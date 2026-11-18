@@ -215,8 +215,10 @@ def test_registrar_refuses_agent_and_research_folder() -> None:
         reg.register_dataset(
             w.tx, Intake(ActorKind.HUMAN, w.ctx.actor, True, "data_pack", "WRITE"), **kw
         )
-    assert w.audit.actions(w.org).count("asset_registrar.intake_rejected") == 3
+    assert w.audit.actions(w.org).count("asset_intake.record_refused") == 3
     ok = reg.register_dataset(w.tx, Intake(ActorKind.HUMAN, w.ctx.actor, True, "data_pack"), **kw)
+    assert w.audit.actions(w.org).count("asset_intake.recorded_from_owner_chat") == 1
+    assert not any(a.startswith("asset_registrar.") for a in w.audit.actions(w.org))
     assert ok.asset.attributes["source_path_class"] == "data_pack"
     assert ok.asset.attributes["bars_count"] == 5
     with pytest.raises(InputInvalidError):
