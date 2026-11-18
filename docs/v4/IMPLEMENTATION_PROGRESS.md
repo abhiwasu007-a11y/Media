@@ -41,6 +41,12 @@ Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skelet
 - **Secrets.** Keys come only through the environment's secret mechanism: never in git, logs or shared environment variables.
 - **Rendering.** In the development environment, or in the VPS night window under the §1 limits. **Never during market hours.**
 
+### D2 (2026-11-18): fast-track without lowering quality
+- **Critical path:** Wave A foundation → full 26-section blueprints **only** for the 3A agents (04, 05, 06, 07, 08, 09, 10, 11, 16), plus the minimal shared core (`3A_SLICE_SPEC.md`, 18, 13, 09, 08 and the ADRs 3A needs) → independent slice check → **STOP for owner approval of this slice** → 3A code starts immediately after approval.
+- **In parallel (Wave B-2):** blueprints 01–03, 12–15, 17 and the enterprise/business docs. Each one is approved before its own build begins.
+- "REQUIRES REVIEW (Phase 1)" items do not block 3A unless they change a 3A design decision. Those that do are listed in `3A_SLICE_SPEC.md`.
+- Token discipline applies: at most 4 sub-agents in parallel. A 3-line Marathi progress update (done / next / blocked-on-owner) after each work block.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
