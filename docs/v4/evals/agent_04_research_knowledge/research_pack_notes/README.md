@@ -36,7 +36,7 @@ Tests the notes step = model output **plus** the post-checks NT4–NT11 (copy gu
 ## 4. Deterministic assertions (all cases)
 | ID | Assertion |
 |---|---|
-| N1 | output validates against `agent_04.research_pack_notes.output` 1.0.0 |
+| N1 | output validates against `agent_04.research_pack.notes.output` 1.0.0 |
 | N2 | every `passage_id` exists in the input; every input passage has exactly one assessment |
 | N3 | `assess`, `must_exclude`, `must_cite_any`, `must_not_cite`, `kinds_any`, `time_ref`, `min_notes`, `max_notes` satisfied |
 | N4 | copy guard (NT6): no note shares `max_verbatim_words` consecutive normalised words with its passage |

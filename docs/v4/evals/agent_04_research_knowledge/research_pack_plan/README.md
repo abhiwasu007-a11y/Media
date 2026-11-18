@@ -38,11 +38,11 @@ Expected: 17 plans, 10 refusals.
 ## 4. Deterministic assertions (all cases)
 | ID | Assertion |
 |---|---|
-| P1 | output validates against `agent_04.research_pack_plan.output` 1.0.0 |
+| P1 | output validates against `agent_04.research_pack.plan.output` 1.0.0 |
 | P2 | `concept_id` unique and sequential; `len(concepts)` within input `max_concepts`; queries within `max_queries_per_concept` |
 | P3 | refusal ⇔ `concepts == []`; `refusal.reason` equals expected; `must_flag_rules` ⊆ `violated_rule_ids` |
 | P4 | no concept has `time_reference = FUTURE`; `CURRENT` only for `REGULATORY_CONTEXT` or `DEFINITION_TERM` |
-| P5 | `wants_method_material` is false everywhere when input `is_method_topic` is false |
+| P5 | `wants_method_material` is false everywhere when input `video_kind` is `GENERAL` |
 | P6 | no URL, e-mail or referral/coupon pattern in labels or queries |
 | P7 | `must_close_gap_ids` satisfied; every input gap is closed or explained |
 | P8 | `kinds_any`, `kinds_none`, `terms_any`, `query_languages_all`, `out_of_scope_notes_nonempty` satisfied |
