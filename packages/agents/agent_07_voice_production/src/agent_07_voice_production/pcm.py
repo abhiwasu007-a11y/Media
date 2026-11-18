@@ -47,7 +47,9 @@ def read_s16(path: Path) -> tuple[WavInfo, array[int]]:
     """Interleaved samples of a 16-bit WAV."""
     info = wav_info(path)
     if info.sample_width != 2:
-        raise InputInvalidError("only 16-bit PCM is handled here", details={"width": info.sample_width})
+        raise InputInvalidError(
+            "only 16-bit PCM is handled here", details={"width": info.sample_width}
+        )
     with wave.open(str(path), "rb") as handle:
         raw = handle.readframes(info.frames)
     samples: array[int] = array("h")
@@ -77,7 +79,9 @@ def decode_s16_bytes(data: bytes) -> tuple[WavInfo, array[int]]:
     return info, samples
 
 
-def write_s16(path: Path, samples: Sequence[int] | array[int], sample_rate_hz: int, channels: int) -> None:
+def write_s16(
+    path: Path, samples: Sequence[int] | array[int], sample_rate_hz: int, channels: int
+) -> None:
     data = samples if isinstance(samples, array) else array("h", samples)
     with wave.open(str(path), "wb") as handle:
         handle.setnchannels(channels)
@@ -87,7 +91,7 @@ def write_s16(path: Path, samples: Sequence[int] | array[int], sample_rate_hz: i
 
 
 def count_clipped(samples: Sequence[int]) -> int:
-    """Samples at digital full scale (18 section 5: ``qc.audio.clipping``, stem samples at 0 dBFS)."""
+    """Samples at digital full scale (18 section 5, stem samples at 0 dBFS)."""
     return sum(1 for s in samples if s >= MAX_S16 or s <= MIN_S16)
 
 
@@ -100,7 +104,9 @@ def rms_dbfs(samples: Sequence[int]) -> float:
     if not samples:
         return SILENT_DBFS
     mean_square = sum(s * s for s in samples) / len(samples)
-    return SILENT_DBFS if mean_square == 0 else round(10 * math.log10(mean_square / FULL_SCALE**2), 2)
+    return (
+        SILENT_DBFS if mean_square == 0 else round(10 * math.log10(mean_square / FULL_SCALE**2), 2)
+    )
 
 
 def trim_silence(

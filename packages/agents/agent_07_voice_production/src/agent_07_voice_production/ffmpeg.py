@@ -10,7 +10,7 @@ FFmpeg documentation and record them in RESEARCH_LOG (blueprint 6.4, F-23).
 
 import json
 import re
-import subprocess  # noqa: S404 - the only process call of the package, argument lists only
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,34 +65,72 @@ _COMMON = ("-nostats", "-hide_banner")
 def ebur128_command(ffmpeg: str, path: Path) -> list[str]:
     """18 section 7.2, verbatim: loudness, loudness range and true peak (``peak=true``)."""
     return [
-        ffmpeg, *_COMMON, "-i", str(path), "-map", "0:a:0",
-        "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-",
-    ]  # fmt: skip
+        ffmpeg,
+        *_COMMON,
+        "-i",
+        str(path),
+        "-map",
+        "0:a:0",
+        "-af",
+        "ebur128=peak=true:framelog=quiet",
+        "-f",
+        "null",
+        "-",
+    ]
 
 
 def silencedetect_command(ffmpeg: str, path: Path, *, noise_db: float, min_s: float) -> list[str]:
     """18 section 7.5: ``silencedetect=n=<noise>dB:d=<min>`` (voice stem: -50 dB, 0.3 s)."""
     return [
-        ffmpeg, *_COMMON, "-i", str(path), "-map", "0:a:0",
-        "-af", f"silencedetect=n={noise_db:g}dB:d={min_s:g}", "-vn", "-f", "null", "-",
-    ]  # fmt: skip
+        ffmpeg,
+        *_COMMON,
+        "-i",
+        str(path),
+        "-map",
+        "0:a:0",
+        "-af",
+        f"silencedetect=n={noise_db:g}dB:d={min_s:g}",
+        "-vn",
+        "-f",
+        "null",
+        "-",
+    ]
 
 
 def ffprobe_command(ffprobe: str, path: Path) -> list[str]:
     return [
-        ffprobe, "-v", "error", "-select_streams", "a:0",
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
         "-show_entries",
         "stream=codec_name,profile,sample_rate,channels,duration_ts,time_base,bit_rate,duration",
-        "-of", "json", str(path),
-    ]  # fmt: skip
+        "-of",
+        "json",
+        str(path),
+    ]
 
 
 def working_format_command(ffmpeg: str, src: Path, dst: Path) -> list[str]:
     """Any decodable input to PCM 16-bit mono 48 kHz (the working format, FR-10/FR-12)."""
     return [
-        ffmpeg, "-nostdin", *_COMMON, "-y", "-i", str(src), "-map", "0:a:0",
-        "-ac", "1", "-ar", "48000", "-c:a", "pcm_s16le", str(dst),
-    ]  # fmt: skip
+        ffmpeg,
+        "-nostdin",
+        *_COMMON,
+        "-y",
+        "-i",
+        str(src),
+        "-map",
+        "0:a:0",
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-c:a",
+        "pcm_s16le",
+        str(dst),
+    ]
 
 
 def gain_db_to_text(gain_db: float) -> str:
@@ -135,25 +173,65 @@ def render_command(
         gain_db=gain_db, ceiling_dbtp=ceiling_dbtp, input_channels=input_channels, denoise=denoise
     )
     return [
-        ffmpeg, "-nostdin", *_COMMON, "-y", "-i", str(src), "-map", "0:a:0",
-        "-af", chain, "-c:a", "pcm_s24le", "-ar", "48000", "-ac", "2", str(dst),
-    ]  # fmt: skip
+        ffmpeg,
+        "-nostdin",
+        *_COMMON,
+        "-y",
+        "-i",
+        str(src),
+        "-map",
+        "0:a:0",
+        "-af",
+        chain,
+        "-c:a",
+        "pcm_s24le",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        str(dst),
+    ]
 
 
 def encode_command(ffmpeg: str, src: Path, dst: Path, *, bitrate_bps: int) -> list[str]:
     """Verification encode in the delivery profile: AAC-LC, 48 kHz, stereo (INF-10)."""
     return [
-        ffmpeg, "-nostdin", *_COMMON, "-y", "-i", str(src), "-map", "0:a:0",
-        "-c:a", "aac", "-profile:a", "aac_low", "-b:a", str(bitrate_bps),
-        "-ar", "48000", "-ac", "2", str(dst),
-    ]  # fmt: skip
+        ffmpeg,
+        "-nostdin",
+        *_COMMON,
+        "-y",
+        "-i",
+        str(src),
+        "-map",
+        "0:a:0",
+        "-c:a",
+        "aac",
+        "-profile:a",
+        "aac_low",
+        "-b:a",
+        str(bitrate_bps),
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        str(dst),
+    ]
 
 
 def decode_command(ffmpeg: str, src: Path, dst: Path) -> list[str]:
     return [
-        ffmpeg, "-nostdin", *_COMMON, "-y", "-i", str(src), "-map", "0:a:0",
-        "-c:a", "pcm_s24le", str(dst),
-    ]  # fmt: skip
+        ffmpeg,
+        "-nostdin",
+        *_COMMON,
+        "-y",
+        "-i",
+        str(src),
+        "-map",
+        "0:a:0",
+        "-c:a",
+        "pcm_s24le",
+        str(dst),
+    ]
 
 
 # --- parsers ----------------------------------------------------------------------------
@@ -247,7 +325,9 @@ class FfmpegAudioTools:
     def _run(self, args: Sequence[str]) -> ProcessResult:
         result = self._runner.run(args)
         if result.returncode != 0:
-            raise RenderCrashError("FFmpeg exited abnormally", details={"returncode": result.returncode})
+            raise RenderCrashError(
+                "FFmpeg exited abnormally", details={"returncode": result.returncode}
+            )
         return result
 
     def build(self) -> str:
@@ -262,16 +342,22 @@ class FfmpegAudioTools:
     def loudness(self, path: Path) -> Loudness:
         return parse_ebur128(self._run(ebur128_command(self.ffmpeg, path)).stderr)
 
-    def silence(self, path: Path, total_ms: int, *, noise_db: float, min_s: float) -> tuple[SilenceSpan, ...]:
+    def silence(
+        self, path: Path, total_ms: int, *, noise_db: float, min_s: float
+    ) -> tuple[SilenceSpan, ...]:
         result = self._run(silencedetect_command(self.ffmpeg, path, noise_db=noise_db, min_s=min_s))
         return parse_silencedetect(result.stderr, total_ms)
 
-    def analyse(self, path: Path, *, silence_noise_db: float, silence_min_s: float) -> AudioAnalysis:
+    def analyse(
+        self, path: Path, *, silence_noise_db: float, silence_min_s: float
+    ) -> AudioAnalysis:
         """Loudness (ebur128), silence runs, clipping and noise floor of a 16-bit WAV stem."""
         info, samples = read_s16(path)
         stream = StreamFacts(info.sample_rate_hz, info.channels, info.frames, "pcm_s16le")
         loudness = self.loudness(path)
-        runs = self.silence(path, stream.duration_ms, noise_db=silence_noise_db, min_s=silence_min_s)
+        runs = self.silence(
+            path, stream.duration_ms, noise_db=silence_noise_db, min_s=silence_min_s
+        )
         floor: float | None = None
         if runs:
             per_ms = info.sample_rate_hz * info.channels // 1000

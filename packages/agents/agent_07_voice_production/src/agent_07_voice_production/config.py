@@ -72,6 +72,12 @@ class AgentSevenConfig(BaseModel):
     music_enabled: StrictBool = False
     music_band_min_db: float = SPEC_MUSIC_BAND_DB[0]
     music_band_max_db: float = SPEC_MUSIC_BAND_DB[1]
+    pause_span_tolerance_ms: Annotated[int, Field(ge=0)] = 100
+    """A silence run inside a deliberate-pause span within this tolerance is not dead air
+    (design default, calibrate in 3B)."""
+    aac_encoder: Annotated[str, Field(min_length=1, max_length=64)] = "aac"
+    aac_rate_mode: Annotated[str, Field(min_length=1, max_length=16)] = "TARGET_BITRATE"
+    """REQUIRES REVIEW (Phase 1): choose and pin the AAC encoder and its rate mode (F-23)."""
     silence_noise_db: float = -50.0
     """``silencedetect`` noise threshold (18 section 7.5 proposal, calibrate in 3B)."""
     silence_detect_min_s: Annotated[float, Field(gt=0)] = 0.3
@@ -101,13 +107,17 @@ class AgentSevenConfig(BaseModel):
 
     @classmethod
     def checked(cls, **values: object) -> Self:
-        """Build the config; a spec violation is ``PERMANENT.CONFIG_INVALID`` (not a schema error)."""
+        """Build the config; a spec violation is ``PERMANENT.CONFIG_INVALID``."""
         try:
             return cls.model_validate(values)
         except ValueError as exc:
             raise ConfigInvalidError(
                 "agent_07 configuration is invalid", details={"reason": str(exc)[:500]}
             ) from exc
+
+    def require_master(self) -> None:
+        if self.max_passes < 1:
+            raise ConfigInvalidError("agent_07.master.max_passes must be at least 1")
 
     def require_voice(self) -> None:
         """Keys the voice step cannot run without (blueprint 6.5: unset => CONFIG_INVALID)."""

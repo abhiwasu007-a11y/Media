@@ -123,7 +123,9 @@ def resolve_voice(
         raise PermissionDeniedError("voice is not ACTIVE", details={"reason": "voice_inactive"})
     # Unsupported capability value fails before any paid call (18 section 4, Q-01). A recording
     # is never sent to a provider, so the adapter's languages do not apply to it.
-    if voice.kind is not VoiceKind.HUMAN_RECORDED and not language_supported(language, caps.languages):
+    if voice.kind is not VoiceKind.HUMAN_RECORDED and not language_supported(
+        language, caps.languages
+    ):
         raise UnsupportedTaskError(
             "the adapter does not declare the script language",
             details={"language": language, "reason": "adapter_language"},
@@ -179,7 +181,9 @@ def check_licence(
 
 
 def _deny_licence(reason: str) -> None:
-    raise PermissionDeniedError("the voice licence does not allow this render", details={"reason": reason})
+    raise PermissionDeniedError(
+        "the voice licence does not allow this render", details={"reason": reason}
+    )
 
 
 # --- F-04 consent ------------------------------------------------------------------------

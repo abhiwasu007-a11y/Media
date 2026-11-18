@@ -50,7 +50,9 @@ def applied_ratio(
             continue
         asked += 1
         pace_ok = seg.pace is Pace.NORMAL or dec.pace_applied.value == seg.pace.value
-        emotion_ok = seg.emotion is Emotion.NEUTRAL or dec.emotion_applied.value == seg.emotion.value
+        emotion_ok = (
+            seg.emotion is Emotion.NEUTRAL or dec.emotion_applied.value == seg.emotion.value
+        )
         if pace_ok and emotion_ok:
             applied += 1
     return applied, asked

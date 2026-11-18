@@ -478,6 +478,8 @@ class NarrationTimeline(AmwModel):
     script_id: ScriptId
     script_version: Annotated[int, Field(ge=1)]
     iteration: NonNeg
+    purpose: Purpose = Purpose.PRODUCTION
+    """A SAMPLE stem is never mastered (M1: refuse SAMPLE stems)."""
     source: TimelineSource
     total_duration_ms: Annotated[int, Field(ge=1)]
     segments: tuple[TimelineSegment, ...]

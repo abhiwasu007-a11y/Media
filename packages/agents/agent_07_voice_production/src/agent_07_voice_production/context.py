@@ -1,4 +1,4 @@
-"""Execution context shared by both stages (tenant scope, IDs, scratch space; 19.1 layers 1 and 3)."""
+"""Execution context shared by both stages (tenant scope, IDs, scratch; 19.1 layers 1, 3)."""
 
 import shutil
 from collections.abc import Iterator
@@ -48,7 +48,7 @@ class ExecContext:
         return self.tenant.correlation_id
 
     @classmethod
-    def from_task_input(cls, task_input: TaskInput, attempt_id: str) -> "ExecContext":
+    def from_task_input(cls, task_input: TaskInput, attempt_id: str) -> ExecContext:
         """V1 TenantScope: the envelope org, the Task Input org and every typed ID must agree.
         Anything else is ``TENANT_MISMATCH`` before any step runs (19.1 layer 1)."""
         actor: ActorRef = actor_ref(AGENT_ID)

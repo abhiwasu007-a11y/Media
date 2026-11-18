@@ -28,7 +28,6 @@ from amw_adapters.common import request_sha256
 from amw_adapters.tts.protocol import OPERATION_SYNTHESIZE, TtsRequest
 from amw_core.enums import CostFigureKind, CostOperation, CostUnitKind, IdempotencyStatus
 from amw_core.errors import (
-    BudgetExhaustedError,
     CircuitOpenError,
     CorruptedOutputError,
     IdempotencyConflictError,
@@ -36,7 +35,6 @@ from amw_core.errors import (
     TemporaryError,
 )
 from amw_core.ids import (
-    COST_ENTRY,
     CostEntryId,
     IdempotencyKey,
     IdempotencyScope,
@@ -59,7 +57,9 @@ def estimate_micros(characters: int, price_micros_per_1k_chars: int) -> int:
     return -(-characters * price_micros_per_1k_chars // 1000)
 
 
-def tts_key(ctx: ExecContext, segment_id: str, spoken_text_sha256: str, voice_id: str) -> IdempotencyKey:
+def tts_key(
+    ctx: ExecContext, segment_id: str, spoken_text_sha256: str, voice_id: str
+) -> IdempotencyKey:
     """03 section 9.2 key of scope ``tts.synthesize``: (task, segment, spoken-text hash, voice)."""
     return make_idempotency_key(
         ctx.org_id,
@@ -71,7 +71,7 @@ def tts_key(ctx: ExecContext, segment_id: str, spoken_text_sha256: str, voice_id
 @dataclass(frozen=True, slots=True)
 class ClipResult:
     segment_id: str
-    samples: "array[int]"
+    samples: array[int]
     clip_uri: str
     clip_sha256: str
     spoken_text_sha256: str
@@ -157,9 +157,14 @@ class SegmentSynthesizer:
         estimate = estimate_micros(prepared.characters, cfg.price_micros_per_1k_chars)
         with self._tenancy.transaction(ctx.tenant) as tx:
             decision = self._idem.begin(
-                tx, key, IdempotencyScope.TTS_SYNTHESIZE, request_hash, ctx.task_id,
-                self._clock.now(), IDEMPOTENCY_LOCK_MS,
-            )  # fmt: skip
+                tx,
+                key,
+                IdempotencyScope.TTS_SYNTHESIZE,
+                request_hash,
+                ctx.task_id,
+                self._clock.now(),
+                IDEMPOTENCY_LOCK_MS,
+            )
         if decision.action is BeginAction.RETURN_STORED:
             return self._stored(ctx, prepared, key, decision.record.result_ref)
         if decision.action is BeginAction.IN_FLIGHT:
@@ -199,9 +204,17 @@ class SegmentSynthesizer:
             self._budget.after_call(tx, entry)
             self._idem.complete(tx, key, clip_uri, self._clock.now())
         return ClipResult(
-            prepared.segment_id, samples, clip_uri, clip_sha, prepared.spoken_text_sha256,
-            key, True, prepared.characters, entry.id, estimate,
-        )  # fmt: skip
+            prepared.segment_id,
+            samples,
+            clip_uri,
+            clip_sha,
+            prepared.spoken_text_sha256,
+            key,
+            True,
+            prepared.characters,
+            entry.id,
+            estimate,
+        )
 
     # -- internals --------------------------------------------------------------------
 
@@ -223,7 +236,7 @@ class SegmentSynthesizer:
             return result
         raise AssertionError("unreachable")  # pragma: no cover
 
-    def _validate(self, audio: bytes, media_type: str, prepared: PreparedSegment) -> "array[int]":
+    def _validate(self, audio: bytes, media_type: str, prepared: PreparedSegment) -> array[int]:
         """F-11: decodable, non-empty, not silent, duration inside the plausibility band; converted
         to PCM mono 48 000 Hz; edges trimmed to ``trim_keep_ms``."""
         cfg = self._config
@@ -244,7 +257,7 @@ class SegmentSynthesizer:
             raise CorruptedOutputError("provider audio duration is implausible for the text")
         return trimmed
 
-    def _convert(self, audio: bytes) -> "array[int]":
+    def _convert(self, audio: bytes) -> array[int]:
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp, "clip_in.wav"), Path(tmp, "clip_out.wav")
             src.write_bytes(audio)
@@ -253,7 +266,7 @@ class SegmentSynthesizer:
         return samples
 
     def _store_clip(
-        self, ctx: ExecContext, prepared: PreparedSegment, samples: "array[int]"
+        self, ctx: ExecContext, prepared: PreparedSegment, samples: array[int]
     ) -> tuple[str, str]:
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as handle:
@@ -271,7 +284,11 @@ class SegmentSynthesizer:
         return uri, sha
 
     def _stored(
-        self, ctx: ExecContext, prepared: PreparedSegment, key: IdempotencyKey, result_ref: str | None
+        self,
+        ctx: ExecContext,
+        prepared: PreparedSegment,
+        key: IdempotencyKey,
+        result_ref: str | None,
     ) -> ClipResult:
         if result_ref is None:
             raise CorruptedOutputError("a completed key without a stored clip")
@@ -282,9 +299,17 @@ class SegmentSynthesizer:
         data = b"".join(self._storage.get(ctx.tenant, uri, head.sha256))
         _, samples = decode_s16_bytes(data)
         return ClipResult(
-            prepared.segment_id, samples, str(uri), head.sha256, prepared.spoken_text_sha256,
-            key, False, prepared.characters, None, 0,
-        )  # fmt: skip
+            prepared.segment_id,
+            samples,
+            str(uri),
+            head.sha256,
+            prepared.spoken_text_sha256,
+            key,
+            False,
+            prepared.characters,
+            None,
+            0,
+        )
 
     def _fail_key(self, ctx: ExecContext, key: IdempotencyKey) -> None:
         with self._tenancy.transaction(ctx.tenant) as tx:

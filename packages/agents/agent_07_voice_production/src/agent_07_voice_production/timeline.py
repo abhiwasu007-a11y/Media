@@ -9,6 +9,7 @@ complete marks is refused (CCR-051).
 from array import array
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from itertools import pairwise
 
 from agent_07_voice_production.contracts import (
     AppliedEmotion,
@@ -149,8 +150,10 @@ def validate_marks(
         previous_end = max(previous_end, mark.end_ms)
     if problems:
         raise InputInvalidError(
-            "the recording's segment marks are not usable (a recording without complete marks is refused)",
-            details={"violations": [{"path": "", "keyword": "marks", "message": m} for m in problems]},
+            "the segment marks are not usable (a recording without complete marks is refused)",
+            details={
+                "violations": [{"path": "", "keyword": "marks", "message": m} for m in problems]
+            },
         )
 
 
@@ -178,7 +181,7 @@ def timeline_from_marks(
         TimelinePause(
             after_segment_id=a.segment_id, start_ms=a.end_ms, end_ms=b.start_ms, kind=PauseKind.GAP
         )
-        for a, b in zip(marks, marks[1:], strict=False)
+        for a, b in pairwise(marks)
         if b.start_ms > a.end_ms
     )
     return segments, pauses

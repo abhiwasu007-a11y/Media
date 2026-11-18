@@ -32,7 +32,7 @@ ZWJ = "‍"
 MARKUP_CHARS = ("<", ">", "&")
 _ESCAPES = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}
 _LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9'_-]*")
-_DIGIT_RUN = re.compile(r"[0-9०-९]+")
+_DIGIT_RUN = re.compile("[0-9\u0966-\u096f]+")
 
 
 def is_word_char(ch: str) -> bool:
@@ -63,7 +63,7 @@ def sanitise(text: str) -> str:
 
 
 def escape_markup(text: str, extra_delimiters: Iterable[str] = ()) -> str:
-    """Markup-significant characters are escaped so script text is never provider markup (6.3 step 4)."""
+    """Markup-significant characters are escaped: script text is never markup (6.3 step 4)."""
     escaped = "".join(_ESCAPES.get(ch, ch) for ch in text)
     for delimiter in extra_delimiters:
         escaped = escaped.replace(delimiter, "".join(f"&#{ord(c)};" for c in delimiter))
@@ -107,7 +107,7 @@ class PronunciationDictionary:
     @classmethod
     def from_bytes(
         cls, data: bytes, expected_sha256: str | None, language: str
-    ) -> "PronunciationDictionary":
+    ) -> PronunciationDictionary:
         """Parse and verify a dictionary blob. ``expected_sha256`` None means "use the hash stored
         with the row"; the caller always passes the row hash then (the loader never skips it)."""
         digest = hashlib.sha256(data).hexdigest()
@@ -118,7 +118,9 @@ class PronunciationDictionary:
         except (ValueError, TypeError) as exc:
             raise InputInvalidError(
                 "pronunciation dictionary does not match its schema",
-                details={"violations": [{"path": "", "keyword": "schema", "message": str(exc)[:300]}]},
+                details={
+                    "violations": [{"path": "", "keyword": "schema", "message": str(exc)[:300]}]
+                },
             ) from exc
         if document.language.split("-")[0] != language.split("-")[0]:
             raise InputInvalidError("pronunciation dictionary language differs from the script")
@@ -253,7 +255,9 @@ def scan_unknown_terms(
             item.segments.append(segment_id)
 
     scene_of = {s.segment_id: s.scene_id for s in segments}
-    candidates: dict[str, tuple[str, ...]] = {s.scene_id: s.pronunciation_candidates for s in scenes}
+    candidates: dict[str, tuple[str, ...]] = {
+        s.scene_id: s.pronunciation_candidates for s in scenes
+    }
     for seg in segments:
         sid = seg.segment_id
         spoken = substituted_texts[sid]
@@ -273,7 +277,9 @@ def scan_unknown_terms(
             note(ch, UnknownTermSource.MARKUP_CHARACTER, sid)
     result = [
         UnknownTerm(
-            term_sha256=term_hash(org_wire_id, u.term), segment_ids=tuple(u.segments), source=u.source
+            term_sha256=term_hash(org_wire_id, u.term),
+            segment_ids=tuple(u.segments),
+            source=u.source,
         )
         for u in found.values()
     ]
@@ -317,7 +323,9 @@ def prepare_segment(
             details={"segment_id": segment.segment_id, "limit": max_chars_per_request},
         )
     hits = tuple(
-        DictionaryHit(entry_id=h.entry_id, segment_id=segment.segment_id, count=h.count, mode=h.mode)
+        DictionaryHit(
+            entry_id=h.entry_id, segment_id=segment.segment_id, count=h.count, mode=h.mode
+        )
         for h in applied.hits
     )
     return PreparedSegment(
