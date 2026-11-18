@@ -26,37 +26,37 @@ Documentation status values: **Not started** · **Draft** · **Partial (blocked)
 ## 2. Business architecture
 | File | Status |
 |---|---|
-| 19_NICHE_BENCHMARKS.md | Not started |
-| 17_BUSINESS_PLAN.md | Not started |
-| 26_GROWTH_OPPORTUNITIES.md | Not started |
-| 21_PRICING_AND_PACKAGING.md | Not started |
+| 19_NICHE_BENCHMARKS.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
+| 17_BUSINESS_PLAN.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
+| 26_GROWTH_OPPORTUNITIES.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
+| 21_PRICING_AND_PACKAGING.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
 
 ## 3. System architecture
 | File | Status |
 |---|---|
 | adr/ (ADR-001 … ADR-012) | Not started |
-| 01_MASTER_ARCHITECTURE.md | Not started |
-| 02_AGENT_REGISTRY.md | Not started |
+| 01_MASTER_ARCHITECTURE.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 02_AGENT_REGISTRY.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
 | 03_COMMUNICATION_STANDARD.md | Not started |
 | 24_PRODUCTION_TYPES.md | Not started |
-| 20_MULTI_TENANCY_AND_ENTERPRISE.md | Not started |
+| 20_MULTI_TENANCY_AND_ENTERPRISE.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
 | 04_DATABASE_ARCHITECTURE.md | Not started |
-| 05_RESOURCE_MANAGEMENT.md | Not started |
-| 06_NIGHT_SCHEDULING.md | Not started |
+| 05_RESOURCE_MANAGEMENT.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 06_NIGHT_SCHEDULING.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
 | 07_FAILURE_MANAGEMENT.md | Not started |
 | 08_SECURITY.md | Not started |
-| 22_DATA_PROTECTION.md | Not started |
+| 22_DATA_PROTECTION.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
 | 09_COST_AND_BUDGET.md | Not started |
 | 18_PRODUCTION_QUALITY_STANDARD.md | Not started |
 | 13_COMPLIANCE_YOUTUBE_POLICY.md | Not started |
-| 25_ADVERTISING_COMPLIANCE.md | Not started |
-| 14_SHARED_SERVICES.md | Not started |
-| 15_LEARNING_LOOP.md | Not started |
-| 16_COMMAND_CENTER.md | Not started |
-| 10_DEPLOYMENT_AND_MIGRATION.md | Not started |
-| 12_DISASTER_RECOVERY.md | Not started |
+| 25_ADVERTISING_COMPLIANCE.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 14_SHARED_SERVICES.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 15_LEARNING_LOOP.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 16_COMMAND_CENTER.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 10_DEPLOYMENT_AND_MIGRATION.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
+| 12_DISASTER_RECOVERY.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
 | 27_ENGINEERING_STANDARDS.md | Not started |
-| 11_TESTING_STRATEGY.md | Not started |
+| 11_TESTING_STRATEGY.md | Draft (integrated; open contract requests in audit/b2_unfiled_ccr_requests_shared.md) |
 | prompts/ + evals/ skeletons | Not started |
 | 23_ENTERPRISE_READINESS_CHECKLIST.md | Not started |
 
