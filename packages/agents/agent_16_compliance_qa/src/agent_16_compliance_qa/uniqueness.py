@@ -15,10 +15,10 @@ from typing import Final
 from pydantic import Field
 
 from agent_16_compliance_qa.base import Model, worst
-from agent_16_compliance_qa.textnorm import normalise_for_matching
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import CheckKind, CheckVerdict, ComplianceVerdict
 from amw_core.errors import CrossTenantRefError
+from amw_core.text_normalise import normalise_for_matching
 
 _SLOT: Final = re.compile(r"\{[a-z0-9_]+\}")
 _WS: Final = re.compile(r"\s+")
@@ -49,9 +49,9 @@ class Thresholds(Model):
 
 
 def _norm(text: str) -> str:
-    """The shared matching seam (zero-width, compatibility and look-alike characters folded,
+    """``amw_core.text_normalise`` (zero-width, compatibility and look-alike characters folded,
     review minor 6); ``{slot}`` placeholders survive it unchanged."""
-    return _WS.sub(" ", normalise_for_matching(text).strip())
+    return _WS.sub(" ", normalise_for_matching(text).text.strip())
 
 
 def _pattern(template_text: str) -> re.Pattern[str]:

@@ -11,7 +11,7 @@ from typing import Final
 
 from agent_16_compliance_qa.config import Lexicon
 from agent_16_compliance_qa.judge.models import ItemClaim
-from agent_16_compliance_qa.textnorm import normalise_for_matching
+from amw_core.text_normalise import normalise_for_matching
 
 _CLAIM_RULES: Final[Mapping[str, tuple[str, ...]]] = {
     "RECOMMENDATION": ("FIN-R1",),
@@ -27,9 +27,14 @@ _MONEY_OR_PCT = re.compile(
     re.IGNORECASE,
 )
 _URL = re.compile(r"https?://|www\.|\?ref=|utm_", re.IGNORECASE)
-_norm = normalise_for_matching
-"""Every lexicon, number and money test runs on the normalised text (review B2); the money and
-number patterns see ASCII digits only because the seam maps every decimal digit."""
+
+
+def _norm(text: str) -> str:
+    """The shared matching core (``amw_core.text_normalise``, CCR-105): every lexicon, number
+    and money test runs on its output and lexicon entries are normalised with the same
+    function (review B2). Its digit fold maps every decimal digit to ASCII, so the number and
+    money patterns see ASCII digits only."""
+    return normalise_for_matching(text).text
 
 
 def contains_any(text: str, words: Iterable[str]) -> bool:

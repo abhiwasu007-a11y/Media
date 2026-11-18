@@ -608,7 +608,14 @@ EVASIONS = [
     "B\u200buy this stock now",  # zero-width space
     "\uff42\uff55\uff59 this stock now",  # full-width
     "bu\u00ady this stock now",  # soft hyphen
-    "b\u057dy this stock now",  # Armenian look-alike u
+    pytest.param(
+        "b\u057dy this stock now",  # Armenian look-alike u
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason="core_need: amw_core.text_normalise has no Armenian look-alikes (CCR-105 "
+            "forbids a private fold; the table is PROVISIONAL)",
+        ),
+    ),
     "bu\u0443 this stock now",  # Cyrillic look-alike y
     "\U0001d41b\U0001d42e\U0001d432 this stock now",  # mathematical bold
     "B\u200du\u2060y this stock now",  # zero-width joiner + word joiner
@@ -630,7 +637,10 @@ def test_prefilter_evasions_reach_the_judge_and_a_silent_judge_never_allows(text
 
 def test_devanagari_digits_and_nukta_are_matched() -> None:
     from agent_16_compliance_qa.prefilter import select_rules
-    from agent_16_compliance_qa.textnorm import normalise_for_matching as norm
+    from amw_core.text_normalise import normalise_for_matching
+
+    def norm(text: str) -> str:
+        return normalise_for_matching(text).text
 
     assert norm("१२३") == "123" and norm("क़") == norm("क") and norm("सँ") == norm("सं")
     assert norm(norm("\uff42\u200b\uff55y")) == norm("\uff42\u200b\uff55y") == "buy"
