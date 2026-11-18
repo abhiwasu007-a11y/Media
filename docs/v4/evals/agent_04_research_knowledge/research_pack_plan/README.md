@@ -10,7 +10,7 @@
 | Files | `cases.jsonl` (27 cases), `rubric.md` (judge) |
 
 ## 1. Scope
-Tests the plan step = model output **plus** the step's deterministic post-checks PL3–PL11. The asserted outcome is the output after the code checks. Numeric limits (`max_concepts`, `max_queries_per_concept`) are carried in each case input so the dataset does not depend on config values.
+Tests the plan step = model output **plus** the step's deterministic post-checks PL3–PL11. The asserted outcome is the output after the code checks. Numeric limits (`max_concepts`, `max_queries_per_concept`) are carried in each case input so the dataset does not depend on config values. Every case `input` validates against `agent_04.research_pack.plan.input` 1.0.0 (Appendix A of the prompt; `video_kind` is `GENERAL` or `METHOD_TOPIC`, `topic_title` has at least 3 characters). Refusals map per 27 §4.3 and blueprint §18: `RULE_WOULD_BE_BROKEN` ⇒ pack `BLOCKED` (task `SUCCEEDED`, gate result `a04.topic_allowed` FAIL); `INSUFFICIENT_INPUT` ⇒ `PERMANENT.INSUFFICIENT_INPUT`; `OUT_OF_SCOPE` and `CONFLICTING_INSTRUCTIONS` ⇒ `PERMANENT.INPUT_INVALID`; `UNSAFE_CONTENT` ⇒ `NEEDS_HUMAN_REVIEW`.
 
 ## 2. Case coverage
 | Category | Cases | What they prove |

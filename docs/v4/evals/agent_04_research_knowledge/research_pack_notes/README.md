@@ -12,6 +12,8 @@
 ## 1. Scope
 Tests the notes step = model output **plus** the post-checks NT4–NT11 (copy guard, number check, URL/quote check, forward-looking exclusion). Every passage in `cases.jsonl` is **invented for this dataset**: no book text, no real source, no personal or tenant data (evals/README §2). The copy-guard run length is carried as `max_verbatim_words` in each input.
 
+Every case `input` validates against `agent_04.research_pack.notes.input` 1.0.0 (Appendix A of the prompt). A refusal of a notes batch follows the declared item-level mapping of blueprint §18 (WARN `a04.notes_refused`, no note, never PASS). Notes are always English; a pair of a non-English passage and an English note skips the copy guard (blueprint §10.6), which EDGE-12 and EDGE-23 exercise.
+
 ## 2. Case coverage
 | Category | Cases | What they prove |
 |---|---|---|
