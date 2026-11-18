@@ -785,7 +785,7 @@ Rules: `amw_app` has `INSERT` only; a trigger rejects `UPDATE`/`DELETE` for ever
 | agent_id | text | yes | executor ID |
 | provider | text | no | |
 | model | text | yes | from config, recorded per call |
-| operation | text | no | e.g. `llm.completion`, `tts.synthesize`, `stock.license`, `youtube.quota` |
+| operation | text | no | `cost_operation` (GLOSSARY §6.52, closed list; CCR-057), e.g. `llm.completion`, `tts.synthesize`, `stock.license`, `youtube.quota` |
 | billing_mode | enum(billing_mode) | yes | LLM calls |
 | tokens_in / tokens_out / tokens_cached_in | int | yes | |
 | units | numeric(20,6) | yes | non-token units |

@@ -40,6 +40,153 @@ One registry defines every product the platform makes, so a new business line is
 
 Validation at load: schema valid; every `task_type` exists in the task-type catalogue (§3.2); the stage graph is a DAG; every gate's `on_fail` target and every `alt_target_stage_ids` entry precedes the gate (is a transitive dependency of it); every mandatory approval has a workflow; `rp.youtube_general` is mandatory whenever `YOUTUBE` is a destination.
 
+### 2.1 Record schema (`amw.production_type` 1.0.0, CCR-057)
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.production_type:1.0.0",
+  "title": "AMW production type record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key", "version", "display_name", "status", "first_tier", "destinations", "requires_channel",
+               "parent_input", "duration_targets_ms", "aspect_ratios", "languages", "stages", "required_inputs",
+               "approvals", "templates", "qc_profile", "rule_packs", "deliverables", "cost_model",
+               "default_price", "limits"],
+  "properties": {
+    "key": { "enum": ["CHANNEL_LONG_FORM", "SHORTS", "AD_SPOT", "EXPLAINER_CORPORATE_TRAINING", "ECOMMERCE_PRODUCT", "DUBBING_LOCALISATION"] },
+    "version": { "type": "integer", "minimum": 1 },
+    "display_name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "status": { "enum": ["PLANNED", "IN_DEVELOPMENT", "IMPLEMENTED", "TESTED", "PRODUCTION_READY"] },
+    "first_tier": { "enum": ["TIER_0", "TIER_1", "TIER_2", "TIER_3"] },
+    "destinations": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["YOUTUBE", "FILE_DELIVERY"] } },
+    "requires_channel": { "type": "boolean" },
+    "parent_input": { "enum": ["NONE", "PARENT_JOB", "SOURCE_VIDEO"] },
+    "duration_targets_ms": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["min", "max"],
+          "properties": { "min": { "type": ["integer", "null"], "minimum": 0 }, "max": { "type": ["integer", "null"], "minimum": 0 } } },
+        { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } }
+      ]
+    },
+    "aspect_ratios": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["16:9", "9:16", "1:1", "4:5"] } },
+    "languages": { "enum": ["SINGLE", "MULTI"] },
+    "stages": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/stage" } },
+    "required_inputs": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "description", "input_schema", "provided_by"],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z0-9_]{2,48}$" },
+          "description": { "type": "string", "maxLength": 500 },
+          "input_schema": { "oneOf": [ { "type": "string", "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$" }, { "type": "null" } ] },
+          "provided_by": { "enum": ["OWNER", "CLIENT", "SYSTEM"] }
+        }
+      }
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["approval_kind", "workflow_key", "mandatory"],
+        "properties": {
+          "approval_kind": { "$ref": "#/$defs/approval_kind" },
+          "workflow_key": { "enum": ["owner_one_tap", "client_two_step", "owner_sensitive"] },
+          "mandatory": { "type": "boolean" }
+        }
+      }
+    },
+    "templates": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9_.]{2,64}$" } },
+    "qc_profile": { "type": "string", "pattern": "^qc\\.[a-z_]{2,32}$" },
+    "rule_packs": {
+      "type": "object", "additionalProperties": false, "required": ["mandatory", "by_category"],
+      "properties": {
+        "mandatory": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/rule_pack_key" } },
+        "by_category": { "type": "object", "propertyNames": { "pattern": "^[a-z_]{2,32}$" },
+                         "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/rule_pack_key" } } }
+      }
+    },
+    "deliverables": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[a-z0-9_<>]{2,64}$" } },
+    "cost_model": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["component", "unit"],
+        "properties": {
+          "component": { "type": "string", "pattern": "^[a-z0-9_]{2,48}$" },
+          "unit": { "type": "string", "maxLength": 32 },
+          "note": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "default_price": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "object", "additionalProperties": false, "required": ["amount_minor", "currency", "label"],
+          "properties": {
+            "amount_minor": { "type": ["integer", "null"], "minimum": 0 },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+            "label": { "const": "PROPOSAL" } } }
+      ]
+    },
+    "limits": {
+      "type": "object", "additionalProperties": false, "required": ["max_revision_loops"],
+      "properties": { "max_revision_loops": { "type": "integer", "minimum": 0, "maximum": 10 } }
+    }
+  },
+  "$defs": {
+    "stage_id": { "type": "string", "pattern": "^[a-z0-9_]{2,32}$" },
+    "rule_pack_key": { "type": "string", "pattern": "^rp\\.[a-z0-9_]+$" },
+    "approval_kind": { "enum": ["TOPIC", "BRIEF", "CONCEPT", "SCRIPT", "STORYBOARD", "VOICE_SAMPLE", "ROUGH_CUT", "FINAL_VIDEO",
+                                "THUMBNAIL", "METADATA", "PUBLISH", "SPEND", "NEW_CHANNEL", "NEW_CATEGORY", "SENSITIVE_CLAIM",
+                                "COPYRIGHT_DOUBT", "UNUSUAL_PUBLISH", "POLICY_CHANGE", "DLQ_REPLAY", "EXPERIMENT", "COMMENT_REPLY",
+                                "KNOWLEDGE_RELEASE", "USAGE_RIGHTS"] },
+    "stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stage_id", "task_type", "required", "resource_class", "capabilities", "depends_on", "gate", "approval"],
+      "properties": {
+        "stage_id": { "$ref": "#/$defs/stage_id" },
+        "task_type": { "type": "string", "pattern": "^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3]))\\.[a-z0-9_]+$" },
+        "required": { "type": "boolean" },
+        "enabled_by_default": { "type": "boolean" },
+        "resource_class": { "enum": ["LIGHT", "AI_IO", "HEAVY_CPU", "PUBLISH"] },
+        "capabilities": { "type": "array", "uniqueItems": true,
+          "items": { "enum": ["llm", "tts", "image_gen", "video_gen", "stock_search", "music_search", "render_ffmpeg", "media_probe",
+                              "doc_extract", "web_fetch", "publish_youtube", "file_delivery", "analytics_ingest", "notify_email"] } },
+        "depends_on": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/stage_id" } },
+        "gate": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "additionalProperties": false, "required": ["blocking", "on_fail"],
+              "properties": {
+                "blocking": { "const": true },
+                "on_fail": {
+                  "oneOf": [
+                    { "type": "object", "additionalProperties": false, "required": ["action", "target_stage_id"],
+                      "properties": { "action": { "const": "REVISE" }, "target_stage_id": { "$ref": "#/$defs/stage_id" },
+                                      "alt_target_stage_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/stage_id" } } } },
+                    { "type": "object", "additionalProperties": false, "required": ["action"],
+                      "properties": { "action": { "const": "STOP" } } }
+                  ]
+                }
+              } }
+          ]
+        },
+        "approval": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "additionalProperties": false, "required": ["approval_kind", "workflow_key"],
+              "properties": { "approval_kind": { "$ref": "#/$defs/approval_kind" },
+                              "workflow_key": { "enum": ["owner_one_tap", "client_two_step", "owner_sensitive"] } } }
+          ]
+        },
+        "params": { "type": "object", "maxProperties": 16 }
+      }
+    }
+  }
+}
+```
+Rules not expressible in the schema are checked at load (validation list above): DAG, task types in §3.2, on_fail and alt targets are ancestors, mandatory approvals have workflows, `rp.youtube_general` mandatory with a `YOUTUBE` destination, `limits.max_revision_loops` ≤ the 07 §9 ceiling.
+
 ## 3. Task graph
 
 ### 3.1 Stage object
@@ -53,6 +200,8 @@ Validation at load: schema valid; every `task_type` exists in the task-type cata
 | `depends_on` | list of `stage_id` |
 | `gate` | optional `{blocking: true, on_fail: {action: REVISE, target_stage_id, alt_target_stage_ids?: [stage_id, …]} | {action: STOP}}`. `alt_target_stage_ids` (CCR-002) lists the other stages a failing result may name as `remedy_stage_id` (03 §5.3 rule 4) |
 | `approval` | optional `{approval_kind, workflow_key}`; the stage is then an S7 approval gate (03 §11.6) |
+| `enabled_by_default` | optional stages only: whether the stage runs unless the tenant/job disables it (CCR-057) |
+| `params` | optional small object of stage parameters that the orchestrator's input builder passes into the task payload (e.g. `{"verify_mode": "CHART_FACTS"}` for `s06_chart`; CCR-004/057) |
 
 ### 3.2 Canonical task types (names are contract-bound; payload schemas are defined in the agent blueprints)
 | Task type | Owner | Purpose |

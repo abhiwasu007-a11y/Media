@@ -117,6 +117,8 @@ Stated per dataset in its `README.md`/`thresholds` block; answer-key cases alway
 - Adapters (LLM, TTS, image, video generation, stock, music, destinations) implement Protocols and ship with a fake and recorded fixtures.
 - Only `workers/*` and `apps/*` wire concrete adapters (dependency injection via constructor parameters; no service locator, no globals).
 
+Adapter request/response models (e.g. `LlmRequest`, `TtsRequest`, stock/music search and licence, image, video, delivery) are **adapter-owned** typed models in `amw_adapters/<family>/`, not Wave A contracts; they change with their adapter's tests and fakes, never with a CCR (CCR-057). What crosses an agent boundary is always a 03 contract or a payload schema.
+
 ### 7.2 Package names (also the `prompts/` and `evals/` folder names)
 Agents: `agent_01_ceo_orchestrator` (code package `amw_orchestrator`), `agent_02_market_intelligence`, `agent_03_content_strategy`, `agent_04_research_knowledge`, `agent_05_scriptwriter`, `agent_06_fact_checker`, `agent_07_voice_production`, `agent_08_visual_assets`, `agent_09_video_director`, `agent_10_video_editor`, `agent_11_thumbnail_design`, `agent_12_seo_metadata`, `agent_13_publishing_delivery`, `agent_14_analytics`, `agent_15_growth_revenue`, `agent_16_compliance_qa`, `agent_17_brief_creative_strategy`.
 Services: `s01_audience_intelligence`, `s02_uniqueness_auditor`, `s03_localisation_dubbing`, `s04_financial_controller`, `s05_infrastructure_intelligence`, `s06_security_audit`, `s07_human_approval`, `s08_command_center`, `s09_tenant_identity_access`, `s10_billing_metering`, `s11_client_portal`, `s12_integration_api`, `s13_community_comments`.

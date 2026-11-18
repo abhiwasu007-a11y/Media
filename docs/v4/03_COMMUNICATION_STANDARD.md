@@ -19,7 +19,7 @@
 ## 2. Schema registry and versioning
 
 ### 2.1 Registry
-- Location (build): `packages/amw_core/contracts/schemas/<schema name>/<semver>.json`. Each file's `$id` is `urn:amw:schema:<schema name>:<semver>`.
+- Location (build): `packages/amw_core/src/amw_core/contracts/schemas/<schema name>/<semver>.json` (uv src layout; CCR-057). Each file's `$id` is `urn:amw:schema:<schema name>:<semver>`.
 - Schemas are **immutable once released**. A change is a new version file.
 - The validator resolves `$ref` only from this registry (no network fetch).
 - Contract schemas: `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`, `amw.owner_topic` (§3.4, CCR-006). Registry record schema: `amw.production_type` (fields in 24 §2). Payload schemas: one input and one output per task type, plus one input and one output per LLM step inside a task type (`<task_type>.<step>.input/.output`) and agent document schemas (`<agent_id>.<snake_case>`), all owned by the agent blueprint (GLOSSARY §2.4, CCR-018). A payload, step or document schema whose name follows GLOSSARY §2.4 is registered by being defined in its blueprint (§7/§8) and shipped in the registry folder; no per-name CCR is needed.
@@ -69,7 +69,7 @@
   "$id": "urn:amw:schema:amw.common:1.0.0",
   "title": "AMW common definitions",
   "$defs": {
-    "uuid7_body": { "type": "string", "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "uuid7_body": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "org_id":     { "type": "string", "pattern": "^org_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "job_id":     { "type": "string", "pattern": "^job_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "task_id":    { "type": "string", "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
@@ -422,7 +422,10 @@ The output carries no IDs of its own: it is stored at `amw-blob://<org>/jobs/<jo
     { "if": { "properties": { "status": { "enum": ["FAILED", "REJECTED"] } } },
       "then": { "properties": { "error": { "type": "object" } } } },
     { "if": { "properties": { "status": { "const": "SUSPENDED" } } },
-      "then": { "properties": { "next_action": { "properties": { "type": { "const": "WAIT" }, "wait_reason": { "type": "string" } } } } } }
+      "then": { "properties": { "next_action": { "properties": { "type": { "const": "WAIT" }, "wait_reason": { "type": "string" } } } } } },
+    { "if": { "properties": { "status": { "const": "REJECTED" } } },
+      "then": { "properties": { "payload": { "type": "null" }, "output_refs": { "maxItems": 0 },
+                                "error": { "properties": { "attempt_no": { "const": 0 } } } } } }
   ]
 }
 ```
@@ -485,7 +488,8 @@ Rules:
 1. `error_class` must equal the prefix of `code` (checked by `amw_core.contracts`, not expressible in the schema). Codes come only from the catalogue in 07 §2.
 2. `retryable` is decided by the retry policy of 07 §3 for that code, not by the producer's opinion; the producer's value is overwritten by the policy engine before persistence.
 3. `message` and `details` never contain secrets, tokens, raw provider keys, personal data beyond IDs, or another tenant's data. Tracebacks are stored separately (redacted) as `dead_letter.traceback_ref`.
-4. `attempt_no` is 0 for rejections at validation (no attempt started).
+4. `attempt_no` is 0 for rejections at validation (no attempt started); `amw.task_output` enforces it for `REJECTED` together with `payload = null` and no `output_refs` (CCR-057).
+5. `details` is deliberately open (no `additionalProperties: false`): each code may add its own keys (e.g. `unresolved_shots`, `missing_inputs`), documented by the blueprint that raises it; rule 3 applies to every key (CCR-057).
 
 ## 7. Validation before processing and structured rejection
 

@@ -559,6 +559,9 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `eval_case_category` | `ANSWER_KEY` · `HARD_NEGATIVE` · `EDGE` · `REFUSAL` · `POSITIVE` | evals/README.md |
 | `ccr_status` | `Proposed` · `Needs owner` · `Approved` · `Rejected` · `Applied` | CONTRACT_CHANGE_REQUESTS.md |
 | `cost_unit_kind` | `characters` · `audio_ms` · `images` · `video_ms` · `render_ms` · `quota_units` · `items` · `bytes` | `cost_ledger.unit_kind`, 24 §6 |
+| `cost_operation` (CCR-057; closed list of adapter operation names) | `llm.completion` · `llm.count_tokens` · `llm.batch` (3C) · `tts.synthesize` · `tts.list_voices` · `stock.search` · `stock.license` · `music.search` · `music.license` · `image.generate` · `video.generate` · `web.fetch` · `render.ffmpeg` · `delivery.file` · `storage.bytes` · `youtube.quota`. A `cost_ledger` row is written for every operation that costs money or consumes quota; free operations write none | `cost_ledger.operation`, adapter fakes |
+| `error_disposition` (CCR-057) | `RETRY` · `SUSPEND` · `FAIL` · `NO_ATTEMPT` (written `NO-ATTEMPT` in 07 §2) | 07 §2 |
+| `retry_policy` (CCR-057) | `temporary` · `rate_limited` · `db` · `resource` · `agent` · `agent_parse` · `infra` · `publish_resume` | 07 §3.3, config `retry.<policy>.*` |
 | `queue_name` | `light` · `ai` · `render` · `publish` | `task_queue.queue_name` |
 | `transition_id` | `T01`–`T20` (task), `J01`–`J12` (job) | 03 §11.3, §11.5 |
 | `gate_verdict` (CCR-001) | `PASSED` · `FAILED` (optional payload echo of a gate stage; the orchestrator decides from `validation_results`, 03 §5.3) | gate stage payloads (`agent_07.audio_master`, `agent_10.technical_qc`, …) |

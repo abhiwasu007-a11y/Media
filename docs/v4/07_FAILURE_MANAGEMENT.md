@@ -74,11 +74,13 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `PUBLISHING.OAUTH_REFRESH_FAILED` | refresh failed (not a revocation) | RETRY | `temporary` | yes | L3 after cap; channel → `NEEDS_REAUTH` |
 | `PUBLISHING.PROCESSING_FAILED` | destination processing failed or timed out | FAIL | never | no | L3 (publishing) |
 | `PUBLISHING.VERIFICATION_MISMATCH` | post-publish read-back differs (privacy, title, disclosure flag) | FAIL; publication not marked `VERIFIED` | never | no | L3 (publishing) |
-| `PUBLISHING.DUPLICATE_DETECTED` | reconciliation found the video already uploaded | NO new upload; link existing video; task continues if consistent, else FAIL | never | no | L3 (data integrity) if inconsistent |
+| `PUBLISHING.DUPLICATE_DETECTED` | reconciliation found the video already uploaded **and it is inconsistent** with the publication row (the consistent case links the existing video and raises no error) | FAIL (no new upload) | never | no | L3 (data integrity) |
 | `PUBLISHING.NOT_AUTHORISED` | publish guard failed (approval, editorial contribution, authorisation verdict; 04 §5.21) | FAIL | never | no | L3 (publishing; should never happen) |
 | `PUBLISHING.DESTINATION_UNAVAILABLE` | destination returns 5xx/outage | RETRY | `temporary` | yes | L1 |
 
 New codes are additive and require a CCR (CONTRACT_CHANGE_REQUESTS.md).
+
+Reading the table (CCR-057): `retryable` (03 §6) is `true` for **RETRY** and **NO-ATTEMPT** codes (both come back to `RETRY_WAIT` / re-evaluation; NO-ATTEMPT consumes no attempt) and `false` for **FAIL** and **SUSPEND** codes (a suspension resumes through T15, not a retry). The disposition values are the GLOSSARY §6.52 set `error_disposition`; the policy names are `retry_policy`. In the Escalation column the first level is the level on first occurrence; a second level written `X → Y`, `Y after cap` or `Y if …` is the level after the retry cap or under the stated condition.
 
 ## 3. Retry policies
 
