@@ -41,6 +41,9 @@
 | `amw_auth` | YES | none | enforced | Identity tables (§5.1 users/auth refs/sessions); used by the auth component of ADR-003. |
 | `amw_readonly` | YES | none | enforced | Reporting/analytics reads within a tenant context; `SELECT` only. |
 | `amw_sysfn` | NO | the system functions of §3.6 only | `BYPASSRLS` | Owner of narrowly scoped `SECURITY DEFINER` functions that must see operational rows across tenants. Never granted to a login role directly. |
+| `amw_operator` | YES | none | enforced, `NOBYPASSRLS` | CCR-100: the operator tool (`sys_operator`, D5) only. `SELECT, INSERT` on `owner_instruction_evidence` (insert only in `PENDING_VERIFICATION` or `REFUSED`); `SELECT` on approvals, jobs, steps; `EXECUTE` on `amw_human_record_apply`. No UPDATE/DELETE anywhere; no other DML. |
+| `amw_verifier` | YES | none | enforced, `NOBYPASSRLS` | CCR-100: the evidence-store verifier process only (it alone holds the session-event-source credential). `SELECT` on `owner_instruction_evidence`; `EXECUTE` on `amw_evidence_mark_verified`, `amw_evidence_mark_confirmed`, `amw_evidence_refuse`. No direct DML. |
+| `amw_verifier_fn` | NO | the evidence functions of §3.6a and the key table `evidence_mac_keys` | enforced (not `BYPASSRLS`; runs in the caller's tenant transaction) | CCR-100: owner of the `SECURITY DEFINER` evidence functions; the only role with `UPDATE` on `owner_instruction_evidence` and with `INSERT`/`UPDATE` of human rows. Never granted to a login role. |
 
 The app never connects as `amw_owner`, `amw_migrator` or a superuser. Credentials come from the environment (S6, 08); none are in the repository.
 
@@ -99,6 +102,16 @@ Some platform processes must find work before they know its tenant. They use `SE
 | `amw_platform_ops_summary()` (T1) | S8 platform-owner view | per-org aggregates only: queue depth, job counts by state, cost totals, DLQ counts — no content |
 
 Every call is logged with the caller's actor; `amw_platform_ops_summary` calls are audited.
+
+### 3.6a Owner-evidence functions (CCR-100; owner `amw_verifier_fn`, `SECURITY DEFINER`, fixed `search_path`)
+| Function | EXECUTE granted to | Effect |
+|---|---|---|
+| `amw_evidence_mark_verified(evidence_id, verifier_result)` | `amw_verifier` | requires `session_user = 'amw_verifier'` and `state = 'PENDING_VERIFICATION'`; sets `VERIFIED`, `event_verified_at`, `verifier_result`, `mac_key_version` and `evidence_mac` = HMAC-SHA256 (key version from `evidence_mac_keys`) over the canonical evidence fields incl. `org_id`, `id`, `state` |
+| `amw_evidence_mark_confirmed(evidence_id, confirmation_event_uuid, confirmation_quote, confirmation_message_at, verifier_result)` | `amw_verifier` | requires `session_user = 'amw_verifier'`, `state = 'VERIFIED'` and a valid MAC; sets `CONFIRMED`, the confirmation fields and a new `evidence_mac` over the fields incl. the confirmation |
+| `amw_evidence_refuse(evidence_id, reason, verifier_result)` | `amw_verifier` | `PENDING_VERIFICATION`/`VERIFIED` → `REFUSED` |
+| `amw_evidence_mac_valid(evidence_id) → boolean` | `amw_app`, `amw_operator`, `amw_verifier` (read-only check) | recomputes the HMAC with the stored key version and compares; never returns the key |
+| `amw_human_record_apply(evidence_id)` | `amw_operator` | requires `session_user = 'amw_operator'`, a `CONFIRMED` evidence with a valid MAC; writes exactly the one human row the evidence names (step decision; contribution; HUMAN score rows from `claimed_scores`; for a `SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT` step also the human `compliance_verdicts` row, §5.17) with `approval_channel = 'OWNER_CHAT_OPERATOR'`, `recorded_by = 'sys_operator'`, `evidence_id` |
+`evidence_mac_keys` (`version int`, `key bytea`, `created_at`, `retired_at`): no grant to any role; the key is loaded from the environment's secret mechanism by the migrator at setup and rotated by adding a version. HMAC uses PostgreSQL's `pgcrypto` `hmac()` — **REQUIRES REVIEW (Phase 1): record the `pgcrypto` documentation for the pinned PostgreSQL version in RESEARCH_LOG**. Tests (blocking, `tests/tenancy` and `tests/security`): `amw_app` and `amw_operator` cannot update evidence, cannot insert evidence in `VERIFIED`/`CONFIRMED`, cannot insert any human row directly, cannot read `evidence_mac_keys`; a row with a forged `evidence_mac` fails `amw_evidence_mac_valid`.
 
 ### 3.7 Cross-tenant test requirement (blocking CI gate)
 `tests/tenancy/` must, for **every** TENANT and SHARED-CATALOGUE table:
@@ -168,6 +181,7 @@ Every call is logged with the caller's actor; `amw_platform_ops_summary` calls a
 | 5.16 | approval_steps | TENANT | T0 | S7 → 01 | |
 | 5.16 | editorial_contributions | TENANT | T0 | S7 / 16 | |
 | 5.16 | owner_instruction_evidence | TENANT (append-only) | T0 | S7 → 01 | CCR-010, decision D5 |
+| 3.6a | evidence_mac_keys | GLOBAL (key material only, no tenant data; no grant to any role; owner `amw_verifier_fn`) | T0 | S7 → 01 | CCR-100; on the §3.7.6 GLOBAL allow-list |
 | 5.17 | quality_scores | TENANT | T0 | 16 | |
 | 5.17 | qc_results | TENANT | T0 | 10 / 16 | |
 | 5.17 | compliance_verdicts | TENANT | T0 | 16 | |
@@ -915,7 +929,7 @@ Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in on
 | approval_channel | enum(approval_channel) | yes | CCR-010; required (CHECK) once the step is decided; no default (fail closed) |
 | recorded_by | text | yes | actor ref that wrote the decision: the deciding `usr_` itself (`WEB_DASHBOARD`, `CLIENT_PORTAL`) or `sys_operator` (`OWNER_CHAT_OPERATOR`) |
 | evidence_id | uuid | yes | TFK → owner_instruction_evidence; required when `approval_channel = 'OWNER_CHAT_OPERATOR'` |
-Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_contributions` and HUMAN `quality_scores`): an `agent_NN` / `svc_sNN` actor can never write a human row. A `usr_` actor writes only its own decision. `sys_operator` may write a human row only with `approval_channel = 'OWNER_CHAT_OPERATOR'` and an `evidence_id` that references an `owner_instruction_evidence` row of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, whose `on_behalf_of` equals the row's human field (`decided_by`, `contributor_user_id`, or the user of `scorer_ref`), whose `subject_kind`/`subject_id` (and `approval_id`/`step_no`, `parsed_decision` = the step's decision) match the row, and whose `state = 'CONFIRMED'`; the human must still hold an `ACTIVE` membership with the required role. For a HUMAN `quality_scores` row the trigger also requires `points` to equal `claimed_scores->>dimension` of its evidence (and `points` to be an integer); for an `editorial_contributions` row, `description` must be a verbatim substring of the evidence `quote` (CCR-060). The operator is never the approver. **Every human-originated row needs evidence of its channel** (CCR-010): `approval_channel` is mandatory on every human row of `approval_steps`, `editorial_contributions`, HUMAN `quality_scores` and human `compliance_verdicts` overrides; in 3A the only accepted channel is `OWNER_CHAT_OPERATOR` (config `approvals.accepted_channels`; `WEB_DASHBOARD` is accepted only once the authenticated dashboard exists, 3C, and then the `usr_` session is the evidence).
+Trigger ("human-row rule", CCR-010 as hardened by CCR-100; shared by `approval_steps` decisions, `editorial_contributions`, HUMAN `quality_scores` and human `compliance_verdicts`): **identity comes from the database role, never from `app.actor`**. A human row (or the decision columns of a step) may be inserted or set **only when `current_user = 'amw_verifier_fn'`**, i.e. only inside the SECURITY DEFINER function `amw_human_record_apply(evidence_id)` (§3.6), which the operator role `amw_operator` executes. The function and the trigger both require: `approval_channel = 'OWNER_CHAT_OPERATOR'` (3A; config `approvals.accepted_channels`); an `evidence_id` of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, `state = 'CONFIRMED'` and `amw_evidence_mac_valid(evidence_id) = true`; `on_behalf_of` = the row's human field (`decided_by`, `contributor_user_id`, the user of `scorer_ref`); subject, `approval_id`/`step_no` (the approval's current step) and `parsed_decision` matching; the human holds an `ACTIVE` membership with the required role. For a HUMAN `quality_scores` row also `points` = the integer in `claimed_scores` for its dimension; for an `editorial_contributions` row `description` is a verbatim substring of the evidence `quote` (CCR-060). `amw_app` (agents, services, the orchestrator) has no INSERT/UPDATE path to any human row; `recorded_by` is set by the function to `sys_operator`. The operator is never the approver. 3C `WEB_DASHBOARD` rows will use a separate apply function for the dashboard API role, defined with ADR-003; until then that channel is refused.
 
 **editorial_contributions** — TENANT · T0 · Std
 | Column | Type | Null | Constraint / note |
@@ -947,7 +961,8 @@ One row per owner instruction that the operator tool was asked to record, includ
 | session_id / event_uuid | text / text | no | the session and the transcript event of the owner's message, as the platform's session event store names them |
 | quote | text | no | the owner's words as copied from the fetched event (≤ 4000 chars) |
 | message_at | timestamptz | no | the fetched event's timestamp |
-| state | enum(evidence_state) | no | `PENDING_VERIFICATION` → `VERIFIED` → `CONFIRMED`, or → `REFUSED` |
+| state | enum(evidence_state) | no | `PENDING_VERIFICATION` → `VERIFIED` → `CONFIRMED`, or → `REFUSED`; an INSERT may only use `PENDING_VERIFICATION` or `REFUSED` with every verification, confirmation and MAC column NULL (CHECK + trigger, CCR-100) |
+| evidence_mac / mac_key_version | bytea / int | yes | CCR-100: keyed HMAC-SHA256 set only by the §3.6a functions; required (CHECK) for `VERIFIED` and `CONFIRMED` |
 | event_verified_at | timestamptz | yes | when the code check passed |
 | verifier_result | jsonb | yes | the code check's result (each test with pass/fail; IDs and hashes only, no extra text) |
 | confirmation_event_uuid / confirmation_quote / confirmation_message_at | text / text / timestamptz | yes | the owner's reply to the echo: a **second** human event, verified the same way, with `confirmation_message_at > message_at` |
@@ -956,10 +971,10 @@ One row per owner instruction that the operator tool was asked to record, includ
 | evidence_sha256 | bytea | no | SHA-256 of the canonical `{session_id, event_uuid, quote, message_at, record_kind, subject_kind, subject_id, review_code, parsed_decision, parsed_target_stage_id, claimed_scores}` (CCR-060, CCR-089) |
 | refused_reason | text | yes | set with `state = REFUSED` (ambiguous message, not owner-authored, event not found, check failed); a refused row backs nothing |
 | supersedes_id | uuid | yes | TFK → owner_instruction_evidence (a correction never edits a row) |
-Keys: `UNIQUE (org_id, event_uuid, record_kind, subject_kind, subject_id) WHERE state <> 'REFUSED'` (one owner message backs one record of each kind per subject: replay check). Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
+Keys (CCR-101: one message = one subject = one step): `UNIQUE (org_id, event_uuid) WHERE state <> 'REFUSED'`; `UNIQUE (org_id, confirmation_event_uuid)`; a trigger refuses a `confirmation_event_uuid` that equals any live `event_uuid` of the org and vice versa, so one owner message never both confirms one record and creates another. Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
 **Code check (`VERIFIED`)**, run by the evidence store in code (never by the model and never accepted from a caller): the authenticity tests A1–A9 and the rule set of the record kind in 03 §11.6 rule 7 (CCR-059) — among them the owner's own account, a top-level owner session, verbatim quote, equal timestamp, one subject reference, no question/conditional/deferral, the strict decision grammar for `DECISION` kinds, no negation for `CONTENT` kinds, exact integer scores for `SCORE`. A row whose event cannot be fetched stays `PENDING_VERIFICATION` and can never back a record.
 **Two-phase rule:** a human record (§5.16, §5.17) may reference only a `CONFIRMED` row: `VERIFIED` plus a verified confirmation event. A slow confirmation leaves the approval `PENDING` (03 §11.6); it never makes a decision final.
-**Append-only exception:** the trigger allows only the forward state changes above, each setting its own columns once (`event_verified_at`, `verifier_result`; then the confirmation fields; or `refused_reason`); nothing else is ever updated or deleted.
+**Append-only exception:** the trigger allows only the forward state changes above, each setting its own columns once (`event_verified_at`, `verifier_result`, `evidence_mac`; then the confirmation fields and a new `evidence_mac`; or `refused_reason`), and only when `current_user = 'amw_verifier_fn'` (inside the §3.6a functions); UPDATE and DELETE are not granted to any login role (CCR-100).
 
 ### 5.17 Quality, QC and compliance
 
@@ -980,8 +995,10 @@ Keys: `UNIQUE (org_id, event_uuid, record_kind, subject_kind, subject_id) WHERE 
 | rationale | text | no | |
 | evidence_ref | text | yes | |
 | decided_by | text | no | actor ref (Agent 16 or human) |
-| is_final | boolean | no | true only for Agent 16's publication authorisation or a human override (Q5); trigger (CCR-010): `is_final = true` requires `decided_by = 'agent_16'` or a `usr_` actor, directly or through `sys_operator` with an `evidence_id` (human-row rule) |
-| evidence_id | uuid | yes | TFK → owner_instruction_evidence; required for a human override recorded by `sys_operator` |
+| is_final | boolean | no | true only for Agent 16's publication authorisation or a human override (Q5); trigger (CCR-010/102): `is_final = true` requires `decided_by = 'agent_16'` (machine row, written by `amw_app`) or a human row written under the human-row rule (§5.16) |
+| evidence_id | uuid | yes | TFK → owner_instruction_evidence; required for every human row |
+| approval_channel / recorded_by | enum(approval_channel) / text | yes | CCR-102: required for human rows (CHECK); set by `amw_human_record_apply` |
+Human rows (CCR-102): a human resolution of a `NEEDS_HUMAN_REVIEW` is the step decision of its `SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT` approval; `amw_human_record_apply` writes the `compliance_verdicts` row in the same transaction, reusing the step's evidence (no second event), with `decided_by` = the owner's `usr_`, `verdict` mapped `APPROVED → ALLOWED`, `REJECTED` / `CHANGES_REQUESTED → BLOCKED`. A direct override outside an approval (`COMPLIANCE_DECISION` evidence) is 3C.
 Index `(org_id, job_id, is_final)`.
 
 ### 5.18 Renders

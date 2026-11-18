@@ -706,6 +706,10 @@ Blocking outcomes: when a blocking gate (compliance, originality, QC) returns `B
 
    **Requested changes** (CCR-089): the stage of a `CHANGES_REQUESTED` decision comes only from its stage word (closed map, e.g. script → `s05_script`, visuals → `s09_plan`, thumbnail → `s11_thumbs`; only stages the approval's workflow allows); a `CHANGES_REQUESTED` without a stage word is `NEEDS_CLARIFICATION`. What to change is a separate `REVISION_NOTE` (CONTENT kind) message for the same review code; the orchestrator passes it as an `APPROVER` feedback item (24 §3.3 rule 7 / 7b). The operator never chooses the stage.
 
+   **Confirmation grammar** (CCR-101): the confirmation is a second owner event checked with the same authenticity tests and a whitelist: after normalisation it contains exactly one review code (the record's own) and exactly one word from `approvals.owner_chat.confirm_words.<lang>` (e.g. `confirm R7K2`, `R7K2 पक्के`), every other token from the neutral words. Anything else (a dispute, a correction, a new decision, a second code) is not a confirmation: the evidence stays `VERIFIED` and never becomes `CONFIRMED`; a correction is a new evidence row that supersedes it. One owner message is one subject and one step: it backs exactly one evidence row, either as its event or as its confirmation (04 §5.16 keys).
+
+   **Provenance in the database** (CCR-100): only the verifier role can move evidence to `VERIFIED`/`CONFIRMED`, and it stamps a keyed MAC; human rows are written only by the definer function that checks `CONFIRMED` + MAC; every consumer of a human row (G4 of Agent 16, the publish guard, the approval transition T15) re-checks `amw_evidence_mac_valid` (04 §3.6a). `app.actor` is never trusted as a human identity.
+
    Until the real session event source exists (ticket 3A-13) only a fake source exists, so no 3A approval recorded this way is production-verified.
 
 ### 11.7 Audit of every transition

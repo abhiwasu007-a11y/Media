@@ -472,6 +472,7 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `gcp_ownership` | `PLATFORM` · `CLIENT_OWNED` |
 | `google_review_status` (OAuth verification, API audit) | `NOT_STARTED` · `IN_REVIEW` · `PASSED` · `FAILED` |
 | `actor_kind` | `HUMAN` · `AGENT` · `SERVICE` · `SYSTEM` |
+| `db_role` (04 §3.1; CCR-100) | `amw_owner` · `amw_migrator` · `amw_app` · `amw_publisher` · `amw_auth` · `amw_readonly` · `amw_sysfn` · `amw_operator` · `amw_verifier` · `amw_verifier_fn` |
 | `consent_state` (voice) | `PENDING_VERIFICATION` · `VERIFIED` · `WITHDRAWN` · `EXPIRED` · `REJECTED` |
 | `voice_kind` | `PROVIDER_STOCK` · `CONSENTED_CLONE` · `HUMAN_RECORDED` |
 | `presenter_kind` (CCR-027, **provisional until the owner answers 3A R4**) | `NEUTRAL_NARRATION` (voice only, no persona, no named presenter) · `OWNER_VOICE` (the owner's own recording or a consented clone of the owner's own voice) · `SYNTHETIC_PERSONA` (a synthetic voice or face presented as a named person; blocked on finance, health and political channels by FIN-R11 / YTG-R2) |
