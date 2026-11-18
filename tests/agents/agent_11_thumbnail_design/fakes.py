@@ -23,11 +23,20 @@ from agent_11_thumbnail_design.ports import (
 from agent_11_thumbnail_design.subject_options import AssetFacts
 from amw_adapters.common import CallUsage
 from amw_adapters.llm.protocol import LlmRequest, LlmResponse, TokenCount
-from amw_core.enums import BillingMode, BudgetPeriod, BudgetScopeKind, BudgetState, CostOperation, ReservationStatus
+from amw_core.enums import (
+    BillingMode,
+    CostOperation,
+)
 from amw_core.errors import BudgetExhaustedError, CrossTenantRefError, MissingDependencyError
-from amw_core.ids import Prefix, new_id
+from amw_core.ids import AuditEntryId, Prefix, new_id
 from amw_core.interfaces.audit_log import AuditEntry, ChainVerification, NewAuditEntry
-from amw_core.interfaces.budget_guard import Budget, BudgetStatus, CallCheck, Reservation, ReservationOutcome
+from amw_core.interfaces.budget_guard import (
+    Budget,
+    BudgetStatus,
+    CallCheck,
+    Reservation,
+    ReservationOutcome,
+)
 from amw_core.interfaces.cost_ledger import CostEntry, NewCostEntry
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
@@ -94,8 +103,11 @@ class FakeStorage:
     def head(self, context: TenantContext, uri: BlobUri) -> BlobHead:
         self._check(context, uri)
         data = self.blobs.get(uri)
-        return BlobHead(data is not None, hashlib.sha256(data).hexdigest() if data else None,
-                        len(data) if data else None)  # fmt: skip
+        return BlobHead(
+            data is not None,
+            hashlib.sha256(data).hexdigest() if data else None,
+            len(data) if data else None,
+        )
 
     def list_prefix(self, context: TenantContext, org_id: Any, area: str) -> Iterable[BlobInfo]:
         return []
@@ -110,7 +122,9 @@ class FakeBudget:
     def applicable_budgets(self, tx: TenantTransaction, job_id: Any) -> Sequence[Budget]:
         return []
 
-    def reserve(self, tx: TenantTransaction, task_id: Any, amount_micros: int, currency: str) -> ReservationOutcome:
+    def reserve(
+        self, tx: TenantTransaction, task_id: Any, amount_micros: int, currency: str
+    ) -> ReservationOutcome:
         return ReservationOutcome(self.grant, (), ())
 
     def check_call(self, tx: TenantTransaction, check: CallCheck) -> None:
@@ -162,12 +176,21 @@ class FakeAudit:
 
     def append(self, tx: TenantTransaction, entry: NewAuditEntry) -> AuditEntry:
         self.entries.append(entry)
-        return AuditEntry(new_id(Prefix.AUDIT_ENTRY), tx.context.org_id, len(self.entries), entry, b"", b"")  # type: ignore[arg-type]
+        return AuditEntry(
+            AuditEntryId(new_id(Prefix.AUDIT_ENTRY)),
+            tx.context.org_id,
+            len(self.entries),
+            entry,
+            b"",
+            b"",
+        )
 
     def verify_chain(self, tx: TenantTransaction) -> ChainVerification:
         return ChainVerification(True, len(self.entries), None)
 
-    def export(self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None) -> Iterator[AuditEntry]:
+    def export(
+        self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None
+    ) -> Iterator[AuditEntry]:
         return iter(())
 
 
@@ -188,10 +211,21 @@ class ScriptedLlm:
         if isinstance(ans, Exception):
             raise ans
         usage = CallUsage(
-            provider="fake", operation=CostOperation.LLM_COMPLETION, model=request.model,
-            billing_mode=BillingMode.STANDARD, tokens_in=100, tokens_out=50, tokens_cached_in=0,
-            tokens_cache_write_in=0, chars_in=10, language=request.language, amount_micros=350,
-            currency="USD", price_ref="fake-price", idempotency_key=idempotency_key)  # fmt: skip
+            provider="fake",
+            operation=CostOperation.LLM_COMPLETION,
+            model=request.model,
+            billing_mode=BillingMode.STANDARD,
+            tokens_in=100,
+            tokens_out=50,
+            tokens_cached_in=0,
+            tokens_cache_write_in=0,
+            chars_in=10,
+            language=request.language,
+            amount_micros=350,
+            currency="USD",
+            price_ref="fake-price",
+            idempotency_key=idempotency_key,
+        )
         return LlmResponse(text=ans, stop_reason="end_turn", usage=usage)
 
     def count_tokens(self, request: LlmRequest, *, idempotency_key: str) -> TokenCount:
@@ -231,10 +265,14 @@ class FakeRepo:
     def subject_hints(self, tx: TenantTransaction, uri: str, sha256: str) -> list[SubjectHint]:
         return self.hints
 
-    def previous_manifest(self, tx: TenantTransaction, uri: str, sha256: str) -> dict[str, Any] | None:
+    def previous_manifest(
+        self, tx: TenantTransaction, uri: str, sha256: str
+    ) -> dict[str, Any] | None:
         return self.previous
 
-    def registered_assets(self, tx: TenantTransaction, keys: Sequence[tuple[str, str]]) -> dict[tuple[str, str], RegisteredAsset]:
+    def registered_assets(
+        self, tx: TenantTransaction, keys: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], RegisteredAsset]:
         return {k: v for k, v in self.registered.items() if k in keys}
 
     def licence_id_code_generated(self, tx: TenantTransaction) -> str:
@@ -247,7 +285,10 @@ class FakeRepo:
         return self.images[row.content_sha256]
 
     def insert_ledger_row(self, tx: TenantTransaction, row: NewLedgerRow) -> None:
-        if not any(r.asset_id == row.asset_id and r.usage_kind == row.usage_kind and r.job_id == row.job_id for r in self.ledger):
+        if not any(
+            r.asset_id == row.asset_id and r.usage_kind == row.usage_kind and r.job_id == row.job_id
+            for r in self.ledger
+        ):
             self.ledger.append(LedgerRow(row.asset_id, row.usage_kind, row.job_id, False))
             self.ledger_inserts.append(row)
 
@@ -257,22 +298,35 @@ class FakeRepo:
 
 def settings(**over: Any) -> Agent11Settings:
     flat: dict[str, Any] = {
-        "agent_11.canvas.width_px": 1920, "agent_11.canvas.height_px": 1080, "agent_11.output.format": "png",
-        "agent_11.output.max_bytes": 50_000_000, "agent_11.text.max_words": 6, "agent_11.text.max_chars": 40,
-        "agent_11.text.max_options": 8, "agent_11.text.min_font_px": 48, "agent_11.text.max_font_px": 200,
-        "agent_11.text.font_step_px": 8, "agent_11.layout.safe_margin_permille": 30,
-        "agent_11.layout.reserved_corner": "bottom_right", "agent_11.legibility.min_contrast_ratio": 4.5,
-        "agent_11.distinct.min_hash_distance_bits": 1, "agent_11.asset.min_width_px": 1280,
-        "agent_11.asset.min_height_px": 720, "agent_11.llm.enabled": True, "agent_11.llm.max_rationale_chars": 160,
+        "agent_11.canvas.width_px": 1920,
+        "agent_11.canvas.height_px": 1080,
+        "agent_11.output.format": "png",
+        "agent_11.output.max_bytes": 50_000_000,
+        "agent_11.text.max_words": 6,
+        "agent_11.text.max_chars": 40,
+        "agent_11.text.max_options": 8,
+        "agent_11.text.min_font_px": 48,
+        "agent_11.text.max_font_px": 200,
+        "agent_11.text.font_step_px": 8,
+        "agent_11.layout.safe_margin_permille": 30,
+        "agent_11.layout.reserved_corner": "bottom_right",
+        "agent_11.legibility.min_contrast_ratio": 4.5,
+        "agent_11.distinct.min_hash_distance_bits": 1,
+        "agent_11.asset.min_width_px": 1280,
+        "agent_11.asset.min_height_px": 720,
+        "agent_11.llm.enabled": True,
+        "agent_11.llm.max_rationale_chars": 160,
         "llm.agent_11.thumbnail_variants.concepts.model_tier": "MID",
         "llm.agent_11.thumbnail_variants.concepts.temperature": 0.0,
         "llm.agent_11.thumbnail_variants.concepts.max_output_tokens": 1500,
         "llm.agent_11.thumbnail_variants.concepts.timeout_ms": 60000,
         "llm.agent_11.thumbnail_variants.concepts.cost_budget_micros": 100000,
         "llm.agent_11.thumbnail_variants.concepts.cache_system_prompt": True,
-        "llm.tiers.MID.model": "model-mid", "llm.tiers.MID.price_in_micros_per_token": 3,
-        "llm.tiers.MID.price_out_micros_per_token": 15, "llm.tiers.MID.currency": "USD",
-    }  # fmt: skip
+        "llm.tiers.MID.model": "model-mid",
+        "llm.tiers.MID.price_in_micros_per_token": 3,
+        "llm.tiers.MID.price_out_micros_per_token": 15,
+        "llm.tiers.MID.currency": "USD",
+    }
     for k, v in over.items():
         flat[k.replace("__", ".")] = v
     return Agent11Settings.load(flat)
@@ -280,20 +334,38 @@ def settings(**over: Any) -> Agent11Settings:
 
 def promise_en() -> tuple[Promise, Brief]:
     return (
-        Promise(promise_statement="You will learn how to read a trend from price structure.",
-                promise_key_terms=("trend", "price structure"),
-                working_title_local="How to read a trend from price structure"),
-        Brief(subject_idea="outline of level steps", text_idea_local="Read the trend", must_not_promise=("profit", "secret")),
-    )  # fmt: skip
+        Promise(
+            promise_statement="You will learn how to read a trend from price structure.",
+            promise_key_terms=("trend", "price structure"),
+            working_title_local="How to read a trend from price structure",
+        ),
+        Brief(
+            subject_idea="outline of level steps",
+            text_idea_local="Read the trend",
+            must_not_promise=("profit", "secret"),
+        ),
+    )
 
 
 def asset_facts(sha: str = "a1", **over: Any) -> AssetFacts:
     base: dict[str, Any] = {
-        "sha": sha, "label": f"owner image {sha}", "kind": "IMAGE", "status": "ACTIVE", "source_type": "OWNER_MADE",
-        "licence_state": "ACTIVE", "covers_monetized": True, "expired": False, "channel_allowed": True,
-        "width_px": 1920, "height_px": 1080, "depicts_real_person": False, "release_ref": False,
-        "data_age_vs_lag": "NOT_APPLICABLE", "label_free": False, "direction_balanced": False,
-    }  # fmt: skip
+        "sha": sha,
+        "label": f"owner image {sha}",
+        "kind": "IMAGE",
+        "status": "ACTIVE",
+        "source_type": "OWNER_MADE",
+        "licence_state": "ACTIVE",
+        "covers_monetized": True,
+        "expired": False,
+        "channel_allowed": True,
+        "width_px": 1920,
+        "height_px": 1080,
+        "depicts_real_person": False,
+        "release_ref": False,
+        "data_age_vs_lag": "NOT_APPLICABLE",
+        "label_free": False,
+        "direction_balanced": False,
+    }
     base.update(over)
     return AssetFacts(**base)
 

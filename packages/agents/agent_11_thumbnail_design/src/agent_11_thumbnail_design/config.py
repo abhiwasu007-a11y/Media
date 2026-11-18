@@ -32,7 +32,9 @@ class Agent11Settings(BaseModel):
     text_max_font_px: Annotated[int, Field(ge=1)]
     text_font_step_px: Annotated[int, Field(ge=1)]
     layout_safe_margin_permille: Annotated[int, Field(ge=0, le=300)]
-    layout_reserved_corner: Annotated[str, Field(pattern=r"^(bottom_right|bottom_left|top_right|top_left)$")]
+    layout_reserved_corner: Annotated[
+        str, Field(pattern=r"^(bottom_right|bottom_left|top_right|top_left)$")
+    ]
     legibility_min_contrast_ratio: Annotated[float, Field(ge=1.0, le=21.0)]
     legibility_min_text_height_px_at_preview: int | None = None
     legibility_preview_width_px: int | None = None
@@ -60,7 +62,7 @@ class Agent11Settings(BaseModel):
     currency: Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
 
     @classmethod
-    def load(cls, flat: Mapping[str, Any]) -> "Agent11Settings":
+    def load(cls, flat: Mapping[str, Any]) -> Agent11Settings:
         """Read the flat dotted keys; any missing required key or bad range is CONFIG_INVALID."""
         tier = flat.get(LLM_PREFIX + "model_tier")
         pairs: dict[str, Any] = {}
@@ -71,8 +73,12 @@ class Agent11Settings(BaseModel):
                 pairs[key[len(LLM_PREFIX) :]] = value
         if tier is not None:
             pairs["model_id"] = flat.get(f"llm.tiers.{tier}.model")
-            pairs["price_in_micros_per_token"] = flat.get(f"llm.tiers.{tier}.price_in_micros_per_token")
-            pairs["price_out_micros_per_token"] = flat.get(f"llm.tiers.{tier}.price_out_micros_per_token")
+            pairs["price_in_micros_per_token"] = flat.get(
+                f"llm.tiers.{tier}.price_in_micros_per_token"
+            )
+            pairs["price_out_micros_per_token"] = flat.get(
+                f"llm.tiers.{tier}.price_out_micros_per_token"
+            )
             pairs["currency"] = flat.get(f"llm.tiers.{tier}.currency")
         try:
             return cls.model_validate(pairs)

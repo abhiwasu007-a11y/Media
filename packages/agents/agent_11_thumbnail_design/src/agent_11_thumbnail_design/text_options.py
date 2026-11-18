@@ -39,7 +39,9 @@ def finance_text_hit(text: str, lexicon: Sequence[str]) -> bool:
 def _key_term_ids(text: str, key_terms: Sequence[str]) -> tuple[str, ...]:
     toks = folded_words(text)
     return tuple(
-        f"k{i + 1}" for i, term in enumerate(key_terms) if contains_sequence(toks, folded_words(term))
+        f"k{i + 1}"
+        for i, term in enumerate(key_terms)
+        if contains_sequence(toks, folded_words(term))
     )
 
 
@@ -70,7 +72,10 @@ def build_text_options(
 ) -> TextOptions:
     candidates: list[tuple[str, TextSource]] = [(normalise(brief_text), "BRIEF_TEXT")]
     candidates += [(normalise(t), "KEY_TERM") for t in promise_key_terms]
-    candidates += [(s, "TITLE_SPAN") for s in _title_spans(working_title_local, promise_key_terms, cfg.max_words)]
+    candidates += [
+        (s, "TITLE_SPAN")
+        for s in _title_spans(working_title_local, promise_key_terms, cfg.max_words)
+    ]
     seen: set[str] = set()
     kept: list[tuple[str, TextSource]] = []
     excluded: list[ExcludedText] = []

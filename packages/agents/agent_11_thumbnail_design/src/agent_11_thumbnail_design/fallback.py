@@ -43,11 +43,17 @@ def _texts_ok(texts: Sequence[TextOption], step: StepIn) -> bool:
     must = [fold(m) for m in step.brief.must_not_promise if m.strip()]
     if any(m in fold(t.text) for t in texts for m in must):
         return False
-    return not (len(texts) == 2 and set(folded_words(texts[0].text)) & set(folded_words(texts[1].text)))
+    return not (
+        len(texts) == 2 and set(folded_words(texts[0].text)) & set(folded_words(texts[1].text))
+    )
 
 
 def _viable(
-    tpl: TemplateOffer, pic: PictureOptionView, texts: Sequence[TextOption], step: StepIn, pol: PlannerPolicy
+    tpl: TemplateOffer,
+    pic: PictureOptionView,
+    texts: Sequence[TextOption],
+    step: StepIn,
+    pol: PlannerPolicy,
 ) -> bool:
     if pic.kind not in tpl.supports_subject_kinds or tpl.text_lines_max < len(texts):
         return False
@@ -68,9 +74,7 @@ def _ordered_texts(step: StepIn) -> list[TextOption]:
 def _ranked_pictures(step: StepIn) -> list[PictureOptionView]:
     idea = " ".join([step.brief.subject_idea, *[h.intent_text for h in step.subject_hints]])
     want = _tokens(idea)
-    return sorted(
-        step.subject_options, key=lambda o: (-len(_tokens(o.label) & want), o.option_id)
-    )
+    return sorted(step.subject_options, key=lambda o: (-len(_tokens(o.label) & want), o.option_id))
 
 
 def _concept(
@@ -91,7 +95,7 @@ def _concept(
         angle="TERM_CLARITY",
         hypothesis_kind=kind,
         emphasis_style="TERM_HIGHLIGHT" if any(t.key_term_ids for t in texts) else "PLAIN",
-        accent_role=accent,  # type: ignore[arg-type]
+        accent_role=accent,
         rationale=RATIONALES[kind],
     )
 
@@ -114,7 +118,7 @@ def _no_text(cid: str, reason: str) -> Concept:
     return Concept(
         concept_id=cid,
         status="NO_SAFE_CONCEPT",
-        reason_code=reason,  # type: ignore[arg-type]
+        reason_code=reason,
         template_key=None,
         subject_option_id=None,
         text_ids=(),
@@ -128,8 +132,10 @@ class FallbackPlanner:
     def __init__(self, policy: PlannerPolicy) -> None:
         self._pol = policy
 
-    def plan(self, step: StepIn, keep: Sequence[Concept] = (), need: Sequence[str] | None = None) -> list[Concept]:
-        """Concepts c1..cN: ``keep`` entries are repeated, ``need`` ids (default all) are planned."""
+    def plan(
+        self, step: StepIn, keep: Sequence[Concept] = (), need: Sequence[str] | None = None
+    ) -> list[Concept]:
+        """Concepts c1..cN: ``keep`` entries repeat, ``need`` ids (default all) are planned."""
         kept = {c.concept_id: c for c in keep}
         wanted = set(need) if need is not None else {f"c{i + 1}" for i in range(step.variant_count)}
         prev = {p.concept_id: p for p in step.previous_concepts or ()}
@@ -149,7 +155,11 @@ class FallbackPlanner:
         tpls = sorted(step.templates, key=lambda t: not t.is_default)
         avoid = None
         if prev is not None:
-            avoid = (getattr(prev, "template_key", None), getattr(prev, "subject_option_id", None), tuple(getattr(prev, "text_ids", ())))
+            avoid = (
+                getattr(prev, "template_key", None),
+                getattr(prev, "subject_option_id", None),
+                tuple(getattr(prev, "text_ids", ())),
+            )
         if idx == 0:
             return self._control(step, cid, texts, pics, tpls, avoid)
         control = made[0]
@@ -157,18 +167,37 @@ class FallbackPlanner:
             return _no_distinct(cid)
         return self._variant(step, cid, idx, control, made, avoid)
 
-    def _control(self, step, cid, texts, pics, tpls, avoid) -> Concept:  # type: ignore[no-untyped-def]
+    def _control(
+        self,
+        step: StepIn,
+        cid: str,
+        texts: Sequence[TextOption],
+        pics: Sequence[PictureOptionView],
+        tpls: Sequence[TemplateOffer],
+        avoid: tuple[str | None, str | None, tuple[str, ...]] | None,
+    ) -> Concept:
         if not texts:
             return _no_text(cid, "NO_ELIGIBLE_TEXT")
         default = next((t for t in tpls if t.is_default), tpls[0] if tpls else None)
         for t in texts:
             for p in pics:
                 for tpl in ([default] if default else []) + [x for x in tpls if x is not default]:
-                    if _viable(tpl, p, [t], step, self._pol) and (tpl.template_key, p.option_id, (t.text_id,)) != avoid:
+                    if (
+                        _viable(tpl, p, [t], step, self._pol)
+                        and (tpl.template_key, p.option_id, (t.text_id,)) != avoid
+                    ):
                         return _concept(cid, tpl, p, [t], "CONTROL")
         return _no_text(cid, "NO_ELIGIBLE_TEXT")
 
-    def _variant(self, step, cid, idx, control, made, avoid) -> Concept:  # type: ignore[no-untyped-def]
+    def _variant(
+        self,
+        step: StepIn,
+        cid: str,
+        idx: int,
+        control: Concept,
+        made: Sequence[Concept],
+        avoid: tuple[str | None, str | None, tuple[str, ...]] | None,
+    ) -> Concept:
         tpl0 = next(t for t in step.templates if t.template_key == control.template_key)
         pic0 = next(o for o in step.subject_options if o.option_id == control.subject_option_id)
         texts0 = [t for t in step.text_options if t.text_id in control.text_ids]

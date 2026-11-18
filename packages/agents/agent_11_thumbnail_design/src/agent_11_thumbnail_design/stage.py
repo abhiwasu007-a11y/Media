@@ -36,6 +36,7 @@ from agent_11_thumbnail_design.errors import (
 from agent_11_thumbnail_design.fallback import FallbackPlanner, PlannerPolicy
 from agent_11_thumbnail_design.guards import GuardContext, check_concepts, rationale_ok
 from agent_11_thumbnail_design.models import (
+    AccentRole,
     Concept,
     GuardHit,
     Limits,
@@ -151,7 +152,7 @@ AGENT_ID = "agent_11"
 INPUT_SCHEMA = "agent_11.thumbnail_variants.input"
 OUTPUT_SCHEMA = "agent_11.thumbnail_variants.output"
 _SCRIPT_OF = {"mr-IN": "Devanagari", "hi-IN": "Devanagari", "en-IN": "Latin"}
-_ACCENT_ROLES = ("PRIMARY", "SECONDARY", "TERTIARY")
+_ACCENT_ROLES: tuple[AccentRole, ...] = ("PRIMARY", "SECONDARY", "TERTIARY")
 _DIRECT = {"HOOK", "PROOF"}
 
 
@@ -236,7 +237,9 @@ class ThumbnailStage:
             run.audit("thumbnail_set.failed", {"code": getattr(exc, "code", type(exc).__name__)})
             raise
         run.audit(
-            "thumbnail_set.blocked" if out.payload_verdict != "ALLOWED" else "thumbnail_set.completed",
+            "thumbnail_set.blocked"
+            if out.payload_verdict != "ALLOWED"
+            else "thumbnail_set.completed",
             {"produced": out.produced, "verdict": out.payload_verdict},
         )
         return out.task_output(d.clock.monotonic_ms() - started, d.clock.now(), s)
@@ -249,10 +252,14 @@ class ThumbnailStage:
         except ValidationError as exc:
             raise SchemaInvalidError(
                 "agent_11 input payload invalid",
-                details={"violations": [{"path": ".".join(map(str, e["loc"]))} for e in exc.errors()]},
+                details={
+                    "violations": [{"path": ".".join(map(str, e["loc"]))} for e in exc.errors()]
+                },
             ) from exc
         if inp.variant_count > self.d.settings.max_variants:
-            raise InputInvalidError("variant_count out of range", details={"violations": ["VARIANT_COUNT"]})
+            raise InputInvalidError(
+                "variant_count out of range", details={"violations": ["VARIANT_COUNT"]}
+            )
         refs = [inp.script_ref, inp.verification_ref, inp.shot_plan_ref, inp.brand_kit_ref]
         if inp.previous_set_ref:
             refs.append(inp.previous_set_ref)
@@ -304,7 +311,10 @@ class _Result:
             resource_usage=usage,
             error=None,
             next_action=NextAction(
-                type=NextActionType.CONTINUE, wait_reason=None, escalation_level=None, reason="set composed"
+                type=NextActionType.CONTINUE,
+                wait_reason=None,
+                escalation_level=None,
+                reason="set composed",
             ),
             downstream_agent="agent_16",
             timestamp=now,
@@ -315,7 +325,12 @@ class _Run:
     """State of one task execution (one tenant, one job)."""
 
     def __init__(
-        self, stage: ThumbnailStage, ti: TaskInput, inp: ThumbnailInput, tc: TenantContext, attempt: AttemptId
+        self,
+        stage: ThumbnailStage,
+        ti: TaskInput,
+        inp: ThumbnailInput,
+        tc: TenantContext,
+        attempt: AttemptId,
     ) -> None:
         self.d = stage.d
         self.s = stage.d.settings
@@ -366,7 +381,9 @@ class _Run:
 
     def _checkpoint(self, step_key: str, state: dict[str, Any]) -> None:
         raw = canonical_json(state)
-        uri, sha, _ = self._put("checkpoints", f"{self.ti.task_id}/{step_key}-{_sha(raw)[:16]}.json", raw)
+        uri, sha, _ = self._put(
+            "checkpoints", f"{self.ti.task_id}/{step_key}-{_sha(raw)[:16]}.json", raw
+        )
         with self.tx() as t:
             self.d.checkpoints.write(
                 t,
@@ -388,7 +405,8 @@ class _Run:
         with self.tx() as t:
             script = self.d.repo.script_view(t, inp.script_ref.uri, inp.script_ref.sha256)
             self._script_gate(script)
-            assert script.promise is not None and script.brief is not None  # noqa: S101 - gate above
+            if script.promise is None or script.brief is None:
+                raise InsufficientInputError("title_promise or thumbnail_brief is missing")
             promise, brief = script.promise, script.brief
             category = self.d.repo.channel_category(t, ti.channel_id or "")
             kit = self.d.repo.brand_kit(t, inp.brand_kit_ref.uri, inp.brand_kit_ref.sha256)
@@ -408,14 +426,20 @@ class _Run:
         finance = category in self.d.lexicons.finance_categories
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
-        covered_text = " ".join([promise.working_title_local, brief.text_idea_local, *promise.promise_key_terms])
+        covered_text = " ".join(
+            [promise.working_title_local, brief.text_idea_local, *promise.promise_key_terms]
+        )
         if self.d.composer.missing_glyphs(self.ti.org_id, font_bytes, covered_text):
             raise MissingDependencyError("no font with glyph coverage for the language")
 
         # Promise material scan: instruction-like content means a human must look (8.4).
-        promise_material = " ".join([promise.promise_statement, promise.working_title_local, *promise.promise_key_terms])
+        promise_material = " ".join(
+            [promise.promise_statement, promise.working_title_local, *promise.promise_key_terms]
+        )
         if self.scanner.scan(promise_material).flagged:
-            return self._empty_result(promise, ComplianceVerdict.NEEDS_HUMAN_REVIEW, "INSTRUCTION_IN_INPUT", (), finance)
+            return self._empty_result(
+                promise, ComplianceVerdict.NEEDS_HUMAN_REVIEW, "INSTRUCTION_IN_INPUT", (), finance
+            )
 
         text_opts = build_text_options(
             working_title_local=promise.working_title_local,
@@ -428,9 +452,7 @@ class _Run:
             lexicon=self.d.lexicons.finance_markers,
             scanner=self.scanner,
         )
-        glyphs = [
-            g.facts() for g in glyph_catalogue() if not _banned(g.label, banned_words)
-        ]
+        glyphs = [g.facts() for g in glyph_catalogue() if not _banned(g.label, banned_words)]
         pic_opts = build_picture_options(
             assets=[a.facts for a in owner_assets if not _banned(a.facts.label, banned_words)],
             glyphs=glyphs,
@@ -442,9 +464,13 @@ class _Run:
         templates = offer_templates(self.d.templates, finance=finance)
         self._checkpoint(
             "CK1_OPTIONS",
-            {"texts": [o.text_id for o in text_opts.options], "pictures": [o.option_id for o in pic_opts.options],
-             "template_set": template_set_sha256(), "script": script.content_sha256},
-        )  # fmt: skip
+            {
+                "texts": [o.text_id for o in text_opts.options],
+                "pictures": [o.option_id for o in pic_opts.options],
+                "template_set": template_set_sha256(),
+                "script": script.content_sha256,
+            },
+        )
         stats = {
             "text_built": len(text_opts.options),
             "text_excluded": _count([e.reason for e in text_opts.excluded]),
@@ -452,36 +478,75 @@ class _Run:
             "picture_excluded": _count([e.reason for e in pic_opts.excluded]),
             "templates_offered": len(templates),
         }
-        call = finance and finance_text_hit(promise.working_title_local, self.d.lexicons.finance_markers)
+        call = finance and finance_text_hit(
+            promise.working_title_local, self.d.lexicons.finance_markers
+        )
         if call or not text_opts.options:
             reason = "PROMISE_IS_A_CALL" if call else "NO_ELIGIBLE_TEXT"
             return self._empty_result(
-                promise, ComplianceVerdict.BLOCKED, reason, ("FIN-R1",) if call else (), finance, stats
+                promise,
+                ComplianceVerdict.BLOCKED,
+                reason,
+                ("FIN-R1",) if call else (),
+                finance,
+                stats,
             )
-        step = self._step_in(category, promise, brief, hints, pic_opts, text_opts, templates, prev_manifest)
-        picks, omitted, refusal = self._choose(step, finance)
+        step = self._step_in(
+            category, promise, brief, hints, pic_opts, text_opts, templates, prev_manifest
+        )
+        picks, _omitted, refusal = self._choose(step, finance)
         if refusal is not None:
             return self._refusal_result(promise, refusal, finance, stats)
         ok_picks = [p for p in picks if p.concept.status == "OK"]
-        omitted_ids = [(p.concept.concept_id, p.concept.reason_code or "NO_DISTINCT_OPTION") for p in picks if p.concept.status != "OK"]
+        omitted_ids = [
+            (p.concept.concept_id, p.concept.reason_code or "NO_DISTINCT_OPTION")
+            for p in picks
+            if p.concept.status != "OK"
+        ]
         if not ok_picks:
             return self._empty_result(
-                promise, ComplianceVerdict.BLOCKED, omitted_ids[0][1] if omitted_ids else "NO_DISTINCT_OPTION", (), finance, stats
+                promise,
+                ComplianceVerdict.BLOCKED,
+                omitted_ids[0][1] if omitted_ids else "NO_DISTINCT_OPTION",
+                (),
+                finance,
+                stats,
             )
-        self._checkpoint("CK2_CONCEPTS", {"concepts": [p.concept.model_dump(mode="json") for p in picks],
-                                          "calls": len(self.calls.records)})  # fmt: skip
+        self._checkpoint(
+            "CK2_CONCEPTS",
+            {
+                "concepts": [p.concept.model_dump(mode="json") for p in picks],
+                "calls": len(self.calls.records),
+            },
+        )
         return self._compose_and_persist(
-            promise, brief, picks, omitted_ids, step, pic_opts, owner_assets, font, font_bytes,
-            colours, finance, stats, hints_count=len(hints),
-        )  # fmt: skip
+            promise,
+            brief,
+            picks,
+            [(c, str(r)) for c, r in omitted_ids],
+            step,
+            pic_opts,
+            owner_assets,
+            font,
+            font_bytes,
+            colours,
+            finance,
+            stats,
+            hints_count=len(hints),
+        )
 
     def _script_gate(self, script: Any) -> None:
         if script.verified_sha256 is None or not (
             script.content_sha256 == self.inp.script_ref.sha256 == script.verified_sha256
         ):
-            raise InputInvalidError("script hash differs from the verified hash", details={"violations": ["SCRIPT_HASH_MISMATCH"]})
+            raise InputInvalidError(
+                "script hash differs from the verified hash",
+                details={"violations": ["SCRIPT_HASH_MISMATCH"]},
+            )
         if script.verdict != ComplianceVerdict.ALLOWED.value or script.open_blocked_claims:
-            raise InputInvalidError("script verdict is not ALLOWED", details={"violations": ["VERDICT_NOT_ALLOWED"]})
+            raise InputInvalidError(
+                "script verdict is not ALLOWED", details={"violations": ["VERDICT_NOT_ALLOWED"]}
+            )
         if script.promise is None or script.brief is None:
             raise InsufficientInputError("title_promise or thumbnail_brief is missing")
 
@@ -497,9 +562,16 @@ class _Run:
         return default
 
     def _step_in(
-        self, category: str, promise: Any, brief: Any, hints: Sequence[SubjectHint], pics: PictureOptions,
-        texts: TextOptions, templates: Sequence[Any], prev_manifest: dict[str, Any] | None,
-    ) -> StepIn:  # fmt: skip
+        self,
+        category: str,
+        promise: Any,
+        brief: Any,
+        hints: Sequence[SubjectHint],
+        pics: PictureOptions,
+        texts: TextOptions,
+        templates: Sequence[Any],
+        prev_manifest: dict[str, Any] | None,
+    ) -> StepIn:
         previous = None
         if prev_manifest is not None:
             previous = tuple(
@@ -520,7 +592,13 @@ class _Run:
             brief=brief,
             subject_hints=tuple(hints[:4]),
             subject_options=tuple(
-                PictureOptionView(option_id=o.option_id, kind=o.kind, label=o.label, has_face=o.has_face, direction_neutral=o.direction_neutral)
+                PictureOptionView(
+                    option_id=o.option_id,
+                    kind=o.kind,
+                    label=o.label,
+                    has_face=o.has_face,
+                    direction_neutral=o.direction_neutral,
+                )
                 for o in pics.options
             ),
             text_options=texts.options,
@@ -545,29 +623,55 @@ class _Run:
 
     def _planner(self, finance: bool) -> FallbackPlanner:
         return FallbackPlanner(
-            PlannerPolicy(finance=finance, faces_allowed=self.s.faces_allowed and not finance,
-                          fin_lexicon=self.d.lexicons.finance_markers)  # fmt: skip
+            PlannerPolicy(
+                finance=finance,
+                faces_allowed=self.s.faces_allowed and not finance,
+                fin_lexicon=self.d.lexicons.finance_markers,
+            )
         )
 
     def _choose(self, step: StepIn, finance: bool) -> tuple[list[_Pick], list[str], Any]:
         planner = self._planner(finance)
         gctx = self._guard_ctx(step, finance)
         keep_prev = [
-            Concept(concept_id=p.concept_id, status="OK", reason_code=None, template_key=p.template_key,
-                    subject_option_id=p.subject_option_id, text_ids=p.text_ids, angle=p.angle,
-                    hypothesis_kind=p.hypothesis_kind, emphasis_style=p.emphasis_style,
-                    accent_role=p.accent_role, rationale="Repeated from the previous set.")
-            for p in (step.previous_concepts or ()) if p.keep
-        ]  # fmt: skip
-        need_ids = [f"c{i + 1}" for i in range(step.variant_count) if f"c{i + 1}" not in {k.concept_id for k in keep_prev}]
+            Concept(
+                concept_id=p.concept_id,
+                status="OK",
+                reason_code=None,
+                template_key=p.template_key,
+                subject_option_id=p.subject_option_id,
+                text_ids=p.text_ids,
+                angle=p.angle,
+                hypothesis_kind=p.hypothesis_kind,
+                emphasis_style=p.emphasis_style,
+                accent_role=p.accent_role,
+                rationale="Repeated from the previous set.",
+            )
+            for p in (step.previous_concepts or ())
+            if p.keep
+        ]
+        need_ids = [
+            f"c{i + 1}"
+            for i in range(step.variant_count)
+            if f"c{i + 1}" not in {k.concept_id for k in keep_prev}
+        ]
         if not self.s.llm_enabled:
             concepts = planner.plan(step, keep_prev, need_ids)
-            return [_Pick(c, "FALLBACK" if c.concept_id in need_ids else "LLM") for c in concepts], [], None
+            return (
+                [_Pick(c, "FALLBACK" if c.concept_id in need_ids else "LLM") for c in concepts],
+                [],
+                None,
+            )
         self._reserve_budget()
         first: StepOut | None = None
         try:
             first = self._call_parse(step)
-        except (CircuitOpenError, ProviderRefusalError, InvalidJsonError, OutputSchemaInvalidError) as exc:
+        except (
+            CircuitOpenError,
+            ProviderRefusalError,
+            InvalidJsonError,
+            OutputSchemaInvalidError,
+        ) as exc:
             if not self.s.llm_fallback_on_unavailable:
                 raise
             self.calls.fallback_code = exc.code
@@ -599,7 +703,12 @@ class _Run:
             second_step = step.model_copy(update={"call_seq": 2, "retry_context": retry})
             try:
                 second = self._call_parse(second_step, seq=2)
-            except (InvalidJsonError, OutputSchemaInvalidError, CircuitOpenError, ProviderRefusalError) as exc:
+            except (
+                InvalidJsonError,
+                OutputSchemaInvalidError,
+                CircuitOpenError,
+                ProviderRefusalError,
+            ) as exc:
                 if not self.s.llm_fallback_on_unavailable:
                     raise
                 self.calls.fallback_code = exc.code
@@ -624,7 +733,10 @@ class _Run:
     def _reserve_budget(self) -> None:
         with self.tx() as t:
             outcome = self.d.budget.reserve(
-                t, TaskId(self.ti.task_id), self.ti.resource_budget.max_cost_micros, self.ti.resource_budget.currency
+                t,
+                TaskId(self.ti.task_id),
+                self.ti.resource_budget.max_cost_micros,
+                self.ti.resource_budget.currency,
             )
         if not outcome.granted:
             raise BudgetExhaustedError("no budget reservation for the concept call")
@@ -636,7 +748,9 @@ class _Run:
             call_seq = seq + attempt
             if len(self.calls.records) >= 2:
                 break
-            text = self._one_call(step.model_copy(update={"call_seq": call_seq}), call_seq, parse_error)
+            text = self._one_call(
+                step.model_copy(update={"call_seq": call_seq}), call_seq, parse_error
+            )
             try:
                 return parse_output(text)
             except (InvalidJsonError, OutputSchemaInvalidError) as exc:
@@ -648,23 +762,45 @@ class _Run:
     def _one_call(self, step: StepIn, call_seq: int, parse_error: str | None) -> str:
         s, d = self.s, self.d
         request = render_request(
-            step, d.prompt, model=s.model_id, max_output_tokens=s.max_output_tokens, temperature=s.temperature,
-            timeout_ms=s.timeout_ms, cache_system_prompt=s.cache_system_prompt, platform_packs=d.packs.platform,
-            tenant_pack_text=d.packs.tenant_text, parse_error=parse_error,
-        )  # fmt: skip
-        key = make_idempotency_key(self.ti.org_id, "llm.call", [self.ti.task_id, "concepts", call_seq])
+            step,
+            d.prompt,
+            model=s.model_id,
+            max_output_tokens=s.max_output_tokens,
+            temperature=s.temperature,
+            timeout_ms=s.timeout_ms,
+            cache_system_prompt=s.cache_system_prompt,
+            platform_packs=d.packs.platform,
+            tenant_pack_text=d.packs.tenant_text,
+            parse_error=parse_error,
+        )
+        key = make_idempotency_key(
+            self.ti.org_id, "llm.call", [self.ti.task_id, "concepts", call_seq]
+        )
         req_sha = _sha(request.model_dump_json().encode("utf-8"))
         with self.tx() as t:
             est = (len(request.system) + sum(len(m.content) for m in request.messages)) // 4
             d.budget.check_call(
                 t,
                 CallCheck(
-                    task_id=TaskId(self.ti.task_id), job_id=JobId(self.ti.job_id), provider=d.llm.provider,
-                    estimated_cost_micros=est * s.price_in_micros_per_token + s.max_output_tokens * s.price_out_micros_per_token,
-                    currency=s.currency, tokens_in=est, tokens_out=s.max_output_tokens,
+                    task_id=TaskId(self.ti.task_id),
+                    job_id=JobId(self.ti.job_id),
+                    provider=d.llm.provider,
+                    estimated_cost_micros=est * s.price_in_micros_per_token
+                    + s.max_output_tokens * s.price_out_micros_per_token,
+                    currency=s.currency,
+                    tokens_in=est,
+                    tokens_out=s.max_output_tokens,
                 ),
-            )  # fmt: skip
-            decision = d.idem.begin(t, key, "llm.call", req_sha, TaskId(self.ti.task_id), d.clock.now(), s.timeout_ms + 5000)
+            )
+            decision = d.idem.begin(
+                t,
+                key,
+                "llm.call",
+                req_sha,
+                TaskId(self.ti.task_id),
+                d.clock.now(),
+                s.timeout_ms + 5000,
+            )
             if decision.action is BeginAction.RETURN_STORED and decision.record.result_ref:
                 uri = decision.record.result_ref
                 head = d.storage.head(self.tc, BlobUri(uri))
@@ -681,19 +817,34 @@ class _Run:
             entry = d.costs.record(
                 t,
                 NewCostEntry(
-                    provider=u.provider, operation=CostOperation.LLM_COMPLETION, amount_micros=u.amount_micros,
-                    currency=u.currency, figure_kind=CostFigureKind.ESTIMATE, occurred_at=d.clock.now(),
-                    job_id=JobId(self.ti.job_id), task_id=TaskId(self.ti.task_id), attempt_id=self.attempt,
+                    provider=u.provider,
+                    operation=CostOperation.LLM_COMPLETION,
+                    amount_micros=u.amount_micros,
+                    currency=u.currency,
+                    figure_kind=CostFigureKind.ESTIMATE,
+                    occurred_at=d.clock.now(),
+                    job_id=JobId(self.ti.job_id),
+                    task_id=TaskId(self.ti.task_id),
+                    attempt_id=self.attempt,
                     channel_id=ChannelId(self.ti.channel_id) if self.ti.channel_id else None,
-                    agent_id=ExecutorId(AGENT_ID), model=request.model, billing_mode=BillingMode.STANDARD,
-                    tokens_in=u.tokens_in, tokens_out=u.tokens_out, tokens_cached_in=u.tokens_cached_in,
-                    tokens_cache_write_in=u.tokens_cache_write_in, chars_in=u.chars_in, language=step.language,
-                    price_ref=u.price_ref, idempotency_key=key,
+                    agent_id=ExecutorId(AGENT_ID),
+                    model=request.model,
+                    billing_mode=BillingMode.STANDARD,
+                    tokens_in=u.tokens_in,
+                    tokens_out=u.tokens_out,
+                    tokens_cached_in=u.tokens_cached_in,
+                    tokens_cache_write_in=u.tokens_cache_write_in,
+                    chars_in=u.chars_in,
+                    language=step.language,
+                    price_ref=u.price_ref,
+                    idempotency_key=key,
                 ),
-            )  # fmt: skip
+            )
             d.budget.after_call(t, entry)
             raw = response.text.encode("utf-8")
-            uri, _sha_hex, _ = self._put("llm", f"{self.ti.task_id}/concepts-{call_seq}-{_sha(raw)[:16]}.json", raw)
+            uri, _sha_hex, _ = self._put(
+                "llm", f"{self.ti.task_id}/concepts-{call_seq}-{_sha(raw)[:16]}.json", raw
+            )
             d.idem.complete(t, key, uri, d.clock.now())
         self.calls.cost_entry_ids.append(str(entry.id))
         self.calls.cost_micros += u.amount_micros
@@ -701,32 +852,75 @@ class _Run:
         self.calls.tokens_out += u.tokens_out or 0
         self.calls.tokens_cached += u.tokens_cached_in or 0
         self.calls.records.append(
-            {"step_key": "concepts", "call_seq": call_seq, "provider": u.provider, "model": request.model,
-             "tokens_in": u.tokens_in or 0, "tokens_out": u.tokens_out or 0,
-             "tokens_cached_in": u.tokens_cached_in or 0, "cost_entry_id": str(entry.id)}
-        )  # fmt: skip
+            {
+                "step_key": "concepts",
+                "call_seq": call_seq,
+                "provider": u.provider,
+                "model": request.model,
+                "tokens_in": u.tokens_in or 0,
+                "tokens_out": u.tokens_out or 0,
+                "tokens_cached_in": u.tokens_cached_in or 0,
+                "cost_entry_id": str(entry.id),
+            }
+        )
         return response.text
 
     # ------------------------------------------------------------------ P6..P9
     def _build_spec(
-        self, org: str, tpl: TemplateSpec, concept: Concept, texts: Sequence[TextOption], pic: PictureOption,
-        owner: OwnerAsset | None, glyph: GlyphSpec | None, promise_terms: tuple[str, ...], colours: dict[str, str],
-        font: FontRef, font_bytes: bytes, accent: str, cap: int | None, image: bytes | None,
-    ) -> RenderSpec:  # fmt: skip
+        self,
+        org: str,
+        tpl: TemplateSpec,
+        concept: Concept,
+        texts: Sequence[TextOption],
+        pic: PictureOption,
+        owner: OwnerAsset | None,
+        glyph: GlyphSpec | None,
+        promise_terms: tuple[str, ...],
+        colours: dict[str, str],
+        font: FontRef,
+        font_bytes: bytes,
+        accent: str,
+        cap: int | None,
+        image: bytes | None,
+    ) -> RenderSpec:
         return RenderSpec(
-            org_id=org, canvas_w=self.s.canvas_width_px, canvas_h=self.s.canvas_height_px, template=tpl,
-            colours=colours, lines=tuple(t.text for t in texts), emphasis=concept.emphasis_style or "PLAIN",
-            accent_role=accent, key_terms=promise_terms, picture_kind=pic.kind, glyph=glyph, image_bytes=image,
-            image_sha256=owner.content_sha256 if owner else None, font_bytes=font_bytes, font_sha256=font.sha256,
-            min_font_px=self.s.text_min_font_px, max_font_px=self.s.text_max_font_px,
-            font_step_px=self.s.text_font_step_px, font_cap_px=cap,
-        )  # fmt: skip
+            org_id=org,
+            canvas_w=self.s.canvas_width_px,
+            canvas_h=self.s.canvas_height_px,
+            template=tpl,
+            colours=colours,
+            lines=tuple(t.text for t in texts),
+            emphasis=concept.emphasis_style or "PLAIN",
+            accent_role=accent,
+            key_terms=promise_terms,
+            picture_kind=pic.kind,
+            glyph=glyph,
+            image_bytes=image,
+            image_sha256=owner.content_sha256 if owner else None,
+            font_bytes=font_bytes,
+            font_sha256=font.sha256,
+            min_font_px=self.s.text_min_font_px,
+            max_font_px=self.s.text_max_font_px,
+            font_step_px=self.s.text_font_step_px,
+            font_cap_px=cap,
+        )
 
     def _compose_and_persist(
-        self, promise: Any, brief: Any, picks: list[_Pick], omitted_pre: list[tuple[str, str]], step: StepIn,
-        pics: PictureOptions, owner_assets: list[OwnerAsset], font: FontRef, font_bytes: bytes,
-        colours: dict[str, str], finance: bool, stats: dict[str, Any], hints_count: int,
-    ) -> _Result:  # fmt: skip
+        self,
+        promise: Any,
+        brief: Any,
+        picks: list[_Pick],
+        omitted_pre: list[tuple[str, str]],
+        step: StepIn,
+        pics: PictureOptions,
+        owner_assets: list[OwnerAsset],
+        font: FontRef,
+        font_bytes: bytes,
+        colours: dict[str, str],
+        finance: bool,
+        stats: dict[str, Any],
+        hints_count: int,
+    ) -> _Result:
         s = self.s
         org = self.ti.org_id
         tpl_by_key = {t.template_key: t for t in self.d.templates}
@@ -757,8 +951,22 @@ class _Run:
             cap: int | None = None
             result: tuple[RenderResult, RenderSpec, VariantFacts] | None = None
             for attempt in range(2):
-                spec = self._build_spec(org, tpl, c, texts, pic, owner, glyph, tuple(promise.promise_key_terms),
-                                        colours, font, font_bytes, accent, cap, image)  # fmt: skip
+                spec = self._build_spec(
+                    org,
+                    tpl,
+                    c,
+                    texts,
+                    pic,
+                    owner,
+                    glyph,
+                    tuple(promise.promise_key_terms),
+                    colours,
+                    font,
+                    font_bytes,
+                    accent,
+                    cap,
+                    image,
+                )
                 try:
                     rr = self.d.composer.render(spec)
                 except GlyphMissingError:
@@ -769,11 +977,18 @@ class _Run:
                     raise AgentCrashError("composition failed") from exc
                 if rr is not None:
                     facts = VariantFacts(
-                        variant_id="v" + c.concept_id[1:], concept=c, template_key=tpl.template_key,
-                        template_direction_neutral=tpl.direction_neutral, picture=pic, picture_fact=fact,
-                        texts=tuple(texts), render=rr, file_size_bytes=len(rr.png), text_local=" ".join(rr.lines),
+                        variant_id="v" + c.concept_id[1:],
+                        concept=c,
+                        template_key=tpl.template_key,
+                        template_direction_neutral=tpl.direction_neutral,
+                        picture=pic,
+                        picture_fact=fact,
+                        texts=tuple(texts),
+                        render=rr,
+                        file_size_bytes=len(rr.png),
+                        text_local=" ".join(rr.lines),
                         rationale_ok=rationale_ok(c.rationale, self._guard_ctx(step, finance)),
-                    )  # fmt: skip
+                    )
                     if not variant_failures(facts, s, safe, corner):
                         result = (rr, spec, facts)
                         break
@@ -788,27 +1003,52 @@ class _Run:
                 continue
             rr, spec, facts = result
             near = [
-                b for b in built
-                if bin(int(b[2].phash, 16) ^ int(rr.phash, 16)).count("1") < s.distinct_min_hash_distance_bits
-            ]  # fmt: skip
+                b
+                for b in built
+                if bin(int(b[2].phash, 16) ^ int(rr.phash, 16)).count("1")
+                < s.distinct_min_hash_distance_bits
+            ]
             if near:
                 omitted.append((c.concept_id, "CHECK_FAILED"))
                 continue
             built.append((pick, facts, rr, spec))
         if not built or built[0][0].concept.concept_id != "c1":
             raise QualityRepeatedFailureError(
-                "no variant (or no control) passed the blocking checks", details={"omitted": omitted}
+                "no variant (or no control) passed the blocking checks",
+                details={"omitted": omitted},
             )
         return self._persist_and_finish(
-            promise, built, omitted, step, pics, owner_by_sha, glyph_by_key, font, tpl_by_key, finance, stats, safe, corner
+            promise,
+            built,
+            omitted,
+            step,
+            pics,
+            owner_by_sha,
+            glyph_by_key,
+            font,
+            tpl_by_key,
+            finance,
+            stats,
+            safe,
+            corner,
         )
 
     def _persist_and_finish(
-        self, promise: Any, built: list[Any], omitted: list[tuple[str, str]], step: StepIn, pics: PictureOptions,
-        owner_by_sha: dict[str, OwnerAsset], glyph_by_key: dict[str, GlyphSpec], font: FontRef,
-        tpl_by_key: dict[str, TemplateSpec], finance: bool, stats: dict[str, Any],
-        safe: tuple[int, int, int, int], corner: tuple[int, int, int, int],
-    ) -> _Result:  # fmt: skip
+        self,
+        promise: Any,
+        built: list[Any],
+        omitted: list[tuple[str, str]],
+        step: StepIn,
+        pics: PictureOptions,
+        owner_by_sha: dict[str, OwnerAsset],
+        glyph_by_key: dict[str, GlyphSpec],
+        font: FontRef,
+        tpl_by_key: dict[str, TemplateSpec],
+        finance: bool,
+        stats: dict[str, Any],
+        safe: tuple[int, int, int, int],
+        corner: tuple[int, int, int, int],
+    ) -> _Result:
         s = self.s
         job, task = self.ti.job_id, self.ti.task_id
         files: list[tuple[str, str, int, str]] = []  # (asset_id, uri, size, sha)
@@ -820,22 +1060,44 @@ class _Run:
             registered = self.d.repo.registered_assets(t, sorted(wanted))
             missing = sorted(k for k in wanted if k not in registered)
             if missing:
-                raise MissingDependencyError("template, glyph-set or font asset is not registered for the tenant", details={"missing": [list(k) for k in missing]})
+                raise MissingDependencyError(
+                    "template, glyph-set or font asset is not registered for the tenant",
+                    details={"missing": [list(k) for k in missing]},
+                )
             for _pick, facts, rr, _spec in built:
                 name = f"{job}/{facts.variant_id}-{_sha(rr.png)[:16]}.png"
                 uri, sha, size = self._put("thumbnails", name, rr.png)
                 tier = "A_OWNER_REAL" if facts.picture.kind == "OWNER_IMAGE" else "C_CODE_MOTION"
                 asset_id = self.d.repo.insert_image_asset(
-                    t, NewImageAsset(sha, uri, size, rr.width, rr.height, tier, {"licence_id": lic_id, "composition_sha256": rr.composition_sha256})
+                    t,
+                    NewImageAsset(
+                        sha,
+                        uri,
+                        size,
+                        rr.width,
+                        rr.height,
+                        tier,
+                        {"licence_id": lic_id, "composition_sha256": rr.composition_sha256},
+                    ),
                 )
                 files.append((asset_id, uri, size, sha))
                 used = [("TEMPLATE", facts.template_key), ("FONT", font.asset_id)]
                 for kind, key in used:
-                    self.d.repo.insert_ledger_row(t, NewLedgerRow(registered[(kind, key)].asset_id, kind, job, task))
+                    self.d.repo.insert_ledger_row(
+                        t, NewLedgerRow(registered[(kind, key)].asset_id, kind, job, task)
+                    )
                 if facts.picture.kind == "OWNER_IMAGE":
-                    self.d.repo.insert_ledger_row(t, NewLedgerRow(owner_by_sha[facts.picture.key].asset_id, "IMAGE", job, task))
+                    self.d.repo.insert_ledger_row(
+                        t,
+                        NewLedgerRow(owner_by_sha[facts.picture.key].asset_id, "IMAGE", job, task),
+                    )
                 elif facts.picture.kind == "CODE_GLYPH":
-                    self.d.repo.insert_ledger_row(t, NewLedgerRow(registered[("TEMPLATE", "glyphset")].asset_id, "TEMPLATE", job, task))
+                    self.d.repo.insert_ledger_row(
+                        t,
+                        NewLedgerRow(
+                            registered[("TEMPLATE", "glyphset")].asset_id, "TEMPLATE", job, task
+                        ),
+                    )
             ledger = self.d.repo.ledger_rows(t, job)
         for i in range(len(built)):
             self._checkpoint(f"CK3_VARIANT_{i + 1}", {"sha256": files[i][3], "check": "persisted"})
@@ -843,96 +1105,205 @@ class _Run:
         payload_variants: list[PayloadVariant] = []
         for (pick, facts, rr, spec), (asset_id, uri, size, sha) in zip(built, files, strict=True):
             c = pick.concept
-            owner = owner_by_sha.get(facts.picture.key) if facts.picture.kind == "OWNER_IMAGE" else None
+            owner = (
+                owner_by_sha.get(facts.picture.key) if facts.picture.kind == "OWNER_IMAGE" else None
+            )
             pic_asset = owner.asset_id if owner else None
             manifest_variants.append(
                 {
-                    "variant_id": facts.variant_id, "concept_id": c.concept_id, "is_control": c.concept_id == "c1",
-                    "hypothesis_kind": c.hypothesis_kind, "angle": c.angle, "emphasis_style": c.emphasis_style,
-                    "accent_role": spec.accent_role, "template_key": facts.template_key,
-                    "picture": {"kind": facts.picture.kind, "key": facts.picture.key, "asset_id": pic_asset},
+                    "variant_id": facts.variant_id,
+                    "concept_id": c.concept_id,
+                    "is_control": c.concept_id == "c1",
+                    "hypothesis_kind": c.hypothesis_kind,
+                    "angle": c.angle,
+                    "emphasis_style": c.emphasis_style,
+                    "accent_role": spec.accent_role,
+                    "template_key": facts.template_key,
+                    "picture": {
+                        "kind": facts.picture.kind,
+                        "key": facts.picture.key,
+                        "asset_id": pic_asset,
+                    },
                     "texts": [{"text_id": t.text_id, "text": t.text} for t in facts.texts],
                     "text_local": facts.text_local,
                     "file": {"asset_id": asset_id, "uri": uri, "sha256": sha},
                 }
-            )  # fmt: skip
-            covered = tuple(k for k in promise.promise_key_terms if contains_sequence(folded_words(facts.text_local), folded_words(k)))
+            )
+            covered = tuple(
+                k
+                for k in promise.promise_key_terms
+                if contains_sequence(folded_words(facts.text_local), folded_words(k))
+            )
             payload_variants.append(
                 PayloadVariant(
-                    variant_id=facts.variant_id, concept_id=c.concept_id, is_control=c.concept_id == "c1",
-                    hypothesis_kind=c.hypothesis_kind or "CONTROL", angle=c.angle or "TERM_CLARITY",
-                    planned_by=pick.planned_by, template_key=facts.template_key,  # type: ignore[arg-type]
+                    variant_id=facts.variant_id,
+                    concept_id=c.concept_id,
+                    is_control=c.concept_id == "c1",
+                    hypothesis_kind=c.hypothesis_kind or "CONTROL",
+                    angle=c.angle or "TERM_CLARITY",
+                    planned_by=pick.planned_by,
+                    template_key=facts.template_key,
                     template_version=tpl_by_key[facts.template_key].version,
-                    picture=PayloadPicture(option_id=facts.picture.option_id, kind=facts.picture.kind, asset_id=pic_asset,
-                                           has_face=facts.picture.has_face, direction_neutral=facts.picture.direction_neutral),
-                    text_ids=c.text_ids, text_lines_local=rr.lines, text_local=facts.text_local,
-                    text_language=self.inp.language, emphasis_style=c.emphasis_style or "PLAIN",
-                    accent_role=spec.accent_role,  # type: ignore[arg-type]
-                    promise_terms_covered=covered, rationale=c.rationale,
-                    file=PayloadFile(asset_id=asset_id, uri=uri, sha256=sha, size_bytes=size, media_type="image/png",
-                                     width_px=rr.width, height_px=rr.height),
+                    picture=PayloadPicture(
+                        option_id=facts.picture.option_id,
+                        kind=facts.picture.kind,
+                        asset_id=pic_asset,
+                        has_face=facts.picture.has_face,
+                        direction_neutral=facts.picture.direction_neutral,
+                    ),
+                    text_ids=c.text_ids,
+                    text_lines_local=rr.lines,
+                    text_local=facts.text_local,
+                    text_language=self.inp.language,
+                    emphasis_style=c.emphasis_style or "PLAIN",
+                    accent_role=spec.accent_role,
+                    promise_terms_covered=covered,
+                    rationale=c.rationale,
+                    file=PayloadFile(
+                        asset_id=asset_id,
+                        uri=uri,
+                        sha256=sha,
+                        size_bytes=size,
+                        media_type="image/png",
+                        width_px=rr.width,
+                        height_px=rr.height,
+                    ),
                     composition_sha256=rr.composition_sha256,
                 )
-            )  # fmt: skip
+            )
         base = {
-            "iteration": self.inp.iteration, "language": self.inp.language, "aspect_ratio": "16:9",
-            "canvas": {"width_px": s.canvas_width_px, "height_px": s.canvas_height_px, "format": s.output_format},
+            "iteration": self.inp.iteration,
+            "language": self.inp.language,
+            "aspect_ratio": "16:9",
+            "canvas": {
+                "width_px": s.canvas_width_px,
+                "height_px": s.canvas_height_px,
+                "format": s.output_format,
+            },
             "variants": manifest_variants,
-        }  # fmt: skip
+        }
         set_hash = set_sha256(base)
         manifest = Manifest.model_validate({**base, "set_sha256": set_hash})
         manifest_bytes = canonical_json(manifest.model_dump(mode="json"))
         facts_all = self._licence_facts(built, owner_by_sha, registered, ledger, job, font)
-        fallback_ids = tuple(p.concept.concept_id for p in (b[0] for b in built) if p.planned_by == "FALLBACK")
+        fallback_ids = tuple(
+            p.concept.concept_id for p in (b[0] for b in built) if p.planned_by == "FALLBACK"
+        )
         payload = OutputPayload(
-            verdict="ALLOWED", iteration=self.inp.iteration, language=self.inp.language, aspect_ratio="16:9",
-            canvas=manifest.canvas, variant_count_requested=self.inp.variant_count,
-            variant_count_produced=len(built), variants=tuple(payload_variants), violated_rule_ids=(),
+            verdict="ALLOWED",
+            iteration=self.inp.iteration,
+            language=self.inp.language,
+            aspect_ratio="16:9",
+            canvas=manifest.canvas,
+            variant_count_requested=self.inp.variant_count,
+            variant_count_produced=len(built),
+            variants=tuple(payload_variants),
+            violated_rule_ids=(),
             omitted=tuple(Omitted(concept_id=c, reason_code=r) for c, r in omitted),
-            promise={"promise_sha256": _sha(canonical_json(promise.model_dump(mode="json"))),
-                     "promise_key_terms": list(promise.promise_key_terms)},
-            option_stats=stats, chart_stills_used=(),
-            planner=PlannerInfo(llm_enabled=s.llm_enabled, llm_calls=len(self.calls.records),
-                                reasks=self.calls.reasks, fallback_concepts=fallback_ids),
-            set_sha256=set_hash, refusal=None, provenance=self._provenance(font),
-        )  # fmt: skip
+            promise={
+                "promise_sha256": _sha(canonical_json(promise.model_dump(mode="json"))),
+                "promise_key_terms": list(promise.promise_key_terms),
+            },
+            option_stats=stats,
+            chart_stills_used=(),
+            planner=PlannerInfo(
+                llm_enabled=s.llm_enabled,
+                llm_calls=len(self.calls.records),
+                reasks=self.calls.reasks,
+                fallback_concepts=fallback_ids,
+            ),
+            set_sha256=set_hash,
+            refusal=None,
+            provenance=self._provenance(font),
+        )
         checks = run_checks(
             CheckContext(
-                settings=s, verdict=ComplianceVerdict.ALLOWED, finance=finance, requested=self.inp.variant_count,
-                variants=tuple(b[1] for b in built), promise_key_terms=tuple(promise.promise_key_terms),
-                must_not_promise=tuple(step.brief.must_not_promise), banned_words=(),
-                fin_lexicon=self.d.lexicons.finance_markers, faces_allowed=s.faces_allowed,
-                licence_facts=facts_all, schema_ok=True, llm_calls=len(self.calls.records),
-                cost_micros=self.calls.cost_micros, reserved_micros=self.ti.resource_budget.max_cost_micros,
-                max_cost_micros=self.ti.resource_budget.max_cost_micros, cost_entry_ids=tuple(self.calls.cost_entry_ids),
-                llm_fallback_code=self.calls.fallback_code, safe_rect=safe, reserved_corner_rect=corner,
+                settings=s,
+                verdict=ComplianceVerdict.ALLOWED,
+                finance=finance,
+                requested=self.inp.variant_count,
+                variants=tuple(b[1] for b in built),
+                promise_key_terms=tuple(promise.promise_key_terms),
+                must_not_promise=tuple(step.brief.must_not_promise),
+                banned_words=(),
+                fin_lexicon=self.d.lexicons.finance_markers,
+                faces_allowed=s.faces_allowed,
+                licence_facts=facts_all,
+                schema_ok=True,
+                llm_calls=len(self.calls.records),
+                cost_micros=self.calls.cost_micros,
+                reserved_micros=self.ti.resource_budget.max_cost_micros,
+                max_cost_micros=self.ti.resource_budget.max_cost_micros,
+                cost_entry_ids=tuple(self.calls.cost_entry_ids),
+                llm_fallback_code=self.calls.fallback_code,
+                safe_rect=safe,
+                reserved_corner_rect=corner,
             )
-        )  # fmt: skip
+        )
         failed = [r.check_id for r in checks if r.blocking and r.verdict.value == "FAIL"]
         if failed:
-            raise QualityRepeatedFailureError("blocking checks failed", details={"check_ids": failed})
-        m_uri, m_sha, m_size = self._put("thumbnails", f"{job}/manifest-{set_hash[:16]}.json", manifest_bytes)
+            raise QualityRepeatedFailureError(
+                "blocking checks failed", details={"check_ids": failed}
+            )
+        m_uri, m_sha, m_size = self._put(
+            "thumbnails", f"{job}/manifest-{set_hash[:16]}.json", manifest_bytes
+        )
         refs = [
-            OutputRef(uri=f.uri, kind=OutputRefKind.IMAGE, sha256=f.sha256, size_bytes=f.size_bytes,
-                      media_type="image/png", entity_ref=f.uri)
+            OutputRef(
+                uri=f.uri,
+                kind=OutputRefKind.IMAGE,
+                sha256=f.sha256,
+                size_bytes=f.size_bytes,
+                media_type="image/png",
+                entity_ref=f.uri,
+            )
             for f in payload_variants_files(payload_variants)
-        ]  # fmt: skip
-        refs.append(OutputRef(uri=m_uri, kind=OutputRefKind.DATA, sha256=m_sha, size_bytes=m_size,
-                              media_type="application/json"))  # fmt: skip
-        return _Result("ALLOWED", payload, refs, checks, self.calls, self.ti.resource_budget.currency, len(built))
+        ]
+        refs.append(
+            OutputRef(
+                uri=m_uri,
+                kind=OutputRefKind.DATA,
+                sha256=m_sha,
+                size_bytes=m_size,
+                media_type="application/json",
+            )
+        )
+        return _Result(
+            "ALLOWED",
+            payload,
+            refs,
+            checks,
+            self.calls,
+            self.ti.resource_budget.currency,
+            len(built),
+        )
 
     def _licence_facts(
-        self, built: list[Any], owner_by_sha: dict[str, OwnerAsset], registered: dict[tuple[str, str], RegisteredAsset],
-        ledger: Sequence[Any], job: str, font: FontRef,
-    ) -> tuple[LicenceFact, ...]:  # fmt: skip
+        self,
+        built: list[Any],
+        owner_by_sha: dict[str, OwnerAsset],
+        registered: dict[tuple[str, str], RegisteredAsset],
+        ledger: Sequence[Any],
+        job: str,
+        font: FontRef,
+    ) -> tuple[LicenceFact, ...]:
         rows = {(r.asset_id, r.usage_kind): r for r in ledger if r.job_id == job}
         out: dict[tuple[str, str], LicenceFact] = {}
 
         def reg(kind: str, key: str) -> None:
             a = registered[(kind, key)]
             row = rows.get((a.asset_id, kind))
-            out[(a.asset_id, kind)] = LicenceFact(a.asset_id, kind, row is not None, bool(row and row.has_interval),
-                                                  a.licence_state, a.covers_monetized, None, a.source_type, a.expired)  # fmt: skip
+            out[(a.asset_id, kind)] = LicenceFact(
+                a.asset_id,
+                kind,
+                row is not None,
+                bool(row and row.has_interval),
+                a.licence_state,
+                a.covers_monetized,
+                None,
+                a.source_type,
+                a.expired,
+            )
 
         reg("FONT", font.asset_id)
         for b in built:
@@ -944,62 +1315,130 @@ class _Run:
                 o = owner_by_sha[f.picture.key]
                 row = rows.get((o.asset_id, "IMAGE"))
                 out[(o.asset_id, "IMAGE")] = LicenceFact(
-                    o.asset_id, "IMAGE", row is not None, bool(row and row.has_interval), o.facts.licence_state,
-                    o.facts.covers_monetized, o.facts.third_party_permission, o.facts.source_type, o.facts.expired)  # fmt: skip
+                    o.asset_id,
+                    "IMAGE",
+                    row is not None,
+                    bool(row and row.has_interval),
+                    o.facts.licence_state,
+                    o.facts.covers_monetized,
+                    o.facts.third_party_permission,
+                    o.facts.source_type,
+                    o.facts.expired,
+                )
         return tuple(out.values())
 
     def _provenance(self, font: FontRef) -> dict[str, Any]:
         return {
-            "prompt_id": self.d.prompt.prompt_id, "prompt_sha256": self.d.prompt.sha256,
-            "rule_pack_versions": {}, "config_key_families": ["agent_11.", "llm.agent_11.thumbnail_variants.concepts."],
-            "composer_version": "pillow-raqm", "template_set_sha256": template_set_sha256(),
-            "font_asset_ids": [font.asset_id], "calls": self.calls.records,
-        }  # fmt: skip
+            "prompt_id": self.d.prompt.prompt_id,
+            "prompt_sha256": self.d.prompt.sha256,
+            "rule_pack_versions": {},
+            "config_key_families": ["agent_11.", "llm.agent_11.thumbnail_variants.concepts."],
+            "composer_version": "pillow-raqm",
+            "template_set_sha256": template_set_sha256(),
+            "font_asset_ids": [font.asset_id],
+            "calls": self.calls.records,
+        }
 
     # ------------------------------------------------------------------ empty results
     def _empty_result(
-        self, promise: Any, verdict: ComplianceVerdict, reason: str, rules: tuple[str, ...], finance: bool,
+        self,
+        promise: Any,
+        verdict: ComplianceVerdict,
+        reason: str,
+        rules: tuple[str, ...],
+        finance: bool,
         stats: dict[str, Any] | None = None,
-    ) -> _Result:  # fmt: skip
+    ) -> _Result:
         s = self.s
-        omitted = tuple(Omitted(concept_id=f"c{i + 1}", reason_code=reason) for i in range(self.inp.variant_count))
+        omitted = tuple(
+            Omitted(concept_id=f"c{i + 1}", reason_code=reason)
+            for i in range(self.inp.variant_count)
+        )
         payload = OutputPayload(
-            verdict=verdict.value, iteration=self.inp.iteration, language=self.inp.language,  # type: ignore[arg-type]
+            verdict=verdict.value,
+            iteration=self.inp.iteration,
+            language=self.inp.language,
             aspect_ratio="16:9",
-            canvas={"width_px": s.canvas_width_px, "height_px": s.canvas_height_px, "format": s.output_format},  # type: ignore[arg-type]
-            variant_count_requested=self.inp.variant_count, variant_count_produced=0, variants=(),
-            violated_rule_ids=rules, omitted=omitted,
-            promise={"promise_sha256": _sha(canonical_json(promise.model_dump(mode="json"))),
-                     "promise_key_terms": list(promise.promise_key_terms)},
-            option_stats=stats or {}, chart_stills_used=(),
-            planner=PlannerInfo(llm_enabled=s.llm_enabled, llm_calls=len(self.calls.records), reasks=0, fallback_concepts=()),
-            set_sha256=None, refusal=None,
-            provenance={"prompt_id": self.d.prompt.prompt_id, "prompt_sha256": self.d.prompt.sha256,
-                        "template_set_sha256": template_set_sha256(), "calls": self.calls.records},
-        )  # fmt: skip
+            canvas={
+                "width_px": s.canvas_width_px,
+                "height_px": s.canvas_height_px,
+                "format": s.output_format,
+            },
+            variant_count_requested=self.inp.variant_count,
+            variant_count_produced=0,
+            variants=(),
+            violated_rule_ids=rules,
+            omitted=omitted,
+            promise={
+                "promise_sha256": _sha(canonical_json(promise.model_dump(mode="json"))),
+                "promise_key_terms": list(promise.promise_key_terms),
+            },
+            option_stats=stats or {},
+            chart_stills_used=(),
+            planner=PlannerInfo(
+                llm_enabled=s.llm_enabled,
+                llm_calls=len(self.calls.records),
+                reasks=0,
+                fallback_concepts=(),
+            ),
+            set_sha256=None,
+            refusal=None,
+            provenance={
+                "prompt_id": self.d.prompt.prompt_id,
+                "prompt_sha256": self.d.prompt.sha256,
+                "template_set_sha256": template_set_sha256(),
+                "calls": self.calls.records,
+            },
+        )
         checks = run_checks(self._empty_ctx(verdict, finance))
-        return _Result(verdict.value, payload, [], checks, self.calls, self.ti.resource_budget.currency, 0)
+        return _Result(
+            verdict.value, payload, [], checks, self.calls, self.ti.resource_budget.currency, 0
+        )
 
     def _empty_ctx(self, verdict: ComplianceVerdict, finance: bool) -> CheckContext:
         return CheckContext(
-            settings=self.s, verdict=verdict, finance=finance, requested=self.inp.variant_count, variants=(),
-            promise_key_terms=(), must_not_promise=(), banned_words=(), fin_lexicon=self.d.lexicons.finance_markers,
-            faces_allowed=self.s.faces_allowed, licence_facts=(), schema_ok=True, llm_calls=len(self.calls.records),
-            cost_micros=self.calls.cost_micros, reserved_micros=self.ti.resource_budget.max_cost_micros,
-            max_cost_micros=self.ti.resource_budget.max_cost_micros, cost_entry_ids=tuple(self.calls.cost_entry_ids),
+            settings=self.s,
+            verdict=verdict,
+            finance=finance,
+            requested=self.inp.variant_count,
+            variants=(),
+            promise_key_terms=(),
+            must_not_promise=(),
+            banned_words=(),
+            fin_lexicon=self.d.lexicons.finance_markers,
+            faces_allowed=self.s.faces_allowed,
+            licence_facts=(),
+            schema_ok=True,
+            llm_calls=len(self.calls.records),
+            cost_micros=self.calls.cost_micros,
+            reserved_micros=self.ti.resource_budget.max_cost_micros,
+            max_cost_micros=self.ti.resource_budget.max_cost_micros,
+            cost_entry_ids=tuple(self.calls.cost_entry_ids),
             llm_fallback_code=self.calls.fallback_code,
-        )  # fmt: skip
+        )
 
-    def _refusal_result(self, promise: Any, refusal: Any, finance: bool, stats: dict[str, Any]) -> _Result:
+    def _refusal_result(
+        self, promise: Any, refusal: Any, finance: bool, stats: dict[str, Any]
+    ) -> _Result:
         """Refusal mapping of blueprint 8.4."""
         r = refusal.reason
         if r == "INSUFFICIENT_INPUT":
             raise InsufficientInputError("the concept step reports insufficient input")
         if r in ("OUT_OF_SCOPE", "CONFLICTING_INSTRUCTIONS"):
             raise InputInvalidError("the concept step refused the input")
-        verdict = ComplianceVerdict.NEEDS_HUMAN_REVIEW if r == "UNSAFE_CONTENT" else ComplianceVerdict.BLOCKED
-        out = self._empty_result(promise, verdict, "PROMISE_IS_A_CALL" if verdict is ComplianceVerdict.BLOCKED else "INSTRUCTION_IN_INPUT",
-                                 tuple(refusal.violated_rule_ids), finance, stats)  # fmt: skip
+        verdict = (
+            ComplianceVerdict.NEEDS_HUMAN_REVIEW
+            if r == "UNSAFE_CONTENT"
+            else ComplianceVerdict.BLOCKED
+        )
+        out = self._empty_result(
+            promise,
+            verdict,
+            "PROMISE_IS_A_CALL" if verdict is ComplianceVerdict.BLOCKED else "INSTRUCTION_IN_INPUT",
+            tuple(refusal.violated_rule_ids),
+            finance,
+            stats,
+        )
         return out
 
 
@@ -1024,9 +1463,14 @@ def _picture_fact(owner: OwnerAsset | None) -> PictureFact:
         return PictureFact(None, False, False, None, False, False, False)
     f = owner.facts
     return PictureFact(
-        owner.asset_kind, f.depicts_real_person, f.release_ref, f.data_age_vs_lag, f.label_free,
-        f.direction_balanced, owner.data_end_date_present,
-    )  # fmt: skip
+        owner.asset_kind,
+        f.depicts_real_person,
+        f.release_ref,
+        f.data_age_vs_lag,
+        f.label_free,
+        f.direction_balanced,
+        owner.data_end_date_present,
+    )
 
 
 _unused = (GuardHit, GlyphFacts, BrandKitView, _DIRECT)

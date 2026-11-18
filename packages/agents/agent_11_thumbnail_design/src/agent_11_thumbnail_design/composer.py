@@ -11,10 +11,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
 from PIL import Image, ImageDraw, ImageFont
 
-from agent_11_thumbnail_design.errors import ComposeFailedError, GlyphMissingError, TextDoesNotFitError
+from agent_11_thumbnail_design.errors import (
+    ComposeFailedError,
+    GlyphMissingError,
+    TextDoesNotFitError,
+)
 from agent_11_thumbnail_design.measure import contrast_ratio, fit_text
 from agent_11_thumbnail_design.revision import canonical_json
 from agent_11_thumbnail_design.templates import GlyphSpec, TemplateSpec
@@ -62,7 +66,11 @@ class RenderSpec:
                 "emphasis": self.emphasis,
                 "accent": self.accent_role,
                 "key_terms": list(self.key_terms),
-                "picture": [self.picture_kind, self.glyph.key if self.glyph else None, self.image_sha256],
+                "picture": [
+                    self.picture_kind,
+                    self.glyph.key if self.glyph else None,
+                    self.image_sha256,
+                ],
                 "font": self.font_sha256,
                 "fit": [self.min_font_px, self.max_font_px, self.font_step_px, self.font_cap_px],
             }
@@ -99,7 +107,7 @@ class ImageComposer(Protocol):
 
 
 class _Metrics:
-    def __init__(self, font_at: "FontProvider") -> None:
+    def __init__(self, font_at: FontProvider) -> None:
         self._font_at = font_at
 
     def text_width(self, line: str, font_px: int) -> float:
@@ -117,7 +125,7 @@ class FontProvider(Protocol):
 def phash64(img: Image.Image) -> str:
     """Average hash over an 8x8 grey thumbnail (box filter): 64 bits as 16 hex digits."""
     grey = img.convert("L").resize((8, 8), Image.Resampling.BOX)
-    px = list(grey.get_flattened_data())
+    px = list(grey.tobytes())
     mean = sum(px) / 64
     bits = 0
     for v in px:
@@ -149,7 +157,9 @@ class PillowComposer:
             cmap = TTFont(io.BytesIO(font_bytes), lazy=True).getBestCmap() or {}
             self._cmaps[key] = frozenset(cmap)
         cmap_set = self._cmaps[key]
-        return tuple(sorted({ch for ch in text if ord(ch) not in cmap_set and ord(ch) not in _IGNORED}))
+        return tuple(
+            sorted({ch for ch in text if ord(ch) not in cmap_set and ord(ch) not in _IGNORED})
+        )
 
     def raqm_available(self) -> bool:
         from PIL import features
@@ -214,11 +224,20 @@ class PillowComposer:
                 if op["op"] == "rect":
                     bx, by, bw, bh = op["box"]
                     draw.rectangle(
-                        (ox + bx * side // 1000, oy + by * side // 1000,
-                         ox + (bx + bw) * side // 1000, oy + (by + bh) * side // 1000),
-                        fill=fill, outline=line, width=lw)
+                        (
+                            ox + bx * side // 1000,
+                            oy + by * side // 1000,
+                            ox + (bx + bw) * side // 1000,
+                            oy + (by + bh) * side // 1000,
+                        ),
+                        fill=fill,
+                        outline=line,
+                        width=lw,
+                    )
                 elif op["op"] == "polygon":
-                    pts = [(ox + px * side // 1000, oy + py * side // 1000) for px, py in op["points"]]
+                    pts = [
+                        (ox + px * side // 1000, oy + py * side // 1000) for px, py in op["points"]
+                    ]
                     draw.polygon(pts, fill=fill, outline=line)
 
     def _text(
@@ -233,10 +252,14 @@ class PillowComposer:
         metrics = _Metrics(font_at)
         max_px = min(spec.max_font_px, spec.font_cap_px or spec.max_font_px)
         lines = list(spec.lines)
-        fit = _try_fit(lines, spec.template.text_lines_max, bx1 - bx0, by1 - by0, metrics, spec, max_px)
+        fit = _try_fit(
+            lines, spec.template.text_lines_max, bx1 - bx0, by1 - by0, metrics, spec, max_px
+        )
         if fit is None and len(lines) == 1 and spec.template.text_lines_max >= 2:
             for split in _balanced_splits(lines[0]):
-                fit = _try_fit(split, spec.template.text_lines_max, bx1 - bx0, by1 - by0, metrics, spec, max_px)
+                fit = _try_fit(
+                    split, spec.template.text_lines_max, bx1 - bx0, by1 - by0, metrics, spec, max_px
+                )
                 if fit is not None:
                     lines = split
                     break
@@ -256,7 +279,9 @@ class PillowComposer:
             width = font.getlength(line)
             x = bx0 + ((bx1 - bx0 - width) / 2 if spec.template.align == "center" else 0)
             consumed = ""
-            for seg, colour in _segments(line, li, len(lines), spec.emphasis, terms, text_c, accent_c):
+            for seg, colour in _segments(
+                line, li, len(lines), spec.emphasis, terms, text_c, accent_c
+            ):
                 sx = x + font.getlength(consumed)
                 bbox = (int(sx), int(y), int(sx + font.getlength(seg)) + 1, int(y + lh) + 1)
                 runs.append(_make_run(img, seg, bbox, font_px, colour))
@@ -273,9 +298,19 @@ def _px(box: tuple[int, int, int, int], w: int, h: int) -> tuple[int, int, int, 
     return (x * w // 1000, y * h // 1000, (x + bw) * w // 1000, (y + bh) * h // 1000)
 
 
-def _try_fit(lines: Sequence[str], lines_max: int, bw: float, bh: float, metrics: _Metrics, spec: RenderSpec, max_px: int) -> int | None:
+def _try_fit(
+    lines: Sequence[str],
+    lines_max: int,
+    bw: float,
+    bh: float,
+    metrics: _Metrics,
+    spec: RenderSpec,
+    max_px: int,
+) -> int | None:
     try:
-        return fit_text(lines, lines_max, bw, bh, metrics, max_px, spec.min_font_px, spec.font_step_px).font_px
+        return fit_text(
+            lines, lines_max, bw, bh, metrics, max_px, spec.min_font_px, spec.font_step_px
+        ).font_px
     except TextDoesNotFitError:
         return None
 
@@ -284,12 +319,20 @@ def _balanced_splits(line: str) -> list[list[str]]:
     ws = words(line)
     if len(ws) < 2:
         return []
-    cuts = sorted(range(1, len(ws)), key=lambda i: (abs(len(" ".join(ws[:i])) - len(" ".join(ws[i:]))), i))
+    cuts = sorted(
+        range(1, len(ws)), key=lambda i: (abs(len(" ".join(ws[:i])) - len(" ".join(ws[i:]))), i)
+    )
     return [[" ".join(ws[:i]), " ".join(ws[i:])] for i in cuts]
 
 
 def _segments(
-    line: str, li: int, n_lines: int, emphasis: str, terms: list[list[str]], text_c: RGB, accent_c: RGB
+    line: str,
+    li: int,
+    n_lines: int,
+    emphasis: str,
+    terms: list[list[str]],
+    text_c: RGB,
+    accent_c: RGB,
 ) -> list[tuple[str, RGB]]:
     if emphasis == "TWO_TONE" and n_lines == 2:
         return [(line, accent_c if li == 1 else text_c)]
@@ -317,12 +360,26 @@ def _segments(
     return [(s.rstrip() if k == len(segs) - 1 else s, c) for k, (s, c) in enumerate(segs)]
 
 
-def _make_run(img: Image.Image, seg: str, bbox: tuple[int, int, int, int], font_px: int, fg: RGB) -> TextRun:
-    box = (max(0, bbox[0]), max(0, bbox[1]), min(img.width, max(bbox[0] + 1, bbox[2])), min(img.height, max(bbox[1] + 1, bbox[3])))
+def _make_run(
+    img: Image.Image, seg: str, bbox: tuple[int, int, int, int], font_px: int, fg: RGB
+) -> TextRun:
+    box = (
+        max(0, bbox[0]),
+        max(0, bbox[1]),
+        min(img.width, max(bbox[0] + 1, bbox[2])),
+        min(img.height, max(bbox[1] + 1, bbox[3])),
+    )
     region = img.crop(box).resize((1, 1), Image.Resampling.BOX)
-    px = region.getpixel((0, 0))
-    bg = (int(px[0]), int(px[1]), int(px[2])) if isinstance(px, tuple) else (int(px), int(px), int(px))
+    raw = region.tobytes()
+    bg = (raw[0], raw[1], raw[2])
     return TextRun(seg.strip(), bbox, font_px, fg, bg, contrast_ratio(fg, bg))
 
 
-__all__ = ["ImageComposer", "PillowComposer", "RenderResult", "RenderSpec", "contains_sequence", "hex_to_rgb"]
+__all__ = [
+    "ImageComposer",
+    "PillowComposer",
+    "RenderResult",
+    "RenderSpec",
+    "contains_sequence",
+    "hex_to_rgb",
+]

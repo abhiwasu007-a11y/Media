@@ -90,7 +90,7 @@ def fixture_step(
             "must_not_promise": [],
         },
         "subject_hints": [],
-        "subject_options": [{k: v for k, v in p.items()} for p in pics],
+        "subject_options": [dict(p) for p in pics],
         "text_options": texts,
         "templates": tpls,
         "banned_subjects": [],

@@ -55,10 +55,14 @@ class ExcludedPicture:
     glyph: str | None = None
 
     def as_dict(self) -> dict[str, str]:
-        return {"asset": self.asset, "reason": self.reason} if self.asset else {
-            "glyph": str(self.glyph),
-            "reason": self.reason,
-        }
+        return (
+            {"asset": self.asset, "reason": self.reason}
+            if self.asset
+            else {
+                "glyph": str(self.glyph),
+                "reason": self.reason,
+            }
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,8 +148,15 @@ def build_picture_options(
             )
         )
     none = PictureOption(
-        option_id="o00", kind="NONE", key="none", label="text only", has_face=False, direction_neutral=True
+        option_id="o00",
+        kind="NONE",
+        key="none",
+        label="text only",
+        has_face=False,
+        direction_neutral=True,
     )
     ordered = [*owner, *code, none]
-    numbered = tuple(o.model_copy(update={"option_id": f"o{i + 1:02d}"}) for i, o in enumerate(ordered))
+    numbered = tuple(
+        o.model_copy(update={"option_id": f"o{i + 1:02d}"}) for i, o in enumerate(ordered)
+    )
     return PictureOptions(numbered, tuple(excluded))

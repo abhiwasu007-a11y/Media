@@ -76,7 +76,9 @@ def glyph_catalogue() -> tuple[GlyphSpec, ...]:
 
 
 def neutral_allow_list_sha256() -> str:
-    return hashlib.sha256(canonical_json({"allow": _data("glyphs.json")["neutral_allow_list"]})).hexdigest()
+    return hashlib.sha256(
+        canonical_json({"allow": _data("glyphs.json")["neutral_allow_list"]})
+    ).hexdigest()
 
 
 def template_set_sha256() -> str:
@@ -106,8 +108,10 @@ def offer_templates(
 
 def reserved_corner_rect(corner: str, width: int, height: int) -> tuple[int, int, int, int]:
     """The corner kept free of text (the video-length badge), in pixels."""
-    cw, ch = (width * _data("templates.json")["reserved_corner_permille"][0] // 1000,
-              height * _data("templates.json")["reserved_corner_permille"][1] // 1000)
+    cw, ch = (
+        width * _data("templates.json")["reserved_corner_permille"][0] // 1000,
+        height * _data("templates.json")["reserved_corner_permille"][1] // 1000,
+    )
     right = corner.endswith("right")
     bottom = corner.startswith("bottom")
     x0 = width - cw if right else 0

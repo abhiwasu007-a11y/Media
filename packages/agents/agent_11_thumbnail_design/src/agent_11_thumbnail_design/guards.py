@@ -191,11 +191,16 @@ def check_concepts(concepts: Sequence[Concept], ctx: GuardContext) -> list[Guard
     for idx in range(len(concepts), ctx.step_in.variant_count):
         hits.append(GuardHit(concept_id=f"c{idx + 1}", guard="G1"))
     if len(concepts) > ctx.step_in.variant_count:
-        hits.extend(GuardHit(concept_id=c.concept_id, guard="G1") for c in concepts[ctx.step_in.variant_count :])
+        hits.extend(
+            GuardHit(concept_id=c.concept_id, guard="G1")
+            for c in concepts[ctx.step_in.variant_count :]
+        )
     return hits
 
 
-def _first_failure(c: Concept, idx: int, concepts: Sequence[Concept], ctx: GuardContext) -> GuardId | None:
+def _first_failure(
+    c: Concept, idx: int, concepts: Sequence[Concept], ctx: GuardContext
+) -> GuardId | None:
     if not _g1(c, idx, ctx):
         return "G1"
     if c.status != "OK":

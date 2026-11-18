@@ -46,7 +46,9 @@ def build_previous(
 
 
 def canonical_json(doc: Mapping[str, Any]) -> bytes:
-    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+        "utf-8"
+    )
 
 
 def set_sha256(manifest_without_hash: Mapping[str, Any]) -> str:

@@ -39,9 +39,7 @@ class TextOption(A11Model):
 class ExcludedText(A11Model):
     text: str
     source: TextSource
-    reason: Literal[
-        "EMPTY", "TOO_LONG", "BANNED_WORD", "MUST_NOT_PROMISE", "INJECTION", "FIN_TEXT"
-    ]
+    reason: Literal["EMPTY", "TOO_LONG", "BANNED_WORD", "MUST_NOT_PROMISE", "INJECTION", "FIN_TEXT"]
 
 
 class PictureOption(A11Model):
@@ -111,7 +109,7 @@ class PreviousConcept(A11Model):
     keep: bool
 
     @model_validator(mode="after")
-    def _keep_needs_choices(self) -> "PreviousConcept":
+    def _keep_needs_choices(self) -> PreviousConcept:
         if self.keep and (not self.template_key or not self.subject_option_id or not self.text_ids):
             raise ValueError("a kept previous concept needs every choice")
         return self
@@ -162,7 +160,9 @@ class Concept(A11Model):
     reason_code: ReasonCode | None
     template_key: Annotated[str, Field(max_length=64)] | None
     subject_option_id: Annotated[str, Field(pattern=r"^o[0-9]{2}$")] | None
-    text_ids: Annotated[tuple[Annotated[str, Field(pattern=r"^t[0-9]{2}$")], ...], Field(max_length=2)]
+    text_ids: Annotated[
+        tuple[Annotated[str, Field(pattern=r"^t[0-9]{2}$")], ...], Field(max_length=2)
+    ]
     angle: Angle | None = None
     hypothesis_kind: HypothesisKind | None
     emphasis_style: Emphasis | None
@@ -194,7 +194,7 @@ class StepOut(A11Model):
     refusal: Refusal | None
 
     @model_validator(mode="after")
-    def _status_rules(self) -> "StepOut":
+    def _status_rules(self) -> StepOut:
         for c in self.concepts:
             if c.status == "OK":
                 complete = (
