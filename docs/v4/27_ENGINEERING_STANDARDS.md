@@ -113,6 +113,7 @@ Stated per dataset in its `README.md`/`thresholds` block; answer-key cases alway
 ## 7. Code standards (§3.5.5)
 ### 7.1 Structure (SOURCE_LAYOUT.md)
 - `amw_core` = the one shared library: contracts, state machine, retries, tenancy, audit, cost, config, queue, storage, observability, ids. It imports no other internal package.
+- **Shared text matching (CCR-105).** Every lane that matches text against a lexicon or another text (finance rules FIN-R1…R13, copy guard, pre-filters, Agents 04, 05, 06, 11, 16) uses only `amw_core.text_normalise`: `normalise_for_matching` (with `NormalisedText.original_span` / `quote`), `tokenize`, `dominant_script`, `stem_affixes`, `word_ngrams` / `shingle_set`, and normalises its lexicon entries with the same function; no private fold or variant. Its confusables, vowel and suffix tables, thresholds and defaults are PROVISIONAL, **REQUIRES REVIEW (owner / linguist)**; the module docstring is the API note.
 - One package per agent and per shared service; each exposes a typed `Protocol` (its stage interface) and Pydantic models for its payload schemas; it imports only `amw_core` and adapter Protocols, never another agent (§2 of the directive: hand-offs only through contracts and the orchestrator).
 - Adapters (LLM, TTS, image, video generation, stock, music, destinations) implement Protocols and ship with a fake and recorded fixtures.
 - Only `workers/*` and `apps/*` wire concrete adapters (dependency injection via constructor parameters; no service locator, no globals).

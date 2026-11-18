@@ -59,7 +59,9 @@ Uses only the `budgets` / `budget_reservations` columns and enums of 04 §5.14 a
 
 ### 3.2 States
 
-`budget_state`: `ACTIVE` -> `SUSPENDED_EXCEEDED` (E3 or E1 finds consumed + held >= limit) -> `ACTIVE` only by (a) the period rolling over (DAY/MONTH), or (b) an owner/Finance action that raises `limit_minor` or releases it (audited, permission-gated, never automatic). `DISABLED` = budget not enforced; permitted only for non-paid system tasks and only by the platform owner; a paid task with no `ACTIVE` applicable budget is refused at E1 (fail closed).
+`budget_state`: `ACTIVE` -> `SUSPENDED_EXCEEDED` (E3 or E1 finds `committed` (§3.3) >= limit; never for `PER_VIDEO` / `PER_JOB`, CCR-107) -> `ACTIVE` only by (a) the period rolling over (DAY/MONTH), or (b) an owner/Finance action that raises `limit_minor` or releases it (audited, permission-gated, never automatic). `DISABLED` = budget not enforced; permitted only for non-paid system tasks and only by the platform owner; a paid task with no `ACTIVE` applicable budget is refused at E1 (fail closed).
+
+**Per-job caps (CCR-107).** `PER_VIDEO` and `PER_JOB` budgets have no job-level state: their row stays `ACTIVE` and the cap is evaluated per job (`committed` = that job's ledger rows and holds, §3.3). A job that reaches its cap is stopped alone: E1 refuses the job's new paid tasks (T05, `AWAITING_BUDGET`), E2 refuses the job's calls whose estimate would take the job's ledger spend above the cap, E3 writes the audit event `budget.job_cap_reached` (never `budget.suspended`). Other jobs are unaffected. Release is by raising `limit_minor` (audited); resume through T15 re-runs E1 (B6).
 
 `non_critical_suspend` (default true): when true, an exceeded budget suspends **new** non-critical paid jobs. In 3A every paid task is treated as non-critical, so the per-video and pilot limits are hard stops. A critical class is **(pending CCR)** (§14, request 3) and is 3C.
 
@@ -68,10 +70,14 @@ Uses only the `budgets` / `budget_reservations` columns and enums of 04 §5.14 a
 ```
 committed(budget) = Σ cost_ledger.amount_micros in scope and period
                     counting, per call, the VERIFIED row if one exists, else the ESTIMATE row
-                  + Σ budget_reservations.amount_micros where status = HELD
+                  + Σ over HELD reservations r of the budget of
+                      max(0, r.amount_micros − Σ cost_ledger.amount_micros of r.task_id
+                                               in the same scope and period, same row selection)
 remaining(budget) = limit_minor (converted to micros) − committed(budget)
 ```
-A VERIFIED row replaces its ESTIMATE in the sum through `estimate_entry_id`; both rows stay in the ledger (§6). Currency conversion uses the `fx_rate` recorded on the row; a missing rate is a refusal, not a guess.
+A VERIFIED row replaces its ESTIMATE in the sum through `estimate_entry_id`; both rows stay in the ledger (§6). A HELD reservation counts only its **unspent** part, so a running task's spend is never counted twice (CCR-106; a task that has spent 6 of a hold of 10 commits 10, not 16). For a `PER_VIDEO` / `PER_JOB` budget the sums are restricted to the job (CCR-107).
+
+**Currency (CCR-133, CCR-111).** `limit_minor` is converted to micros with the ISO 4217 minor-unit exponent of the budget currency (config `finance.currency_minor_exponent`, CCR-133: map currency → exponent, no code default; a currency with no entry is refused, `PERMANENT.CONFIG_INVALID`). A ledger row in currency X counts against a budget in currency Y only when `"X/Y"` is listed in config `finance.fx_pairs` (list of strings `"<row currency>/<budget currency>"`, e.g. `"USD/INR"`; default empty = no conversion), as `ceil(amount_micros × fx_rate)` with `fx_rate` = units of Y per unit of X (04 §5.14). A pair not listed, or a row without `fx_rate`, refuses the evaluation with `PERMANENT.CONFIG_INVALID`; a rate is never guessed. Values: **REQUIRES REVIEW (owner / Finance)** (Q-O12, Q-O13).
 
 ### 3.4 Reservation lifecycle (03 T03)
 
@@ -88,7 +94,7 @@ If any applicable budget cannot cover the hold, no reservation is made on any of
 
 | Rule | Behaviour |
 |---|---|
-| B1 | New non-critical paid tasks are not admitted; they wait in `CHECKPOINTED` / `AWAITING_BUDGET` with durable progress. |
+| B1 | (For a per-job cap: only that job's, CCR-107.) New non-critical paid tasks are not admitted; they wait in `CHECKPOINTED` / `AWAITING_BUDGET` with durable progress. |
 | B2 | A task already running continues only to its next safe point inside its own HELD reservation; E2 stops any call that would exceed it. Its partial output is checkpointed. |
 | B3 | **Completed work is never deleted**: artifacts, ledger rows, checkpoints and approvals stay. Suspension changes scheduling only. |
 | B4 | Non-paid work (deterministic QC, assembly of already-paid assets, delivery of an already-finished bundle) is not blocked by a paid-budget breach. |
