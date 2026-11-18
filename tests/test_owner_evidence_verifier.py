@@ -30,8 +30,6 @@ from amw_core.interfaces import OwnerEvidenceStore, TenantContext
 from amw_core.owner_evidence_verifier import (
     DEFAULT_DECISION_WORDS,
     NEEDS_CLARIFICATION,
-    NEGATION_OR_WITHHOLDING,
-    QUESTION_OR_DEFERRED,
     RECORD,
     EventUnavailable,
     NewEvidence,
@@ -114,7 +112,7 @@ def refused_with(record: Any, reason: str) -> None:
 
 
 def test_store_verifies_and_confirms() -> None:
-    confirmation = event("ev-2", content="R7K2 approve, confirmed", timestamp=SAID + SECOND)
+    confirmation = event("ev-2", content="R7K2 confirmed", timestamp=SAID + SECOND)
     store, tx = new_store(event(), confirmation)
     row = store.record(tx, evidence())
     with pytest.raises(InvalidTransitionError):
@@ -140,7 +138,9 @@ def test_store_verifies_and_confirms() -> None:
         ("R7K2: approved.", "approved", APPROVED),
         ("reject R7K2", "reject", ApprovalStepState.REJECTED),
         ("R7K2 नामंजूर", "नामंजूर", ApprovalStepState.REJECTED),
-        ("changes R7K2, see the intro", "intro", ApprovalStepState.CHANGES_REQUESTED),
+        ("changes R7K2", "changes", ApprovalStepState.CHANGES_REQUESTED),
+        ("Approve R7K2 please 👍", "Approve R7K2", APPROVED),
+        ("R7K2 go ahead, thanks", "go ahead", APPROVED),
     ],
 )
 def test_grammar_accepts(content: str, quote: str, decision: ApprovalStepState) -> None:
@@ -199,7 +199,7 @@ def test_superseding_evidence_must_be_later() -> None:
 
 def test_replay_of_the_same_event_for_another_subject() -> None:
     other = evidence(subject_id=ids.new_id(ids.Prefix.RENDER), review_code="Q9Z1")
-    refused_with(verify_via_store(event(), other), "review_code_present")
+    refused_with(verify_via_store(event(), other), NEEDS_CLARIFICATION)
 
 
 @pytest.mark.parametrize(
@@ -221,26 +221,28 @@ def test_non_owner_source_is_refused() -> None:
 
 
 @pytest.mark.parametrize(
-    ("content", "reason"),
+    "content",
     [
-        ("R7K2 do not approve", NEGATION_OR_WITHHOLDING),
-        ("R7K2 not approved", NEGATION_OR_WITHHOLDING),
-        ("R7K2 don't approve", NEGATION_OR_WITHHOLDING),
-        ("R7K2 don\u2019t approve", NEGATION_OR_WITHHOLDING),
-        ("R7K2 मंजूर नाही", NEGATION_OR_WITHHOLDING),
-        ("R7K2 मंजूर नको", NEGATION_OR_WITHHOLDING),
-        ("approve R7K2 or reject?", QUESTION_OR_DEFERRED),
-        ("R7K2 approve, no wait", NEGATION_OR_WITHHOLDING),
-        ("approve R7K2 नामंजूर", NEEDS_CLARIFICATION),
-        ("R7K2 looks fine to me, approve", "decision_adjacent"),
-        ("R7K2 approvement", "decision_matches"),
-        ("R7K2 R7K2 approve", "review_code_present"),
-        ("XR7K2 approve", "review_code_present"),
+        "R7K2 do not approve",
+        "R7K2 not approved",
+        "R7K2 don't approve",
+        "R7K2 मंजूर नाही",
+        "approve R7K2 or reject?",
+        "R7K2 approve, no wait",
+        "approve R7K2 नामंजूर",
+        "R7K2 looks fine to me, approve",
+        "R7K2 approvement",
+        "R7K2 R7K2 approve",
+        "XR7K2 approve",
+        "R7K2",
+        "R7K2 approve approved",
     ],
 )
-def test_strict_grammar_refuses(content: str, reason: str) -> None:
-    assert read_decision(content, "R7K2", POLICY) == reason
-    refused_with(verify_via_store(event(content=content), evidence(quote="R7K2")), reason)
+def test_strict_grammar_refuses(content: str) -> None:
+    assert read_decision(content, "R7K2", POLICY) is None
+    refused_with(
+        verify_via_store(event(content=content), evidence(quote="R7K2")), NEEDS_CLARIFICATION
+    )
 
 
 @pytest.mark.parametrize(
@@ -252,6 +254,7 @@ def test_strict_grammar_refuses(content: str, reason: str) -> None:
         ("sub-agent", late(inbound_origin="subagent"), PermissionDeniedError),
         ("no review code", late(content="approve"), PermissionDeniedError),
         ("other decision", late(content="R7K2 reject"), PermissionDeniedError),
+        ("extra words", late(content="R7K2 approve, confirmed"), PermissionDeniedError),
         ("negated", late(content="R7K2 not approve"), PermissionDeniedError),
         ("deferred", late(content="R7K2 approve tomorrow"), PermissionDeniedError),
         ("not found", None, MissingDependencyError),

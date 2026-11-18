@@ -6,7 +6,6 @@ CONTENT and SCORE kinds, and "one owner message verifies exactly one subject".
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -161,53 +160,101 @@ def test_owner_topic_short_title_is_fine() -> None:
 # --- SCORE kinds ---------------------------------------------------------------------------
 
 
-def score_evidence(*scores: tuple[QualityDimension, str], **change: Any) -> NewEvidence:
-    parsed = tuple((d, Decimal(p)) for d, p in scores)
+def score_evidence(*scores: tuple[QualityDimension, int], **change: Any) -> NewEvidence:
     quote = change.pop("quote", "R7K2")
-    return evidence(EvidenceRecordKind.HUMAN_SCORE, quote, scores=parsed, **change)
+    return evidence(EvidenceRecordKind.HUMAN_SCORE, quote, claimed_scores=scores, **change)
 
 
 def test_scores_stated_exactly_are_verified() -> None:
-    message = "R7K2 research_accuracy 18, storytelling: 12.5"
-    ne = score_evidence((RA, "18"), (ST, "12.5"))
+    message = "R7K2 research_accuracy 18, storytelling: 12"
+    ne = score_evidence((RA, 18), (ST, 12))
     assert run(event(message), ne).state is EvidenceState.VERIFIED
+    assert ne.claimed_scores_json == {"RESEARCH_ACCURACY": 18, "STORYTELLING": 12}
 
 
 @pytest.mark.parametrize(
     ("case", "message", "scores", "reason"),
     [
-        ("inferred number", "R7K2 research_accuracy good", [(RA, "18")], "scores_stated"),
-        ("other number", "R7K2 research_accuracy 17", [(RA, "18")], "scores_stated"),
-        ("dimension missing", "R7K2 research_accuracy 18", [(RA, "18"), (ST, "12")],
+        ("inferred number", "R7K2 research_accuracy good", [(RA, 18)], "scores_stated"),
+        ("other number", "R7K2 research_accuracy 17", [(RA, 18)], "scores_stated"),
+        ("decimal in message", "R7K2 storytelling 12.5", [(ST, 12)], "scores_stated"),
+        ("dimension missing", "R7K2 research_accuracy 18", [(RA, 18), (ST, 12)],
          "scores_stated"),
-        ("dimension stated twice", "R7K2 research_accuracy 18 research_accuracy 19", [(RA, "18")],
+        ("dimension stated twice", "R7K2 research_accuracy 18 research_accuracy 19", [(RA, 18)],
          "scores_stated"),
-        ("duplicate claim", "R7K2 research_accuracy 18", [(RA, "18"), (RA, "18")], "scores_stated"),
-        ("over the dimension max", "R7K2 storytelling 16", [(ST, "16")], "scores_in_range"),
-        ("negative", "R7K2 storytelling -1", [(ST, "-1")], "scores_in_range"),
-        ("three decimals", "R7K2 storytelling 12.125", [(ST, "12.125")], "scores_in_range"),
+        ("duplicate claim", "R7K2 research_accuracy 18", [(RA, 18), (RA, 18)], "scores_stated"),
+        ("over the dimension max", "R7K2 storytelling 16", [(ST, 16)], "scores_in_range"),
+        ("negative", "R7K2 storytelling -1", [(ST, -1)], "scores_in_range"),
         ("no scores", "R7K2 nice", [], "scores_given"),
-        ("no subject reference", "research_accuracy 18", [(RA, "18")], "subject_reference"),
+        ("no subject reference", "research_accuracy 18", [(RA, 18)], "subject_reference"),
+        ("second review code", "R7K2 Q9Z1 research_accuracy 18", [(RA, 18)], "subject_reference"),
+        ("negated", "R7K2 research_accuracy 18, not 20", [(RA, 18)], "negation_or_withholding"),
+        ("deferred", "R7K2 research_accuracy 18 for now, later more", [(RA, 18)],
+         "question_or_deferred"),
     ],
 )  # fmt: skip
 def test_score_rejections(
-    case: str, message: str, scores: list[tuple[QualityDimension, str]], reason: str
+    case: str, message: str, scores: list[tuple[QualityDimension, int]], reason: str
 ) -> None:
     ne = score_evidence(*scores, quote=message.split()[0])
     refused(run(event(message), ne), reason)
 
 
 def test_score_with_decision_is_refused() -> None:
-    ne = score_evidence((RA, "18"), parsed_decision=ApprovalStepState.APPROVED)
+    ne = score_evidence((RA, 18), parsed_decision=ApprovalStepState.APPROVED)
     refused(run(event("R7K2 research_accuracy 18"), ne), "decision_not_applicable")
 
 
 def test_scores_are_bound_into_the_evidence_hash() -> None:
+    from amw_core.owner_evidence_verifier import evidence_sha256
+
+    assert evidence_sha256(score_evidence((RA, 18))) != evidence_sha256(score_evidence((RA, 19)))
+
+
+def _confirmed(ne: NewEvidence, message: str) -> tuple[Any, Any, Any]:
+    later = SAID + timedelta(minutes=1)
+    events = [event(message), event(message, uuid="ev-2", timestamp=later)]
+    store = MemoryOwnerEvidenceStore(MemorySessionEventSource(events), POLICY)
+    tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
+    row = store.record(tx, ne)
+    store.verify_recorded(tx, row.id, REQUESTED, NOW)
+    store.confirm(tx, row.id, "ses-1", "ev-2", "R7K2", NOW)
+    return store, tx, row
+
+
+def test_trigger_compares_human_score_rows_with_claimed_scores() -> None:
+    from amw_core.errors import PermissionDeniedError
+
+    store, tx, row = _confirmed(score_evidence((RA, 18)), "R7K2 research_accuracy 18")
+    store.authorise_human_score(tx, row.id, "script", SUBJECT, RA, 18)
+    for dimension, points in ((RA, 17), (ST, 18), (RA, True)):
+        with pytest.raises(PermissionDeniedError):
+            store.authorise_human_score(tx, row.id, "script", SUBJECT, dimension, points)
+    with pytest.raises(PermissionDeniedError):
+        store.authorise_human_score(tx, row.id, "script", ids.new_id(ids.Prefix.SCRIPT), RA, 18)
+
+
+def test_trigger_content_text_is_a_verbatim_substring() -> None:
+    from amw_core.errors import PermissionDeniedError
+
+    kind = EvidenceRecordKind.CONTRIBUTION
+    store, tx, row = _confirmed(evidence(kind, TEXT), f"R7K2 {TEXT}")
+    store.authorise_content(tx, row.id, kind, "script", SUBJECT, "the 2008 crash")
+    for text in ("", "the 2009 crash"):
+        with pytest.raises(PermissionDeniedError):
+            store.authorise_content(tx, row.id, kind, "script", SUBJECT, text)
+    with pytest.raises(PermissionDeniedError):
+        store.authorise_content(tx, row.id, EvidenceRecordKind.OWNER_TOPIC, "script", SUBJECT, TEXT)
+
+
+def test_trigger_refuses_unconfirmed_evidence() -> None:
+    from amw_core.errors import PermissionDeniedError
+
     store = MemoryOwnerEvidenceStore(MemorySessionEventSource([]), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
-    a = store.record(tx, score_evidence((RA, "18")))
-    b = store.record(tx, score_evidence((RA, "19"), subject_id=ids.new_id(ids.Prefix.SCRIPT)))
-    assert a.evidence_sha256 != b.evidence_sha256
+    row = store.record(tx, score_evidence((RA, 18)))
+    with pytest.raises(PermissionDeniedError):
+        store.authorise_human_score(tx, row.id, "script", SUBJECT, RA, 18)
 
 
 # --- one owner message, one subject --------------------------------------------------------
@@ -244,3 +291,25 @@ def test_content_confirmation_needs_subject_reference() -> None:
     with pytest.raises(PermissionDeniedError):
         store.confirm(tx, row.id, "ses-1", "ev-2", "yes", NOW)
     assert store.confirm(tx, row.id, "ses-1", "ev-3", "yes", NOW).state is EvidenceState.CONFIRMED
+
+
+def test_rule_table_equals_03_section_11_6_rule_7() -> None:
+    from amw_core.owner_evidence_verifier import AUTHENTICITY_TESTS
+    from tests.docs_tables import r14_tables
+
+    test_ids, doc_kinds = r14_tables()
+    assert test_ids == [f"A{n}" for n in range(1, 10)]
+    assert list(AUTHENTICITY_TESTS) == test_ids
+    config: dict[str, list[str]] = {}
+    for record_kind, kind in DEFAULT_RECORD_KIND_RULES.items():
+        config.setdefault(kind.value, []).append(record_kind.value)
+    assert {k: sorted(v) for k, v in config.items()} == {k: sorted(v) for k, v in doc_kinds.items()}
+    assert set(doc_kinds) == {k.value for k in VerificationKind}
+
+
+def test_every_authenticity_check_is_recorded() -> None:
+    from amw_core.owner_evidence_verifier import AUTHENTICITY_TESTS
+
+    record = run(event(f"R7K2 {TEXT}"), evidence(EvidenceRecordKind.CONTRIBUTION, TEXT))
+    names = {name for group in AUTHENTICITY_TESTS.values() for name in group}
+    assert names <= set(record.verifier_result)

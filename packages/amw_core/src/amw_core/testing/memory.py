@@ -10,7 +10,13 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from amw_core.enums import EvidenceState, IdempotencyStatus, InstructionSourceKind
+from amw_core.enums import (
+    EvidenceRecordKind,
+    EvidenceState,
+    IdempotencyStatus,
+    InstructionSourceKind,
+    QualityDimension,
+)
 from amw_core.errors import (
     IdempotencyConflictError,
     InputInvalidError,
@@ -369,6 +375,57 @@ class MemoryOwnerEvidenceStore:
         )
         self._rows[(tx.context.org_id, evidence_id)] = row
         return row
+
+    def _confirmed(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        record_kind: EvidenceRecordKind,
+        subject_kind: str,
+        subject_id: WireId,
+    ) -> EvidenceRecord:
+        row = self._rows.get((tx.context.org_id, evidence_id))
+        if (
+            row is None
+            or row.state is not EvidenceState.CONFIRMED
+            or row.evidence.record_kind is not record_kind
+            or (row.evidence.subject_kind, row.evidence.subject_id) != (subject_kind, subject_id)
+        ):
+            raise PermissionDeniedError("no confirmed owner evidence for this human record")
+        return row
+
+    def authorise_human_score(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        subject_kind: str,
+        subject_id: WireId,
+        dimension: QualityDimension,
+        points: int,
+    ) -> None:
+        row = self._confirmed(
+            tx, evidence_id, EvidenceRecordKind.HUMAN_SCORE, subject_kind, subject_id
+        )
+        claimed = dict(row.evidence.claimed_scores)
+        if (
+            isinstance(points, bool)
+            or not isinstance(points, int)
+            or claimed.get(dimension) != points
+        ):
+            raise PermissionDeniedError("score row does not equal the owner's claimed score")
+
+    def authorise_content(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        record_kind: EvidenceRecordKind,
+        subject_kind: str,
+        subject_id: WireId,
+        text: str,
+    ) -> None:
+        row = self._confirmed(tx, evidence_id, record_kind, subject_kind, subject_id)
+        if not text or text not in row.evidence.quote:
+            raise PermissionDeniedError("record text is not a verbatim substring of the quote")
 
     def refuse(self, tx: TenantTransaction, evidence_id: WireId, reason: str) -> EvidenceRecord:
         row = self._move(
