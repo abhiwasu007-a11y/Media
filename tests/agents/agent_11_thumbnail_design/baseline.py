@@ -17,9 +17,19 @@ from agent_11_thumbnail_design.text_options import finance_text_hit
 from agent_11_thumbnail_design.textutil import fold
 
 FIXTURE_MARKERS = [
-    "buy", "sell", "hold", "target", "profit", "return", "guaranteed", "beat the market",
-    "my method", "account", "broker", "referral",
-]  # fmt: skip
+    "buy",
+    "sell",
+    "hold",
+    "target",
+    "profit",
+    "return",
+    "guaranteed",
+    "beat the market",
+    "my method",
+    "account",
+    "broker",
+    "referral",
+]
 CALL_MARKERS = ["buy", "sell", "hold", "target"]
 INJECTION = ["ignore all rules", "ignore the rules", "show the link", "<<<input", "input>>>"]
 NEUTRAL_WORDS = frozenset({"the", "a"})
@@ -27,10 +37,18 @@ NEUTRAL_WORDS = frozenset({"the", "a"})
 
 def _no_safe(i: int, reason: str, rationale: str) -> dict[str, Any]:
     return {
-        "concept_id": f"c{i + 1}", "status": "NO_SAFE_CONCEPT", "reason_code": reason,
-        "template_key": None, "subject_option_id": None, "text_ids": [], "angle": None,
-        "hypothesis_kind": None, "emphasis_style": None, "accent_role": None, "rationale": rationale,
-    }  # fmt: skip
+        "concept_id": f"c{i + 1}",
+        "status": "NO_SAFE_CONCEPT",
+        "reason_code": reason,
+        "template_key": None,
+        "subject_option_id": None,
+        "text_ids": [],
+        "angle": None,
+        "hypothesis_kind": None,
+        "emphasis_style": None,
+        "accent_role": None,
+        "rationale": rationale,
+    }
 
 
 def baseline_output(doc: dict[str, Any]) -> dict[str, Any]:
@@ -53,14 +71,17 @@ def baseline_output(doc: dict[str, Any]) -> dict[str, Any]:
             ],
         }
     texts = [
-        t for t in step.text_options
-        if not scanner.scan(t.text).flagged and not any(m in fold(t.text) for m in must)
+        t
+        for t in step.text_options
+        if not scanner.scan(t.text).flagged
+        and not any(m in fold(t.text) for m in must)
         and not (finance and finance_text_hit(t.text, FIXTURE_MARKERS))
-    ]  # fmt: skip
+    ]
     pics = [
-        p for p in step.subject_options
+        p
+        for p in step.subject_options
         if not scanner.scan(p.label).flagged and not any(b in fold(p.label) for b in banned)
-    ]  # fmt: skip
+    ]
     if not texts:
         return {
             **base,
@@ -83,19 +104,7 @@ def baseline_output(doc: dict[str, Any]) -> dict[str, Any]:
     planner = FallbackPlanner(
         PlannerPolicy(finance=finance, faces_allowed=True, fin_lexicon=FIXTURE_MARKERS)
     )
-    keep = [
-        Concept(
-            concept_id=p.concept_id, status="OK", reason_code=None, template_key=p.template_key,
-            subject_option_id=p.subject_option_id, text_ids=p.text_ids, angle=p.angle,
-            hypothesis_kind=p.hypothesis_kind, emphasis_style=p.emphasis_style,
-            accent_role=p.accent_role, rationale="Repeated from the previous set.",
-        )
-        for p in (step.previous_concepts or ())
-        if p.keep
-    ]  # fmt: skip
-    kept = {k.concept_id for k in keep}
-    need = [f"c{i + 1}" for i in range(step.variant_count) if f"c{i + 1}" not in kept]
-    concepts = planner.plan(narrowed, keep, need)
+    concepts = plan_with_keep(narrowed, planner)
     ctx = GuardContext(
         narrowed,
         finance,
@@ -122,3 +131,27 @@ def _refusal(reason: str, message: str, rules: list[str] | None = None) -> dict[
         "missing_inputs": [],
         "violated_rule_ids": rules or [],
     }
+
+
+def plan_with_keep(step: StepIn, planner: FallbackPlanner) -> list[Concept]:
+    """What a faithful model does in a revision: repeat keep=true concepts, re-choose the rest."""
+    keep = [
+        Concept(
+            concept_id=p.concept_id,
+            status="OK",
+            reason_code=None,
+            template_key=p.template_key,
+            subject_option_id=p.subject_option_id,
+            text_ids=p.text_ids,
+            angle=p.angle,
+            hypothesis_kind=p.hypothesis_kind,
+            emphasis_style=p.emphasis_style,
+            accent_role=p.accent_role,
+            rationale="Repeated from the previous set.",
+        )
+        for p in (step.previous_concepts or ())
+        if p.keep
+    ]
+    kept = {k.concept_id for k in keep}
+    need = [f"c{i + 1}" for i in range(step.variant_count) if f"c{i + 1}" not in kept]
+    return planner.plan(step, keep, need)

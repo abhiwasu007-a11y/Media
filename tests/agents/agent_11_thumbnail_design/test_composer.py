@@ -5,11 +5,11 @@ import io
 from dataclasses import replace
 
 import pytest
+from PIL import Image, ImageFont
+
 from agent_11_thumbnail_design.composer import PillowComposer, RenderSpec, hex_to_rgb, phash64
 from agent_11_thumbnail_design.errors import GlyphMissingError, TextDoesNotFitError
 from agent_11_thumbnail_design.templates import glyph_catalogue, load_templates, palette
-from PIL import Image, ImageFont
-
 from tests.agents.agent_11_thumbnail_design.env import png_bytes
 from tests.agents.agent_11_thumbnail_design.fontgen import build_font
 
@@ -24,12 +24,25 @@ CANARY_SHA256 = "3cbf11eca3b912013ef02294b4c444a2da3954967dee1ad00cb706325356f22
 def spec(**over: object) -> RenderSpec:
     tpl = {t.template_key: t for t in load_templates()}[str(over.pop("tpl", "tpl_split_left_text"))]
     base = {
-        "org_id": ORG, "canvas_w": 1920, "canvas_h": 1080, "template": tpl, "colours": palette(),
-        "lines": ("Read the trend",), "emphasis": "TERM_HIGHLIGHT", "accent_role": "PRIMARY",
-        "key_terms": ("trend",), "picture_kind": "CODE_GLYPH", "glyph": glyph_catalogue()[0],
-        "image_bytes": None, "image_sha256": None, "font_bytes": FONT, "font_sha256": FONT_SHA,
-        "min_font_px": 48, "max_font_px": 200, "font_step_px": 8,
-    }  # fmt: skip
+        "org_id": ORG,
+        "canvas_w": 1920,
+        "canvas_h": 1080,
+        "template": tpl,
+        "colours": palette(),
+        "lines": ("Read the trend",),
+        "emphasis": "TERM_HIGHLIGHT",
+        "accent_role": "PRIMARY",
+        "key_terms": ("trend",),
+        "picture_kind": "CODE_GLYPH",
+        "glyph": glyph_catalogue()[0],
+        "image_bytes": None,
+        "image_sha256": None,
+        "font_bytes": FONT,
+        "font_sha256": FONT_SHA,
+        "min_font_px": 48,
+        "max_font_px": 200,
+        "font_step_px": 8,
+    }
     base.update(over)
     return RenderSpec(**base)  # type: ignore[arg-type]
 
@@ -46,7 +59,7 @@ def test_byte_identical_across_runs_and_instances() -> None:
 
 def test_canary_hash_is_recorded() -> None:
     sha = hashlib.sha256(PillowComposer().render(spec()).png).hexdigest()
-    assert CANARY_SHA256 == sha, f"re-record the canary: {sha}"
+    assert sha == CANARY_SHA256, f"re-record the canary: {sha}"
 
 
 def test_changing_the_text_changes_the_pixels_and_hash() -> None:
@@ -84,12 +97,20 @@ def test_two_tone_and_centered_template() -> None:
 def test_owner_image_is_drawn_into_the_band_template() -> None:
     img = png_bytes((10, 200, 10), (800, 800))
     r = PillowComposer().render(
-        spec(tpl="tpl_full_bleed_subject_band", picture_kind="OWNER_IMAGE", glyph=None, image_bytes=img,
-             image_sha256=hashlib.sha256(img).hexdigest(), emphasis="PLAIN")
-    )  # fmt: skip
+        spec(
+            tpl="tpl_full_bleed_subject_band",
+            picture_kind="OWNER_IMAGE",
+            glyph=None,
+            image_bytes=img,
+            image_sha256=hashlib.sha256(img).hexdigest(),
+            emphasis="PLAIN",
+        )
+    )
     pix = Image.open(io.BytesIO(r.png)).convert("RGB")
     assert pix.getpixel((960, 300)) == (10, 200, 10)  # picture area
-    assert pix.getpixel((960, 1000))[0] < 40  # the band below is the background colour
+    bottom = pix.getpixel((960, 1000))
+    assert isinstance(bottom, tuple)
+    assert bottom[0] < 40  # the band below is the background colour
 
 
 def test_a_long_single_option_wraps_to_two_balanced_lines() -> None:
@@ -141,7 +162,8 @@ def test_devanagari_conjunct_is_shaped_by_raqm_not_by_a_naive_layout() -> None:
     assert raqm.getlength("क्ष") == 70.0
     assert basic.getlength("क्ष") == 150.0
     r = comp.render(spec(lines=("ट्रेंड क्ष",), emphasis="PLAIN", key_terms=()))
-    assert r.runs and not r.missing_glyphs
+    assert r.runs
+    assert not r.missing_glyphs
 
 
 def test_system_devanagari_font_when_present() -> None:

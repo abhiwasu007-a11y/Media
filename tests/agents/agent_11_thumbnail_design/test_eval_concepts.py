@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from jsonschema import Draft202012Validator
+
 from agent_11_thumbnail_design.guards import GuardContext, check_concepts
 from agent_11_thumbnail_design.models import Concept, StepIn, StepOut
 from agent_11_thumbnail_design.scanner import InjectionScanner
-from jsonschema import Draft202012Validator
-
 from amw_evals.adapter import FakeAdapter, LlmResponse
 from amw_evals.prompt_doc import parse_prompt
 from amw_evals.runner import run_eval
@@ -44,7 +44,7 @@ def assertions(case: dict[str, Any], out: dict[str, Any]) -> dict[str, bool]:
     ok = [c for c in concepts if c["status"] == "OK"]
     finance = inp["channel_category"] == "finance"
     res: dict[str, bool] = {}
-    res["A1"] = not list(Draft202012Validator(SCHEMA).iter_errors(out))
+    res["A1"] = not list(Draft202012Validator(SCHEMA or {}).iter_errors(out))
     res["A2"] = [c["status"] for c in concepts] == exp["statuses"]
     res["A3"] = [c["reason_code"] for c in concepts] == exp["reason_codes"]
     refusal = (out["refusal"] or {}).get("reason")
@@ -102,21 +102,38 @@ def assertions(case: dict[str, Any], out: dict[str, Any]) -> dict[str, bool]:
         prev = {r["concept_id"]: r["previous"] for r in retry if r["guard_id"] is None}
         res["A14"] = all(
             (c["template_key"], c["subject_option_id"], c["text_ids"])
-            == (prev[c["concept_id"]]["template_key"], prev[c["concept_id"]]["subject_option_id"], prev[c["concept_id"]]["text_ids"])
-            for c in concepts if c["concept_id"] in prev
-        )  # fmt: skip
+            == (
+                prev[c["concept_id"]]["template_key"],
+                prev[c["concept_id"]]["subject_option_id"],
+                prev[c["concept_id"]]["text_ids"],
+            )
+            for c in concepts
+            if c["concept_id"] in prev
+        )
     pc = inp.get("previous_concepts")
     if pc:
         old = {p["concept_id"]: p for p in pc}
         cur = {c["concept_id"]: c for c in concepts}
         res["A15"] = all(
-            (cur[k]["template_key"], cur[k]["subject_option_id"], cur[k]["text_ids"], cur[k]["angle"], cur[k]["hypothesis_kind"])
-            == (old[k]["template_key"], old[k]["subject_option_id"], old[k]["text_ids"], old[k]["angle"], old[k]["hypothesis_kind"])
+            (
+                cur[k]["template_key"],
+                cur[k]["subject_option_id"],
+                cur[k]["text_ids"],
+                cur[k]["angle"],
+                cur[k]["hypothesis_kind"],
+            )
+            == (
+                old[k]["template_key"],
+                old[k]["subject_option_id"],
+                old[k]["text_ids"],
+                old[k]["angle"],
+                old[k]["hypothesis_kind"],
+            )
             for k in exp["keep_concept_ids"]
         ) and all(
             _choices(cur[k]) != _choices({**old[k], "text_ids": old[k]["text_ids"]})
             for k in exp["changed_concept_ids"]
-        )  # fmt: skip
+        )
     return res
 
 

@@ -204,6 +204,11 @@ class _Calls:
     reasks: int = 0
     fallback_code: str | None = None
 
+    @property
+    def paid(self) -> int:
+        """Calls this run really made (a replay from the idempotency store costs nothing)."""
+        return sum(1 for r in self.records if not r.get("replayed"))
+
 
 @dataclass(frozen=True, slots=True)
 class _Pick:
@@ -290,8 +295,8 @@ class _Result:
             tokens_in=self.calls.tokens_in,
             tokens_out=self.calls.tokens_out,
             tokens_cached_in=self.calls.tokens_cached,
-            llm_calls=len(self.calls.records),
-            provider_calls=len(self.calls.records),
+            llm_calls=self.calls.paid,
+            provider_calls=self.calls.paid,
             cost_estimate_micros=self.calls.cost_micros,
             currency=self.currency,
             cost_entry_ids=tuple(self.calls.cost_entry_ids),
@@ -1208,7 +1213,7 @@ class _Run:
             chart_stills_used=(),
             planner=PlannerInfo(
                 llm_enabled=s.llm_enabled,
-                llm_calls=len(self.calls.records),
+                llm_calls=self.calls.paid,
                 reasks=self.calls.reasks,
                 fallback_concepts=fallback_ids,
             ),
@@ -1230,7 +1235,7 @@ class _Run:
                 faces_allowed=s.faces_allowed,
                 licence_facts=facts_all,
                 schema_ok=True,
-                llm_calls=len(self.calls.records),
+                llm_calls=self.calls.paid,
                 cost_micros=self.calls.cost_micros,
                 reserved_micros=self.ti.resource_budget.max_cost_micros,
                 max_cost_micros=self.ti.resource_budget.max_cost_micros,
@@ -1377,7 +1382,7 @@ class _Run:
             chart_stills_used=(),
             planner=PlannerInfo(
                 llm_enabled=s.llm_enabled,
-                llm_calls=len(self.calls.records),
+                llm_calls=self.calls.paid,
                 reasks=0,
                 fallback_concepts=(),
             ),
@@ -1409,7 +1414,7 @@ class _Run:
             faces_allowed=self.s.faces_allowed,
             licence_facts=(),
             schema_ok=True,
-            llm_calls=len(self.calls.records),
+            llm_calls=self.calls.paid,
             cost_micros=self.calls.cost_micros,
             reserved_micros=self.ti.resource_budget.max_cost_micros,
             max_cost_micros=self.ti.resource_budget.max_cost_micros,

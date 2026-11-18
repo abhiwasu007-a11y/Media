@@ -26,6 +26,7 @@ from amw_core.contracts.task_input import TaskInput
 from amw_core.ids import Prefix, new_id
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.testing.memory import MemoryCheckpointStore, MemoryIdempotencyStore
+from tests.agents.agent_11_thumbnail_design.baseline import plan_with_keep
 from tests.agents.agent_11_thumbnail_design.fakes import (
     FakeAudit,
     FakeBudget,
@@ -69,7 +70,7 @@ class PlannerLlm:
         planner = FallbackPlanner(
             PlannerPolicy(finance=self.finance, faces_allowed=False, fin_lexicon=FIN_MARKERS)
         )
-        concepts = [json.loads(c.model_dump_json()) for c in planner.plan(step)]
+        concepts = [json.loads(c.model_dump_json()) for c in plan_with_keep(step, planner)]
         text = json.dumps({"call_seq": step.call_seq, "concepts": concepts, "refusal": None})
         usage = CallUsage(
             provider="fake",
