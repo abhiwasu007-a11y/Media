@@ -67,12 +67,7 @@ You are the independent verification step of the Fact Checker stage in a video p
   "title": "Agent 06 claim verification (one batch) output",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "results",
-    "claim_conflicts",
-    "passage_flags",
-    "refusal"
-  ],
+  "required": ["results", "claim_conflicts", "passage_flags", "refusal"],
   "properties": {
     "results": {
       "type": "array",
@@ -90,51 +85,20 @@ You are the independent verification step of the Fact Checker stage in a video p
           "rationale"
         ],
         "properties": {
-          "local_id": {
-            "type": "string",
-            "pattern": "^c[0-9]{1,4}$"
-          },
-          "assessment": {
-            "enum": [
-              "SUPPORTED",
-              "PARTIALLY_SUPPORTED",
-              "CONTRADICTED",
-              "NOT_FOUND",
-              "UNCLEAR"
-            ]
-          },
+          "local_id": {"type": "string", "pattern": "^c[0-9]{1,4}$"},
+          "assessment": {"enum": ["SUPPORTED", "PARTIALLY_SUPPORTED", "CONTRADICTED", "NOT_FOUND", "UNCLEAR"]},
           "evidence": {
             "type": "array",
             "maxItems": 6,
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "evidence_id",
-                "relation",
-                "span_start",
-                "span_end"
-              ],
+              "required": ["evidence_id", "relation", "span_start", "span_end"],
               "properties": {
-                "evidence_id": {
-                  "type": "string",
-                  "pattern": "^[pf][0-9]{2,3}$"
-                },
-                "relation": {
-                  "enum": [
-                    "SUPPORTS",
-                    "PARTIAL",
-                    "CONTRADICTS"
-                  ]
-                },
-                "span_start": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "span_end": {
-                  "type": "integer",
-                  "minimum": 1
-                }
+                "evidence_id": {"type": "string", "pattern": "^[pf][0-9]{2,3}$"},
+                "relation": {"enum": ["SUPPORTS", "PARTIAL", "CONTRADICTS"]},
+                "span_start": {"type": "integer", "minimum": 0},
+                "span_end": {"type": "integer", "minimum": 1}
               }
             }
           },
@@ -144,11 +108,7 @@ You are the independent verification step of the Fact Checker stage in a video p
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "kind",
-                "claim_value",
-                "evidence_value"
-              ],
+              "required": ["kind", "claim_value", "evidence_value"],
               "properties": {
                 "kind": {
                   "enum": [
@@ -164,38 +124,14 @@ You are the independent verification step of the Fact Checker stage in a video p
                     "DEFINITION"
                   ]
                 },
-                "claim_value": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 80
-                },
-                "evidence_value": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 80
-                }
+                "claim_value": {"type": "string", "minLength": 1, "maxLength": 80},
+                "evidence_value": {"type": "string", "minLength": 1, "maxLength": 80}
               }
             }
           },
-          "certainty": {
-            "enum": [
-              "HIGH",
-              "MEDIUM",
-              "LOW"
-            ]
-          },
-          "suggested_correction": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "maxLength": 300
-          },
-          "rationale": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          }
+          "certainty": {"enum": ["HIGH", "MEDIUM", "LOW"]},
+          "suggested_correction": {"type": ["string", "null"], "maxLength": 300},
+          "rationale": {"type": "string", "minLength": 1, "maxLength": 500}
         }
       }
     },
@@ -205,36 +141,12 @@ You are the independent verification step of the Fact Checker stage in a video p
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "claim_a",
-          "claim_b",
-          "kind",
-          "explanation"
-        ],
+        "required": ["claim_a", "claim_b", "kind", "explanation"],
         "properties": {
-          "claim_a": {
-            "type": "string",
-            "pattern": "^c[0-9]{1,4}$"
-          },
-          "claim_b": {
-            "type": "string",
-            "pattern": "^c[0-9]{1,4}$"
-          },
-          "kind": {
-            "enum": [
-              "NUMBER",
-              "DIRECTION",
-              "DEFINITION",
-              "ENTITY",
-              "TIME_SCOPE",
-              "NEGATION"
-            ]
-          },
-          "explanation": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 300
-          }
+          "claim_a": {"type": "string", "pattern": "^c[0-9]{1,4}$"},
+          "claim_b": {"type": "string", "pattern": "^c[0-9]{1,4}$"},
+          "kind": {"enum": ["NUMBER", "DIRECTION", "DEFINITION", "ENTITY", "TIME_SCOPE", "NEGATION"]},
+          "explanation": {"type": "string", "minLength": 1, "maxLength": 300}
         }
       }
     },
@@ -244,38 +156,20 @@ You are the independent verification step of the Fact Checker stage in a video p
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "evidence_id",
-          "flag"
-        ],
+        "required": ["evidence_id", "flag"],
         "properties": {
-          "evidence_id": {
-            "type": "string",
-            "pattern": "^p[0-9]{2,3}$"
-          },
-          "flag": {
-            "enum": [
-              "INJECTION_SUSPECTED",
-              "UNREADABLE"
-            ]
-          }
+          "evidence_id": {"type": "string", "pattern": "^p[0-9]{2,3}$"},
+          "flag": {"enum": ["INJECTION_SUSPECTED", "UNREADABLE"]}
         }
       }
     },
     "refusal": {
       "oneOf": [
-        {
-          "type": "null"
-        },
+        {"type": "null"},
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "reason",
-            "message",
-            "missing_inputs",
-            "violated_rule_ids"
-          ],
+          "required": ["reason", "message", "missing_inputs", "violated_rule_ids"],
           "properties": {
             "reason": {
               "enum": [
@@ -286,23 +180,9 @@ You are the independent verification step of the Fact Checker stage in a video p
                 "UNSAFE_CONTENT"
               ]
             },
-            "message": {
-              "type": "string",
-              "maxLength": 1000
-            },
-            "missing_inputs": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "violated_rule_ids": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[A-Z]{2,8}-R[0-9]{1,3}$"
-              }
-            }
+            "message": {"type": "string", "maxLength": 1000},
+            "missing_inputs": {"type": "array", "items": {"type": "string"}},
+            "violated_rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,8}-R[0-9]{1,3}$"}}
           }
         }
       ]
@@ -310,23 +190,8 @@ You are the independent verification step of the Fact Checker stage in a video p
   },
   "allOf": [
     {
-      "if": {
-        "properties": {
-          "refusal": {
-            "type": "object"
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "results": {
-            "maxItems": 0
-          },
-          "claim_conflicts": {
-            "maxItems": 0
-          }
-        }
-      }
+      "if": {"properties": {"refusal": {"type": "object"}}},
+      "then": {"properties": {"results": {"maxItems": 0}, "claim_conflicts": {"maxItems": 0}}}
     }
   ]
 }

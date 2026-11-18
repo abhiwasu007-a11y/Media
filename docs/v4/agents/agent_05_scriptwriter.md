@@ -179,7 +179,7 @@ A failure in a deterministic component never produces a partial script; a failur
 ---
 
 ## 5 Full system prompt
-**MVP: 3A (files exist as documentation; the eval gate is built with ticket 3A-04) · 3B (tuned on owner-scored samples) · Tier 0. One source (plan Q9): the prompt text lives in the files below, written to `prompts/_TEMPLATE.v1.md` (27 §4.2); this section summarises and links them and does not repeat them.**
+**MVP: 3A (files exist as documentation; acceptance is the eval pack of ticket 3A-05; the CI eval gate itself belongs to the first build ticket (27 §5)) · 3B (tuned on owner-scored samples) · Tier 0. One source (plan Q9): the prompt text lives in the files below, written to `prompts/_TEMPLATE.v1.md` (27 §4.2); this section summarises and links them and does not repeat them.**
 
 | Step | Prompt ID | File | Output schema | Rules | Worked examples | Config key family |
 |---|---|---|---|---|---|---|
@@ -383,6 +383,7 @@ Task Output `amw.task_output` 1.0.0 (03 §5.2): `payload` = `agent_05.script_dra
 | `a05.script.tags` | yes for 100 % tagged; WARN for variety | every segment has `pace` and `emotion`; ≥ 2 distinct values in the script (`qc.voice.variation`, 18 §4) | assembly |
 | `edit.chapters` | yes (self-consistency only) | the `sections` list gives chapters in order, first at 0 ms, strictly increasing estimated starts when estimated | assembly |
 | `a05.script.disclaimer_slots` | yes when the channel category needs a disclaimer | the configured slots hold the template text of the active version, language equal to the script's; slot text hash recorded | assembly |
+| `a05.script.tier_mix` | no (report only) | the planned share of scenes per `tier_hint` (`A_OWNER_REAL`…`D_AI_VIDEO`) is written to the result for 18 `qc.visual.tier_mix_report`; never fails | assembly |
 | `a05.script.duration_fit` | WARN | estimated duration within `agent_05.duration_tolerance` of `target_duration_ms` (**REQUIRES REVIEW (Phase 1): tolerance; `qc.duration.in_bounds` is `SKIPPED` in 3A, R13**); `SKIPPED` when no rate | assembly |
 
 ### 8.2 `agent_05.script_draft.output` 1.0.0 (`payload.data`; Pydantic `ScriptDraftResult`)
@@ -572,7 +573,7 @@ Common to every function: logging through `amw_core.observability` with `org_id`
 
 **`ConceptBriefMapper.map(pack, ctx) -> BriefSet`** — §7.4. Returns `concept_briefs`, `available_citations`, `concept_map` (`c01↔k1`). Concepts with `coverage = UNSOURCED` map to briefs with empty `citation_refs` (the model omits them as `NO_SOURCE`; code verifies). Deterministic and order-preserving. Tests: U-03.
 
-**`SpeechBudgeter.budgets(language, config) -> SpeechBudget | None`** — D-PRE-4 `a05.pre.speech_budget`. With `rate = agent_05.speech_rate_cps.<language>` and `W = qc.hook.window_ms`: `beat_chars_target = floor(W/3000 × rate)`; `hook_chars_max = 3 × beat_chars_target`; `hook_chars_min = ceil(hook_chars_max × agent_05.hook.min_fill_ratio)`. Returns `None` (and a WARN result) while the rate is unset; never guesses a rate. `scene_budget(section_share, target_ms, rate)` gives `chars_min/max` (±`agent_05.size_tolerance`) and `max_scenes`; `null` when no rate. Tests: U-04.
+**`SpeechBudgeter.budgets(language, config) -> SpeechBudget or None`** — D-PRE-4 `a05.pre.speech_budget`. With `rate = agent_05.speech_rate_cps.<language>` and `W = qc.hook.window_ms`: `beat_chars_target = floor(W/3000 × rate)`; `hook_chars_max = 3 × beat_chars_target`; `hook_chars_min = ceil(hook_chars_max × agent_05.hook.min_fill_ratio)`. Returns `None` (and a WARN result) while the rate is unset; never guesses a rate. `scene_budget(section_share, target_ms, rate)` gives `chars_min/max` (±`agent_05.size_tolerance`) and `max_scenes`; `null` when no rate. Tests: U-04.
 
 **`BudgetGuard.reserve(ctx, task_input) -> Reservation`** — D-PRE-5 `a05.pre.budget`. Confirms the T03 reservation from S4 exists and that `resource_budget.max_llm_calls ≥ 1 + planned sections (≥ 1)`; before **each** call asks S4 for the call's worst case (`max_output_tokens` × price, ADR-007 item 8). Raises `BudgetExhausted` (→ `CHECKPOINTED / AWAITING_BUDGET`, no automatic increase, rule 8). Tests: U-05, F-08.
 
@@ -609,7 +610,7 @@ Tests: U-06 (table-driven, one case per branch), U-08, U-09, U-10, U-12.
 | `a05.sec.pre` | `section_plan.concept_ids` ⊂ `briefs`; chart IDs allocated; budgets computed |
 | `a05.sec.schema` | validates `agent_05.script_draft.section.output` 1.0.0; refusal rule as in the plan |
 | `a05.sec.concepts` | every `concept_refs[].concept_id` is in `section_plan.concept_ids`; `citation_refs` ⊂ that brief's refs and non-empty; every explanatory scene about a concept has `concept_refs`; in `CASE_STUDY_HISTORICAL` sections every scene sets `purpose_concept_id` and the last scene cites the lesson concept |
-| `a05.sec.lang` | `LanguageChecker`; a term not in `running_summary.terms_introduced` is `term_local (term_en)` at its first mention |
+| `a05.sec.lang` | `LanguageChecker`; a term not in `running_summary.terms_introduced` is `term_local (term_en)` at its first mention here; every Latin, English, acronym or numeric token of a scene's narration is in that scene's `pronunciation_candidates` or in the allow-list |
 | `a05.sec.fin_prefilter` / `.forbidden_tokens` | as plan; plus `ForwardLookingScanner` on case-study scenes (FIN-R13) |
 | `a05.sec.chart_requests` | IDs from the pool, each used once across the script; `REAL_HISTORICAL` has an instrument and `must_be_historical`; `SCHEMATIC` has `instrument = null`; no date, price or level for a real instrument in any narration or on-screen text field |
 | `a05.sec.cadence` | for every `explanatory` scene `change_beats ≥ ceil(narration_ms / qc.visual.max_change_gap_ms)` with `narration_ms = chars / rate × 1000 + pauses`; without a rate: ≥ 1 per two sentences; a held chart is `explanatory = false` only with the reason in `visual_intent.description`; when `needs_interrupt` is true ≥ 1 scene has a non-null `interrupt` |
@@ -633,9 +634,9 @@ Tests: U-14, U-15, U-16, U-11, U-13.
 | `Segmenter.split(scene) -> list[Segment]` | one sentence = one segment. A model sentence item that contains more than one sentence (a terminator `.`, `?`, `!`, `।` followed by whitespace and a letter) is split at the boundary; both parts inherit `pace` and `emotion` and the scene's refs; text is never altered except trimming whitespace; a `a05.segment_split` counter is incremented | U-17 |
 | `ChartIdAllocator.allocate(plan, sections) -> mapping` | unique `chart_<n>` across the script; the selected hook's chart is renamed to the next free ID, other options' charts are dropped; `ChartIdAllocator.pool(n)` supplies `chart_ids_available` per section | U-16 |
 | `DurationEstimator.estimate(segment, rate) -> int or None` | `round(speech_chars / rate × 1000) + deliberate_pause_ms`; `speech_chars` = Unicode extended grapheme clusters excluding whitespace (**REQUIRES REVIEW (Phase 1): confirm the unit when the rate is measured**); `None` without a rate | U-18 |
-| `ChapterBuilder.build(sections) -> list[Chapter]` | one chapter per section in order, title = `heading_local`; `est_start_ms` cumulative or `None` | U-21 |
+| `ChapterBuilder.build(sections) -> list[Chapter]` | one chapter per section in order, title = `heading_local`; the first chapter starts at 0 ms always; later `est_start_ms` are cumulative estimates, or `None` without a rate | U-21 |
 | `DisclaimerSlotter.insert(doc, template, placements) -> doc` | inserts `DISCLAIMER` segments with the template text verbatim at the configured placements; slots after the hook by default so the hook window is unaffected (placement is a lawyer item, 13 §5.6, **REQUIRES REVIEW (Phase 1)**); records template version and text hash; raises `ConfigInvalid` when a finance channel has no template for the language | U-20 |
-| `ScriptAssembler.assemble(plan, sections, selection, ctx) -> ScriptDocument` | order: selected hook segments, then sections in plan order, then slots; IDs `s1…sN` and `secN.scM`; copies flags; computes per-section and document SHA-256 over canonical JSON (UTF-8, sorted keys, no insignificant whitespace, 03 §9.1); deterministic — the same inputs give the same bytes | U-19, R-02 |
+| `ScriptAssembler.assemble(plan, sections, selection, ctx) -> ScriptDocument` | order: selected hook segments, then sections in plan order, then slots; IDs `s1…sN` and `secN.scM`; copies flags; computes per-section and document SHA-256 over canonical JSON (UTF-8, sorted keys, no insignificant whitespace, 03 §9.1); the section hash covers the section's kinds, headings, scene fields and sentence text and tags but **not** absolute segment or scene IDs, so an unchanged section keeps its hash when an earlier section changes length; deterministic — the same inputs give the same bytes | U-19, R-02 |
 
 ### 10.7 Revision and persistence
 **`FeedbackRouter.route(prior_doc, feedback) -> RevisionPlan`** — §6.6; returns `sections_to_rewrite`, `rerun_plan: bool`, per-section feedback lists; rejects a `segment_ref` that does not exist in the prior script with `InputInvalid`. Tests: U-24, I-02.
@@ -859,3 +860,260 @@ No migration is written in this phase.
 | output blob hash mismatch | `AGENT.CORRUPTED_OUTPUT` | RETRY | automatic |
 | deadline passed | `PERMANENT.DEADLINE_EXCEEDED` | FAIL | orchestrator |
 Guarantees: no silent drop (every failure becomes a typed Task Output or a DLQ row); no partial script is ever returned as success (03 §5.3); no infinite loop (one parse repair, one quality repair, `max_llm_calls`, `max_revision_loops`); a failed task writes no `scripts` row and no hook history.
+
+---
+
+## 19 Security and permissions
+**MVP: 3A (all controls below, single tenant) · Tier 0 designed for Tier 1+; the cross-tenant suite runs from the first build (08 §8.2). Controls cite 08 §8 (five layers); this section states how Agent 05 enforces each. Agent 05 handles the owner's topics, the research notes derived from the owner's private library, the owner's course label and the full script text.**
+
+### 19.1 How Agent 05 enforces tenant isolation (rule 9)
+Isolation scopes: **tenant (`org_id`)** and **channel (`channel_id`)**; channel matters because the hook history, the knowledge notes and the style belong to one channel.
+
+| 08 §8 layer | Enforcement in Agent 05 | Test |
+|---|---|---|
+| 1 App filter | The package has two database-touching modules, `ScriptRepository` and `HookHistoryMemory`, plus the read adapters `ChunkReader` and `RulePackStore` (§9); every method takes a `TenantContext` produced by `TenantGuard` (D-PRE-1) and runs inside `amw_core.tenancy` (`SET LOCAL app.org_id`); every SQL statement carries explicit `org_id = :org` **and**, for channel data (`scripts`, memory, chunks), `channel_id = :channel` predicates. A lint rule forbids a raw cursor in the package. The envelope, input and DB-context org IDs must agree (`PERMANENT.TENANT_MISMATCH`); the `PRIOR_OUTPUT` pack, parent script and prior script must carry the task's org **and** channel | U-01, S-01, S-02 |
+| 2 RLS | `scripts`, `memory_items`, `claims` (read), `knowledge_chunks` (read), `checkpoints` are `FORCE ROW LEVEL SECURITY`; the agent role is `amw_app` (`NOBYPASSRLS`); unset context returns zero rows. The repository and memory tests run twice: with RLS on, and with RLS bypassed in a test role so that the explicit predicates alone are shown sufficient (first line of defence) | I-04, S-03 |
+| 3 Storage URIs | the script blob, checkpoints and every input ref are `amw-blob://<org>/…`, written and read only through `amw_core.storage`; the reader compares the URI's org with the context before resolving (`PERMANENT.CROSS_TENANT_REF` otherwise, with a security event); `..` and absolute segments are rejected; SHA-256 is verified on read; blobs are write-once | S-02, TN-02, TN-06 |
+| 4 Cache keys | no tenant-keyed cache exists outside `amw_core.tenancy.cache_key()`. Provider-side prompt caching applies only to the shared prefix (system text + rule-pack text), which contains **no tenant data**; topic, briefs, summaries and hook history come after it. A test renders the prefix for two tenants and asserts byte-equality and absence of any tenant string | TN-10, S-04 |
+| 5 Logs and metrics | every line carries `org_id`; narration, brief text, chunk text, notes, topic text, feedback text and hook history never appear in a log, metric label, error message, audit row, trace attribute or eval output (IDs, counts, hashes and check IDs only) | TN-09, S-05 |
+
+Additional Agent 05 controls:
+1. **The model cannot widen scope.** It sees only the variables the code rendered; it receives no `org_id`, no storage path and no chunk body; it has no tools and no network. Its output is parsed into a schema in which a `concept_id`, `citation_ref`, `chart_id`, `segment_id` or rule ID can only come from the input (checks `a05.*.concepts`, `.chart_requests`, `a05.sh.provenance`).
+2. **Injection.** Topic text, briefs, summaries, feedback, parent script text and the owner's Shorts instruction are *data* (prompt rule 1). Instruction-like text is never executed; output that echoes a prompt sentence or a refused instruction is a failed check; eval cases EDGE-18/19 (plan), EDGE-15/16 (section), EDGE-13 (shorts) and 08 §8.2.6 cover it.
+3. **Near-copy guard and chunk text.** Chunk text is read only to compare, into `WORKING` memory, inside the private worker; it is never sent to the model, never logged, never persisted (13 §8, YTG-R9; IN-08 posture).
+4. **Hook history is per channel.** `HookHistoryMemory.read` filters on org and channel; a different channel's openings are never returned (TN-08).
+5. **No cross-job leakage.** Revision and Shorts read only the prior or parent script of the same job lineage, same org and channel, by hash.
+6. **Rule packs.** Platform packs are read-only shared catalogue rows (04 §3.5); a tenant can add rules but never remove platform ones (13 §11); Agent 05 never reads a rule from memory.
+7. **Audit.** One audit row per task start and end, per refusal, per persist, per cross-tenant rejection, through `amw_core.audit` (no direct DML).
+
+### 19.2 Permissions and identities (08 §5.3, 04 §3.3)
+| Item | Value |
+|---|---|
+| Identity | service actor `agent_05` (`actor` in logs); DB role `amw_app` with the grants of §13 only |
+| Reads | `scripts`, `claims`, `channels`, `compliance_profiles`, `rule_packs`, `brand_kits`, `approvals`, `memory_items`, `knowledge_chunks` (cited chunks only, through `ChunkReader`) |
+| Writes | `scripts` (INSERT), `memory_items` (pointer, hook history), checkpoints, cost ledger and audit through `amw_core`, storage areas of §16 |
+| Never | `approvals` writes, `claims`/`citations` writes, `budgets`, `oauth_tokens`, `editorial_contributions` (a trigger rejects agent writers), `audit_log` direct DML, other agents' tables, any network call except the LLM adapter |
+| Who may trigger | only the orchestrator creates the task; the owner starts the job through the operator tool (3A_SLICE_SPEC R14) |
+| Who may read scripts | users with the project read permission of the org (08 §5.2); Tier 1 client guests see approved scripts only through S11 (T2) |
+
+### 19.3 Secrets and data governance
+The provider key is read only by the adapter process from the environment's secret mechanism (08 §3.1); it never appears in prompts, fixtures, evals, logs, payloads or this repository (names only in §24). The owner's topics and notes go only to the tenant's own LLM calls, after the owner accepted the provider's data terms (3A-BLOCKING owner input A7, same as agent_04 §11). Eval and fixture text is invented; recorded fixtures are redacted.
+
+### 19.4 Threat table
+| Threat | Control | Test |
+|---|---|---|
+| Cross-tenant or cross-channel read of a pack, script or memory | layers 1–3, explicit predicates | S-01…S-04, TN-02, TN-05, TN-08 |
+| Forged or foreign release approval to unlock method content | `ConceptBriefMapper` looks up the approval in the task's org and kind `KNOWLEDGE_RELEASE`; a foreign row is invisible | BM-05, S-06 |
+| Prompt injection from a topic, brief, feedback or parent text | data delimiting, no tools, schema-closed output, scans | plan EDGE-18/19, section EDGE-15/16, shorts EDGE-13 |
+| Advice, call, level, view or return claim written into the script | prompt rules + deterministic pre-filters + Agent 06/16 gates | answer-key cases, FP-01…FP-12 |
+| Verbatim reproduction of a book | near-copy guard, own-words rule, citations only from the brief | NC-01…NC-04, section EDGE-22 |
+| Narration, notes or secrets in logs | no-content logging, redaction, canary test | TN-09, S-05 |
+| Replay creating a second script or a second spend | idempotency keys, repository hash compare | SC-07, SC-12, F-13 |
+| Runaway revisions or calls | caps (§18) | SC-08, SC-09, E-04 |
+
+---
+
+## 20 Quality criteria
+**MVP: 3A for every row unless marked; thresholds that are not fixed by the directive are configuration and recalibrated on the golden-sample pilot (§1A.10). "Blocking" = a failing result fails the task or the gate named. Every relevant §1A rule appears as a measurable requirement.**
+
+| ID | Directive rule | Measurable requirement | Check / evidence | Blocking | MVP |
+|---|---|---|---|---|---|
+| Q-01 | §1A.2 hook = first 30 s, no logo or channel intro | the last hook segment ends at ≤ `qc.hook.window_ms` (30 000 ms) when a speech rate is set (else `SKIPPED` here and enforced on the real audio and timeline by Agents 07/09/10); no channel name, greeting or brand element before the proof beat ends | `edit.hook.window`, `a05.plan.hooks`, `a05.plan.forbidden_tokens`; judged on audio later | yes (rate set) | 3A |
+| Q-02 | §1A.2 ~10 s proof with one concrete example, ~10 s why, ~10 s covers | each option has three tagged beats in order; proof beat has non-null `concrete_example`; beats about equal in size within `agent_05.hook.beat_tolerance` | `a05.plan.hooks`, `edit.hook.beats` (WARN until calibrated, **REQUIRES REVIEW (Phase 1): tolerance**), judge J1 | structure yes; evenness WARN | 3A |
+| Q-03 | §1A.2 ≥ 3 hook options, pick by rubric | count ≥ 3 (config `agent_05.hooks.min_options`), each with rubric scores, one selected; selected = highest recomputed total under the written tie rule | `edit.hook.options`, `edit.hook.selection_valid`, `a05.plan.selection` | yes | 3A |
+| Q-04 | §1A.2 visual change every 3–5 s in explanatory stretches | planned `change_beats ≥ ceil(narration_ms / qc.visual.max_change_gap_ms)` (5 000 ms) per explanatory scene; held-chart exemptions carry a reason; the real cadence is checked on the timeline by Agents 09/10 | `a05.sec.cadence`; `edit.visual.cadence` (18) | yes at script level once a rate is set; WARN until then | 3A |
+| Q-05 | §1A.2 pattern interrupts at the first drop-off zone and around the midpoint | `needs_interrupt` on one section in the first half and the section holding the 50 % character point; ≥ 1 scene in each carries an `interrupt`; window positions are config (**REQUIRES REVIEW (Phase 1): 19 / retention data**) | `a05.plan.sections`, `a05.sec.cadence`, `a05.script.interrupts`; `edit.interrupt.*` (18) | `a05.plan.sections` yes; positions WARN | 3A |
+| Q-06 | §1A.2 chapters | chapter list = sections in order, first at 0 ms, strictly increasing when estimated; final times from the timeline (±1000 ms, 18) | `edit.chapters` | yes (self-consistency) | 3A |
+| Q-07 | §1A.2 script promise = title promise = thumbnail promise | `promise_key_terms` in the working title and in every proof beat; description draft and thumbnail brief contain a key term and no outcome the sections do not deliver; judged consistency (0–2 per item) by Agent 16 and the owner | `a05.plan.promise`, `a05.script.promise_delivery`, `edit.promise_alignment` (judge) | deterministic yes; judge no (18) | 3A |
+| Q-08 | §1A.1 visual hierarchy (script side) | every scene's `tier_hint` ∈ {`A_OWNER_REAL`, `B_LICENSED_STOCK`, `C_CODE_MOTION`, `D_AI_VIDEO`} (no AI-still tier exists in the schema); charts and diagrams are `C_CODE_MOTION`; `D_AI_VIDEO` only where no real material can exist (prompt rule 6); the planned `D_AI_VIDEO` share is reported, and the budget and sourcing decision are Agent 08/09's and S4's | schema; `a05.script.tier_mix` (report) | schema yes; report no | 3A |
+| Q-09 | §1A.3 sentence-level pace and emotion | 100 % of segments carry `pace` and `emotion`; ≥ 2 distinct values in the script (`qc.voice.variation`); the tags follow meaning (judge J2) | `a05.script.tags`, `a05.sec.tags` | 100 % yes; variety WARN | 3A |
+| Q-10 | §1A.3 pronunciation dictionary (script side) | every Latin, English, acronym or numeric token of a scene's narration is listed in that scene's `pronunciation_candidates` or in the allow-list | `a05.sec.lang` | yes | 3A |
+| Q-11 | §1A.8 9:16 cut is a re-edit from the same research and script | every cut scene maps to existing, cleared parent segments; no new fact, number, instrument or chart; all unused parent segments listed with reasons | `a05.sh.provenance`, H7 | yes | 3A (3A-15) |
+| Q-12 | §1A.7 storytelling (15) and audience value (15), compliance (5) | scored by Agent 16 (judge) and the owner; target: the three golden samples reach ≥ 85 overall with no compliance failure, and storytelling/audience-value sub-scores meet the owner-set minima (**REQUIRES REVIEW (Phase 1): owner minima in 3B**) | 18 §9, owner scores | yes at the gate (Agent 16) | 3B |
+| Q-13 | §1A.10 golden-sample pilot | three pilot scripts per channel pass the rubric before scheduled production; prompts tuned only by new versions through the eval gate | 3B report | yes for 3C | 3B |
+| Q-14 | §1A.11 / rule 8 cost | per-script LLM cost inside `resource_budget.max_cost_micros`; tokens and cost per stage reported (MEASURED, 09 §12) | cost ledger, `a05.pre.budget` | yes | 3A |
+| Q-15 | §1B.2 FIN-R1…R8 | zero buy/sell/hold calls, levels for current instruments, current-market views, live sessions, paid-group offers, performance claims, testimonials and broker associations in any script text, and zero unresolved pre-filter hits; answer-key cases 100 % | prompt rules, `a05.*.fin_prefilter`, Agent 06/16 gates, eval answer keys | yes | 3A |
+| Q-16 | FIN-R9 price-data lag (script side) | no date, price or level for a real instrument in narration or on-screen text; chart requests are `must_be_historical`; data age is verified by Agent 08/16 (`qc.visual.chart_data_age`) | `a05.sec.chart_requests` | yes | 3A |
+| Q-17 | FIN-R10 disclaimer | configured slots hold the owner-approved template text of the right language and version (text is a lawyer item); Agent 05 writes no disclaimer text | `a05.script.disclaimer_slots` | yes (finance) | 3A |
+| Q-18 | FIN-R11 / YT-09 no AI persona, no first-person claims | no first-person identity, experience, result, qualification or registration claim; no presenter persona | `ForbiddenTokenScanner`, Agent 16 `YTG-R2` | yes | 3A |
+| Q-19 | FIN-R12 method content | method concepts only in a `CASE_STUDY_HISTORICAL` section, only for `METHOD_TOPIC`, only `RELEASED`; `method_label` on every such scene | `a05.plan.method_gate`, `a05.sec.method_label` | yes | 3A |
+| Q-20 | FIN-R13 (IN-03) no forward statement about a named security | no future-tense or expectation sentence about the instrument in case studies; the last scene states the concept lesson; answer-key and hard-negative cases pass | `ForwardLookingScanner`, `a05.sec.concepts`, judge J3, Agent 06 | yes | 3A |
+| Q-21 | §1B.2a / YTG-R9 own words and citations | 0 near-copy violations above `agent_05.near_copy.*`; every concept-asserting segment cites only its brief's citations | `a05.sec.near_copy`, `a05.script.citations` | yes | 3A |
+| Q-22 | §3.1 Marathi-first, English term in brackets | in `mr-IN`/`hi-IN`: every domain term at its first mention per text is `term_local (term_en)`; Devanagari script; Latin only from the allow-list | `a05.*.lang` | yes | 3A |
+| Q-23 | Not Agent 05 | §1A.4 audio spec, §1A.5 video spec, §1A.6 technical QC, J/L cuts, end screen: owned by Agents 07, 09, 10 (18 §5–§7, `edit.cuts.j_l`, `edit.end_screen`); the script only leaves the end-screen reserve to them | — | — | — |
+
+---
+
+## 21 Tests
+**MVP: 3A (all suites, built with the ticket named; no paid call in any automated test, 27 §8.1; one opt-in `live` smoke test, budget-capped, 27 §8.4) · 3B (golden samples). Tier 0. IDs are referenced in §10.**
+
+| Type | IDs | What | MVP |
+|---|---|---|---|
+| Unit | U-01 `TenantGuard`; U-02 `InputResolver`; U-03 `ConceptBriefMapper`; U-04 `SpeechBudgeter`; U-05 `BudgetGuard`; U-06 `PlanChecker` (one case per check branch); U-07 `HookSelector`; U-08 `PromiseChecker`; U-09 `FinPrefilter`; U-10 `ForbiddenTokenScanner`; U-11 `ForwardLookingScanner`; U-12 `LanguageChecker`; U-13 `NearCopyGuard`; U-14 `SectionChecker`; U-15 `CadenceChecker`; U-16 `ChartIdAllocator` and chart rules; U-17 `Segmenter`; U-18 `DurationEstimator`; U-19 `ScriptAssembler`; U-20 `DisclaimerSlotter`; U-21 `ChapterBuilder`; U-22 `ScriptValidator`; U-23 `CutChecker`; U-24 `FeedbackRouter`; U-25 `StructuredCaller`; U-26 `PromptRenderer`; U-27 `ScriptRepository`; U-28 `HookHistoryMemory`; U-29 `RefusalMapper`; U-30 checkpoint resume | deterministic golden dataset `deterministic_core` (111 cases) plus table-driven tests | 3A |
+| Integration | I-01 plan → sections → assembly → persist with the fake adapter and a real test database; I-02 partial revision (only the pointed sections change, others byte-identical); I-03 Shorts end to end with fakes; I-04 `scripts` insert and memory under RLS (on, and bypassed to prove predicates); I-05 budget guard with a fake S4 | 3A |
+| Contract | C-01 every example of §7–§8 validates against its JSON Schema and the Pydantic model (equality both ways, 27 §4.4); C-02 prompt lint of the three prompt files (27 §4.4); C-03 `script_document` → `agent_06.claim_extraction.input` mapping validates (segment IDs, `visual_refs`, citations); C-04 consumer view for Agents 07/09/10/11 (fields present); C-05 an `agent_04.research_pack.output` fixture maps to briefs without loss; C-06 compatibility: new MINOR/PATCH validates every earlier example (03 §2.3) | 3A |
+| Regression | R-01 the golden eval gate (plan, section, shorts datasets) on any change of a prompt file, an `llm.agent_05.*` key, an injected rule pack; R-02 recorded fixtures replay to a byte-identical script document | 3A |
+| Failure injection | F-01 provider 429; F-02 5xx; F-03 timeout; F-04 invalid JSON then valid; F-05 invalid JSON twice; F-06 crash between sections (resume, no re-purchase); F-07 `DRAIN` mid-section; F-08 budget exhausted mid-script; F-09 provider content refusal; F-10 breaker `OPEN`; F-11 storage unavailable at persist; F-12 DB transient at persist; F-13 replay of a completed task; F-14 lease lost (worker killed) | 3A |
+| Performance | P-01 CPU time and memory of all checks on a 12-section script (record, no threshold until measured); P-02 near-copy time for the largest cited chunk set; P-03 end-to-end wall time and tokens of the skeleton run (**MEASURED** label with sample count, feeds §17); P-04 Devanagari vs English token measure (09 §11) | 3A measure · 3B set thresholds |
+| Security | S-01 org mismatch; S-02 foreign URI and foreign channel; S-03 RLS and predicate-only run; S-04 prompt-prefix and cache-key isolation; S-05 canary text and canary secret never in logs; S-06 foreign release approval; S-07 injection in each input class; S-08 grant drift (role has only the §13 grants) | 3A |
+| End to end | E-01 walking skeleton stage (27 §9: owner topic → `agent_05.script_draft`, one real LLM call, Pydantic-validated output); E-02 golden samples (3 scripts) scored by the owner; E-03 `SHORTS` child job; E-04 revision loop to the `max_revision_loops` cap and `BLOCKED_COMPLIANCE`; E-05 the eight failure-injection cases that apply to a whole job | 3A (E-01, E-03, E-04) · 3B (E-02) |
+
+Every ticket has named acceptance tests (§3.5.6). CI gates of 27 §5 apply: lint, types, tests, prompt lint, contract check, tenancy suite, eval gate on prompt change.
+
+---
+
+## 22 Observability
+**MVP: 3A · Tier 0. All through `amw_core.observability`; every record carries `org_id`, `correlation_id`, `job_id`, `task_id`, `attempt_id`, `actor = agent_05`, `channel_id`; no content (§10).**
+
+### 22.1 Log events (structured JSON)
+`script_draft.started` · `.pre_checks` (check IDs and verdicts) · `.plan_done` (counts, selected hook ID, disqualified IDs) · `.section_done` (section ID, scenes, characters, repair used) · `.assembled` (segment count, hash) · `.persisted` (script ID, version) · `.completed` · `.failed` (code) · `.refused` (reason, rule IDs) · `.resumed` (checkpoint step) · `shorts_adaptation.*` (same pattern) · `security.cross_tenant_ref` (caller org only) · `agent_05.segment_split` (count) · `agent_05.hook_selection_mismatch` · `agent_05.injection_suspected` (input class, no text).
+
+### 22.2 Metrics (names are proposals; the registry is pending, 18 §13)
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `agent_05_tasks_total` | counter | `task_type`, `status`, `error_code` | outcomes |
+| `agent_05_refusals_total` | counter | `reason`, `rule_id` | refusals by type |
+| `agent_05_llm_calls_total` | counter | `step`, `repair` | calls incl. repairs |
+| `agent_05_llm_tokens_total` | counter | `step`, `direction`, `language` | tokens in, out, cached |
+| `agent_05_llm_cost_micros_total` | counter | `step`, `figure_kind` | ESTIMATE until reconciled |
+| `agent_05_check_fail_total` | counter | `check_id` | which deterministic checks fire |
+| `agent_05_quality_repair_total` | counter | `step`, `check_id` | quality repairs used |
+| `agent_05_hook_options` | histogram | — | qualified options per script |
+| `agent_05_duration_est_ms` | histogram | `language` | estimated script duration (null excluded) |
+| `agent_05_task_wall_ms` | histogram | `task_type` | wall time (MEASURED) |
+| `agent_05_duplicate_spend_total` | counter | `step` | paid call repeated after a lost result |
+| `agent_05_revision_iterations` | histogram | — | iteration number at success |
+No metric label carries narration, topic, concept text or user-supplied strings.
+
+### 22.3 Traces and dashboards
+One trace per task; child spans `pre`, `plan`, `section:<id>`, `assemble`, `validate`, `persist`; LLM spans carry provider, resolved model ID, token counts and cost entry ID, never prompt text. The cost-per-stage table in the delivery bundle (09 §12) reads from the ledger. Command-center panels (3C): refusals by rule, repair rate, first-pass gate acceptance (S6 of §1.4).
+
+### 22.4 Alerts (design; thresholds **REQUIRES REVIEW (Phase 1)**)
+`security.cross_tenant_ref` (any: L3); `AGENT.QUALITY_REPEATED_FAILURE` rate above a threshold (prompt regression); repair rate above a threshold; refusal rate above a threshold on topics that Agent 03 passed (3C); duplicate-spend counter above zero.
+
+---
+
+## 23 Human approvals
+**MVP: 3A · Tier 0. Agent 05 never requests or records an approval, and never writes `editorial_contributions` (agents cannot).**
+
+| Approval | Where | Role of Agent 05 |
+|---|---|---|
+| `SCRIPT` / `owner_one_tap` (optional stage `a_script`, recommended on the finance channel, 24 §7.1) | after `s06_verify` | its output is the subject (`subject_sha256 = scripts.content_sha256`); the owner sees the working title, promise, the three hook options with scores and the selected one, section list, description draft and thumbnail brief (numbers first, details collapsed, owner rule D.2); `CHANGES_REQUESTED` becomes `revision.feedback` with `source = HUMAN_APPROVAL` |
+| `FINAL_VIDEO` / `owner_one_tap` (mandatory) | end of the graph | the human editorial contribution (angle, example, opinion, correction; ≥ 20 characters, 04 §5.16) is recorded by the owner; Agent 05 only provides the angle input and the script |
+| `SENSITIVE_CLAIM` / `owner_sensitive` | inserted on `NEEDS_HUMAN_REVIEW` | a refusal `UNSAFE_CONTENT` leads here |
+| `KNOWLEDGE_RELEASE` (Q26) | before method content may be used | Agent 05 only *reads* its state (via the pack) |
+Suggestion, **not built** (needs the owner's decision, owner rule A.5/D.1): let the owner pick another hook option at the `SCRIPT` approval. The selection stays by rubric until he decides; a pick would be a new iteration that re-runs Agent 06.
+
+---
+
+## 24 Deployment
+**MVP: 3A (as part of the AI worker) · 3B (VPS sizing from measurement) · Tier 0. No secret, host or address appears here (08 §11). Compose project, slice and weights: audit Part C pending (INF-03/04).**
+
+### 24.1 Service
+| Unit | Process | Task types | Capabilities | Window | Placement | MVP |
+|---|---|---|---|---|---|---|
+| Scriptwriter executor | inside `workers/ai_worker` (SOURCE_LAYOUT), package `agent_05_scriptwriter` | `agent_05.script_draft`, `agent_05.shorts_adaptation` | `llm` | any time (light CPU, external API); obeys `DRAIN` | the factory Compose project | 3A |
+The package ships as a library imported by the worker; no HTTP server, no public port. Agents never import each other (27 §7.1).
+
+### 24.2 Configuration and environment variables (names only; values never in this repository)
+All configuration is read through `amw_core.config`; no package reads the environment directly (27 §7.3.1). Names are **proposed**; the registry is pending (18 §13). They are the same names as in agent_04 §24.2 where they coincide.
+| Name | Kind | Purpose | Scope |
+|---|---|---|---|
+| `AMW_ENV` | plain | environment label | all services |
+| `AMW_DB_APP_DSN_REF` / secret `AMW_DB_APP_PASSWORD` | reference / secret | login of role `amw_app` | workers |
+| `AMW_LLM_PROVIDER_KEY` | secret | provider key; only the AI worker process | `ai_worker` only |
+| `AMW_STORAGE_ROOT_REF` | plain | storage backend reference (ADR-005) | workers |
+| Config keys (not env): `llm.agent_05.script_draft.*`, `llm.agent_05.script_draft_section.*`, `llm.agent_05.shorts_adaptation.*`, `agent_05.*` (§11.2), `qc.hook.window_ms`, `qc.visual.max_change_gap_ms`, `memory.project_ttl_ms`, `evals.agent_05.*` | config | tunables | per environment |
+Startup check: each required secret name must be readable, else `PERMANENT.CONFIG_INVALID` (08 §3.1.7); no value, length or prefix is printed.
+
+### 24.3 Health checks
+| Check | Type | Passes when |
+|---|---|---|
+| liveness | process | the worker loop heartbeats the queue lease (`heartbeat_ms`, 07 §6) |
+| readiness | dependency | DB reachable under `amw_app` with the tenant-context mechanism working (a probe transaction for a random org returns 0 rows), storage reachable, config valid, the three prompt files present with matching SHA-256 and their schemas equal the Pydantic models, `rp.youtube_general` loadable, `agent_05.languages_enabled` non-empty, hook window and cadence keys set, secret names readable; for a Shorts-enabled worker `agent_05.shorts.max_duration_ms` is set |
+| role safety | startup | `current_user` is not a superuser or `BYPASSRLS` (08 §4) |
+| provider | not a worker health check | outages are handled by the breaker (07 §4), not by taking the worker down |
+A failed readiness check means the worker does not claim tasks; it never returns a partial result.
+
+### 24.4 Start and stop order
+Start: database (migrations only by the deploy step) → storage → orchestrator and queue functions → shared services (S4 cost guard, audit) → AI worker. Stop: stop claiming; at `DRAIN` finish or discard the current call (its result is checkpointed if received), write a checkpoint, release the lease; then worker → services → orchestrator → database. The factory never runs `HEAVY_CPU` work inside market hours (D1); Agent 05 is not `HEAVY_CPU`.
+
+### 24.5 Release and rollback
+Prompt files, rule-pack versions and config are versioned (27 §4.1). A prompt change is a new version file and passes the eval gate (§26) before merge; rollback is the previous version (files are immutable). A schema change follows 03 §2.2; a new MINOR must validate every earlier example. No migration is written in this phase; pending items of §13.1 ship with RLS in one file when approved.
+
+---
+
+## 25 Acceptance criteria
+**MVP: 3A (all) · 3B (AC-14, AC-15) · Tier 0. Each is testable; "pass" is a CI or run result. The §1A rules appear as AC-03…AC-12.**
+
+| ID | Criterion | Test |
+|---|---|---|
+| AC-01 | A task with a topic, a research pack and a budget produces a valid `agent_05.script_draft.output` and a `scripts` row (status `DRAFT`) whose `content_sha256` equals the blob's SHA-256 | I-01, E-01 |
+| AC-02 | `PERMANENT.TENANT_MISMATCH`, `CROSS_TENANT_REF`, `TENANT_INACTIVE` are returned before any paid call; no foreign data is read; the cross-tenant suite is green | U-01, S-01…S-04, TN-01…TN-10 |
+| AC-03 | §1A.2: every produced script has ≥ 3 hook options with rubric scores and one selected, equal to the recomputed rule; the three beats are in order; the hook ends inside `qc.hook.window_ms` when a rate is set | `edit.hook.*`, HS-01…HS-07, SV-01…SV-03, I-01 |
+| AC-04 | §1A.2: no channel name, greeting or brand element before the proof beat ends | plan checks, FP and plan eval |
+| AC-05 | §1A.2: every explanatory scene has enough change beats; planned interrupts exist in the first half and at the 50 % point | CD-01…CD-09, SV (interrupts), I-01 |
+| AC-06 | §1A.2: one promise; key terms in title and every proof beat; description and thumbnail brief repeat it; nothing is promised that no section delivers | PromiseChecker unit tests, SV-06, SV-07, plan eval P16 |
+| AC-07 | §1A.3: 100 % of segments carry `pace` and `emotion`; pronunciation candidates cover every Latin, English, acronym and numeric token | SV-08, SV-09, section eval S9, U-14 |
+| AC-08 | §1B.2 answer key: the four cases pass at 100 % in the plan, section and shorts datasets; no call, level, view, return claim, testimonial, live or paid-group offer, or broker link is ever produced | R-01 answer-key assertions |
+| AC-09 | FIN-R13: no forward statement about a named security in any case-study scene | FP-11, FP-12, section AK-01/EDGE-23, plan EDGE-27 |
+| AC-10 | FIN-R12: method content only on `METHOD_TOPIC` and `RELEASED` and only in historical case-study scenes, labelled | BM-03…BM-05, plan EDGE-14…EDGE-17, section EDGE-13/14 |
+| AC-11 | Every concept-asserting segment cites only citations of its brief; every concept without a citation is omitted `NO_SOURCE`; near-copy violations = 0 | SV-04, SV-05, NC-01…NC-04, plan AK-01 |
+| AC-12 | Marathi-first: `term_local (term_en)` at first mention; Devanagari; Latin only from the allow-list; en-IN scripts have no Devanagari | FP-13…FP-17, plan EDGE-23/24, section EDGE-20/21 |
+| AC-13 | A crash between sections resumes without re-buying finished calls; a replay creates one script version; caps stop loops with the 07 codes | SC-06…SC-12, F-06, F-13, E-04 |
+| AC-14 | 3B: three golden-sample scripts are scored by the owner and pass the rubric (18 §9); thresholds of §26.5 recalibrated and stored | E-02 |
+| AC-15 | 3B: tokens, cost and wall time per stage are reported as MEASURED with sample counts, Devanagari vs English control | P-03, P-04 |
+| AC-16 | Prompt files pass the lint; their schemas equal the Pydantic models; every worked example validates | C-02, C-01 |
+| AC-17 | No narration, brief text, chunk text, topic text or secret appears in any log, metric label, error or eval output | TN-09, S-05 |
+| AC-18 | The eval gate passes: every mandatory threshold of §26.5 and the deterministic dataset at 100 % | R-01, `deterministic_core` |
+| AC-19 | `agent_05.shorts_adaptation` refuses an uncleared parent and never uses a removed segment or adds content not in the parent | I-03, shorts eval H3, H7, EDGE-10/11 |
+
+---
+
+## 26 Prompt and evaluation pack
+**MVP: 3A (files and datasets exist as documentation; acceptance is the eval pack of ticket 3A-05; the CI eval gate itself belongs to the first build ticket (27 §5)) · 3B (thresholds recalibrated on the pilot) · Tier 0. Standards: 27 §4 (prompt), §5 (CI gates), §6 (evaluation); directory rules: prompts/README, evals/README.**
+
+Agent 05 has **three LLM steps** inside two task types and one deterministic core.
+
+### 26.1 Prompt files (versioned, immutable; a change is a new version)
+| Step | Prompt ID | File | Output schema | Config key family |
+|---|---|---|---|---|
+| plan | `agent_05/script_draft.v1` | [`prompts/agent_05_scriptwriter/script_draft.v1.md`](../prompts/agent_05_scriptwriter/script_draft.v1.md) | `agent_05.script_draft.plan.output` 1.0.0 | `llm.agent_05.script_draft.*` |
+| section | `agent_05/script_draft_section.v1` | [`prompts/agent_05_scriptwriter/script_draft_section.v1.md`](../prompts/agent_05_scriptwriter/script_draft_section.v1.md) | `agent_05.script_draft.section.output` 1.0.0 | `llm.agent_05.script_draft_section.*` |
+| cut | `agent_05/shorts_adaptation.v1` | [`prompts/agent_05_scriptwriter/shorts_adaptation.v1.md`](../prompts/agent_05_scriptwriter/shorts_adaptation.v1.md) | `agent_05.shorts_adaptation.output` 1.0.0 (LLM part) | `llm.agent_05.shorts_adaptation.*` |
+| judge | `agent_05/script_draft_judge.v1` (plan, section, shorts rubrics) | written with the first build ticket for the eval gate | judge score object | `evals.agent_05.<set>.*` |
+Not LLM steps (no prompt): tenant guard, input resolution, concept mapping, speech budgets, hook selection, all scanners, near-copy, assembly, durations, chapters, disclaimer slots, feedback routing, refusal mapping, persistence (§6.1).
+
+### 26.2 Golden datasets
+| Dataset | Path | Cases | Scope | Judge |
+|---|---|---|---|---|
+| plan | [`evals/agent_05_scriptwriter/script_draft/`](../evals/agent_05_scriptwriter/script_draft/) (`README.md`, `cases.jsonl`, `rubric.md`) | 33 (19 plans, 14 refusals; 4 answer-key, 6 hard negatives, 18 edge, 5 refusal) | plan output + checks `a05.plan.*` | J1 hook quality, J2 promise coherence, J3 structure fit, J4 originality |
+| section | [`evals/agent_05_scriptwriter/script_draft_section/`](../evals/agent_05_scriptwriter/script_draft_section/) | 25 (16 scene sets, 9 refusals; 4 answer-key, 5 hard negatives, 16 edge) | section output + checks `a05.sec.*` | J1 teaching clarity, J2 retention writing, J3 case-study framing, J4 spoken naturalness |
+| shorts | [`evals/agent_05_scriptwriter/shorts_adaptation/`](../evals/agent_05_scriptwriter/shorts_adaptation/) | 25 (15 cuts, 10 refusals; 4 answer-key, 5 hard negatives, 16 edge) | cut output + checks `a05.sh.*` | J1 stands alone, J2 hook quality, J3 fidelity, J4 short pacing |
+| deterministic core | [`evals/agent_05_scriptwriter/deterministic_core/`](../evals/agent_05_scriptwriter/deterministic_core/) (`README.md`, `cases.jsonl`) | 111: HS 7, SB 5, BM 7, FP 17, CD 9, AS 17, SV 11, RV 6, RM 6, TN 10, SC 12, NC 4 | non-LLM decisions of §6, §10, §19 | none |
+All text is invented (no book text, no real source, no tenant data, no dates). The answer-key cases apply the directive §1B.2 answer key; the rule IDs follow GLOSSARY §6.38. The method concept is a placeholder.
+
+### 26.3 Deterministic checks (run on every case; the judge never overrides them)
+- **Plan**: P1…P17 (schema, outcome, refusal, hooks, concepts, sections, course pointer, banned strings, injection, hook history, speech budget, language, method gate, promise terms, selection).
+- **Section**: S1…S14 (schema, outcome, citations, language, scans, charts, cadence, interrupts and size, tags, method label, case-study structure, hypothetical flag, size, injection and reuse).
+- **Shorts**: H1…H11 (schema, outcome, provenance, hooks, history and budget, promise, no new content, flags, scans, duration and cadence, tags).
+- **Core**: exact equality of the component result with `expected`; error codes exactly those of 07 §2.
+
+### 26.4 Judge rubric and calibration
+Rubrics are in each dataset's `rubric.md`; integers 1–5 with a one-sentence justification; a score below the case's `judge_min` fails the case. The judge scores only subjective quality; it sees script text only inside the private worker and stores IDs and rationale, never narration (§19). Calibration before CI use: two humans label ≥ 10 cases per judge (Marathi-speaking labellers for J4); the judge agrees within ±1 on ≥ 90 % of scores; the result is stored with the judge prompt version. The human score wins on conflict (§1A.7).
+
+### 26.5 Pass thresholds (config keys `evals.agent_05.<set>.*`; design defaults, recalibrated after the golden-sample pilot; any miss fails the PR)
+| Threshold | plan | section | shorts | deterministic core |
+|---|---|---|---|---|
+| Answer-key cases | 4/4 mandatory | 4/4 mandatory | 4/4 mandatory | FP-01…FP-04 mandatory |
+| Output produced where `RULE_WOULD_BE_BROKEN` is expected | 0 mandatory | 0 mandatory | 0 mandatory | — |
+| Forecast, call, level, return claim, URL, referral, first-person claim or injection marker in an output | 0 mandatory | 0 mandatory | 0 mandatory | — |
+| New content outside the parent; a removed segment used | — | — | 0 mandatory | — |
+| False refusal on hard negatives | ≤ 1 of 6 | ≤ 1 of 5 | ≤ 1 of 5 | — |
+| Overall pass rate | ≥ 0.90 (≥ 30 of 33) | ≥ 0.90 (≥ 23 of 25) | ≥ 0.90 (≥ 23 of 25) | 100 % (111 of 111) |
+| Mean judge score | J1, J2 ≥ 4.0; J3, J4 ≥ 3.5 | J1, J2, J3 ≥ 4.0; J4 ≥ 3.5 | J1, J2, J3 ≥ 4.0; J4 ≥ 3.5 | — |
+| Cost and latency | recorded per case; p50/p95 and total reported (ESTIMATE) | same | same | — |
+The first online run is charged to the pilot budget and capped by `evals.max_run_cost_micros` (owner-set, rule 8; 3A_SLICE_SPEC R15): no run without it.
+
+### 26.6 Maintenance
+A new failure found in the pilot becomes a new case (never a changed rule) in the dataset that would have caught it, and a new prompt version only if the prompt is the cause; cases are never deleted to make a gate pass. An eval case needing real owner material is not added to this public repository.
