@@ -714,6 +714,21 @@ class ActorKind(StrEnum):
     SYSTEM = "SYSTEM"
 
 
+class DbRole(StrEnum):
+    """GLOSSARY ``db_role``."""
+
+    AMW_OWNER = "amw_owner"
+    AMW_MIGRATOR = "amw_migrator"
+    AMW_APP = "amw_app"
+    AMW_PUBLISHER = "amw_publisher"
+    AMW_AUTH = "amw_auth"
+    AMW_READONLY = "amw_readonly"
+    AMW_SYSFN = "amw_sysfn"
+    AMW_OPERATOR = "amw_operator"
+    AMW_VERIFIER = "amw_verifier"
+    AMW_VERIFIER_FN = "amw_verifier_fn"
+
+
 class ConsentState(StrEnum):
     """GLOSSARY ``consent_state``."""
 
@@ -767,6 +782,7 @@ class EvidenceRecordKind(StrEnum):
     OWNER_TOPIC = "OWNER_TOPIC"
     DATASET_INTAKE = "DATASET_INTAKE"
     KNOWLEDGE_RELEASE_REQUEST = "KNOWLEDGE_RELEASE_REQUEST"
+    REVISION_NOTE = "REVISION_NOTE"
 
 
 class EvidenceVerificationKind(StrEnum):
@@ -1726,6 +1742,13 @@ class ScoreGateMode(StrEnum):
     BLOCKING = "BLOCKING"
 
 
+class Placement(StrEnum):
+    """GLOSSARY ``placement``."""
+
+    DEV = "DEV"
+    VPS = "VPS"
+
+
 class SourcePathClass(StrEnum):
     """GLOSSARY ``source_path_class``."""
 
@@ -1824,6 +1847,7 @@ GLOSSARY_ENUMS: Mapping[str, type[Enum]] = MappingProxyType(
         "gcp_ownership": GcpOwnership,
         "google_review_status": GoogleReviewStatus,
         "actor_kind": ActorKind,
+        "db_role": DbRole,
         "consent_state": ConsentState,
         "voice_kind": VoiceKind,
         "presenter_kind": PresenterKind,
@@ -1928,6 +1952,7 @@ GLOSSARY_ENUMS: Mapping[str, type[Enum]] = MappingProxyType(
         "frame_finding": FrameFinding,
         "score_scaling_mode": ScoreScalingMode,
         "score_gate_mode": ScoreGateMode,
+        "placement": Placement,
         "source_path_class": SourcePathClass,
     }
 )
