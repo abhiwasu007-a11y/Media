@@ -905,7 +905,7 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 |---|---|---|---|
 | job_id | uuid | yes | TFK → jobs |
 | kind | enum(approval_kind) | no | |
-| subject_kind | text | no | `script`, `render`, `thumbnail`, `metadata`, `concept`, `brief`, `budget`, `dead_letter`, `experiment`, `comment_reply`, `knowledge_source`, `knowledge_release` (CCR-012), `asset` (CCR-012: e.g. a chart case), `voice` (voice sample), … |
+| subject_kind | text | no | `script`, `render`, `thumbnail`, `metadata`, `concept`, `brief`, `budget`, `dead_letter`, `experiment`, `comment_reply`, `knowledge_source`, `knowledge_release` (CCR-012), `asset` (CCR-012: e.g. a chart case), `voice` (voice sample), `channel` (CCR-114: a channel-setup decision such as `audience_kind`), … |
 | subject_id | uuid | no | |
 | subject_sha256 | bytea | yes | binds the decision to exact content |
 | subject_ref | text | yes | CCR-070: storage URI of the canonical subject document when the subject is a set (e.g. the chunk list of a `knowledge_release`); write-once; its SHA-256 equals `subject_sha256` |
