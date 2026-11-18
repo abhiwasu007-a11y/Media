@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.task_input:1.0.0",
+  "title": "AMW Task Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "org_id",
+    "job_id",
+    "task_id",
+    "project_id",
+    "channel_id",
+    "agent_id",
+    "source_agent",
+    "priority",
+    "deadline",
+    "context_refs",
+    "resource_budget",
+    "payload",
+    "correlation_id",
+    "idempotency_key",
+    "retry_count",
+    "schema_version"
+  ],
+  "properties": {
+    "org_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/org_id"
+    },
+    "job_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/job_id"
+    },
+    "task_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/task_id"
+    },
+    "project_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/project_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "channel_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/channel_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "agent_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/executor_id"
+    },
+    "source_agent": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/actor_ref"
+    },
+    "priority": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/priority"
+    },
+    "deadline": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/utc_timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "context_refs": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/context_ref"
+      }
+    },
+    "resource_budget": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/resource_budget"
+    },
+    "payload": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/payload_object"
+    },
+    "correlation_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/correlation_id"
+    },
+    "idempotency_key": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/idempotency_key"
+    },
+    "retry_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    }
+  }
+}

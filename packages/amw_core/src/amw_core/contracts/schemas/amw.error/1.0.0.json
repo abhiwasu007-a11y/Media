@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.error:1.0.0",
+  "title": "AMW Error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "error_class",
+    "message",
+    "retryable",
+    "retry_after_ms",
+    "details",
+    "actor",
+    "provider",
+    "upstream_status",
+    "upstream_code",
+    "attempt_no",
+    "occurred_at",
+    "correlation_id"
+  ],
+  "properties": {
+    "code": {
+      "type": "string",
+      "pattern": "^(TEMPORARY|PERMANENT|RESOURCE|AGENT|INFRASTRUCTURE|PUBLISHING)\\.[A-Z][A-Z0-9_]{2,63}$"
+    },
+    "error_class": {
+      "enum": [
+        "TEMPORARY",
+        "PERMANENT",
+        "RESOURCE",
+        "AGENT",
+        "INFRASTRUCTURE",
+        "PUBLISHING"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "retry_after_ms": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "details": {
+      "type": "object",
+      "properties": {
+        "violations": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "keyword",
+              "message"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "JSON Pointer to the failing location"
+              },
+              "keyword": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          }
+        }
+      }
+    },
+    "actor": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/actor_ref"
+    },
+    "provider": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{2,32}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "upstream_status": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "upstream_code": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 128
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attempt_no": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "occurred_at": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/utc_timestamp"
+    },
+    "correlation_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/correlation_id"
+    }
+  }
+}

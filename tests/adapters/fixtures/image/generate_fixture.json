@@ -1,0 +1,5 @@
+{
+  "operation": "image.generate",
+  "match": {"prompt": "fixture prompt"},
+  "response": {"amount_micros": 4242, "media_type": "image/jpeg"}
+}

@@ -1,0 +1,5 @@
+{
+  "operation": "web.fetch",
+  "match": {"url": "https://example.org/fixture"},
+  "response": {"text": "recorded page", "media_type": "text/plain"}
+}

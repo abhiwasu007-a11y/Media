@@ -1,0 +1,5 @@
+{
+  "operation": "tts.synthesize",
+  "match": {"voice_ref": "fixture-voice"},
+  "response": {"duration_ms": 4321, "media_type": "audio/flac"}
+}

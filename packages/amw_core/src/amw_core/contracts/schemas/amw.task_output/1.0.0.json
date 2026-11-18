@@ -1,0 +1,483 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.task_output:1.0.0",
+  "title": "AMW Task Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "payload",
+    "output_refs",
+    "quality_score",
+    "confidence",
+    "validation_results",
+    "duration",
+    "resource_usage",
+    "error",
+    "next_action",
+    "downstream_agent",
+    "timestamp"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "SUCCEEDED",
+        "FAILED",
+        "SUSPENDED",
+        "REJECTED"
+      ]
+    },
+    "payload": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/payload_object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output_refs": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "uri",
+          "kind",
+          "sha256",
+          "size_bytes",
+          "media_type"
+        ],
+        "properties": {
+          "uri": {
+            "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"
+          },
+          "kind": {
+            "enum": [
+              "SCRIPT",
+              "AUDIO",
+              "VIDEO",
+              "IMAGE",
+              "SUBTITLE",
+              "METADATA",
+              "REPORT",
+              "DATA",
+              "CHECKPOINT_STATE"
+            ]
+          },
+          "sha256": {
+            "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "media_type": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "entity_ref": {
+            "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"
+          }
+        }
+      }
+    },
+    "quality_score": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "confidence": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "validation_results": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "check_id",
+          "kind",
+          "verdict",
+          "blocking",
+          "message"
+        ],
+        "properties": {
+          "check_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_.-]{3,96}$"
+          },
+          "kind": {
+            "enum": [
+              "DETERMINISTIC",
+              "LLM_JUDGE",
+              "HUMAN"
+            ]
+          },
+          "verdict": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "WARN",
+              "SKIPPED"
+            ]
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "rule_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{2,8}-R[0-9]{1,3}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "measured": {
+            "type": [
+              "number",
+              "string",
+              "boolean",
+              "null"
+            ]
+          },
+          "threshold": {
+            "type": [
+              "number",
+              "string",
+              "boolean",
+              "null"
+            ]
+          },
+          "unit": {
+            "oneOf": [
+              {
+                "type": "string",
+                "maxLength": 16
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "evidence_ref": {
+            "oneOf": [
+              {
+                "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gate": {
+            "type": "boolean"
+          },
+          "remedy_stage_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{2,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "verdict": {
+                  "enum": [
+                    "WARN",
+                    "SKIPPED"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "blocking": {
+                  "const": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "remedy_stage_id"
+              ],
+              "properties": {
+                "remedy_stage_id": {
+                  "type": "string"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "gate"
+              ],
+              "properties": {
+                "gate": {
+                  "const": true
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "duration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "resource_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_ms",
+        "peak_rss_bytes",
+        "tokens_in",
+        "tokens_out",
+        "tokens_cached_in",
+        "llm_calls",
+        "provider_calls",
+        "cost_estimate_micros",
+        "currency",
+        "cost_entry_ids"
+      ],
+      "properties": {
+        "cpu_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "peak_rss_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tokens_cached_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "llm_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "provider_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "render_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost_estimate_micros": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/currency"
+        },
+        "cost_entry_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/cost_entry_id"
+          }
+        }
+      }
+    },
+    "error": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.error:1.0.0"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "wait_reason",
+        "escalation_level",
+        "reason"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "CONTINUE",
+            "WAIT",
+            "RETRY",
+            "ESCALATE",
+            "STOP"
+          ]
+        },
+        "wait_reason": {
+          "enum": [
+            "DRAIN",
+            "AWAITING_APPROVAL",
+            "AWAITING_QUOTA",
+            "AWAITING_BUDGET",
+            "AWAITING_EXTERNAL",
+            "OPERATOR_PAUSE",
+            null
+          ]
+        },
+        "escalation_level": {
+          "enum": [
+            "L1",
+            "L2",
+            "L3",
+            null
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "downstream_agent": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/executor_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "timestamp": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/utc_timestamp"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SUCCEEDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object"
+          },
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "FAILED",
+              "REJECTED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "SUSPENDED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "next_action": {
+            "properties": {
+              "type": {
+                "const": "WAIT"
+              },
+              "wait_reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "REJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "null"
+          },
+          "output_refs": {
+            "maxItems": 0
+          },
+          "error": {
+            "properties": {
+              "attempt_no": {
+                "const": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

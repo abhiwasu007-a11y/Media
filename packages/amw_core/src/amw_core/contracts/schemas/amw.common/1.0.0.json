@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.common:1.0.0",
+  "title": "AMW common definitions",
+  "$defs": {
+    "uuid7_body": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "org_id": {
+      "type": "string",
+      "pattern": "^org_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "job_id": {
+      "type": "string",
+      "pattern": "^job_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "channel_id": {
+      "type": "string",
+      "pattern": "^chn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "message_id": {
+      "type": "string",
+      "pattern": "^msg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "correlation_id": {
+      "type": "string",
+      "pattern": "^cor_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "cost_entry_id": {
+      "type": "string",
+      "pattern": "^cst_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^idk_[0-9a-f]{64}$"
+    },
+    "executor_id": {
+      "type": "string",
+      "pattern": "^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3]))$"
+    },
+    "actor_ref": {
+      "type": "string",
+      "pattern": "^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|sys_[a-z_]{3,32})$"
+    },
+    "priority": {
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "NORMAL",
+        "LOW",
+        "BACKGROUND"
+      ]
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "sha256_hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "schema_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+(\\.[a-z0-9_]+)+$"
+    },
+    "storage_uri": {
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^(amw-blob://(org_[0-9a-f-]{36}|platform)/[A-Za-z0-9._/-]+|amw-entity://(org_[0-9a-f-]{36}|platform)/[a-z_]+/[a-z]{3}_[0-9a-f-]{36})$"
+    },
+    "context_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "purpose"
+      ],
+      "properties": {
+        "uri": {
+          "$ref": "#/$defs/storage_uri"
+        },
+        "purpose": {
+          "enum": [
+            "KNOWLEDGE",
+            "MEMORY",
+            "PRIOR_OUTPUT",
+            "BRAND_KIT",
+            "COMPLIANCE_PROFILE",
+            "RULE_PACK",
+            "ASSET",
+            "APPROVAL",
+            "TEMPLATE",
+            "CLIENT_INPUT"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256_hex"
+        },
+        "schema": {
+          "$ref": "#/$defs/schema_name"
+        },
+        "schema_version": {
+          "$ref": "#/$defs/semver"
+        }
+      }
+    },
+    "payload_object": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "payload_schema",
+        "payload_schema_version"
+      ],
+      "properties": {
+        "payload_schema": {
+          "$ref": "#/$defs/schema_name"
+        },
+        "payload_schema_version": {
+          "$ref": "#/$defs/semver"
+        },
+        "data": {
+          "type": "object"
+        },
+        "data_ref": {
+          "$ref": "#/$defs/storage_uri"
+        },
+        "data_sha256": {
+          "$ref": "#/$defs/sha256_hex"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "data"
+          ],
+          "not": {
+            "required": [
+              "data_ref"
+            ]
+          }
+        },
+        {
+          "required": [
+            "data_ref",
+            "data_sha256"
+          ],
+          "not": {
+            "required": [
+              "data"
+            ]
+          }
+        }
+      ]
+    },
+    "resource_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_cost_micros",
+        "currency",
+        "max_wall_ms"
+      ],
+      "properties": {
+        "max_cost_micros": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currency": {
+          "$ref": "#/$defs/currency"
+        },
+        "max_wall_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_tokens_in": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_tokens_out": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_llm_calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_render_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

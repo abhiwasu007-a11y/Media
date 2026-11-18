@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.control:1.0.0",
+  "title": "AMW Control Command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "reason",
+    "act_by",
+    "schema_version"
+  ],
+  "properties": {
+    "command": {
+      "enum": [
+        "DRAIN",
+        "CANCEL",
+        "PAUSE",
+        "RESUME"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "act_by": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/utc_timestamp"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    }
+  }
+}

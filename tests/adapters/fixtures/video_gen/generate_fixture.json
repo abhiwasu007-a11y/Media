@@ -1,0 +1,5 @@
+{
+  "operation": "video.generate",
+  "match": {"prompt": "fixture prompt"},
+  "response": {"duration_ms": 5000, "is_realistic_synthetic": false}
+}

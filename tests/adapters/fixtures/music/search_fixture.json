@@ -1,0 +1,5 @@
+{
+  "operation": "music.search",
+  "match": {"query": "fixture query"},
+  "response": {"items": [{"vendor_item_id": "track-9", "title": "Recorded track", "duration_ms": 90000}]}
+}
