@@ -30,24 +30,37 @@ Authenticity (every kind):
    and score kinds) the job wire ID; one owner message verifies exactly one subject (the store
    also refuses a second subject for one event; a multi-subject format does not exist yet).
 
-``DECISION`` kinds (``STEP_DECISION``, ``COMPLIANCE_DECISION``): review code and decision are
-mandatory and the content states the decision in the strict grammar below.
+Clarity (every kind): a message with negation or withholding language (``not``, ``cannot``,
+``don't``, ``hold``, ``नाही``, ...), a question (ends with ``?`` or opens with an interrogative;
+Marathi / Hindi interrogatives anywhere) or conditional / deferred wording (``if``, ``once``,
+``later``, ``will``, ``let me``, ``उद्या``, ...) anywhere is refused with a clarification reason
+(``Refusal.needs_clarification``): nothing is recorded and the operator asks the owner to restate.
+Tokens are matched as whole words on normalised text (NFC, case-folded, apostrophe variants
+unified), never as substrings of other words.
 
-``CONTENT`` kinds (``CONTRIBUTION``, ``OWNER_TOPIC``, ``DATASET_INTAKE``,
-``KNOWLEDGE_RELEASE_REQUEST``): no decision may be recorded; the quote must carry content, not
-only decision words / negations / references, and a contribution has at least
-``min_contribution_chars`` characters (04 section 5.16 ``editorial_contributions``).
+``DECISION`` kinds (``STEP_DECISION``, ``COMPLIANCE_DECISION``, ``KNOWLEDGE_RELEASE_REQUEST``, the
+last because a release is an authorisation): review code and decision are mandatory and the
+content states the decision in the strict grammar below.
+
+``CONTENT`` kinds (``CONTRIBUTION``, ``OWNER_TOPIC``, ``DATASET_INTAKE``): no decision may be
+recorded; the quote must carry content, not only decision words / negations / references, and a
+contribution has at least ``min_contribution_chars`` characters (04 section 5.16
+``editorial_contributions``).
 
 ``SCORE`` kinds (``HUMAN_SCORE``): no decision; at least one score; each claimed
 ``(dimension, points)`` is written in the message as ``<dimension label> <number>`` exactly (no
 inferred numbers), with ``0 <= points <= max_points`` of the 18 rubric dimension and at most two
-decimals; a dimension appears once.
+decimals; a dimension appears once. The claimed scores are bound into ``evidence_sha256`` only
+until the contract integrator decides on a ``claimed_scores`` column for
+``owner_instruction_evidence`` (requested by the PR #13 review so the DB human-row trigger can
+compare it with the ``quality_scores`` rows); this module does not add that column.
 
 Decision grammar (strict, closed): the content is split into word tokens; every token from the
 closed decision list (config ``approvals.owner_chat.decision_words.<lang>``; English and Marathi
 defaults below) must map to the same decision, one of them must stand directly next to the
-review code, and **any** negation token anywhere in the message makes it ambiguous
-(``needs_clarification``: refused; the operator asks the owner).
+review code; two different decisions are ambiguous (``needs_clarification``). Every list (decision
+words, negation, deferral and interrogative tokens, the rule table, the owner-account and
+top-level-session tests) is configuration with defaults marked **owner to confirm**.
 
 **Limitation (honest status).** The real ``SessionEventSource`` that reads the platform's session
 record is ticket 3A-13. Until then only the in-memory fake
@@ -61,6 +74,7 @@ vocabularies are not yet confirmed and are configuration. Record kinds without a
 import hashlib
 import json
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -80,6 +94,13 @@ USER_ROLE: Final = "user"
 RECORD: Final = "RECORD"
 CONFIRMATION: Final = "CONFIRMATION"
 NEEDS_CLARIFICATION: Final = "needs_clarification"
+"""Reason for a mixed or ambiguous decision (two different decision words)."""
+NEGATION_OR_WITHHOLDING: Final = "negation_or_withholding"
+QUESTION_OR_DEFERRED: Final = "question_or_deferred"
+CLARIFICATION_REASONS: Final = frozenset(
+    {NEEDS_CLARIFICATION, NEGATION_OR_WITHHOLDING, QUESTION_OR_DEFERRED}
+)
+"""Refusals where the operator must ask the owner to restate (nothing is recorded)."""
 
 # Design defaults. OWNER TO CONFIRM: the decision words (English and Marathi forms), the
 # negation tokens, the owner-account and top-level-session tests and the rule table below.
@@ -88,6 +109,7 @@ DEFAULT_DECISION_WORDS: Final[Mapping[str, ApprovalStepState]] = {
     "approve": ApprovalStepState.APPROVED,
     "approved": ApprovalStepState.APPROVED,
     "मंजूर": ApprovalStepState.APPROVED,
+    "release": ApprovalStepState.APPROVED,
     "reject": ApprovalStepState.REJECTED,
     "rejected": ApprovalStepState.REJECTED,
     "नामंजूर": ApprovalStepState.REJECTED,
@@ -95,7 +117,42 @@ DEFAULT_DECISION_WORDS: Final[Mapping[str, ApprovalStepState]] = {
     "बदल": ApprovalStepState.CHANGES_REQUESTED,
 }
 DEFAULT_NEGATION_TOKENS: Final = frozenset(
-    {"not", "no", "never", "don't", "dont", "do'nt", "nope", "नाही", "नको", "न", "नये"}
+    {
+        # English negation, contractions, modals and withholding words.
+        "not", "no", "nope", "never", "without", "cannot", "hold", "wait", "stop", "nor",
+        "don't", "dont", "doesn't", "doesnt", "didn't", "didnt", "isn't", "isnt",
+        "aren't", "arent", "wasn't", "wasnt", "can't", "cant", "won't", "wont",
+        "wouldn't", "wouldnt", "shouldn't", "shouldnt", "couldn't", "couldnt", "mustn't",
+        # Marathi.
+        "नाही", "नको", "न", "नये", "नका", "थांबा", "थांब", "थांबवा", "रोखा",
+        # Hindi-Marathi usage.
+        "नहीं", "मत", "रुको", "रोको",
+    }
+)  # fmt: skip
+DEFAULT_DEFERRAL_TOKENS: Final = frozenset(
+    {
+        # English conditional / deferred wording ("will approve", "let me", "after I check").
+        "if", "once", "later", "maybe", "perhaps", "probably", "tomorrow", "after", "let",
+        "will", "until", "unless", "when", "pending", "soon", "eventually",
+        # Marathi.
+        "नंतर", "उद्या", "कदाचित", "जर", "झाल्यावर", "बघतो", "बघू", "पाहतो", "पाहू", "करेन",
+        # Hindi-Marathi usage.
+        "बाद", "कल", "शायद", "अगर",
+    }
+)  # fmt: skip
+DEFAULT_INTERROGATIVE_FIRST_TOKENS: Final = frozenset(
+    {
+        "what", "why", "how", "who", "which", "whether", "should", "shall", "can", "could",
+        "would", "is", "are", "do", "does", "did",
+    }
+)  # fmt: skip
+"""English interrogatives, a question only when they open the message."""
+DEFAULT_INTERROGATIVE_ANY_TOKENS: Final = frozenset(
+    {"काय", "का", "कसे", "कसा", "कशी", "कधी", "केव्हा", "क्या", "क्यों", "कब", "कैसे"}
+)
+"""Marathi / Hindi interrogatives, a question wherever they occur."""
+_APOSTROPHES: Final = str.maketrans(
+    dict.fromkeys(map(chr, (0x2019, 0x2018, 0x02BC, 0x0060, 0x00B4, 0x2032)), "'")
 )
 
 
@@ -113,7 +170,8 @@ DEFAULT_RECORD_KIND_RULES: Final[Mapping[EvidenceRecordKind, VerificationKind]] 
     EvidenceRecordKind.CONTRIBUTION: VerificationKind.CONTENT,
     EvidenceRecordKind.OWNER_TOPIC: VerificationKind.CONTENT,
     EvidenceRecordKind.DATASET_INTAKE: VerificationKind.CONTENT,
-    EvidenceRecordKind.KNOWLEDGE_RELEASE_REQUEST: VerificationKind.CONTENT,
+    # A release is an authorisation (FIN-R12, Q26): decision grammar, not content rules.
+    EvidenceRecordKind.KNOWLEDGE_RELEASE_REQUEST: VerificationKind.DECISION,
     EvidenceRecordKind.HUMAN_SCORE: VerificationKind.SCORE,
 }
 DEFAULT_DIMENSION_LABELS: Final[Mapping[QualityDimension, tuple[str, ...]]] = {
@@ -207,6 +265,9 @@ class VerifierPolicy:
     )
     """Closed list of single decision words (all configured languages) -> decision."""
     negation_tokens: frozenset[str] = DEFAULT_NEGATION_TOKENS
+    deferral_tokens: frozenset[str] = DEFAULT_DEFERRAL_TOKENS
+    interrogative_first_tokens: frozenset[str] = DEFAULT_INTERROGATIVE_FIRST_TOKENS
+    interrogative_any_tokens: frozenset[str] = DEFAULT_INTERROGATIVE_ANY_TOKENS
     require_top_level_session: bool = True
     record_kind_rules: Mapping[EvidenceRecordKind, VerificationKind] = field(
         default_factory=lambda: dict(DEFAULT_RECORD_KIND_RULES)
@@ -238,6 +299,11 @@ class Refusal:
     reason: str
     checks: tuple[tuple[str, bool], ...]
 
+    @property
+    def needs_clarification(self) -> bool:
+        """The operator must ask the owner to restate; nothing may be recorded."""
+        return self.reason in CLARIFICATION_REASONS
+
 
 @dataclass(frozen=True, slots=True)
 class EventUnavailable:
@@ -254,9 +320,31 @@ _TOKEN = re.compile(
 )
 
 
+def normalise(text: str) -> str:
+    """NFC (Devanagari nukta / vowel signs composed), case-folded, apostrophe variants unified."""
+    return unicodedata.normalize("NFC", text).casefold().translate(_APOSTROPHES)
+
+
 def tokens(content: str) -> list[str]:
-    """Lower-cased word tokens (Devanagari vowel signs and virama stay inside the word)."""
-    return [t.replace("\u2019", "'") for t in _TOKEN.findall(content.casefold())]
+    """Whole-word tokens of the normalised text (Devanagari signs stay inside the word), so a
+    list entry never matches a substring of another word."""
+    return _TOKEN.findall(normalise(content))
+
+
+def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
+    """Negation / withholding, a question, or conditional / deferred wording, anywhere in the
+    message: each makes it unusable as evidence until the owner restates it."""
+    words = tokens(content)
+    if any(w in policy.negation_tokens for w in words):
+        return NEGATION_OR_WITHHOLDING
+    question = content.strip().endswith(("?", "\uff1f")) or (
+        bool(words) and words[0] in policy.interrogative_first_tokens
+    )
+    if question or any(w in policy.interrogative_any_tokens for w in words):
+        return QUESTION_OR_DEFERRED
+    if any(w in policy.deferral_tokens for w in words):
+        return QUESTION_OR_DEFERRED
+    return None
 
 
 def read_decision(
@@ -264,12 +352,13 @@ def read_decision(
 ) -> ApprovalStepState | str:
     """The decision stated in ``content`` under the strict grammar, or a refusal reason."""
     words = tokens(content)
-    code = review_code.casefold()
+    code = normalise(review_code)
     positions = [i for i, w in enumerate(words) if w == code]
     if len(positions) != 1:
         return "review_code_present"
-    if any(w in policy.negation_tokens for w in words):
-        return NEEDS_CLARIFICATION
+    problem = clarity_problem(content, policy)
+    if problem is not None:
+        return problem
     found = {policy.decision_words[w] for w in words if w in policy.decision_words}
     if len(found) != 1:
         return NEEDS_CLARIFICATION if found else "decision_matches"
@@ -280,7 +369,7 @@ def read_decision(
 
 
 def _code_once(words: list[str], code: str | None) -> bool:
-    return bool(code) and sum(1 for w in words if w == str(code).casefold()) == 1
+    return bool(code) and sum(1 for w in words if w == normalise(str(code))) == 1
 
 
 def _scores_stated(
@@ -291,7 +380,7 @@ def _scores_stated(
         if dimension in seen:
             return False
         seen.add(dimension)
-        labels = {label.casefold() for label in policy.dimension_labels.get(dimension, ())}
+        labels = {normalise(label) for label in policy.dimension_labels.get(dimension, ())}
         stated = []
         for i, word in enumerate(words[:-1]):
             if word in labels:
@@ -364,16 +453,21 @@ def verify_owner_event(
             "review_code_given": bool(evidence.review_code),
             "decision_given": evidence.parsed_decision is not None,
             "review_code_present": stated not in ("review_code_present", "review_code_given"),
+            NEGATION_OR_WITHHOLDING: stated != NEGATION_OR_WITHHOLDING,
+            QUESTION_OR_DEFERRED: stated != QUESTION_OR_DEFERRED,
             NEEDS_CLARIFICATION: stated != NEEDS_CLARIFICATION,
             "decision_adjacent": stated != "decision_adjacent",
             "decision_matches": evidence.parsed_decision is not None
             and stated == evidence.parsed_decision,
         }
     elif kind is not None:
+        problem = clarity_problem(event.content, policy)
+        checks[NEGATION_OR_WITHHOLDING] = problem != NEGATION_OR_WITHHOLDING
+        checks[QUESTION_OR_DEFERRED] = problem != QUESTION_OR_DEFERRED
         checks["decision_not_applicable"] = evidence.parsed_decision is None
         checks["subject_reference"] = code_once or (kind is not None and job_ref)
         if kind is VerificationKind.CONTENT and purpose == RECORD:
-            reference = {str(evidence.review_code).casefold(), str(evidence.job_id).casefold()}
+            reference = {normalise(str(evidence.review_code)), normalise(str(evidence.job_id))}
             carried = [
                 w
                 for w in tokens(quote)

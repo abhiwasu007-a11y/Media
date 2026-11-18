@@ -43,7 +43,7 @@ JOB = ids.JOB.new()
 SUBJECT = ids.new_id(ids.Prefix.SCRIPT)
 RA = QualityDimension.RESEARCH_ACCURACY
 ST = QualityDimension.STORYTELLING
-CONTRIBUTION_TEXT = "Add the 2008 crash as the opening example, not 2020"
+CONTRIBUTION_TEXT = "Use the 2008 crash as the opening example instead of 2020"
 TEXT = CONTRIBUTION_TEXT
 
 
@@ -101,7 +101,6 @@ CONTENT_KINDS = [
     EvidenceRecordKind.CONTRIBUTION,
     EvidenceRecordKind.OWNER_TOPIC,
     EvidenceRecordKind.DATASET_INTAKE,
-    EvidenceRecordKind.KNOWLEDGE_RELEASE_REQUEST,
 ]
 
 
