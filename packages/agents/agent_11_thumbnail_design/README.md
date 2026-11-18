@@ -13,7 +13,8 @@ image-provider call, no real person, no upload. Software status: built in the de
 | Shaping stack in the wheel | libraqm 0.11.0, HarfBuzz 14.5.0 (bundled in the wheel), FreeType 2.14.3; FriBiDi 1.0.13 is reported by `PIL.features` |
 | Licences (from the wheel metadata and `licenses/LICENSE`) | Pillow: MIT-CMU (HPND style); HarfBuzz: "Old MIT"; Raqm: MIT; FreeType: FreeType licence (FTL) or GPLv2; FriBiDi: LGPL-2.1 (a separate library; the wheel does not bundle it) |
 | Glyph coverage check | fontTools 4.68.0 (MIT), cmap lookup per character (`a11.q.language_glyphs`) |
-| Fallback when Raqm is absent | none: `render` raises `ComposeFailedError` (a basic layout would draw unshaped conjuncts) |
+| Fallback when Raqm is absent | none. `a11.pre.config` checks `raqm_available()` before any model call and raises the permanent `MISSING_DEPENDENCY`; `render` raises `ComposeFailedError` as a second line (a basic layout would draw unshaped conjuncts) |
+| System dependency | Raqm in the wheel loads the system library `libfribidi.so.0` (not bundled in the wheel): install it (Debian: `libfribidi0`) on every worker, otherwise tasks fail closed with `MISSING_DEPENDENCY` |
 | Output | PNG, 8-bit RGB, no metadata, `compress_level=6`, `optimize=False`; byte-identical for equal inputs (test `test_byte_identical_across_runs_and_instances`, canary `CANARY_SHA256`) |
 
 ### Devanagari shaping evidence
@@ -52,7 +53,7 @@ hashes and counts only (test `test_s05_...`). Tests: `test_s01_cross_tenant_payl
 ## Tests
 
 `tests/agents/agent_11_thumbnail_design/`: the 66 `composer_engine` cases (`test_ce_*`), the 31 `thumbnail_concepts` cases with
-assertions A1..A15 against the deterministic baseline and replayed through `amw_evals.run_eval` (`test_eval_concepts.py`),
+assertions A1..A12, A14, A15 (A13 not implemented; A8 circular; A11 and A15 partial, see the module docstring) against the deterministic baseline and replayed through `amw_evals.run_eval` (`test_eval_concepts.py`),
 23 checks with pass/fail fixtures (`test_checks.py`), composer determinism and shaping (`test_composer.py`), whole-task, failure
 injection, revision, replay, tenancy and security tests (`test_stage.py`).
 
@@ -63,7 +64,7 @@ injection, revision, replay, tenancy and security tests (`test_stage.py`).
 3. Memory digest (`a11.set_digest`, `memory_items`) is not written: no memory port in `amw_core` yet.
 4. Checkpoints CK1..CK3 are written; a resume that reads them (FI-08 kill mid-composition) is not implemented. Repeated LLM calls are
    already prevented by the `llm.call` idempotency key, and blobs are write-once; the resume path and its test are open.
-5. The judged part of `thumbnail_concepts` (J1..J4, judge prompt, online model) is not run: no paid call. CI runs A1..A15 on the
+5. The judged part of `thumbnail_concepts` (J1..J4, judge prompt, online model) is not run: no paid call. CI runs A1..A12, A14, A15 (partial, A13 missing) on the
    deterministic baseline only; the baseline is not the model and its pass says nothing about model quality.
 6. The finance marker lists, injection phrases and neutral words are injected (`Lexicons`); production lists are 13 / rule-pack
    content. The lists used in tests are fixtures.
@@ -73,3 +74,23 @@ injection, revision, replay, tenancy and security tests (`test_stage.py`).
 9. Official thumbnail spec (dimensions, formats) and the preview-size threshold are `REQUIRES REVIEW`; `a11.q.preview_legibility`
    is `WARN` until its threshold is configured.
 10. Composition and checks run per task in one process; measured time and memory (P-01, P-03 over 100 runs) are not recorded.
+
+## Review fixes (PR #39) and remaining gaps
+
+Fixed: fail-closed `a11.pre.config` (empty finance markers, injection lists, missing platform or finance rule pack, prompt hash
+mismatch, Raqm) before any model call; the promise statement is screened like the title; Devanagari edge stripping removes only
+punctuation and symbols (whole-word matching, no stemming); whole-set blocking checks run before any blob, asset or ledger row is
+written; an `IN_FLIGHT` LLM call is the retryable `LOCK_CONFLICT` and a stale `RECONCILE` key is marked failed and re-run (a
+completion has no external effect to look up); `ASSET` context refs are tenant-checked (`CROSS_TENANT_REF` plus the
+`security.cross_tenant_ref` audit event) and must resolve (`MISSING_DEPENDENCY`).
+
+Still open (disclosed, not fixed here):
+- Text normalisation is a package-local seam (`textutil.py`); `amw_core.text_normalise` is not on `origin/main` yet.
+- Persistence order: blobs are put inside the tenant transaction, so a database rollback after a successful put leaves complete,
+  content-addressed blobs without rows (never a partial file; a replay reuses them). The manifest is written after the commit.
+- A kill between the commit and the manifest write is completed by a replay; there is no resume from checkpoints (open item 4).
+- Minors not addressed: owner `IMAGE` is always direction-neutral on finance (owner question), `chart_stills_used` is always empty,
+  `max_llm_calls` is the literal 2, `max_wall_ms` is not enforced, the port `NewLedgerRow` lacks `licence_id` and `recorded_by`,
+  checkpoints are thinner than blueprint section 16, no `thumb.*` structured log events, one flat finance list instead of one per
+  language, the canary pins Latin text only (no Devanagari canary), a refusal is always labelled `PROMISE_IS_A_CALL`.
+- The ledger-row check now runs on the planned rows before writing and is verified against the written rows inside the transaction.

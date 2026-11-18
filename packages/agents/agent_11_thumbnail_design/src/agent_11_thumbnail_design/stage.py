@@ -62,6 +62,7 @@ from agent_11_thumbnail_design.payload import (
 from agent_11_thumbnail_design.ports import (
     BrandKitView,
     FontRef,
+    LedgerRow,
     NewImageAsset,
     NewLedgerRow,
     OwnerAsset,
@@ -118,10 +119,13 @@ from amw_core.errors import (
     AgentCrashError,
     BudgetExhaustedError,
     CircuitOpenError,
+    ConfigInvalidError,
     CrossTenantRefError,
+    IncompleteOutputError,
     InputInvalidError,
     InsufficientInputError,
     InvalidJsonError,
+    LockConflictError,
     MissingDependencyError,
     OutputSchemaInvalidError,
     ProviderRefusalError,
@@ -228,12 +232,17 @@ class ThumbnailStage:
     def run(self, ti: TaskInput, attempt_id: str) -> TaskOutput:
         d, s = self.d, self.d.settings
         started = d.clock.monotonic_ms()
-        inp = self._parse_input(ti)
         tc = TenantContext(
             org_id=OrgId(ti.org_id),
             actor=ActorRef(AGENT_ID),
             correlation_id=CorrelationId(ti.correlation_id),
         )
+        try:
+            inp = self._parse_input(ti)
+        except CrossTenantRefError as exc:
+            # Blueprint 18 / 19.1 layer 1: a foreign reference is a security event, never a drop.
+            _append_audit(d, tc, ti, "security.cross_tenant_ref", dict(exc.details or {}))
+            raise
         run = _Run(self, ti, inp, tc, AttemptId(attempt_id))
         run.audit("thumbnail_set.started", {"iteration": inp.iteration})
         try:
@@ -270,7 +279,19 @@ class ThumbnailStage:
             refs.append(inp.previous_set_ref)
         for ref in refs:
             if storage_uri_owner(ref.uri) not in (ti.org_id, "platform"):
-                raise CrossTenantRefError("reference belongs to another tenant")
+                raise CrossTenantRefError(
+                    "reference belongs to another tenant", details={"ref_kind": "PAYLOAD_REF"}
+                )
+        for cref in ti.context_refs:
+            owner = storage_uri_owner(cref.uri)
+            allowed = (
+                (ti.org_id,) if cref.purpose is ContextRefPurpose.ASSET else (ti.org_id, "platform")
+            )
+            if owner not in allowed:
+                raise CrossTenantRefError(
+                    "context reference belongs to another tenant",
+                    details={"ref_kind": "CONTEXT_REF", "purpose": str(cref.purpose)},
+                )
         return inp
 
 
@@ -326,6 +347,27 @@ class _Result:
         )
 
 
+def _append_audit(
+    d: StageDeps, tc: TenantContext, ti: TaskInput, action: str, details: dict[str, Any]
+) -> None:
+    with d.tenancy.transaction(tc) as t:
+        d.audit.append(
+            t,
+            NewAuditEntry(
+                actor_kind=ActorKind.AGENT,
+                actor_ref=ActorRef(AGENT_ID),
+                authority=AGENT_ID,
+                action=action,
+                target_kind="job",
+                target_id=ti.job_id,
+                occurred_at=d.clock.now(),
+                job_id=JobId(ti.job_id),
+                correlation_id=CorrelationId(ti.correlation_id),
+                details=details,
+            ),
+        )
+
+
 class _Run:
     """State of one task execution (one tenant, one job)."""
 
@@ -341,6 +383,7 @@ class _Run:
         self.s = stage.d.settings
         self.ti, self.inp, self.tc, self.attempt = ti, inp, tc, attempt
         self.calls = _Calls()
+        self.banned_words: tuple[str, ...] = ()
         self.scanner = InjectionScanner(
             stage.d.lexicons.injection_markers, stage.d.lexicons.instruction_phrases
         )
@@ -352,22 +395,7 @@ class _Run:
             yield t
 
     def audit(self, action: str, details: dict[str, Any]) -> None:
-        with self.tx() as t:
-            self.d.audit.append(
-                t,
-                NewAuditEntry(
-                    actor_kind=ActorKind.AGENT,
-                    actor_ref=ActorRef(AGENT_ID),
-                    authority=AGENT_ID,
-                    action=action,
-                    target_kind="job",
-                    target_id=self.ti.job_id,
-                    occurred_at=self.d.clock.now(),
-                    job_id=JobId(self.ti.job_id),
-                    correlation_id=CorrelationId(self.ti.correlation_id),
-                    details=details,
-                ),
-            )
+        _append_audit(self.d, self.tc, self.ti, action, details)
 
     def _read_blob(self, uri: str, sha: str) -> bytes:
         return b"".join(self.d.storage.get(self.tc, BlobUri(uri), sha))
@@ -416,9 +444,14 @@ class _Run:
             category = self.d.repo.channel_category(t, ti.channel_id or "")
             kit = self.d.repo.brand_kit(t, inp.brand_kit_ref.uri, inp.brand_kit_ref.sha256)
             font = self._pick_font(t, kit)
-            owner_assets = self.d.repo.owner_assets(
-                t, [r.uri for r in ti.context_refs if r.purpose is ContextRefPurpose.ASSET]
-            )
+            asset_uris = [r.uri for r in ti.context_refs if r.purpose is ContextRefPurpose.ASSET]
+            owner_assets = self.d.repo.owner_assets(t, asset_uris)
+            absent = sorted(set(asset_uris) - {a.uri for a in owner_assets})
+            if absent:
+                raise MissingDependencyError(
+                    "an owner asset context reference does not resolve to an asset row",
+                    details={"missing": absent},
+                )
             hints = self.d.repo.subject_hints(t, inp.shot_plan_ref.uri, inp.shot_plan_ref.sha256)
             prev_manifest = None
             if inp.previous_set_ref:
@@ -427,10 +460,12 @@ class _Run:
                 )
                 if prev_manifest is None:
                     raise MissingDependencyError("previous thumbnail set manifest is unreadable")
-        font_bytes = self._read_blob(font.uri, font.sha256)
         finance = category in self.d.lexicons.finance_categories
+        self._preflight(finance)  # a11.pre.config: fail closed before any model call
+        font_bytes = self._read_blob(font.uri, font.sha256)
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
+        self.banned_words = tuple(banned_words)
         covered_text = " ".join(
             [promise.working_title_local, brief.text_idea_local, *promise.promise_key_terms]
         )
@@ -483,8 +518,9 @@ class _Run:
             "picture_excluded": _count([e.reason for e in pic_opts.excluded]),
             "templates_offered": len(templates),
         }
-        call = finance and finance_text_hit(
-            promise.working_title_local, self.d.lexicons.finance_markers
+        call = finance and any(
+            finance_text_hit(text, self.d.lexicons.finance_markers)
+            for text in (promise.working_title_local, promise.promise_statement)
         )
         if call or not text_opts.options:
             reason = "PROMISE_IS_A_CALL" if call else "NO_ELIGIBLE_TEXT"
@@ -539,6 +575,36 @@ class _Run:
             stats,
             hints_count=len(hints),
         )
+
+    def _preflight(self, finance: bool) -> None:
+        """a11.pre.config (blueprint 6.4, 18): a missing or empty list or rule pack is
+        ``CONFIG_INVALID`` / ``MISSING_DEPENDENCY``. It is never replaced by a weaker screen."""
+        d = self.d
+        bad: list[str] = []
+
+        def blank(items: Sequence[str]) -> bool:
+            return not any(i.strip() for i in items)
+
+        if blank(d.lexicons.injection_markers):
+            bad.append("injection_markers")
+        if blank(d.lexicons.instruction_phrases):
+            bad.append("instruction_phrases")
+        if finance and blank(d.lexicons.finance_markers):
+            bad.append("compliance.finance_sebi_in.markers")
+        if not d.prompt.text.strip() or _sha(d.prompt.text.encode("utf-8")) != d.prompt.sha256:
+            bad.append("prompt_sha256_mismatch")
+        needed = ["rp.youtube_general", *(["rp.finance_sebi_in"] if finance else [])]
+        bad.extend(f"rule_pack:{t}" for t in needed if not d.packs.platform.get(t, "").strip())
+        if bad:
+            raise ConfigInvalidError(
+                "required list, rule pack or prompt is absent, empty or altered",
+                details={"check_id": "a11.pre.config", "violations": sorted(bad)},
+            )
+        if not d.composer.raqm_available():
+            raise MissingDependencyError(
+                "the Raqm layout engine (libraqm with system libfribidi) is not available",
+                details={"check_id": "a11.pre.config", "missing": ["raqm"]},
+            )
 
     def _script_gate(self, script: Any) -> None:
         if script.verified_sha256 is None or not (
@@ -782,6 +848,7 @@ class _Run:
             self.ti.org_id, "llm.call", [self.ti.task_id, "concepts", call_seq]
         )
         req_sha = _sha(request.model_dump_json().encode("utf-8"))
+        reconciled = False
         with self.tx() as t:
             est = (len(request.system) + sum(len(m.content) for m in request.messages)) // 4
             d.budget.check_call(
@@ -811,8 +878,25 @@ class _Run:
                 head = d.storage.head(self.tc, BlobUri(uri))
                 self.calls.records.append({"call_seq": call_seq, "replayed": True})
                 return self._read_blob(uri, head.sha256 or "").decode("utf-8")
+            if decision.action is BeginAction.IN_FLIGHT:
+                raise LockConflictError("another attempt holds this LLM call; retry later")
+            if decision.action is BeginAction.RECONCILE:
+                # 07 section 11: a completion has no external effect to look up (nothing is
+                # written by the provider), so the reconciliation is to mark the stale key FAILED
+                # (its cost, if any, is unknown and stays unrecorded) and run the call again.
+                d.idem.fail(t, key, d.clock.now())
+                reconciled = True
+                decision = d.idem.begin(
+                    t,
+                    key,
+                    "llm.call",
+                    req_sha,
+                    TaskId(self.ti.task_id),
+                    d.clock.now(),
+                    s.timeout_ms + 5000,
+                )
             if decision.action is not BeginAction.PROCEED:
-                raise InputInvalidError("a concurrent attempt holds this LLM call")
+                raise LockConflictError("the LLM call could not be reconciled; retry later")
             try:
                 response = d.llm.complete(request, idempotency_key=key)
             except Exception:
@@ -866,6 +950,7 @@ class _Run:
                 "tokens_out": u.tokens_out or 0,
                 "tokens_cached_in": u.tokens_cached_in or 0,
                 "cost_entry_id": str(entry.id),
+                "reconciled_stale_key": reconciled,
             }
         )
         return response.text
@@ -1069,6 +1154,33 @@ class _Run:
                     "template, glyph-set or font asset is not registered for the tenant",
                     details={"missing": [list(k) for k in missing]},
                 )
+            # Whole-set blocking checks run BEFORE any blob, asset row or ledger row is written
+            # (03 9.2, blueprint 6.7): a licence or set failure leaves nothing behind.
+            planned: list[tuple[str, str]] = []
+            for _pick, facts, _rr, _spec in built:
+                planned += [
+                    (registered[("TEMPLATE", facts.template_key)].asset_id, "TEMPLATE"),
+                    (registered[("FONT", font.asset_id)].asset_id, "FONT"),
+                ]
+                if facts.picture.kind == "OWNER_IMAGE":
+                    planned.append((owner_by_sha[facts.picture.key].asset_id, "IMAGE"))
+                elif facts.picture.kind == "CODE_GLYPH":
+                    planned.append((registered[("TEMPLATE", "glyphset")].asset_id, "TEMPLATE"))
+            expected = [LedgerRow(a, k, job, False) for a, k in planned]
+            checks = self._set_checks(
+                promise,
+                built,
+                step,
+                finance,
+                safe,
+                corner,
+                self._licence_facts(built, owner_by_sha, registered, expected, job, font),
+            )
+            failed = [r.check_id for r in checks if r.blocking and r.verdict.value == "FAIL"]
+            if failed:
+                raise QualityRepeatedFailureError(
+                    "blocking checks failed", details={"check_ids": failed}
+                )
             for _pick, facts, rr, _spec in built:
                 name = f"{job}/{facts.variant_id}-{_sha(rr.png)[:16]}.png"
                 uri, sha, size = self._put("thumbnails", name, rr.png)
@@ -1104,6 +1216,9 @@ class _Run:
                         ),
                     )
             ledger = self.d.repo.ledger_rows(t, job)
+            written = {(r.asset_id, r.usage_kind) for r in ledger if r.job_id == job}
+            if not set(planned) <= written:  # rolls the whole transaction back
+                raise IncompleteOutputError("a licence ledger row was not written")
         for i in range(len(built)):
             self._checkpoint(f"CK3_VARIANT_{i + 1}", {"sha256": files[i][3], "check": "persisted"})
         manifest_variants = []
@@ -1190,7 +1305,6 @@ class _Run:
         set_hash = set_sha256(base)
         manifest = Manifest.model_validate({**base, "set_sha256": set_hash})
         manifest_bytes = canonical_json(manifest.model_dump(mode="json"))
-        facts_all = self._licence_facts(built, owner_by_sha, registered, ledger, job, font)
         fallback_ids = tuple(
             p.concept.concept_id for p in (b[0] for b in built) if p.planned_by == "FALLBACK"
         )
@@ -1221,35 +1335,6 @@ class _Run:
             refusal=None,
             provenance=self._provenance(font),
         )
-        checks = run_checks(
-            CheckContext(
-                settings=s,
-                verdict=ComplianceVerdict.ALLOWED,
-                finance=finance,
-                requested=self.inp.variant_count,
-                variants=tuple(b[1] for b in built),
-                promise_key_terms=tuple(promise.promise_key_terms),
-                must_not_promise=tuple(step.brief.must_not_promise),
-                banned_words=(),
-                fin_lexicon=self.d.lexicons.finance_markers,
-                faces_allowed=s.faces_allowed,
-                licence_facts=facts_all,
-                schema_ok=True,
-                llm_calls=self.calls.paid,
-                cost_micros=self.calls.cost_micros,
-                reserved_micros=self.ti.resource_budget.max_cost_micros,
-                max_cost_micros=self.ti.resource_budget.max_cost_micros,
-                cost_entry_ids=tuple(self.calls.cost_entry_ids),
-                llm_fallback_code=self.calls.fallback_code,
-                safe_rect=safe,
-                reserved_corner_rect=corner,
-            )
-        )
-        failed = [r.check_id for r in checks if r.blocking and r.verdict.value == "FAIL"]
-        if failed:
-            raise QualityRepeatedFailureError(
-                "blocking checks failed", details={"check_ids": failed}
-            )
         m_uri, m_sha, m_size = self._put(
             "thumbnails", f"{job}/manifest-{set_hash[:16]}.json", manifest_bytes
         )
@@ -1281,6 +1366,42 @@ class _Run:
             self.calls,
             self.ti.resource_budget.currency,
             len(built),
+        )
+
+    def _set_checks(
+        self,
+        promise: Any,
+        built: list[Any],
+        step: StepIn,
+        finance: bool,
+        safe: tuple[int, int, int, int],
+        corner: tuple[int, int, int, int],
+        facts_all: tuple[LicenceFact, ...],
+    ) -> list[Any]:
+        s = self.s
+        return run_checks(
+            CheckContext(
+                settings=s,
+                verdict=ComplianceVerdict.ALLOWED,
+                finance=finance,
+                requested=self.inp.variant_count,
+                variants=tuple(b[1] for b in built),
+                promise_key_terms=tuple(promise.promise_key_terms),
+                must_not_promise=tuple(step.brief.must_not_promise),
+                banned_words=self.banned_words,
+                fin_lexicon=self.d.lexicons.finance_markers,
+                faces_allowed=s.faces_allowed,
+                licence_facts=facts_all,
+                schema_ok=True,
+                llm_calls=self.calls.paid,
+                cost_micros=self.calls.cost_micros,
+                reserved_micros=self.ti.resource_budget.max_cost_micros,
+                max_cost_micros=self.ti.resource_budget.max_cost_micros,
+                cost_entry_ids=tuple(self.calls.cost_entry_ids),
+                llm_fallback_code=self.calls.fallback_code,
+                safe_rect=safe,
+                reserved_corner_rect=corner,
+            )
         )
 
     def _licence_facts(
@@ -1409,7 +1530,7 @@ class _Run:
             variants=(),
             promise_key_terms=(),
             must_not_promise=(),
-            banned_words=(),
+            banned_words=self.banned_words,
             fin_lexicon=self.d.lexicons.finance_markers,
             faces_allowed=self.s.faces_allowed,
             licence_facts=(),

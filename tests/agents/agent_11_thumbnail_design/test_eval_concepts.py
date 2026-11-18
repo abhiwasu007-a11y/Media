@@ -1,8 +1,15 @@
 """R-01: the ``thumbnail_concepts`` dataset (31 cases) against the deterministic baseline.
 
 The judged criteria (J1..J4) and the online model are not run here (no paid call in CI); the
-deterministic assertions A1..A15 of the dataset README are evaluated on the baseline output, and the
+deterministic assertions of the dataset README are evaluated on the baseline output, and the
 same outputs are replayed through ``amw_evals.run_eval`` as recorded responses.
+
+What this module does NOT establish (review PR #39, M8): A13 is not implemented (no key is
+computed, so nothing is asserted for it); A11 does not check the five-consecutive-word rule; A15
+does not compare emphasis style or accent role; A8 is computed by the package's own G7 guard, so it
+is a self-consistency check, not an independent one. The baseline is not a model and re-implements
+the code pre-screens with dataset-tailored fixture lists, so all 31 passes are plumbing evidence
+for the post-checks, not a measure of model quality.
 """
 
 import json

@@ -4,7 +4,6 @@ import re
 import unicodedata
 
 _WS = re.compile(r"\s+")
-_PUNCT = re.compile(r"^[\W_]+|[\W_]+$", re.UNICODE)
 FIN_SYMBOLS = frozenset("₹$€£¥%")
 
 
@@ -21,9 +20,25 @@ def words(text: str) -> list[str]:
     return normalise(text).split(" ") if normalise(text) else []
 
 
+def _is_edge_noise(ch: str) -> bool:
+    """Punctuation (P*) and symbols (S*) only. Letters, digits and combining marks (Devanagari
+    vowel signs, virama, anusvara: categories Mc/Mn) are part of the word and are never stripped."""
+    return unicodedata.category(ch)[0] in ("P", "S")
+
+
+def _strip_edges(word: str) -> str:
+    start, end = 0, len(word)
+    while start < end and _is_edge_noise(word[start]):
+        start += 1
+    while end > start and _is_edge_noise(word[end - 1]):
+        end -= 1
+    return word[start:end]
+
+
 def folded_words(text: str) -> list[str]:
-    """Case-folded words with edge punctuation removed (whole-word matching)."""
-    out = [_PUNCT.sub("", w) for w in fold(text).split(" ")]
+    """Case-folded words with edge punctuation removed; whole-word matching only (no stemming,
+    no prefix match), so an inflected form is a different word (blueprint 6.2)."""
+    out = [_strip_edges(w) for w in fold(text).split(" ")]
     return [w for w in out if w]
 
 
