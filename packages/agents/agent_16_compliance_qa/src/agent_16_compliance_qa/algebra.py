@@ -68,8 +68,18 @@ def post_check(inp: PolicyInput, out: PolicyOutput) -> PolicyCheck:
         old = check.findings.get(key)
         if old is None or _FINDING_RANK[f.finding] > _FINDING_RANK[old.finding]:
             check.findings[key] = f
-    check.frame_tests = {t.item_id: t for t in out.frame_tests if t.item_id in items}
+    for t in out.frame_tests:  # M2: the worst test per item wins; a pass never overrides a fail
+        if t.item_id not in items:
+            continue
+        old_t = check.frame_tests.get(t.item_id)
+        if old_t is None or (frame_test_fails(t) and not frame_test_fails(old_t)):
+            check.frame_tests[t.item_id] = t
     return check
+
+
+def frame_test_fails(t: FrameTest) -> bool:
+    """V7: either part of the R13 two-part frame test not met (13 section 5.4)."""
+    return not t.past_tense_frame or t.leaves_expectation
 
 
 def _row(
@@ -130,7 +140,7 @@ def judged_rule(
         test = check.frame_tests.get(item.item_id)
         if test is None and check.refusal_reason is None:
             rows.append(_row(rule, CheckVerdict.WARN, nhr, "frame test missing (A9)", item))
-        elif test is not None and (not test.past_tense_frame or test.leaves_expectation):
+        elif test is not None and frame_test_fails(test):
             rows.append(_row(rule, CheckVerdict.FAIL, blocked, "frame test not met (V7)", item))
         if (
             finding != "VIOLATION"

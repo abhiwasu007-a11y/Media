@@ -597,3 +597,81 @@ def test_uniqueness_masked_identity_ignores_zero_width_characters() -> None:
     template = [Segment(section_role="HOOK", text="Today we learn {topic} in five steps.")]
     script = [Segment(section_role="HOOK", text="To\u200bday we le\u00adarn gaps in five steps.")]
     assert masked_identical(script, template)
+
+
+@pytest.mark.parametrize(
+    "verdict", [ComplianceVerdict.BLOCKED, ComplianceVerdict.NEEDS_HUMAN_REVIEW]
+)
+def test_uniqueness_verdict_is_a_gate_row_and_blocked_never_passes(
+    verdict: ComplianceVerdict,
+) -> None:
+    """Review M1: the algebra's verdict, ``gate_verdict``, the gate results and next_action
+    agree."""
+    from agent_16_compliance_qa.gate import review_requests
+
+    d = gate().evaluate(clean_inputs(uniqueness_verdict=verdict))
+    assert d.verdict is verdict
+    vr = validation_results(d, ROUTING, packs())
+    payload = gate_payload(d, {}, ROUTING, packs(), [], {})
+    na = next_action_for(d.verdict, vr)
+    if verdict is ComplianceVerdict.BLOCKED:
+        assert payload["gate_verdict"] == "FAILED"
+        blocking = [r for r in vr if r.blocking]
+        assert blocking and all(r.gate and r.remedy_stage_id for r in blocking)
+        assert na.reason.startswith("gate FAILED") and "ytg.r1" in na.reason
+    else:
+        assert payload["gate_verdict"] == "PASSED" and na.type.value == "ESCALATE"
+        assert any(r["rule_id"] == "YTG-R1" for r in review_requests(d))
+
+
+def test_warning_severity_fail_is_warn_and_never_blocks() -> None:
+    """V8: a deterministic failure of a WARNING-severity rule is WARN; the verdict is not
+    BLOCKED while the results say nothing blocks."""
+    row, body = pack("rp.finance_sebi_in", FIN)
+    row = row.model_copy(update={"rules": dict.fromkeys(FIN, "BLOCKING") | {"FIN-R9": "WARNING"}})
+    yt, ybody = pack("rp.youtube_general", YTG)
+    p = load_packs([yt], [row], {yt.rule_pack_id: ybody, row.rule_pack_id: body})
+    g = ComplianceGate(config(), p, Calls(), no_para, frames_clean)
+    d = g.evaluate(clean_inputs(charts=[R.ChartAge(chart_id="c1", age_days=12)]))
+    vr = validation_results(d, ROUTING, p)
+    r9 = next(r for r in vr if r.rule_id == "FIN-R9")
+    assert r9.verdict.value == "WARN" and not r9.blocking
+    assert d.verdict is not ComplianceVerdict.BLOCKED
+    assert gate_payload(d, {}, ROUTING, p, [], {})["gate_verdict"] == "PASSED"
+
+
+def test_blocked_verdict_without_a_blocking_row_fails_closed() -> None:
+    from agent_16_compliance_qa.checks import failed
+
+    d = gate().evaluate(clean_inputs())
+    forged = d.model_copy(update={"verdict": ComplianceVerdict.BLOCKED})
+    vr = validation_results(forged, ROUTING, packs())
+    assert any(r.check_id == "a16.gate.verdict" and r.blocking for r in vr)
+    assert next_action_for(ComplianceVerdict.BLOCKED, []).reason.startswith("gate FAILED")
+    assert failed("FIN-R9", "x").compliance_verdict is ComplianceVerdict.BLOCKED
+
+
+def _frame_reply(*, duplicate: bool) -> Any:
+    def reply(batch: Any) -> PolicyOutput:
+        out = policy_reply(batch)
+        bad = tuple(t.model_copy(update={"leaves_expectation": True}) for t in out.frame_tests)
+        return out.model_copy(
+            update={"frame_tests": (*bad, *out.frame_tests) if duplicate else bad}
+        )
+
+    return reply
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_a_failing_frame_test_is_never_overridden_by_a_later_pass(duplicate: bool) -> None:
+    """Review M2 (P-01): failing V7 frame test then a passing duplicate for the same item."""
+    d = gate(Calls(_frame_reply(duplicate=duplicate))).evaluate(clean_inputs())
+    assert d.verdict is ComplianceVerdict.BLOCKED
+    from agent_16_compliance_qa.algebra import post_check
+    from agent_16_compliance_qa.judge.models import PolicyInput
+
+    calls = Calls(_frame_reply(duplicate=True))
+    gate(calls).evaluate(clean_inputs())
+    b = calls.batches[0]
+    pc = post_check(PolicyInput.model_validate(b.model_dump()), _frame_reply(duplicate=True)(b))
+    assert all(t.leaves_expectation for t in pc.frame_tests.values())

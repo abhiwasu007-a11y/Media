@@ -322,7 +322,11 @@ class ComplianceGate:
                     },
                 )
             )
-        rules = [*det, *judged]
+        rules = [apply_severity(r, self._packs) for r in (*det, *judged)]
+        if inp.uniqueness_verdict is not ComplianceVerdict.ALLOWED and "YTG-R1" in (
+            self._packs.active_rule_ids
+        ):
+            rules.append(uniqueness_rule(inp.uniqueness_verdict))
         presenter = [f.compliance_verdict for f in frames]  # V10 adds NHR only, never BLOCKED
         verdict = overall_verdict(
             rules,
@@ -345,6 +349,36 @@ class ComplianceGate:
             quote_failures=quote_failures,
             judge_calls=calls,
         )
+
+
+def apply_severity(result: RuleResult, packs: LoadedPacks) -> RuleResult:
+    """V8 (review M1): a failing WARNING-severity rule is ``WARN`` with no compliance verdict,
+    so the algebra's verdict and the blocking gate results always agree."""
+    if (
+        result.compliance_verdict is ComplianceVerdict.BLOCKED
+        and result.rule_id in packs.active_rule_ids
+        and packs.severity(result.rule_id) != "BLOCKING"
+    ):
+        return result.model_copy(
+            update={
+                "check_verdict": CheckVerdict.WARN,
+                "compliance_verdict": None,
+                "rationale": f"warning-severity rule (V8): {result.rationale}"[:1000],
+            }
+        )
+    return result
+
+
+def uniqueness_rule(verdict: ComplianceVerdict) -> RuleResult:
+    """The S2 uniqueness verdict as the YTG-R1 gate row (blocked => script revision)."""
+    blocked = verdict is ComplianceVerdict.BLOCKED
+    return RuleResult(
+        rule_id="YTG-R1",
+        check_verdict=CheckVerdict.FAIL if blocked else CheckVerdict.WARN,
+        compliance_verdict=verdict,
+        rationale=f"svc_s02 uniqueness verdict {verdict.value}",
+        remedy="script",
+    )
 
 
 def rule_rows(decision: GateDecision) -> list[RuleResult]:
@@ -419,6 +453,19 @@ def validation_results(
                 message=f.rationale or f.finding,
                 gate=True,
                 remedy_stage_id=routing.assets_stage_id if f.blocking else None,
+            )
+        )
+    if decision.verdict is ComplianceVerdict.BLOCKED and not any(r.blocking for r in out):
+        out.append(  # fail closed: a BLOCKED verdict always carries a blocking gate result
+            ValidationResult(
+                check_id="a16.gate.verdict",
+                kind=CheckKind.DETERMINISTIC,
+                verdict=CheckVerdict.FAIL,
+                blocking=True,
+                rule_id=None,
+                message="compliance verdict BLOCKED",
+                gate=True,
+                remedy_stage_id=routing.script_stage_id,
             )
         )
     return out

@@ -63,6 +63,8 @@ def next_action_for(verdict: ComplianceVerdict, results: Sequence[ValidationResu
     failing = [
         r.check_id for r in results if r.gate and r.blocking and r.verdict is CheckVerdict.FAIL
     ]
+    if verdict is ComplianceVerdict.BLOCKED and not failing:
+        failing = ["verdict.BLOCKED"]  # fail closed (review M1): BLOCKED is never "gate PASSED"
     if verdict is ComplianceVerdict.NEEDS_HUMAN_REVIEW and not failing:
         return NextAction(
             type=NextActionType.ESCALATE,
