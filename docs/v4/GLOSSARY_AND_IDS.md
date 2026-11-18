@@ -174,7 +174,7 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 | Step schema name (CCR-018) | `<task_type>.<step>.input` / `<task_type>.<step>.output`, one pair per LLM step inside a task type; `<step>` is snake case and equals the prompt's `<task>` part where a prompt exists | `agent_09.shot_plan.direction.output` |
 | Agent document schema (CCR-018) | `<agent_id>.<snake_case>`: a blob document owned by one agent that is not a task payload (e.g. a script document, a pronunciation dictionary) | `agent_05.script_document` |
 | External reference ID (CCR-044) | `ext_` + 24 lowercase hex = the first 24 hex characters of SHA-256 over the canonical `{"org_id": …, "url": <normalised URL>}`; the org part makes the ID tenant-specific; never a primary key | `ext_3f9a…` |
-| Contract schema name | `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control` (03); `amw.production_type` (registry record, 24 §2) | — |
+| Contract schema name | `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`, `amw.owner_topic` (03; CCR-006); `amw.production_type` (registry record, 24 §2) | — |
 | Schema `$id` | `urn:amw:schema:<schema name>:<semver>` | `urn:amw:schema:amw.task_input:1.0.0` |
 | Production type key | `UPPER_SNAKE` (§6.48) + integer version | `CHANNEL_LONG_FORM` v1 |
 | Rule pack key | `rp.<snake_case>` (§6.37) + integer version | `rp.finance_sebi_in` v1 |
