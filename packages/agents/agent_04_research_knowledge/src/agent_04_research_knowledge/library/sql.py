@@ -114,13 +114,6 @@ FROM approvals
 WHERE org_id = %(org_id)s AND id = %(approval_id)s
 """
 
-SELECT_RELEASED_CHUNKS = """
-SELECT id
-FROM knowledge_chunks
-WHERE org_id = %(org_id)s AND channel_id = %(channel_id)s
-  AND collection_id = %(collection_id)s AND release_approval_id = %(approval_id)s
-"""
-
 UPDATE_SOURCE_STATUS = """
 UPDATE knowledge_sources
 SET status = %(status)s,
@@ -153,7 +146,6 @@ STATEMENTS: Mapping[str, str] = {
     "search": SEARCH,
     "chunks": SELECT_CHUNKS,
     "approval": SELECT_APPROVAL,
-    "released": SELECT_RELEASED_CHUNKS,
     "update_source": UPDATE_SOURCE_STATUS,
     "insert_chunk": INSERT_CHUNK,
     "count": COUNT_CHUNKS,
@@ -193,7 +185,7 @@ class SqlKnowledgeLibrary:
         self,
         runner: RunnerFactory,
         fts: FtsQueryBuilder,
-        documents: SubjectDocuments | None = None,
+        documents: SubjectDocuments,
     ) -> None:
         self._runner = runner
         self._fts = fts
@@ -350,26 +342,26 @@ class SqlKnowledgeLibrary:
     def released_chunk_ids(
         self, scope: TenantScope, approval_id: str, collection_id: str
     ) -> frozenset[str]:
-        """The chunk list of a per-topic release. Authoritative: the approval's ``subject_ref``
-        document (CCR-070), whose bytes must hash to ``subject_sha256``; a missing or mismatching
-        document releases nothing (fail closed). Without a document reader, the set-once pointer
-        ``knowledge_chunks.release_approval_id`` is used (documented fallback)."""
+        """The chunk list of a per-topic release (CCR-119). Authoritative: the approval's
+        ``subject_ref`` document (CCR-070), whose bytes must hash to ``subject_sha256``. An
+        unknown approval, a missing ``subject_ref``, a missing or mismatching document, or a
+        document that is not a JSON object with a ``chunk_ids`` list releases nothing (fail
+        closed). ``knowledge_chunks.release_approval_id`` is a lookup index only and never
+        decides coverage."""
         approval = self.approval(scope, approval_id)
-        if approval is not None and approval.subject_ref and self._documents is not None:
-            raw = self._documents.read(scope, approval.subject_ref)
-            if raw is None or hashlib.sha256(raw).hexdigest() != approval.subject_sha256:
-                return frozenset()
+        if approval is None or not approval.subject_ref:
+            return frozenset()
+        raw = self._documents.read(scope, approval.subject_ref)
+        if raw is None or hashlib.sha256(raw).hexdigest() != approval.subject_sha256:
+            return frozenset()
+        try:
             doc = json.loads(raw)
-            ids = doc.get("chunk_ids", []) if isinstance(doc, dict) else []
-            return frozenset(str(i) for i in ids)
-        params = {
-            **self._base(scope),
-            "approval_id": _uuid(approval_id, Prefix.APPROVAL),
-            "collection_id": _uuid(collection_id, Prefix.KNOWLEDGE_COLLECTION),
-        }
-        with self._runner(scope) as run:
-            rows = run.rows(SELECT_RELEASED_CHUNKS, params)
-        return frozenset(_wire(Prefix.KNOWLEDGE_CHUNK, r["id"]) for r in rows)
+        except ValueError:
+            return frozenset()
+        ids = doc.get("chunk_ids") if isinstance(doc, dict) else None
+        if not isinstance(ids, list):
+            return frozenset()
+        return frozenset(str(i) for i in ids)
 
     def set_source_status(
         self,

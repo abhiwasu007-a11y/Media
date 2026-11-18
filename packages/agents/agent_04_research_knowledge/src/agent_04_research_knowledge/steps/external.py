@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from html.parser import HTMLParser
 from io import BytesIO
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from agent_04_research_knowledge.errors import IdempotencyConflict, InputInvalid, RateLimited
 from agent_04_research_knowledge.ingest.chunker import split_text
@@ -21,7 +21,12 @@ from agent_04_research_knowledge.runtime import RunInfo
 from agent_04_research_knowledge.settings import ExternalSettings
 from amw_adapters.web_fetch.protocol import WebFetchAdapter, WebFetchRequest
 from amw_core.errors import Upstream5xxError
-from amw_core.ids import IdempotencyScope, make_external_ref_id, make_idempotency_key
+from amw_core.ids import (
+    IdempotencyScope,
+    make_external_ref_id,
+    make_idempotency_key,
+    normalise_reference_url,
+)
 from amw_core.interfaces import BlobStorage, BlobUri, Clock
 
 UNREACHABLE_STATUSES = frozenset({401, 403, 404, 410, 451})
@@ -64,20 +69,6 @@ def html_to_text(html: str) -> str:
     return "".join(parser.parts).strip()
 
 
-def normalise_url(url: str) -> str:
-    """Scheme and host lower-cased, fragment dropped (the glossary has no fuller rule yet)."""
-    parts = urlsplit(url)
-    return urlunsplit(
-        (
-            parts.scheme.lower(),
-            (parts.hostname or "").lower() + (f":{parts.port}" if parts.port else ""),
-            parts.path or "/",
-            parts.query,
-            "",
-        )
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class ExternalPassage:
     text: str
@@ -98,7 +89,7 @@ class FetchedSource:
 
 def fetch_key(org_id: str, task_id: str, ref_id: str, url: str) -> str:
     """Idempotency key of one reference fetch (03 section 9.2, CCR-015)."""
-    url_sha = hashlib.sha256(normalise_url(url).encode("utf-8")).hexdigest()
+    url_sha = hashlib.sha256(normalise_reference_url(url).encode("utf-8")).hexdigest()
     return make_idempotency_key(
         org_id, IdempotencyScope.FETCH_REFERENCE, [task_id, ref_id, url_sha]
     )
@@ -112,7 +103,7 @@ class ExternalReferenceFetcher:
         parts = urlsplit(url)
         if parts.scheme != "https" or not parts.hostname:
             raise InputInvalid("references must be HTTPS URLs")
-        normalised = normalise_url(url)
+        normalised = normalise_reference_url(url)
         ext_ref = make_external_ref_id(run.context.org_id, normalised)
         key = fetch_key(run.context.org_id, run.task_id, ref_id, url)
         run.effects.append(key)

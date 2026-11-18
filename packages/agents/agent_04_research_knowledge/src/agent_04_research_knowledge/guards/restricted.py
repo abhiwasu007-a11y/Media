@@ -36,7 +36,8 @@ class ApprovalLookup(Protocol):
     def approval(self, approval_id: str) -> ApprovalView | None: ...
 
     def released_chunk_ids(self, approval_id: str, collection_id: str) -> frozenset[str]:
-        """Wire IDs of the collection's chunks whose ``release_approval_id`` is the approval."""
+        """Wire IDs the approval's ``subject_ref`` document releases (CCR-119); the
+        ``release_approval_id`` pointer is a lookup index only."""
         ...
 
 

@@ -2,6 +2,9 @@
 
 Scope ``PROJECT``, key ``research_pack.<job>.<iteration>``, ``value_ref`` the pack URI. The row is
 idempotent by key; ``expires_at`` is mandatory (04 section 5.10 CHECK).
+
+The ``MemoryItems`` Protocol below is local until the core Protocol of P4-17 (CCR-130) is on main;
+then this module imports it from ``amw_core`` and keeps only ``PackMemory``.
 """
 
 from dataclasses import dataclass

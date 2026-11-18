@@ -119,6 +119,8 @@ class PgRunner:
 
 
 def make_library(scratch: dict[str, str], documents: Any = None) -> SqlKnowledgeLibrary:
+    documents = Documents({}) if documents is None else documents
+
     @contextmanager
     def factory(scope: TenantScope) -> Iterator[PgRunner]:
         with (
@@ -516,7 +518,7 @@ def test_release_gate_rg01_to_rg12_through_real_sql(
                         a,
                     ),
                 )
-            lib = make_library(scratch, Documents(docs) if document else None)
+            lib = make_library(scratch, Documents(docs) if document else Documents({}))
             out = decide_for(lib, t, col, chunk_w, topic)
             t.conn.execute("DELETE FROM knowledge_chunks WHERE id=%s", (chunk_id,))
             return out
@@ -583,9 +585,10 @@ def test_release_gate_rg01_to_rg12_through_real_sql(
         # RG-07: another org's approval is invisible under RLS and the org predicate: fails closed
         assert case(approval_org=other)["allowed"] is False
         # RG-08 (unrestricted collection ignores the flags) is covered below
-        # RG-09: per-topic release, hash from the subject document (authoritative) and pointer fallback
+        # RG-09: per-topic release, the subject document is authoritative (CCR-119); the
+        # release_approval_id pointer alone never covers a chunk (no document: fail closed)
         assert case(subject="topic", document=True) == {"allowed": True, "reason": None}
-        assert case(subject="topic", document=False) == {"allowed": True, "reason": None}
+        assert case(subject="topic", document=False)["reason"] == "RELEASE_NOT_COVERING"
         # RG-10: recorded for another topic title: the hash binds the title
         assert (
             case(
