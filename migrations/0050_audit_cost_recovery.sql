@@ -38,8 +38,11 @@ REVOKE SELECT ON audit_log FROM amw_app, amw_publisher;
 -- Monthly partitions are created ahead by the maintenance task (04 section 6).
 CREATE TABLE audit_log_default PARTITION OF audit_log DEFAULT;
 SELECT amw_setup_tenant_partition('audit_log_default');
--- Statement-level TRUNCATE triggers are not cloned to partitions: without this one the owner could
--- TRUNCATE the partition and wipe every tenant's audit rows (PR #44 review m3). The maintenance
+-- Statement-level TRUNCATE triggers are not cloned to partitions: without this one a plain
+-- TRUNCATE of the partition would wipe every tenant's audit rows (PR #44 review m3). This blocks
+-- an accidental or careless TRUNCATE only: the table owner can still DISABLE the trigger or
+-- DETACH and DROP the partition, and a superuser can bypass triggers. A deliberate wipe is not
+-- prevented here; it is detected by the per-tenant hash chain and the chain head. The maintenance
 -- task that creates each monthly partition (04 section 6) must add the same trigger.
 CREATE TRIGGER append_only_truncate BEFORE TRUNCATE ON audit_log_default
   FOR EACH STATEMENT EXECUTE FUNCTION amw_reject_modification();

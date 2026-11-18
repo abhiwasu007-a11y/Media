@@ -15,7 +15,7 @@ from amw_core.errors import CircuitOpenError, PermissionDeniedError
 from amw_core.ids import ActorRef
 from amw_core.interfaces.system_functions import BreakerKey
 from amw_core.interfaces.tenancy_context import TenantContext
-from amw_core.retries import dlq, record, require_closed_or_probe
+from amw_core.retries import dlq, record
 from amw_core.retries.breaker import new_row
 from amw_core.retries.pg import PgBreakerFunctions, PgDeadLetterStore
 from amw_core.tenancy import PgTenancy, dsn_connection_factory
@@ -40,7 +40,11 @@ MY_TABLES = (
 
 def _functions(pg_dsn: str, open_ms: int = 300) -> PgBreakerFunctions:
     cfg = settings().model_copy(
-        update={"breaker_default": BreakerSettings(open_ms=open_ms, open_ms_max=open_ms * 4)}
+        update={
+            "breaker_default": BreakerSettings(
+                open_ms=open_ms, open_ms_max=open_ms * 4, half_open_probe_timeout_ms=5_000
+            )
+        }
     )
     return PgBreakerFunctions(dsn_connection_factory(pg_dsn, role="amw_app"), cfg)
 
@@ -69,13 +73,13 @@ def test_breaker_function_matches_the_pure_state_machine(
     assert state.state is CircuitState.OPEN
     assert state.open_until is not None
     with tenancy.transaction(TenantContext(tenant_a.org_id, ADAPTER)) as tx:
-        row = fns.read(tx, key)  # tenants read the platform row
+        row = fns.read_diagnostics(tx, key)  # tenants read the platform row
         assert row is not None
         assert row.open_count == 1
         assert row.last_error_code == NET
         assert row.opened_at is not None
         with pytest.raises(CircuitOpenError):
-            require_closed_or_probe(row, row.opened_at + timedelta(milliseconds=1), cfg)
+            fns.require_admission(ADAPTER, key)
     time.sleep(0.35)  # past open_until: the next outcome is the first probe's
     assert fns.breaker_record(ADAPTER, key, True, None).state is CircuitState.HALF_OPEN
     assert fns.breaker_record(ADAPTER, key, True, None).state is CircuitState.CLOSED
@@ -85,10 +89,10 @@ def test_breaker_function_matches_the_pure_state_machine(
     reopened = fns.breaker_record(ADAPTER, key, False, "TEMPORARY.UPSTREAM_5XX")
     assert reopened.state is CircuitState.OPEN
     with tenancy.transaction(TenantContext(tenant_a.org_id, ADAPTER)) as tx:
-        again = fns.read(tx, key)
+        again = fns.read_diagnostics(tx, key)
         assert again is not None
         assert again.open_count == 2
-        assert fns.read(tx, BreakerKey("none", "x", "platform")) is None
+        assert fns.read_diagnostics(tx, BreakerKey("none", "x", "platform")) is None
 
 
 @pytest.mark.security

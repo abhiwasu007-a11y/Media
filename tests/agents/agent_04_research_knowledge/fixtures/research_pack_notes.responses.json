@@ -1,0 +1,653 @@
+{
+ "AK-01": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about stop-loss.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "DEFINITION",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "AK-02": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [
+    {
+     "passage_id": "p1",
+     "reason": "FORWARD_LOOKING"
+    }
+   ],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about bullish divergence.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "EXAMPLE_HISTORICAL",
+     "time_reference_kind": "HISTORICAL"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "AK-03": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [
+    {
+     "passage_id": "p1",
+     "reason": "PERFORMANCE_CLAIM"
+    }
+   ],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "AK-04": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [
+    {
+     "passage_id": "p1",
+     "reason": "PROMOTION"
+    }
+   ],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-10": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "INJECTION_SUSPECTED"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-11": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "INJECTION_SUSPECTED"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-12": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about stop-loss.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "DEFINITION",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-13": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    },
+    {
+     "passage_id": "p2",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about retail trading outcomes.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "STATISTIC",
+     "time_reference_kind": "TIMELESS"
+    },
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The second recorded statement restates one idea about retail trading outcomes.",
+     "note_ref": "n2",
+     "numbers_in_note": [],
+     "passage_id": "p2",
+     "statement_kind": "STATISTIC",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-14": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about risk management.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "PRINCIPLE",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-15": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about stop-loss.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "DEFINITION",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-16": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about risk per trade.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "PRINCIPLE",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-17": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    },
+    {
+     "passage_id": "p2",
+     "reason": "recorded",
+     "relevance": "IRRELEVANT"
+    },
+    {
+     "passage_id": "p3",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    },
+    {
+     "passage_id": "p4",
+     "reason": "recorded",
+     "relevance": "IRRELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about position sizing.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "MECHANISM",
+     "time_reference_kind": "TIMELESS"
+    },
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The second recorded statement restates one idea about position sizing.",
+     "note_ref": "n2",
+     "numbers_in_note": [],
+     "passage_id": "p3",
+     "statement_kind": "MECHANISM",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-18": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "TANGENTIAL"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-19": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about risk management.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "PRINCIPLE",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-20": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about drawdown.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "EXAMPLE_HISTORICAL",
+     "time_reference_kind": "HISTORICAL"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-23": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about stop-loss.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "DEFINITION",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-24": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [
+    {
+     "passage_id": "p1",
+     "reason": "RECOMMENDATION"
+    }
+   ],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about support level.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "DEFINITION",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-25": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [
+    {
+     "passage_id": "p1",
+     "reason": "FORWARD_LOOKING"
+    }
+   ],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-27": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about sleep and memory.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "MECHANISM",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "HN-05": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "IRRELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "HN-06": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "TANGENTIAL"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": null
+  }
+ },
+ "HN-07": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about risk per trade.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "PRINCIPLE",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "HN-08": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about position sizing.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "EXAMPLE_HYPOTHETICAL",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "HN-09": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about retail trading outcomes.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "STATISTIC",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "POS-26": {
+  "output": {
+   "assessments": [
+    {
+     "passage_id": "p1",
+     "reason": "recorded",
+     "relevance": "RELEVANT"
+    }
+   ],
+   "excluded_statements": [],
+   "notes": [
+    {
+     "clarity": "CLEAR",
+     "forward_looking": false,
+     "instruments": [],
+     "note": "The first recorded statement restates one idea about moving average.",
+     "note_ref": "n1",
+     "numbers_in_note": [],
+     "passage_id": "p1",
+     "statement_kind": "MECHANISM",
+     "time_reference_kind": "TIMELESS"
+    }
+   ],
+   "refusal": null
+  }
+ },
+ "REF-21": {
+  "output": {
+   "assessments": [],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [
+     "passages"
+    ],
+    "reason": "INSUFFICIENT_INPUT",
+    "violated_rule_ids": []
+   }
+  }
+ },
+ "REF-22": {
+  "output": {
+   "assessments": [],
+   "excluded_statements": [],
+   "notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R3"
+    ]
+   }
+  }
+ }
+}

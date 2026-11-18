@@ -70,6 +70,10 @@ class BreakerSettings(_Model):
     open_ms_max: int = Field(default=900_000, gt=0)
     half_open_max_probes: int = Field(default=1, ge=1)
     half_open_successes_to_close: int = Field(default=2, ge=1)
+    half_open_probe_timeout_ms: int | None = Field(default=None, gt=0)
+    """How long an admitted HALF_OPEN probe may stay unreported before its slot is reclaimed (a
+    crashed worker must not wedge the breaker). No value in 07: REQUIRES REVIEW (owner / Phase 1),
+    no default; unset, ``PgBreakerFunctions.admit`` refuses with ``CONFIG_INVALID``."""
 
     @model_validator(mode="after")
     def _open_bounds(self) -> BreakerSettings:

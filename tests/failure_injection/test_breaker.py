@@ -1,16 +1,17 @@
 """07 section 12: breaker open / half-open / close (pure state machine of 07 section 4.3)."""
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
 from amw_core.config import BreakerSettings
 from amw_core.enums import CircuitState, EscalationLevel
-from amw_core.errors import CircuitOpenError
+from amw_core.errors import ConfigInvalidError
 from amw_core.interfaces.system_functions import BreakerKey
-from amw_core.retries import admit, record, require_closed_or_probe
+from amw_core.retries import admit, record
 from amw_core.retries.breaker import (
+    BreakerRow,
     counts_as_failure,
     escalation_for,
     new_row,
@@ -20,7 +21,7 @@ from tests.core_services.support import T0
 
 pytestmark = pytest.mark.failure_injection
 KEY = BreakerKey("llm_provider", "llm.completion", "platform")
-CFG = BreakerSettings()
+CFG = BreakerSettings(half_open_probe_timeout_ms=5_000)
 NET = "TEMPORARY.NETWORK"
 
 
@@ -47,8 +48,7 @@ def test_consecutive_failures_open_then_half_open_then_close() -> None:
     assert row.open_count == 1
     assert row.open_until == T0 + _ms(5) + _ms(30_000)
     # OPEN: calls rejected without network I/O (NO_ATTEMPT)
-    with pytest.raises(CircuitOpenError):
-        require_closed_or_probe(row, T0 + _ms(1_000), CFG)
+    assert not admit(row, T0 + _ms(1_000), CFG).allowed
     # first check at/after open_until -> HALF_OPEN with one probe
     assert row.open_until is not None
     probe = admit(row, row.open_until, CFG)
@@ -149,3 +149,46 @@ def test_open_duration_formula() -> None:
         900_000,
     ]
     assert open_duration_ms(10_000, CFG) == 900_000
+
+
+def _half_open_with_a_probe() -> tuple[BreakerRow, datetime]:
+    row = new_row(KEY, T0)
+    for _ in range(5):
+        row = record(row, False, NET, T0, CFG)
+    assert row.open_until is not None
+    t = row.open_until
+    probe = admit(row, t, CFG)
+    assert probe.allowed
+    assert probe.probe
+    return probe.row, t
+
+
+def test_a_probe_that_never_reports_is_reclaimed_after_its_lease() -> None:
+    """Re-review N1: a crash after admission must not wedge HALF_OPEN for good."""
+    row, t = _half_open_with_a_probe()
+    assert row.half_open_in_flight == 1
+    assert not admit(row, t + _ms(4_999), CFG).allowed  # lease still running
+    again = admit(row, t + _ms(5_001), CFG)
+    assert again.allowed
+    assert again.probe
+    assert again.row.half_open_in_flight == 1
+    assert again.row.half_open_probe_until == t + _ms(5_001) + _ms(5_000)
+
+
+def test_probe_timeout_is_required_configuration() -> None:
+    row, t = _half_open_with_a_probe()
+    with pytest.raises(ConfigInvalidError):
+        admit(replace(row, half_open_in_flight=0), t, BreakerSettings())
+
+
+def test_a_late_result_of_a_call_admitted_before_the_breaker_opened_frees_no_probe() -> None:
+    """Re-review m-a: only a call admitted as a probe may release a probe slot."""
+    row, t = _half_open_with_a_probe()
+    late_ok = record(row, True, None, t + _ms(1), CFG, probe=False)
+    assert late_ok == row
+    late_fail = record(row, False, NET, t + _ms(1), CFG, probe=False)
+    assert late_fail == row
+    assert not admit(late_ok, t + _ms(2), CFG).allowed  # the real probe is still in flight
+    done = record(row, True, None, t + _ms(3), CFG, probe=True)
+    assert done.half_open_in_flight == 0
+    assert done.window_calls == 1

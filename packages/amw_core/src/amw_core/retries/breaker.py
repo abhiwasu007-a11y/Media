@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 
 from amw_core.config import BreakerSettings
 from amw_core.enums import CircuitState, EscalationLevel
-from amw_core.errors import CATALOGUE, CircuitOpenError
+from amw_core.errors import CATALOGUE, ConfigInvalidError
 from amw_core.interfaces.system_functions import BreakerKey
 
 
@@ -35,6 +35,8 @@ class BreakerRow:
     open_count: int = 0
     half_open_in_flight: int = 0
     last_error_code: str | None = None
+    half_open_probe_until: datetime | None = None
+    """Lease of the last admitted probe; once it has passed, unreported probes are reclaimed."""
 
 
 def new_row(key: BreakerKey, now: datetime) -> BreakerRow:
@@ -62,6 +64,7 @@ def _open(row: BreakerRow, now: datetime, cfg: BreakerSettings) -> BreakerRow:
         open_until=now + timedelta(milliseconds=duration),
         open_count=row.open_count + 1,
         half_open_in_flight=0,
+        half_open_probe_until=None,
         window_started_at=now,
         window_calls=0,
         window_failures=0,
@@ -73,6 +76,7 @@ def _to_half_open(row: BreakerRow, now: datetime) -> BreakerRow:
         row,
         state=CircuitState.HALF_OPEN,
         half_open_in_flight=0,
+        half_open_probe_until=None,
         window_started_at=now,
         window_calls=0,
         window_failures=0,
@@ -93,33 +97,37 @@ class Admission:
 
 
 def admit(row: BreakerRow, now: datetime, cfg: BreakerSettings) -> Admission:
-    """Check before a call (07 section 4.3): ``OPEN`` rejects without network I/O until
-    ``open_until``; the first check at or after it moves to ``HALF_OPEN``; ``HALF_OPEN`` allows up
-    to ``half_open_max_probes`` concurrent probes."""
+    """Model of ``amw_breaker_admit`` (07 section 4.3), used to prove the SQL equal to it; adapters
+    never decide from a row they read, they call ``PgBreakerFunctions.admit``. ``OPEN`` rejects
+    until ``open_until``; the first check at or after it moves to ``HALF_OPEN``; ``HALF_OPEN``
+    admits up to ``half_open_max_probes`` unreported probes, each with a lease of
+    ``half_open_probe_timeout_ms`` after which unreported probes are reclaimed."""
     if row.state is CircuitState.CLOSED:
         return Admission(True, row)
     if row.state is CircuitState.OPEN:
         if row.open_until is not None and now < row.open_until:
             return Admission(False, row)
         row = _to_half_open(row, now)
+    if (
+        row.half_open_in_flight > 0
+        and row.half_open_probe_until is not None
+        and now > row.half_open_probe_until
+    ):
+        row = replace(row, half_open_in_flight=0)
     if row.half_open_in_flight >= cfg.half_open_max_probes:
         return Admission(False, row)
-    return Admission(True, replace(row, half_open_in_flight=row.half_open_in_flight + 1), True)
-
-
-def require_closed_or_probe(row: BreakerRow, now: datetime, cfg: BreakerSettings) -> Admission:
-    """``admit`` that raises ``CircuitOpenError`` (NO_ATTEMPT, 07 section 2) when refused."""
-    admission = admit(row, now, cfg)
-    if not admission.allowed:
-        raise CircuitOpenError(
-            "circuit breaker is open",
-            provider=row.key.provider,
-            details={
-                "operation_class": row.key.operation_class,
-                "open_until": row.open_until.isoformat() if row.open_until else None,
-            },
-        )
-    return admission
+    timeout = cfg.half_open_probe_timeout_ms
+    if timeout is None:
+        raise ConfigInvalidError("breaker.half_open_probe_timeout_ms is not configured")
+    return Admission(
+        True,
+        replace(
+            row,
+            half_open_in_flight=row.half_open_in_flight + 1,
+            half_open_probe_until=now + timedelta(milliseconds=timeout),
+        ),
+        True,
+    )
 
 
 def record(
@@ -128,8 +136,12 @@ def record(
     error_code: str | None,
     now: datetime,
     cfg: BreakerSettings,
+    probe: bool | None = None,
 ) -> BreakerRow:
-    """Apply one call outcome; the exact mirror of ``amw_breaker_record`` (migration 0051)."""
+    """Apply one call outcome; the exact mirror of ``amw_breaker_record`` (migration 0051).
+    ``probe`` is True for a call admitted as a HALF_OPEN probe, False for one admitted while
+    CLOSED (its late result in HALF_OPEN changes nothing and frees no probe slot), None when the
+    caller does not use ``admit`` (treated as a probe)."""
     counted = (not succeeded) and counts_as_failure(error_code)
     if row.state is CircuitState.OPEN:
         if row.open_until is None or now < row.open_until:
@@ -138,6 +150,8 @@ def record(
     elif row.state is CircuitState.CLOSED:
         row = _roll_window(row, now, cfg)
     if row.state is CircuitState.HALF_OPEN:
+        if probe is False:
+            return row  # a late result of a call admitted before the breaker opened
         row = replace(row, half_open_in_flight=max(0, row.half_open_in_flight - 1))
     if not succeeded and not counted:
         return row  # not a provider fault (07 section 4.3): only the probe slot is released
@@ -156,6 +170,7 @@ def record(
                 open_until=None,
                 open_count=0,
                 half_open_in_flight=0,
+                half_open_probe_until=None,
             )
         return row
     row = replace(

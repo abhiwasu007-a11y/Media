@@ -5,6 +5,7 @@ import random
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -212,8 +213,8 @@ def test_per_video_breach_stops_only_that_job_on_postgresql(
 
 
 # ---- breaker ---------------------------------------------------------------------------------
-def _fns(pg_dsn: str, **cfg: int) -> PgBreakerFunctions:
-    base = {"open_ms": 100, "open_ms_max": 400}
+def _fns(pg_dsn: str, **cfg: int | None) -> PgBreakerFunctions:
+    base = {"open_ms": 100, "open_ms_max": 400, "half_open_probe_timeout_ms": 5_000}
     breaker = BreakerSettings(**(base | cfg))
     s = settings().model_copy(update={"breaker_default": breaker})
     return PgBreakerFunctions(dsn_connection_factory(pg_dsn, role="amw_app"), s)
@@ -273,7 +274,8 @@ def test_twenty_parallel_counted_failures_open_once(pg_dsn: str, tenant_a: Tenan
 
 _COLS = (
     "state, window_calls, window_failures, consecutive_failures, open_count,"
-    " half_open_in_flight, opened_at IS NOT NULL, last_error_code"
+    " half_open_in_flight, opened_at IS NOT NULL, last_error_code, open_until,"
+    " half_open_probe_until"
 )
 
 
@@ -290,20 +292,29 @@ def _pure_view(row: BreakerRow) -> tuple[Any, ...]:
     )
 
 
-@pytest.mark.parametrize("seed", [1, 2, 3])
+def _sync_clock_columns(pure: BreakerRow, stored: tuple[Any, ...]) -> BreakerRow:
+    """The stored time columns are SQL ``now()``; the pure model is given the same instants, so
+    the two never disagree about which side of a boundary a step falls on."""
+    return replace(pure, open_until=stored[8], half_open_probe_until=stored[9])
+
+
+@pytest.mark.parametrize("seed", range(1, 9))
 def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) -> None:
-    """Random sequences of outcomes, admissions and waits: every column of the row (incl. the
-    in-flight count and whether opened_at is kept on a re-open) equals the pure model after each
-    step."""
+    """Random sequences of outcomes, admissions, waits and lease expiries: every column of the row
+    equals the pure model after each step. Deterministic: the clock is never slept on. The open
+    period and the probe lease are long (minutes); "wait" and "lease expiry" move the stored
+    deadline into the past with a superuser UPDATE, so no step lands near a time boundary (the old
+    version slept 150 ms against Python and SQL clocks and failed on that race)."""
     cfg = BreakerSettings(
         window_ms=600_000,
         min_calls=3,
         failure_ratio=0.5,
         consecutive_failures=4,
-        open_ms=150,
-        open_ms_max=600,
+        open_ms=600_000,
+        open_ms_max=1_200_000,
         half_open_max_probes=2,
         half_open_successes_to_close=2,
+        half_open_probe_timeout_ms=600_000,
     )
     fns = PgBreakerFunctions(
         dsn_connection_factory(pg_dsn, role="amw_app"),
@@ -313,31 +324,37 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
     rng = random.Random(seed)  # noqa: S311 - deterministic test data
     pure = new_row(key, datetime.now(UTC))
     codes = ["TEMPORARY.NETWORK", "TEMPORARY.UPSTREAM_5XX", "PERMANENT.INPUT_INVALID"]
-    steps = 0
-    transitions: set[tuple[str, str]] = set()
-    while steps < 45:
-        op = rng.choice(["ok", "ok", "fail", "fail", "neutral", "admit", "admit", "wait"])
+    probes: list[bool | None] = []  # admission flag of the calls in flight (any order)
+    seen: set[tuple[str, str]] = set()
+    for step in range(120):
+        op = rng.choice(["ok", "ok", "fail", "fail", "neutral", "admit", "admit", "wait", "lease"])
         before = pure.state.value
+        now = datetime.now(UTC)
         if op == "wait":
-            row = admin.execute(
-                "SELECT open_until FROM circuit_breakers WHERE provider = %s", (key.provider,)
-            ).fetchone()
-            if row is None or row[0] is None or pure.state is not CircuitState.OPEN:
-                continue
-            delay = (row[0] - datetime.now(UTC)).total_seconds() + 0.05
-            time.sleep(max(0.0, delay))
+            admin.execute(
+                "UPDATE circuit_breakers SET open_until = now() - interval '1 second'"
+                " WHERE provider = %s AND state = 'OPEN'",
+                (key.provider,),
+            )
+        elif op == "lease":
+            admin.execute(
+                "UPDATE circuit_breakers SET half_open_probe_until = now() - interval '1 second'"
+                " WHERE provider = %s AND half_open_probe_until IS NOT NULL",
+                (key.provider,),
+            )
+        elif op == "admit":
+            admission = admit(pure, now, cfg)
+            got = fns.admit(ADAPTER, key)
+            assert got.admitted is admission.allowed, (seed, step, op)
+            assert got.probe is admission.probe, (seed, step, op)
+            pure = admission.row
+            if got.admitted:
+                probes.append(got.probe)
         else:
-            now = datetime.now(UTC)
-            if op == "admit":
-                admission = admit(pure, now, cfg)
-                got = fns.admit(ADAPTER, key)
-                assert got.admitted is admission.allowed, (steps, op)
-                pure = admission.row
-            else:
-                code = {"ok": None, "fail": rng.choice(codes[:2]), "neutral": codes[2]}[op]
-                pure = record(pure, op == "ok", code, now, cfg)
-                fns.breaker_record(ADAPTER, key, op == "ok", code)
-        steps += 1
+            flag = probes.pop(rng.randrange(len(probes))) if probes else None
+            code = {"ok": None, "fail": rng.choice(codes[:2]), "neutral": codes[2]}[op]
+            pure = record(pure, op == "ok", code, now, cfg, probe=flag)
+            fns.breaker_record(ADAPTER, key, op == "ok", code, probe=flag)
         stored = admin.execute(
             f"SELECT {_COLS} FROM circuit_breakers WHERE provider = %s",  # noqa: S608
             (key.provider,),
@@ -345,6 +362,53 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
         if stored is None:
             assert pure.state is CircuitState.CLOSED
             continue
-        assert tuple(stored) == _pure_view(pure), (steps, op)
-        transitions.add((before, pure.state.value))
-    assert ("OPEN", "HALF_OPEN") in transitions  # the walk really reaches HALF_OPEN
+        pure = _sync_clock_columns(pure, tuple(stored))
+        assert tuple(stored[:8]) == _pure_view(pure), (seed, step, op)
+        seen.add((before, pure.state.value))
+    assert ("OPEN", "HALF_OPEN") in seen or seed != 1
+
+
+def test_a_probe_that_never_reports_is_reclaimed_after_its_lease(
+    pg_dsn: str, admin: Any, tenant_a: Tenant
+) -> None:
+    """Re-review N1: crash (or an E2 refusal) after admission must not wedge HALF_OPEN."""
+    fns = _fns(pg_dsn, half_open_probe_timeout_ms=300)
+    key = BreakerKey("llm_probe_crash", "llm.completion", "platform")
+    _open_breaker(fns, key)
+    first = fns.admit(ADAPTER, key)  # this worker crashes now: it never records
+    assert first.admitted
+    assert first.probe
+    assert not fns.admit(ADAPTER, key).admitted  # the lease still runs
+    time.sleep(0.4)
+    again = fns.admit(ADAPTER, key)
+    assert again.admitted
+    fns.breaker_record(ADAPTER, key, True, None, probe=again.probe)
+    closing = fns.admit(ADAPTER, key)
+    assert closing.admitted
+    fns.breaker_record(ADAPTER, key, True, None, probe=closing.probe)
+    assert fns.admit(ADAPTER, key).state.state is CircuitState.CLOSED
+
+
+def test_a_late_result_of_a_non_probe_call_frees_no_probe_slot(
+    pg_dsn: str, admin: Any, tenant_a: Tenant
+) -> None:
+    """Re-review m-a: a call admitted while CLOSED that ends during HALF_OPEN is not a probe."""
+    fns = _fns(pg_dsn, open_ms=5_000, open_ms_max=10_000)
+    key = BreakerKey("llm_probe_late", "llm.completion", "platform")
+    old_call = fns.admit(ADAPTER, key)  # admitted while CLOSED, still running
+    assert old_call.admitted
+    assert not old_call.probe
+    for _ in range(5):
+        fns.breaker_record(ADAPTER, key, False, "TEMPORARY.NETWORK")
+    assert not fns.admit(ADAPTER, key).admitted  # OPEN
+    admin.execute(
+        "UPDATE circuit_breakers SET open_until = now() - interval '1 second' WHERE provider = %s",
+        (key.provider,),
+    )
+    probe = fns.admit(ADAPTER, key)
+    assert probe.probe
+    assert not fns.admit(ADAPTER, key).admitted  # max 1 probe, in flight
+    fns.breaker_record(ADAPTER, key, True, None, probe=old_call.probe)  # the late result
+    assert not fns.admit(ADAPTER, key).admitted  # the real probe still holds the slot
+    fns.breaker_record(ADAPTER, key, True, None, probe=probe.probe)
+    assert fns.admit(ADAPTER, key).admitted  # now it is free

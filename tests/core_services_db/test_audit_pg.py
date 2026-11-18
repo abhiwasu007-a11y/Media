@@ -181,7 +181,9 @@ def test_tenant_b_sees_none_of_tenant_a_audit_rows(
 @pytest.mark.parametrize("role", ["amw_owner", "amw_migrator", "amw_app"])
 def test_audit_partition_cannot_be_truncated(admin: Any, table: str, role: str) -> None:
     """PR #44 m3: statement triggers are not cloned to partitions; the default partition has its
-    own, so not even the owner can wipe the audit trail of every tenant."""
+    own, so a plain TRUNCATE is refused for the owner too. Not claimed: the owner can still
+    DISABLE the trigger or DETACH + DROP the partition; a deliberate wipe is detected by the
+    chain head, not prevented."""
     with admin.transaction(force_rollback=True):
         admin.execute(f"SET LOCAL ROLE {role}")
         with pytest.raises(psycopg.Error):
