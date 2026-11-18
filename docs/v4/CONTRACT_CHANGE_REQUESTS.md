@@ -272,3 +272,18 @@ Format: old name or open item → resolution. "as-is" = the blueprint's proposed
 | Q-O9 | May one owner message decide both steps of an `owner_sensitive` approval (CCR-083)? | no: one message per step |
 | Q-O10 | Audience level for the quality judge: which values, and is it part of the owner topic (CCR-084)? | not added; the judge gets no level |
 | Q-O11 | Review-code length (CCR-090) and the decision, neutral and stage words in English and Marathi | 4 characters; the Step 0 default word lists |
+
+## 7. Lane notes filed by build lanes (no variant created; the integrator decides)
+
+### Agent 07 (PR 37 review fixes)
+
+| Note | Where | Problem | Proposed change | Lane behaviour until decided |
+|---|---|---|---|---|
+| A07-N1 | `evals/agent_07_voice_production/voice_synthesis` VS-40 | expects `ledger_rows: 0` for a paid call that returned undecodable audio; FR-9 and Q-23 say every paid call has a ledger row | `ledger_rows: 1`, amount = the estimate (`figure_kind` ESTIMATE); whether the provider bills such a response is not in RESEARCH_LOG: REQUIRES REVIEW (Phase 1) | the call is recorded and debited before the audio is judged; the harness overrides VS-40 to 1 row |
+| A07-N2 | `evals/.../audio_master` AM-30 | `post_codec_true_peak_overshoot_db` 0.3 with ceiling -1.5 gives -1.2 dBTP, at or below -1.0, so no second pass can exist | overshoot at least 0.6 in the dataset | harness sets 0.6 for AM-30 only |
+| A07-N3 | 03 / 18: `codec_verification.bitrate_bps` (`>= 384000`) against CCR-055 ("measured average reported") | a measured AAC average can be below 384 kbps (163 kbps measured on a sparse synthetic tone with the native encoder); the field cannot carry it | keep `bitrate_bps` as the gated nominal rate and add `measured_bitrate_bps` (integer, nullable, no minimum) | payload carries the nominal rate; the measured average is in the stage report (`report.json`) |
+| A07-N4 | 07 blueprint 6.5 | no sourced value for `limiter_ceiling_dbtp`, `codec_headroom_step_db`, `pause_span_tolerance_ms`, `max_attempt_retries`, `max_retry_after_ms`, and the idempotency lease | give a source, or mark each "design default, REQUIRES REVIEW (Phase 1)" with a value | all six are required config keys (CONFIG_INVALID when unset); no default ships |
+| A07-N5 | 18 sections 6.4 / 7.2 | the stem is mono and the master dual-mono; BS.1770 measures that +3.01 LU louder, so a gain solved from the mono stem lands at -11 LUFS | state that the pre-measurement is taken through the master's channel map | gain is solved from the mapped measurement (`measure_mapped`) |
+| A07-N6 | 18 sections 7.2, 7.5 | FFmpeg 6.1 prints `-70.0 LUFS` (not `-inf`) for digital silence; the 7.5 voice-stem commands carry no `-map 0:a:0` | say "at or below the -70 LUFS absolute gate" is not measurable; add `-map 0:a:0` to 7.5 | such a stem is refused INPUT_INVALID; the commands keep `-map 0:a:0` |
+| A07-N7 | 07 / 18 FR-5, 6.2 | licence state `EXPIRING` is accepted next to `ACTIVE` (GLOSSARY: inside the warning window) | confirm | accepted, disclosed in the PR |
+| A07-N8 | IT-02 / 18 section 7.11 | the FFmpeg self-test on the same build is not run by the lane | name the owner of the self-test | not run; listed as a PR limit |
