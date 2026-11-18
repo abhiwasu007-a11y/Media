@@ -665,6 +665,13 @@ class ChannelStatus(StrEnum):
     DISCONNECTED = "DISCONNECTED"
 
 
+class AudienceKind(StrEnum):
+    """GLOSSARY ``audience_kind``."""
+
+    GENERAL = "GENERAL"
+    KIDS = "KIDS"
+
+
 class OauthTokenStatus(StrEnum):
     """GLOSSARY ``oauth_token_status``."""
 
@@ -760,6 +767,14 @@ class EvidenceRecordKind(StrEnum):
     OWNER_TOPIC = "OWNER_TOPIC"
     DATASET_INTAKE = "DATASET_INTAKE"
     KNOWLEDGE_RELEASE_REQUEST = "KNOWLEDGE_RELEASE_REQUEST"
+
+
+class EvidenceVerificationKind(StrEnum):
+    """GLOSSARY ``evidence_verification_kind``."""
+
+    DECISION = "DECISION"
+    CONTENT = "CONTENT"
+    SCORE = "SCORE"
 
 
 class InstructionSourceKind(StrEnum):
@@ -1645,6 +1660,78 @@ class SubjectAnchor(StrEnum):
     RIGHT = "RIGHT"
 
 
+class ComplianceJudgeFinding(StrEnum):
+    """GLOSSARY ``compliance_judge_finding``."""
+
+    VIOLATION = "VIOLATION"
+    NO_VIOLATION = "NO_VIOLATION"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class ParaphraseDecision(StrEnum):
+    """GLOSSARY ``paraphrase_decision``."""
+
+    OWN_WORDS = "OWN_WORDS"
+    CLOSE_PARAPHRASE = "CLOSE_PARAPHRASE"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class TextItemSurface(StrEnum):
+    """GLOSSARY ``text_item_surface``."""
+
+    SCRIPT_SEGMENT = "SCRIPT_SEGMENT"
+    ON_SCREEN_TEXT = "ON_SCREEN_TEXT"
+    THUMBNAIL_TEXT = "THUMBNAIL_TEXT"
+    TITLE = "TITLE"
+    DESCRIPTION = "DESCRIPTION"
+
+
+class CrossVideoStatus(StrEnum):
+    """GLOSSARY ``cross_video_status``."""
+
+    COMPARED = "COMPARED"
+    SKIPPED = "SKIPPED"
+    NOT_BUILT = "NOT_BUILT"
+
+
+class AuthorisedAction(StrEnum):
+    """GLOSSARY ``authorised_action``."""
+
+    DELIVERY = "DELIVERY"
+    UPLOAD_PRIVATE = "UPLOAD_PRIVATE"
+    PUBLISH = "PUBLISH"
+
+
+class FrameFinding(StrEnum):
+    """GLOSSARY ``frame_finding``."""
+
+    WATERMARK_PRESENT = "WATERMARK_PRESENT"
+    PRESENTER_PRESENT = "PRESENTER_PRESENT"
+    NONE_FOUND = "NONE_FOUND"
+    UNCERTAIN = "UNCERTAIN"
+    NOT_EVALUATED = "NOT_EVALUATED"
+
+
+class ScoreScalingMode(StrEnum):
+    """GLOSSARY ``score_scaling_mode``."""
+
+    NONE = "NONE"
+    PRO_RATA = "PRO_RATA"
+
+
+class ScoreGateMode(StrEnum):
+    """GLOSSARY ``score_gate_mode``."""
+
+    REPORT_ONLY = "REPORT_ONLY"
+    BLOCKING = "BLOCKING"
+
+
+class SourcePathClass(StrEnum):
+    """GLOSSARY ``source_path_class``."""
+
+    DATA_PACK = "data_pack"
+
+
 _PRIORITY_QUEUE_INT: Mapping[Priority, int] = MappingProxyType(
     {p: i for i, p in enumerate(Priority)}
 )
@@ -1731,6 +1818,7 @@ GLOSSARY_ENUMS: Mapping[str, type[Enum]] = MappingProxyType(
         "auth_provider": AuthProvider,
         "channel_platform": ChannelPlatform,
         "channel_status": ChannelStatus,
+        "audience_kind": AudienceKind,
         "oauth_token_status": OauthTokenStatus,
         "data_key_status": DataKeyStatus,
         "gcp_ownership": GcpOwnership,
@@ -1742,6 +1830,7 @@ GLOSSARY_ENUMS: Mapping[str, type[Enum]] = MappingProxyType(
         "approval_channel": ApprovalChannel,
         "evidence_state": EvidenceState,
         "evidence_record_kind": EvidenceRecordKind,
+        "evidence_verification_kind": EvidenceVerificationKind,
         "instruction_source_kind": InstructionSourceKind,
         "data_request_kind": DataRequestKind,
         "data_request_status": DataRequestStatus,
@@ -1831,5 +1920,14 @@ GLOSSARY_ENUMS: Mapping[str, type[Enum]] = MappingProxyType(
         "reuse_kind": ReuseKind,
         "crop_mode": CropMode,
         "subject_anchor": SubjectAnchor,
+        "compliance_judge_finding": ComplianceJudgeFinding,
+        "paraphrase_decision": ParaphraseDecision,
+        "text_item_surface": TextItemSurface,
+        "cross_video_status": CrossVideoStatus,
+        "authorised_action": AuthorisedAction,
+        "frame_finding": FrameFinding,
+        "score_scaling_mode": ScoreScalingMode,
+        "score_gate_mode": ScoreGateMode,
+        "source_path_class": SourcePathClass,
     }
 )

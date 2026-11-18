@@ -197,8 +197,7 @@
             ]
           },
           "gate": {
-            "type": "boolean",
-            "default": false
+            "type": "boolean"
           },
           "remedy_stage_id": {
             "oneOf": [
