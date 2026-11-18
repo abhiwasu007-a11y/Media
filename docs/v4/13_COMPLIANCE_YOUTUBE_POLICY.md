@@ -106,9 +106,9 @@ rules:
 
 MVP: **3A** (evaluated by the gate on files, with no upload); publication-time items 3C. Enterprise: Tier 0.
 
-Rule IDs in this pack use the prefix `YTG` (pending CCR: GLOSSARY §6.2 defines the `<PACK>-R<n>` form but fixes only the `FIN` IDs; see contract_requests).
+Rule IDs in this pack use the prefix `YTG`; they are fixed in GLOSSARY §6.38a (CCR-040).
 
-| Rule ID (pending CCR) | Severity | Rule | Basis |
+| Rule ID | Severity | Rule | Basis |
 |---|---|---|---|
 | `YTG-R1` | BLOCKING | Inauthentic / mass-produced content gate | YT-09 |
 | `YTG-R2` | BLOCKING | No AI persona presenting a sensitive topic (health, legal, finance, politics) | YT-09 |
@@ -131,7 +131,7 @@ Rule IDs in this pack use the prefix `YTG` (pending CCR: GLOSSARY §6.2 defines 
 ### 3.2 YTG-R2 No AI persona on sensitive topics
 - **Fact.** AI personas on sensitive topics (health, legal, finance, politics) are not monetizable (YT-09). For the first channel this is `FIN-R11` as well.
 - **Test.** Deterministic: the production type's `presenter_kind` and the voice/visual assets. Blocks when the video presents a synthetic human face or a synthetic voice presented as a named person on a channel whose compliance profile includes `rp.finance_sebi_in`, `rp.health` or `rp.political_news`. Allowed: the owner's own voice (including a clone of the owner's own voice, YT-07 says cloning one's own voice does not by itself need disclosure) and neutral narration with no persona. A persona is detected from the script (first-person identity claims such as a named presenter) and from the asset list (`is_realistic_synthetic` on a person image/video, 04 asset table).
-- **REQUIRES REVIEW (Phase 1):** the field that records "neutral narration vs persona" on a production type or job input. It is not in the Wave A contracts reviewed for this document (contract_requests).
+- **Field (CCR-027, provisional until the owner answers 3A R4):** `voices.presenter_kind` (`presenter_kind`, GLOSSARY §6.44): `NEUTRAL_NARRATION` and `OWNER_VOICE` are allowed; `SYNTHETIC_PERSONA` blocks on a channel with `rp.finance_sebi_in`, `rp.health` or `rp.political_news`. The script and asset checks above still apply.
 
 ### 3.3 YTG-R3 Synthetic or altered content disclosure
 - **Fact.** Disclosure is required for realistic altered or synthetic content: a real person saying or doing something they did not, altered real events or places, realistic scenes that did not occur. Not required: unrealistic content, minor edits, script/title/thumbnail assistance, captions, cloning one's own voice. Penalties include removal and YPP suspension. Disclosure alone does not limit monetization (YT-07). The API field `status.containsSyntheticMedia` is writable on insert and update (YT-06).
@@ -239,7 +239,7 @@ The word "instrument" here follows the directive: an index, a stock, an option o
 
 ### 5.4 FIN-R3 / FIN-R13: forward views and the Sathe bar (see 5.5 for cases)
 - FIN-R3 stops views about "now/tomorrow/this week". FIN-R13 is wider: it stops forward-looking statements about a **named** security in any frame, including a historical case study.
-- The deterministic pre-filter flags sentences with a named instrument plus a future-tense/modal/expectation marker ("will", "should", "likely to", "target", "next move", "again", "repeat", "same setup now"). Because an LLM judge can miss subtle phrasing, **a flagged claim with any future marker is `NEEDS_HUMAN_REVIEW` at minimum, never `ALLOWED` on an LLM verdict alone**.
+- The deterministic pre-filter (marker lists are config `compliance.finance_sebi_in.markers.*`, one list per language; the same lists are reused by every component that screens text for FIN-R1/R2/R3/R5/R6/R8/R13 wording, including `agent_06.claim_extraction` (as its own deterministic check) and Agent 11 thumbnail text; CCR-046) flags sentences with a named instrument plus a future-tense/modal/expectation marker ("will", "should", "likely to", "target", "next move", "again", "repeat", "same setup now"). Because an LLM judge can miss subtle phrasing, **a flagged claim with any future marker is `NEEDS_HUMAN_REVIEW` at minimum, never `ALLOWED` on an LLM verdict alone**.
 - **The two-part test for a historical case study.** (1) *Frame*: the narration is in the past tense about what the chart showed and what happened next; (2) *Purpose*: the segment teaches the concept ("how the pattern was identified, why it worked or failed") and does not leave the viewer with an expectation about where that security goes next. If either part is not met: BLOCKED (FIN-R13). The case study is described as "how the concept looked, why it worked or failed then", with no forward-looking statement about the security (RESEARCH_LOG IN-03, rule-pack addition).
 
 ### 5.5 FIN-R9 Price-data lag (IN-02)

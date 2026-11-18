@@ -116,6 +116,9 @@ Window interaction: if `next_attempt_at` is outside the admissible window for th
 ### 3.4 Never retried
 Every `PERMANENT.*` code; `AGENT.QUALITY_REPEATED_FAILURE`; `AGENT.LOOP_CAP_EXCEEDED`; `PUBLISHING.UPLOAD_REJECTED`, `OAUTH_REVOKED`, `PROCESSING_FAILED`, `VERIFICATION_MISMATCH`, `NOT_AUTHORISED`. Suspensions (`QUOTA_EXHAUSTED`, `BUDGET_EXHAUSTED`, `DISK_FULL`) are waits, not retries, and consume no attempt.
 
+### 3.5 Deterministic in-stage fallback (CCR-023)
+The dispositions of §2 always win; no blueprint sets a private default. A stage that has a deterministic equivalent of an LLM step (e.g. a template thumbnail layout) may use it inside the same attempt only when config `agent_NN.llm.fallback_on_unavailable` is `true` (default `false`; enabling it is an owner decision, D1), and only after `TEMPORARY.CIRCUIT_OPEN`, `PERMANENT.PROVIDER_REFUSAL`, or `AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID` after its one retry. It never applies to a suspension (`RESOURCE.BUDGET_EXHAUSTED`, `QUOTA_EXHAUSTED`, `DISK_FULL`) or to any `PERMANENT.*` input or tenancy code. The fallback is recorded as a `WARN` validation result (`blocking: false`) naming the code; it is not returned as the task error.
+
 ## 4. Circuit breakers (per external provider)
 
 ### 4.1 Key and storage
