@@ -28,6 +28,7 @@ from amw_adapters.music import FakeMusicAdapter, MusicAdapter
 from amw_adapters.stock_footage import FakeStockFootageAdapter, StockFootageAdapter
 from amw_adapters.tts import FakeTtsAdapter, TtsAdapter, TtsRequest, VoiceListRequest
 from amw_adapters.video_gen import FakeVideoGenAdapter, VideoGenAdapter, VideoGenRequest
+from amw_adapters.web_fetch import FakeWebFetchAdapter, WebFetchAdapter, WebFetchRequest
 from amw_core.enums import AspectRatio, CostFigureKind
 from amw_core.errors import (
     ConfigInvalidError,
@@ -128,6 +129,12 @@ def _deliver(f: FakeFileDeliveryAdapter, k: str, v: str) -> AdapterResult:
     return f.deliver(delivery_req(name=f"{v.replace(' ', '_')}.mp4"), idempotency_key=k)
 
 
+def _fetch(f: FakeWebFetchAdapter, k: str, v: str) -> AdapterResult:
+    return f.fetch(
+        WebFetchRequest(url=f"https://example.org/{v.replace(' ', '_')}"), idempotency_key=k
+    )
+
+
 CASES = [
     Case("llm.complete", FakeLlmAdapter, LlmAdapter, _llm, "fixture-system",
          lambda r: getattr(r, "text", None) == "recorded reply" and r.usage.tokens_cached_in == 8),
@@ -146,6 +153,8 @@ CASES = [
     Case("video.generate", FakeVideoGenAdapter, VideoGenAdapter, _video, "fixture prompt",
          lambda r: getattr(r, "duration_ms", None) == 5000),
     Case("delivery.file", FakeFileDeliveryAdapter, FileDeliveryAdapter, _deliver, None, None),
+    Case("web.fetch", FakeWebFetchAdapter, WebFetchAdapter, _fetch, "fixture",
+         lambda r: getattr(r, "content", None) == b"recorded page"),
 ]  # fmt: skip
 IDS = [c.name for c in CASES]
 OPERATIONS = {
@@ -160,6 +169,7 @@ OPERATIONS = {
     "image.generate": "image.generate",
     "video.generate": "video.generate",
     "delivery.file": "delivery.file",
+    "web.fetch": "web.fetch",
 }
 
 

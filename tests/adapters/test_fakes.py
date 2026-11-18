@@ -109,3 +109,68 @@ def test_fixture_store_without_folder(tmp_path: Path) -> None:
 def test_fake_bytes_deterministic() -> None:
     assert fake_bytes("s", 100) == fake_bytes("s", 100)
     assert len(fake_bytes("s", 100)) == 100
+
+
+def test_operations_are_the_glossary_cost_operations() -> None:
+    from amw_core.enums import CostOperation
+
+    with pytest.raises(ValidationError):
+        CallUsage(provider="p1", operation="llm.chat", amount_micros=0, currency="USD",
+                  idempotency_key=K)  # fmt: skip
+    usage = CallUsage(provider="p1", operation="web.fetch", amount_micros=0, currency="USD",
+                      idempotency_key=K)  # fmt: skip
+    assert usage.operation is CostOperation.WEB_FETCH
+
+
+def test_llm_and_tts_record_ccr_037_fields() -> None:
+    llm = FakeLlmAdapter().complete(
+        LlmRequest(
+            model="m",
+            system="abc",
+            messages=(LlmMessage(role="user", content="de"),),
+            max_output_tokens=8,
+            language="mr",
+        ),
+        idempotency_key=K,
+    )
+    assert (llm.usage.chars_in, llm.usage.language, llm.usage.tokens_cache_write_in) == (5, "mr", 0)
+    tts = FakeTtsAdapter().synthesize(
+        TtsRequest(text="abcd", voice_ref="v", model="m", language="mr"), idempotency_key=K
+    )
+    assert (tts.usage.chars_in, tts.usage.language) == (4, "mr")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://localhost/x",
+        "https://127.0.0.1/x",
+        "https://10.0.0.5/x",
+        "https://[::1]/x",
+        "https://metadata.internal/x",
+        "https://not-allowed.example/x",
+    ],
+)
+def test_web_fetch_refuses_private_and_unlisted_hosts(url: str) -> None:
+    from amw_adapters.web_fetch import FakeWebFetchAdapter, WebFetchRequest
+    from amw_core.errors import InputInvalidError
+
+    with pytest.raises(InputInvalidError):
+        FakeWebFetchAdapter().fetch(WebFetchRequest(url=url), idempotency_key=K)
+
+
+def test_web_fetch_https_only_and_size_cap() -> None:
+    from amw_adapters.web_fetch import FakeWebFetchAdapter, WebFetchRequest
+    from amw_core.errors import InputInvalidError
+
+    with pytest.raises(ValidationError):
+        WebFetchRequest(url="http://example.org/x")
+    with pytest.raises(InputInvalidError):
+        FakeWebFetchAdapter().fetch(
+            WebFetchRequest(url="https://example.org/x", max_bytes=3), idempotency_key=K
+        )
+    ok = FakeWebFetchAdapter().fetch(
+        WebFetchRequest(url="https://example.org/x"), idempotency_key=K
+    )
+    assert ok.usage.unit_kind is CostUnitKind.BYTES
+    assert ok.usage.amount_micros == 0

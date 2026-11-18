@@ -31,6 +31,8 @@ class LlmRequest(AdapterModel):
     timeout_ms: Annotated[int, Field(ge=1)] = 120_000
     cache_system_prompt: bool = False
     billing_mode: BillingMode = BillingMode.STANDARD
+    language: str | None = None
+    """BCP 47 language of the prompt content, recorded as ``cost_ledger.language`` (CCR-037)."""
 
 
 class LlmResponse(AdapterResult):

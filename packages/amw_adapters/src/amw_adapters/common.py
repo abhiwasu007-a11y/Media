@@ -17,13 +17,12 @@ from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from amw_core.enums import BillingMode, CostFigureKind, CostUnitKind
+from amw_core.enums import BillingMode, CostFigureKind, CostOperation, CostUnitKind
 from amw_core.errors import AmwError, ConfigInvalidError, IdempotencyConflictError
 from amw_core.ids import IDEMPOTENCY_KEY_PATTERN, idempotency_key_of
 
 NonNeg = Annotated[int, Field(ge=0, strict=True)]
 ProviderName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_]{2,32}$")]
-Operation = Annotated[str, StringConstraints(pattern=r"^[a-z_]+\.[a-z_]+$")]
 FAKE_PRICE_REF = "fake-pricing-v0"
 
 
@@ -37,6 +36,7 @@ class FakeProvider(StrEnum):
     IMAGE = "fake_image"
     VIDEO = "fake_video"
     DELIVERY = "fake_delivery"
+    WEB = "fake_web"
 
 
 def fake_provider(value: str) -> FakeProvider:
@@ -52,15 +52,24 @@ class AdapterModel(BaseModel):
 
 
 class CallUsage(AdapterModel):
-    """Usage and cost of one provider call, mapped 1:1 onto ``cost_ledger`` columns."""
+    """Usage and cost of one provider call, mapped 1:1 onto ``cost_ledger`` columns (04 5.14).
+
+    ``operation`` is the closed GLOSSARY ``cost_operation`` list (CCR-057); ``amount_micros`` is
+    the ledger column; ``tokens_cache_write_in``, ``chars_in`` and ``language`` are CCR-037.
+    """
 
     provider: ProviderName
-    operation: Operation
+    operation: CostOperation
     model: str | None = None
     billing_mode: BillingMode | None = None
     tokens_in: NonNeg | None = None
     tokens_out: NonNeg | None = None
     tokens_cached_in: NonNeg | None = None
+    tokens_cache_write_in: NonNeg | None = None
+    chars_in: NonNeg | None = None
+    language: (
+        Annotated[str, StringConstraints(pattern=r"^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$")] | None
+    ) = None
     units: NonNeg | None = None
     unit_kind: CostUnitKind | None = None
     amount_micros: NonNeg

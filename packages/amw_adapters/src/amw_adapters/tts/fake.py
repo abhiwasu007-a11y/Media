@@ -61,6 +61,8 @@ class FakeTtsAdapter:
                 model=request.model,
                 units=characters,
                 unit_kind=CostUnitKind.CHARACTERS,
+                chars_in=characters,
+                language=request.language,
                 amount_micros=characters * self._price,
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
