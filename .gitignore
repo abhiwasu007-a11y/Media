@@ -1,0 +1,59 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.python-version.local
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Node (dashboard) ---
+node_modules/
+.next/
+
+# --- Secrets: never commit (rule 5, §3.2 S6) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+client_secret*.json
+token*.json
+credentials*.json
+
+# --- Media outputs and working files (finished videos live in factory storage, never in git) ---
+media/
+output/
+renders/
+tmp/
+*.mp4
+*.mov
+*.mkv
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.srt
+
+# --- Private knowledge: book text, extracted chunks, embeddings (§1B.2a; never in this public repo) ---
+knowledge_index/
+*.faiss
+*.sqlite
+*.parquet
+
+# --- VPS audit raw output (contains container names / ports; share privately, not in git) ---
+amw_audit_*
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
