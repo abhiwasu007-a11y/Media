@@ -1,6 +1,6 @@
 # Unfiled contract requests from the B-2 ADR and business drafts (lane B2-1)
 
-Status: **not filed**. Lane B2-1 may not edit `CONTRACT_CHANGE_REQUESTS.md` or a Wave A contract; the integrator files, decides or rejects each line. Line numbers are in the files of this branch. Format: `file:line | what | proposed text`.
+Status: **filed and decided** in `CONTRACT_CHANGE_REQUESTS.md` §4.7 (integrator pass 5, 2026-11-18): rows B1-1…B1-20 in table order → CCR-135…167 (mapping table there); kept as the lane's input record. Lane B2-1 may not edit `CONTRACT_CHANGE_REQUESTS.md` or a Wave A contract; the integrator files, decides or rejects each line. Line numbers are in the files of this branch. Format: `file:line | what | proposed text`.
 
 Looked up in the register: none of the names below exists in 03, 04, 07, 24, 27 or GLOSSARY on main. The old markers "pending CCR-3A-n" do not occur in these ten files (they occur in the blueprints and shared docs of other lanes; CCR-003, 006, 017 and 043 applied them).
 

@@ -8,7 +8,7 @@
 | Depends on | `GLOSSARY_AND_IDS.md` (roles §6.44, enums, IDs); `03_COMMUNICATION_STANDARD.md` (state machine, `amw.control`); `04_DATABASE_ARCHITECTURE.md` (§3.6 system functions, §5.1 `org_controls` / `platform_controls`, §5.13 audit, §5.14 budgets, §5.16 approvals); `07_FAILURE_MANAGEMENT.md` (DLQ, L3); `08_SECURITY.md` (§5.2 permission matrix, §9 audit); `09_COST_AND_BUDGET.md` (§3, §4, §8, §12); `3A_SLICE_SPEC.md` (§4 bundle, §9 out of 3A, §12 R14); `05_RESOURCE_MANAGEMENT.md` §9, `06_NIGHT_SCHEDULING.md`, `17_BUSINESS_PLAN.md` §8, `18_PRODUCTION_QUALITY_STANDARD.md`, `13_COMPLIANCE_YOUTUBE_POLICY.md`, `adr/ADR-004` (**pending**, dashboard stack) |
 | Directive sections covered | §3.2 service S8 (full text of the service), §1C.1 (tenant isolation), §1C.4 (roles, RBAC), §1C.5 (audit log), §1C.15 (tiers), §3.2a (dashboard stack decided in an ADR), rule 7 (no mock data shown as working), rule 8 (no spend without the owner), rule 9 (tenant isolation). Owner decisions D1 (3A / 3B / 3C order; 3A has no upload and no OAuth) and D2 |
 | MVP scope | **3A** minimum view set delivered through the operator tool (§2); **3C** web dashboard (Tier 0), **3C · Tier 1-3** tenant and enterprise items. Marked per section as **[3A / 3B / 3C · Tier n]** |
-| Items marked "(pending CCR)" | depend on the requests in §16; written against the proposed name, never defined here |
+| Items marked with a CCR number | depend on the requests in §16 (filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)); written against the proposed name, never defined here |
 
 Facts come only from `RESEARCH_LOG.md` IDs; a needed fact that is not logged is written as `REQUIRES REVIEW (Phase 1): ...`. This repository is public: no private method, book titles, course content, secrets or server details appear here or on any S8 screen.
 
@@ -96,7 +96,7 @@ flowchart LR
 | Stack | **ADR-004 (dashboard stack) is pending.** `MASTER_DIRECTIVE` §3.2a: Next.js + TypeScript, or a lighter server-rendered option if justified; plan Q15 decides by RAM footprint on the shared VPS. This document is stack-neutral: every behaviour is an HTTP command / query plus an HTML page that works on a phone. Criteria ADR-004 must score: measured RAM and CPU of the UI process on the shared VPS; build chain and dependencies added (nothing added "just because", §3.2a); mobile-first rendering and accessibility; fit with the ADR-003 auth session (HttpOnly session cookie, 08 §5.5); typed client from the FastAPI schema if TypeScript is chosen (27 §1 table); live-update method (below). |
 | Live updates | Polling with a visible "as of" time is the default (no extra process). Push (server-sent events or WebSocket) is an ADR-004 option, allowed only if its footprint is measured. A live-update failure shows "stale since hh:mm" and never fakes freshness (R4, R6). |
 | Reads | Tenant tenant-scoped queries through `amw_readonly` / `amw_app` inside a tenant transaction (04 §3.1). Heavy aggregates (cost by day, per-channel analytics) use read models refreshed on a schedule, with the refresh time shown. Whether a materialised read model is needed is decided from the pilot measurement: `REQUIRES REVIEW (Phase 1): measure dashboard query cost in the 3A walking skeleton`. |
-| Writes | Command handlers only; each one validates the permission key, validates the value against the schema of the control (§7.2, pending CCR), applies the optimistic lock, writes the change and the audit row in one transaction, then lets Agent 01's `ControlBroadcaster` act (agent_01 §6.3). |
+| Writes | Command handlers only; each one validates the permission key, validates the value against the schema of the control (§7.2, 04 §5.1, CCR-140), applies the optimistic lock, writes the change and the audit row in one transaction, then lets Agent 01's `ControlBroadcaster` act (agent_01 §6.3). |
 | Cross-tenant access | Only through the §3.6 system functions of 04 (identifiers and aggregates, no content columns); see §11. |
 | Reachability | Any browser access from outside the machine needs authentication, TLS and rate limits first; the proxy and port decision is `10_DEPLOYMENT_AND_MIGRATION.md` §7 and is not made here. No port is published by this document. |
 
@@ -117,9 +117,9 @@ Roles are the `role` enum of GLOSSARY §6.44: `PLATFORM_OWNER`, `ORG_OWNER`, `OR
 | S8-04 Cost, budget status (read) | `cost.read` | PLATFORM_OWNER, ORG_OWNER, ORG_ADMIN, FINANCE, VIEWER |
 | S8-04 Change a budget limit | `budget.write` | PLATFORM_OWNER, ORG_OWNER, FINANCE |
 | S8-07 Controls: emergency stop, publishing on/off, agent enable | `control.write` | PLATFORM_OWNER (platform controls), ORG_OWNER, ORG_ADMIN |
-| S8-07 Controls: schedule, daily production limit | `control.write` (matrix row names only three controls: **pending CCR**, §16 #1) | same as above |
-| Resume after an emergency stop / pause (03 T15, `ops.resume`) | `ops.resume` is named in `agent_01` but **not in 08 §5.2** (pending CCR, §16 #1) | proposed: same as `control.write` |
-| S8-06 Business (revenue, profit, ROI) | no key exists for revenue (pending CCR `revenue.read`, §16 #1); until then `cost.read` is the least-privilege stand-in | see `cost.read` |
+| S8-07 Controls: schedule, daily production limit | `control.write` (the 08 §5.2 row names them, CCR-148) | same as above |
+| Resume after an emergency stop / pause (03 T15, `ops.resume`) | `ops.resume` is named in `agent_01` and in 08 §5.2 (CCR-148) | same roles as `control.write` |
+| S8-06 Business (revenue, profit, ROI) | no key exists for revenue (`revenue.read`, CCR-152, Proposed, deferred to 3C); until then `cost.read` is the least-privilege stand-in | see `cost.read` |
 | S8-09 Audit log view / export | `audit.read` / `audit.export` | PLATFORM_OWNER, ORG_OWNER; ORG_ADMIN read only |
 | S8-10 Platform view | `platform.ops_summary` | PLATFORM_OWNER only |
 | Members, roles, invitations | `member.manage` | S9 screens (3C · Tier 1), not S8 |
@@ -181,7 +181,7 @@ Breakpoints, spacing and component library are implementation choices of ADR-004
 
 ## 6. Screens (wireframe level)
 
-Wireframes are layout and content contracts, not visual design. "Source" names tables from 04; where a table is missing the item is marked pending CCR.
+Wireframes are layout and content contracts, not visual design. "Source" names tables from 04; where a table is missing the item names its CCR.
 
 ### 6.1 S8-01 Live operations (home) [3A operator tool: job list + queue text · 3C web · Tier 0]
 
@@ -197,7 +197,7 @@ Wireframes are layout and content contracts, not visual design. "Source" names t
 | Cost so far | today and this job set: sum with `figure_kind` and the budget bar | `cost_ledger`, `budgets` |
 | Recent events | last audit rows readable by the viewer (control changes, approvals, replay) | `audit_log` |
 
-**Resource panel rule (tenant isolation).** `workers` is GLOBAL and host signals carry no tenant data (05 §9.1). Tenants of a shared platform see their own queue, wait times and admission reasons, **not** host memory, CPU, other tenants' load or worker names. The platform owner (and the owner of a single-tenant Tier 0 deployment, who is the platform owner) sees the resource panel. Which `workers` / S5 fields the platform view may read is `REQUIRES REVIEW (Phase 1): grants for amw_readonly on workers; or extend amw_platform_ops_summary (pending CCR, §16 #2)`.
+**Resource panel rule (tenant isolation).** `workers` is GLOBAL and host signals carry no tenant data (05 §9.1). Tenants of a shared platform see their own queue, wait times and admission reasons, **not** host memory, CPU, other tenants' load or worker names. The platform owner (and the owner of a single-tenant Tier 0 deployment, who is the platform owner) sees the resource panel. Which `workers` / S5 fields the platform view may read is `REQUIRES REVIEW (Phase 1): grants for amw_readonly on workers; or read the extended `amw_platform_ops_summary()` (04 §3.6, CCR-149)`.
 
 **Empty states (R4).** 3A before the first job: "No job yet. Send me a topic in chat." Channels: "No channel connected (3A has no upload or OAuth)." Never sample numbers.
 
@@ -289,7 +289,7 @@ A/B test of titles / thumbnails is a human YouTube Studio step (YT-08); S8 may s
 
 ### 6.6 S8-06 Business [3C · Tier 0; cost side from 3A]
 
-Formulas and variables are owned by `17_BUSINESS_PLAN.md` §8-§9 and are not repeated. Actual revenue has no table in 04; the screen is written against **`revenue_entries` (pending CCR)** (17 §8.4).
+Formulas and variables are owned by `17_BUSINESS_PLAN.md` §8-§9 and are not repeated. Actual revenue has no table in 04; the screen is written against **`revenue_entries` (CCR-152, Proposed, deferred to 3C)** (17 §8.4).
 
 | Panel | Content | Label rule |
 |---|---|---|
@@ -309,7 +309,7 @@ Numbers first; explanation behind a fold; green for up and red for down only whe
 | Emergency stop (org) | red button + confirm sheet; state toggle with "reason" field | `org_controls.emergency_stop` | admission refuses new tasks (`ORG_EMERGENCY_STOP`, A3); running tasks get a `PAUSE` control and checkpoint with `wait_reason = OPERATOR_PAUSE` (T09); completed work is untouched; resume is a separate human action (T15) |
 | Publishing on / off | switch | `org_controls.publishing_enabled` | publish and upload tasks are held while off; delivery of files is a separate non-publishing path (09 B4 spirit). Always shown `OFF`, "not built" in 3A |
 | Agent enable / disable | list of the 17 agents + services with a switch each | `org_controls.agent_enabled.<agent_id>` | a disabled agent's tasks are refused at admission (`AGENT_DISABLED`, A4); queued tasks wait; a running task finishes its safe point |
-| Production schedule | schedule editor (days and window within the platform window) | `org_controls.production_schedule` | Agent 01 `NightScheduler` uses it (06; 3C). The value schema is pending CCR (§16 #3) |
+| Production schedule | schedule editor (days and window within the platform window) | `org_controls.production_schedule` | Agent 01 `NightScheduler` uses it (06; 3C). The value is the 06 §12.2 window document (04 §5.1, CCR-139, CCR-140) |
 | Daily production limit | number (videos per day in the org's display time zone) | `org_controls.daily_production_limit` | admission refuses the first task of a job beyond the limit (`DAILY_PRODUCTION_LIMIT`, A16, 3C · Tier 0) |
 | API budgets | opens S8-04 budget editor | `budgets` (09) | S4 enforces; S8 only edits rows through `budget.write` |
 | IP allow-list | read-only text in Tier 0 | `org_controls.ip_allowlist` | Tier 3 (08 §7.4) |
@@ -374,7 +374,7 @@ sequenceDiagram
 
 ### 7.2 Control value contract
 
-`04` states the value is "validated per key by `amw_core.config`" but defines no schema. S8 needs one to validate input and to render editors. **Proposed value shapes are pending CCR (§16 #3)** and are listed here only to show what the editor must collect; they are not a new contract:
+The value of each key is defined in 04 §5.1 (CCR-140) and validated by `amw_core.config`; this table shows what the editor collects:
 
 | Key | Editor collects | Notes |
 |---|---|---|
@@ -411,28 +411,28 @@ The 3A bundle (3A_SLICE_SPEC §4, D1): MP4 16:9 (and 9:16 where the owner asked)
 | Integrity | the screen shows each file's size and SHA-256 from the manifest; after download the owner can compare. A file whose stored hash differs from the manifest is shown as `INTEGRITY MISMATCH` and is not offered |
 | Gate | a bundle exists only after delivery was authorised by Agent 16 (`agent_16.publication_authorisation`, deterministic checks) and the `FINAL_VIDEO` approval; an unapproved render shows as `PREVIEW`, labelled "not approved" |
 | Disclosure note | the bundle shows the synthetic-media disclosure decision and the plain-words note that the owner applies the label by hand in Studio (3A_SLICE_SPEC §4; 13 §3.3) |
-| Audit | each download writes an audit row (`delivery.bundle_downloaded`, pending CCR §16 #4) with job, file and actor; no file contents in `details` |
+| Audit | each download writes an audit row (`delivery.bundle_downloaded`, registered here per 08 §9.2, CCR-150) with job, file and actor; no file contents in `details` |
 | Phones | a download button per file and a "download all" action; large files show size first |
 
 ---
 
 ## 9. Command catalogue [3A tool · 3C UI]
 
-Every S8 write is one of these commands. Names of permission keys and audit events are those of 08 §5.2 and §9.2 and the documents named; **new** names are pending CCR.
+Every S8 write is one of these commands. Names of permission keys and audit events are those of 08 §5.2 and §9.2 and the documents named; **new** names are registered by this document per 08 §9.2 (CCR-150).
 
 | # | Command | Permission | Writes | Audit action | Confirmation |
 |---|---|---|---|---|---|
 | C1 | Create job (topic from the owner) | `job.create` | `jobs` via `JobIntake` (`job.create` idempotency key) | `job.created` (agent_01) | form review |
 | C2 | Cancel job | `job.cancel` | T19 / J12 cascade | `task.cancelled` | confirm sheet, reason |
 | C3 | Decide approval | `approval.decide` (3A: the operator records the owner's chat decision, `amw_human_record_apply`, D5) | `approval_steps`, `approvals` | `approval.decided` (3A also `approval.recorded_from_owner_chat`, `approval.owner_confirmed`, `approval.record_refused`, 03 §11.6 rule 6) | decision screen (§6.3); 3A: chat |
-| C4 | Add editorial contribution | human `usr_` only (3A: recorded by the operator from the owner's chat message with evidence) | `editorial_contributions` | `editorial_contribution.recorded_from_owner_chat`, `editorial_contribution.owner_confirmed` (03 §11.6 rule 6); web path in 3C: `editorial.contribution.added` (pending CCR §16 #4) | form (3A: chat) |
-| C5 | Import human score (3B) | `approval.decide` holder (3A: operator tool from the owner's chat, `scorer_ref` = the owner) | `quality_scores` HUMAN rows | 3A: `quality_score.recorded_from_owner_chat`, `quality_score.owner_confirmed` (03 §11.6 rule 6); web path in 3C: pending CCR §16 #4 | form (3A: chat) |
+| C4 | Add editorial contribution | human `usr_` only (3A: recorded by the operator from the owner's chat message with evidence) | `editorial_contributions` | `editorial_contribution.recorded_from_owner_chat`, `editorial_contribution.owner_confirmed` (03 §11.6 rule 6); web path in 3C: `editorial_contribution.added` (CCR-150) | form (3A: chat) |
+| C5 | Import human score (3B) | `approval.decide` holder (3A: operator tool from the owner's chat, `scorer_ref` = the owner) | `quality_scores` HUMAN rows | 3A: `quality_score.recorded_from_owner_chat`, `quality_score.owner_confirmed` (03 §11.6 rule 6); web path in 3C: `quality_score.added` (CCR-150) | form (3A: chat) |
 | C6 | Replay / discard DLQ item | `dlq.replay` / `dlq.discard` | `dead_letter`, requeue or `CANCELLED` | `dlq.replay`, `dlq.discard` (08 §9.2; 03 T17 / T18) | confirm sheet; `DLQ_REPLAY` approval where publishing or financial |
 | C7 | Set a control | `control.write` | `org_controls` | `control.<key>.changed` | confirm sheet; typed phrase for emergency stop |
-| C8 | Resume paused work | `ops.resume` (pending CCR §16 #1) | T15 | `ops.resumed` (pending CCR §16 #4) | confirm sheet |
-| C9 | Change budget limit / state | `budget.write` | `budgets` | `budget.changed` (pending CCR §16 #4) | typed confirmation; shows old and new limit and the provider-limit row it must not exceed (09 §8.3) |
+| C8 | Resume paused work | `ops.resume` (08 §5.2, CCR-148) | T15 | `task.resumed` per task (03 T15, CCR-150) | confirm sheet |
+| C9 | Change budget limit / state | `budget.write` | `budgets` | `budget.changed` (registered here, CCR-150) | typed confirmation; shows old and new limit and the provider-limit row it must not exceed (09 §8.3) |
 | C10 | Platform controls | `PLATFORM_OWNER` | `platform_controls` via `amw_sysfn` | `control.platform_emergency_stop.changed` etc. | typed phrase |
-| C11 | Download file / export audit | `content.read` / `audit.export` | none | `delivery.bundle_downloaded`, `audit.exported` (pending CCR §16 #4) | none |
+| C11 | Download file / export audit | `content.read` / `audit.export` | none | `delivery.bundle_downloaded`, `audit.exported` (registered here, CCR-150) | none |
 | C12 | View platform summary | `platform.ops_summary` | none | `platform.ops_summary` call audited (04 §3.6) | none |
 
 **Idempotency and double-submit.** Commands carry a client-generated idempotency token so a retried tap after a network failure does not apply twice; the result of the first attempt is returned (03 §9 pattern; no new key format is defined here).
@@ -450,7 +450,7 @@ Every S8 write is one of these commands. Names of permission keys and audit even
 | S8-03 | `approvals`, `approval_steps`, `editorial_contributions`, subject tables (`scripts`, `renders`, ...) | per user and role |
 | S8-04 | `cost_ledger`, `budgets`, `budget_reservations` | per job / stage / provider / day; consumed = single definition of 09 §3.3 |
 | S8-05 | `channels`, `publications`, `analytics_snapshots`, `quota_usage` | per channel |
-| S8-06 | `cost_ledger`, `analytics_snapshots`, `revenue_entries` (pending CCR), `publications` | per video, per month (17 §8.2) |
+| S8-06 | `cost_ledger`, `analytics_snapshots`, `revenue_entries` (CCR-152), `publications` | per video, per month (17 §8.2) |
 | S8-07 | `org_controls`, `budgets` | current values |
 | S8-08 | `dead_letter`, `task_attempts`, `circuit_breakers` | per status |
 | S8-09 | `audit_log`, `audit_chain_heads` | filters; chain-check result |
@@ -548,9 +548,9 @@ Not allowed in this view: any content column, any job title or topic of a client
 
 ---
 
-## 16. Contract change requests (pending)
+## 16. Contract change requests (filed in pass 5: CCR-140, 148, 149, 150, 152)
 
-Written against the proposed names above; listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file; not edited into Wave A here.
+Written against the proposed names above; filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5): #1 → CCR-148 (Applied; `revenue.read` CCR-152, deferred), #2 → CCR-149 (Applied in 04 §3.6), #3 → CCR-140 (Applied in 04 §5.1), #4 → CCR-150 (names registered here; `ops.resumed` replaced by `task.resumed`, `editorial.contribution.added` by `editorial_contribution.added`, the human-score import is `quality_score.added`).
 
 | # | Needed | Why | Proposed change | Target |
 |---|---|---|---|---|
@@ -559,7 +559,7 @@ Written against the proposed names above; listed in `audit/b2_unfiled_ccr_reques
 | 3 | Value schemas of `org_controls` keys | editors and validation need one definition; 04 says "validated per key" without a schema | add a table of value schemas for `agent_enabled.<agent_id>`, `production_schedule`, `daily_production_limit`, `publishing_enabled`, `emergency_stop` (with an optional `reason` carried in the audit, not the value) | `04` §5.1 (and `amw_core.config`) |
 | 4 | Audit action names | S8 commands emit events not yet registered: `delivery.bundle_downloaded`, `audit.exported`, `budget.changed`, `ops.resumed` and, for the 3C web path only, `editorial.contribution.added` and the human-score import event (the 3A chat path uses the `*.recorded_from_owner_chat` / `*.owner_confirmed` verbs of 03 §11.6 rule 6; `dlq.replay` / `dlq.discard` already exist in 08 §9.2); agent_01 already lists the audit-name registry as pending | register the names, with `details` fields (no secrets) | `08_SECURITY.md` §9.2 / `03` §11.7 |
 
-Requests this document relies on that are already applied, not repeated: `PILOT_TOTAL` period and `PROVIDER` scope (CCR-035); `qc_report`, `cost_per_stage_report`, `delivery_manifest` output kinds (CCR-043) and the delivery storage area (CCR-017); production type v2 for 3A (CCR-003). Still unfiled: `revenue_entries` (17 §8.4).
+Requests this document relies on that are already applied, not repeated: `PILOT_TOTAL` period and `PROVIDER` scope (CCR-035); `qc_report`, `cost_per_stage_report`, `delivery_manifest` output kinds (CCR-043) and the delivery storage area (CCR-017); production type v2 for 3A (CCR-003). `revenue_entries` (17 §8.4) is CCR-152 (Proposed, deferred to 3C).
 
 ---
 

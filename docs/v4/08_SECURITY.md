@@ -117,7 +117,8 @@ Permission keys below are owned by this document. `dlq.replay`, `dlq.discard` an
 | `approval.decide` (needs the `required_role` of the step, 04 §5.16) | Y | Y | Y | – | Y | – | – | Y (guest steps only) |
 | `comment.write` | Y | Y | Y | Y | Y | – | – | Y |
 | `dlq.replay` / `dlq.discard` (03 T17/T18) | Y | Y | Y | – | – | – | – | – |
-| `control.write` (emergency stop, publishing on/off, agent enable) | Y (platform controls) | Y | Y | – | – | – | – | – |
+| `control.write` (emergency stop, publishing on/off, agent enable, production schedule, daily production limit; CCR-148) | Y (platform controls) | Y | Y | – | – | – | – | – |
+| `ops.resume` (03 T15: resume paused work; CCR-148) | Y | Y | Y | – | – | – | – | – |
 | `budget.write` (S4 limits) | Y | Y | – | – | – | Y | – | – |
 | `cost.read` | Y | Y | Y | – | – | Y | Y | – |
 | `audit.read` / `audit.export` | Y | Y | Y (read) | – | – | – | – | – |
@@ -197,7 +198,7 @@ Not built in 3A (no Google OAuth, D1). Design is fixed now so the schema (04 §5
 - Webhook payloads are signed with the per-webhook secret (encrypted with the tenant DEK, §6); signature includes a timestamp and `event_id` to resist replay; receivers get the verification procedure in the integration docs; delivery retries use `idempotency_key` (04 §5.26). Outbound webhook URLs are validated against private-network and loopback targets (SSRF guard). Rate-limit values: REQUIRES REVIEW (Phase 1).
 
 ### 7.4 IP allow-list (T3)
-Per-org list of permitted networks for interactive sign-in and API keys. Fail closed when the list is non-empty and the source address is absent; changes need `ORG_OWNER`, are audited, and cannot lock out the break-glass path (§7.2). Behaviour behind proxies (trusted-proxy header handling): REQUIRES REVIEW (Phase 1): deployment ADR. Storage of the list: 04 defines no column or table for it — proposed `org_ip_allowlist` (pending CCR).
+Per-org list of permitted networks for interactive sign-in and API keys. Fail closed when the list is non-empty and the source address is absent; changes need `ORG_OWNER`, are audited, and cannot lock out the break-glass path (§7.2). Behaviour behind proxies (trusted-proxy header handling): REQUIRES REVIEW (Phase 1): deployment ADR. Storage of the list: the `org_controls` key `ip_allowlist` (04 §5.1, an array of CIDR strings; CCR-154, CCR-140).
 
 ---
 
@@ -355,7 +356,7 @@ No claim of compliance with any standard appears in sales or product text until 
 | 5 | Support-access policy for the platform owner in client tenants (§5.2) | owner + ⚖ | No (T1) |
 | 6 | Permission review cadence, rotation intervals, anomaly thresholds (§3.3, §5.6) | owner / pilot | No |
 | 7 | Breach-notification duties and timelines (§12.2) | ⚖ | No |
-| 8 | Storage for the IP allow-list (§7.4) | contract request below | No (T3) |
+| 8 | Storage for the IP allow-list (§7.4) | resolved: `org_controls.ip_allowlist` (CCR-154) | No (T3) |
 | 9 | Vulnerability reporting contact/policy for the public repo (§11) | owner | No |
 
 3A design impact: none of the above changes a 3A design decision.

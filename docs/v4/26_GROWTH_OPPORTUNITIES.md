@@ -1,6 +1,6 @@
 # 26 — GROWTH OPPORTUNITIES (six business lines and own-channel niche candidates; scored, not built)
 
-> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines are marked `(unfiled CCR)` and listed in `audit/b2_unfiled_ccr_requests_adr_business.md`; this file changes no contract.
+> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines carry their CCR number and status (filed and decided in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)); this file changes no contract.
 
 | Field | Value |
 |---|---|
@@ -17,7 +17,7 @@
 2. **No price, demand, RPM, margin, client count or competitor figure is stated** unless it is in `RESEARCH_LOG.md` or measured. Where a number would be needed it is a named variable.
 3. **Labels** on every figure: ESTIMATE (verified unit price × a named quantity) / MEASURED (read from our system or a public page on a stated date) / PROJECTION (scenario output) / SECONDARY (third party). **DESIGN-DERIVED** marks an ordinal read from our own design documents (not market evidence).
 4. Owner facts used: channel 1 = Marathi-first stock-market trading education, funnel to the owner's Marathi course and ATP, no broker affiliate income; owner unregistered with SEBI; A6 inputs pending (Appendix A).
-5. Nothing here changes a contract. Proposed names not yet in a Wave A document are marked "(unfiled CCR)".
+5. Nothing here changes a contract. Proposed names not yet in a Wave A document carry their CCR number (CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)).
 
 ## 1. Framework
 
@@ -39,7 +39,7 @@ Each criterion 0-5 with evidence attached, otherwise `NULL`.
 weighted_score(line) = Σ ( w_i × s_i ) / Σ ( w_i )  × 20      (criteria with s_i = NULL excluded from both sums)
 confidence(line)     = Σ ( w_i where s_i has evidence ) / Σ ( w_i )
 ```
-Weights are configuration set by the owner; **none ships by default and an unset weight blocks the ranking run** (17 §2.2). Weight keys for the six criteria: `business.growth.weights.{demand,price,margin,reuse,compliance,sales}` (unfiled CCR). The result is a ranked shortlist with the weight set, its version and the evidence for every cell published beside it; the owner decides (§1B.1). Trending alone never qualifies a line or niche (17 §2.3).
+Weights are configuration set by the owner; **none ships by default and an unset weight blocks the ranking run** (17 §2.2). Weight keys for the six criteria: `business.growth.weights.{demand,price,margin,reuse,compliance,sales}` (CCR-166, Proposed, deferred to 3C). The result is a ranked shortlist with the weight set, its version and the evidence for every cell published beside it; the owner decides (§1B.1). Trending alone never qualifies a line or niche (17 §2.3).
 
 **Consequence today:** only R and C have evidence, so **no weighted score and no ranking is computed**. §5 gives a gate-based sequencing proposal instead, and says so.
 
@@ -167,7 +167,7 @@ Evidence note: the only cell-level benchmark in the repository is C1-C4 for trad
 | P for L1-L6 | competitor price pages read on a date (done-for-you YouTube production, AI ad production, dubbing per minute, corporate video); doc 21 | doc 21 |
 | M | measured `C_video` per production type from 3A/3B; per-order cost model for L2 | 09, 3B |
 | S | owner's network, pilot conversations | owner |
-| Weights and keys | `business.growth.weights.*` (unfiled CCR) | owner |
+| Weights and keys | `business.growth.weights.*` (CCR-166) | owner |
 | Agri-input claims and advertising rules | official text | Phase 1 |
 | API support for multi-language audio upload and for auto-dub deletion | official API reference | Phase 1 (24 §4) |
 | Marathi in YouTube auto-dubbing | re-read the table before any L3 decision (the table changes) | Phase 1 |

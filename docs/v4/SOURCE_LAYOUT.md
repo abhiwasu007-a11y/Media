@@ -24,6 +24,7 @@ amw-media-factory/
 │   │   ├── storage/            #   S3-compatible interface; local-disk backend first
 │   │   ├── observability/      #   JSON logging, metrics, correlation IDs
 │   │   ├── ids/                #   UUIDv7, prefixed wire IDs (GLOSSARY §2)
+│   │   ├── interfaces/         #   typed Protocols of the core services (job store, queue, audit log, storage, clock, …) (CCR-162)
 │   │   └── rulepacks/          #   rule-pack loading, version pinning, PLATFORM/TENANT split for prompt caching (CCR-047)
 │   ├── amw_adapters/           # PROVIDER ADAPTERS behind Protocols, each with a fake + recorded fixtures
 │   │   ├── llm/  tts/  image/  video_gen/  stock_footage/  music/  web_fetch/ (CCR-015: allow-listed HTTPS GET, size/time/redirect caps, private-address block)
