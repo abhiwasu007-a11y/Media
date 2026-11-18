@@ -1,0 +1,17 @@
+{
+    "programs": [
+
+    ],
+    "streams": [
+        {
+            "codec_name": "aac",
+            "profile": "LC",
+            "sample_rate": "48000",
+            "channels": 2,
+            "time_base": "1/48000",
+            "duration_ts": 96000,
+            "duration": "2.000000",
+            "bit_rate": "237795"
+        }
+    ]
+}

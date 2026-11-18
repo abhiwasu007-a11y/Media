@@ -92,8 +92,10 @@ class TaskQueue(Protocol):
         ``WorkerLostError`` if the lease is no longer held by this worker."""
         ...
 
-    def mark_done(self, tx: TenantTransaction, item_id: QueueItemId) -> None:
-        """Set ``DONE`` (T08, T09, T10, T11, T20 side effect)."""
+    def mark_done(self, tx: TenantTransaction, item_id: QueueItemId, worker_id: WorkerId) -> None:
+        """Set ``DONE`` (T08, T09, T10, T11, T20 side effect). 03 section 11.3 T08 guard "lease
+        still held": only the claiming worker under an unexpired lease; otherwise
+        ``WorkerLostError``."""
         ...
 
     def cancel_for_task(self, tx: TenantTransaction, task_id: TaskId) -> None:
