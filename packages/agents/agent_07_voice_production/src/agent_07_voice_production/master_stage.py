@@ -7,9 +7,7 @@ null in 3A; a non-null value is refused while ``music_enabled`` is false and nee
 once enabled.
 """
 
-import io
 import json
-import wave
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -653,4 +651,4 @@ def _scalar(value: object) -> float | str | None:
     return value if isinstance(value, float | str) or value is None else float(value)  # type: ignore[arg-type]
 
 
-__all__ = ["AudioMasterStage", "MasterDeps", "MusicMixer", "evaluate_master", "io", "wave"]
+__all__ = ["AudioMasterStage", "MasterDeps", "MusicMixer", "evaluate_master"]

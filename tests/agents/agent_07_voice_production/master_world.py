@@ -23,10 +23,9 @@ from agent_07_voice_production.ports import (
 )
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.errors import AgentCrashError, RenderCrashError
-from amw_core.ids import CHANNEL, new_id, Prefix
+from amw_core.ids import CHANNEL, Prefix, new_id
 from amw_core.testing.memory import MemoryCheckpointStore
-
-from .support import (
+from tests.agents.agent_07_voice_production.support import (
     FakeClock,
     FakeControl,
     FakeFacts,
@@ -34,7 +33,7 @@ from .support import (
     MemoryTenancy,
     config,
 )
-from .voice_world import OTHER_ORG, make_task_input
+from tests.agents.agent_07_voice_production.voice_world import OTHER_ORG, make_task_input
 
 ORG = "org_01939e5a-7c3b-7d1e-8a4f-0123456789ab"
 
@@ -58,22 +57,31 @@ class StubFfmpeg:
     def to_working_format(self, src: Path, dst: Path) -> None:
         raise NotImplementedError
 
-    def analyse(self, path: Path, *, silence_noise_db: float, silence_min_s: float) -> AudioAnalysis:
+    def analyse(
+        self, path: Path, *, silence_noise_db: float, silence_min_s: float
+    ) -> AudioAnalysis:
         s = self.stem
         samples = s["duration_ms"] * s["sample_rate_hz"] // 1000
         return AudioAnalysis(
             StreamFacts(s["sample_rate_hz"], s["channels"], samples, "pcm_s16le"),
             Loudness(s["integrated_lufs"], s["true_peak_dbtp"], s["lra_lu"]),
-            s["clipping_samples"], -6.0,
+            s["clipping_samples"],
+            -6.0,
             tuple(SilenceSpan(r["start_ms"], r["end_ms"]) for r in s["silence_runs"]),
             s["noise_floor_dbfs"],
-        )  # fmt: skip
+        )
 
     # -- MasteringBackend
     def render(
-        self, src: Path, dst: Path, *, gain_db: float, ceiling_dbtp: float, input_channels: int,
+        self,
+        src: Path,
+        dst: Path,
+        *,
+        gain_db: float,
+        ceiling_dbtp: float,
+        input_channels: int,
         denoise: DenoiseMode,
-    ) -> None:  # fmt: skip
+    ) -> None:
         n = len(self.renders) + 1
         for fault in self.faults:
             if fault.get("fault") == "FFMPEG_CRASH" and fault["at"] == f"during_pass_{n}":
@@ -102,7 +110,9 @@ class StubFfmpeg:
         _, post = self.analyse_master(master)
         idx = min(len(self.renders) - 1, len(self.overshoots) - 1)
         assert post.true_peak_dbtp is not None
-        shifted = Loudness(post.integrated_lufs, round(post.true_peak_dbtp + self.overshoots[idx], 3), post.lra_lu)
+        shifted = Loudness(
+            post.integrated_lufs, round(post.true_peak_dbtp + self.overshoots[idx], 3), post.lra_lu
+        )
         return CodecFacts("aac", "LC", 48_000, 2, self.bitrate_bps, shifted)
 
     def build(self) -> str:
@@ -138,19 +148,28 @@ def build(case: dict[str, Any], scratch: Path) -> MasterWorld:
     blobs.seed(payload["narration_ref"], stem_bytes)
     payload["narration_sha256"] = stem_sha if stem["sha_matches"] else payload["narration_sha256"]
     timeline = c.NarrationTimeline(
-        script_id="scr_98d3acae-b594-7687-8641-4f666d21ff77", script_version=1,
-        iteration=payload["iteration"], purpose=c.Purpose(stem["purpose"]),
-        source=c.TimelineSource.PROVIDER_CLIPS, total_duration_ms=tl["total_duration_ms"],
+        script_id="scr_98d3acae-b594-7687-8641-4f666d21ff77",
+        script_version=1,
+        iteration=payload["iteration"],
+        purpose=c.Purpose(stem["purpose"]),
+        source=c.TimelineSource.PROVIDER_CLIPS,
+        total_duration_ms=tl["total_duration_ms"],
         segments=(
             c.TimelineSegment(
-                segment_id="s1", start_ms=0, end_ms=tl["total_duration_ms"],
-                duration_ms=tl["total_duration_ms"], pace_requested=c.Pace.NORMAL,
-                emotion_requested=c.Emotion.NEUTRAL, pace_applied=c.AppliedPace.NONE,
-                emotion_applied=c.AppliedEmotion.NONE, spoken_text_sha256=None,
-                reused_clip=False, idempotency_key=None,
+                segment_id="s1",
+                start_ms=0,
+                end_ms=tl["total_duration_ms"],
+                duration_ms=tl["total_duration_ms"],
+                pace_requested=c.Pace.NORMAL,
+                emotion_requested=c.Emotion.NEUTRAL,
+                pace_applied=c.AppliedPace.NONE,
+                emotion_applied=c.AppliedEmotion.NONE,
+                spoken_text_sha256=None,
+                reused_clip=False,
+                idempotency_key=None,
             ),
         ),
-    )  # fmt: skip
+    )
     tl_bytes = timeline.model_dump_json().encode()
     blobs.seed(payload["timeline_ref"], tl_bytes)
     payload["timeline_sha256"] = hashlib.sha256(tl_bytes).hexdigest()
@@ -160,24 +179,50 @@ def build(case: dict[str, Any], scratch: Path) -> MasterWorld:
         payload["music_stem"]["stem_sha256"] = hashlib.sha256(music).hexdigest()
 
     cm = fx["codec_model"]
-    ffmpeg = StubFfmpeg(stem, list(cm["post_codec_true_peak_overshoot_db"]), cm["bitrate_bps"], fx["faults"])
-    for fault in fx["faults"]:  # AM-30 needs a second pass to exist: see the module note in the test
+    ffmpeg = StubFfmpeg(
+        stem, list(cm["post_codec_true_peak_overshoot_db"]), cm["bitrate_bps"], fx["faults"]
+    )
+    for fault in fx[
+        "faults"
+    ]:  # AM-30 needs a second pass to exist: see the module note in the test
         if fault.get("fault") == "FFMPEG_CRASH":
             ffmpeg.overshoots = [0.6, *ffmpeg.overshoots[1:]]
     control = FakeControl(drain=any(f.get("control") == "DRAIN" for f in fx["faults"]))
     keys = (
-        "target_lufs", "true_peak_max_dbtp", "tolerance_lu", "max_passes", "limiter_ceiling_dbtp",
-        "codec_headroom_step_db", "max_limiter_reduction_db", "max_silence_ms", "music_enabled",
-        "min_bitrate_bps", "denoise_mode",
-    )  # fmt: skip
+        "target_lufs",
+        "true_peak_max_dbtp",
+        "tolerance_lu",
+        "max_passes",
+        "limiter_ceiling_dbtp",
+        "codec_headroom_step_db",
+        "max_limiter_reduction_db",
+        "max_silence_ms",
+        "music_enabled",
+        "min_bitrate_bps",
+        "denoise_mode",
+    )
     cfg = config(**{k: cfgx[k] for k in keys})
-    facts = FakeFacts(music_licensed=all(a["licence_ledger_row"] for a in (fx["music"] or {"assets": []})["assets"]))
+    facts = FakeFacts(
+        music_licensed=all(
+            a["licence_ledger_row"] for a in (fx["music"] or {"assets": []})["assets"]
+        )
+    )
     checkpoints = MemoryCheckpointStore()
     deps = MasterDeps(
-        config=cfg, storage=blobs, tenancy=MemoryTenancy(), checkpoints=checkpoints, facts=facts,
-        tools=ffmpeg, backend=ffmpeg, clock=FakeClock(), control=control, scratch_root=scratch,
-    )  # fmt: skip
+        config=cfg,
+        storage=blobs,
+        tenancy=MemoryTenancy(),
+        checkpoints=checkpoints,
+        facts=facts,
+        tools=ffmpeg,
+        backend=ffmpeg,
+        clock=FakeClock(),
+        control=control,
+        scratch_root=scratch,
+    )
     task_input = make_task_input(
         ORG, CHANNEL.new(), payload, "agent_07.audio_master.input", "agent_07"
     )
-    return MasterWorld(AudioMasterStage(deps), task_input, blobs, ffmpeg, checkpoints, control, deps)
+    return MasterWorld(
+        AudioMasterStage(deps), task_input, blobs, ffmpeg, checkpoints, control, deps
+    )

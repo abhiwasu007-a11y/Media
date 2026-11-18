@@ -12,15 +12,14 @@ import pytest
 
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import OutputStatus
-
-from .voice_world import VoiceWorld, build
+from tests.agents.agent_07_voice_production.voice_world import VoiceWorld, build
 
 ROOT = Path(__file__).resolve().parents[3]
 CASES = [
     json.loads(line)
-    for line in (
-        ROOT / "docs/v4/evals/agent_07_voice_production/voice_synthesis/cases.jsonl"
-    ).read_text(encoding="utf-8").splitlines()
+    for line in (ROOT / "docs/v4/evals/agent_07_voice_production/voice_synthesis/cases.jsonl")
+    .read_text(encoding="utf-8")
+    .splitlines()
     if line.strip()
 ]
 NOT_RUN = {
@@ -50,7 +49,8 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
         assert world.ledger.total_micros == expected_total
     for row in world.ledger.rows.values():
         assert row.entry.operation.value == "tts.synthesize"
-        assert row.entry.unit_kind is not None and row.entry.unit_kind.value == "characters"
+        assert row.entry.unit_kind is not None
+        assert row.entry.unit_kind.value == "characters"
         assert row.entry.figure_kind.value == "ESTIMATE"
     assert world.registry.asset_rows == exp.get("asset_rows", 0)
     assert world.registry.licence_rows == exp.get("licence_ledger_rows", 0)
@@ -67,7 +67,8 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
     if out.status is not OutputStatus.SUCCEEDED:
         assert out.payload is None
         return
-    assert out.payload is not None and out.payload.data is not None
+    assert out.payload is not None
+    assert out.payload.data is not None
     data = out.payload.data
     assert data["timeline"]["source"] == exp["timeline_source"]
     if "timeline" in exp:
@@ -80,10 +81,15 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
             assert s["end_ms"] - s["start_ms"] == s["duration_ms"]
     for pause in exp.get("pauses_expected", []):
         found = [
-            p for p in data["timeline"]["pauses"] if p["after_segment_id"] == pause["after_segment_id"]
-            and p["kind"] == pause["kind"]
-        ]  # fmt: skip
-        assert found and (found[0]["start_ms"], found[0]["end_ms"]) == (pause["start_ms"], pause["end_ms"])
+            p
+            for p in data["timeline"]["pauses"]
+            if p["after_segment_id"] == pause["after_segment_id"] and p["kind"] == pause["kind"]
+        ]
+        assert found
+        assert (found[0]["start_ms"], found[0]["end_ms"]) == (
+            pause["start_ms"],
+            pause["end_ms"],
+        )
     if "characters_billed" in exp:
         assert data["cost"]["characters"] == exp["characters_billed"]
     verdicts = _results(out)
@@ -102,7 +108,9 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
     if exp.get("request_contains_markup") is False:
         assert all("<" not in r.text and ">" not in r.text for r in world.tts.requests)
     for style in exp.get("style", []):
-        seg = next(s for s in data["timeline"]["segments"] if s["segment_id"] == style["segment_id"])
+        seg = next(
+            s for s in data["timeline"]["segments"] if s["segment_id"] == style["segment_id"]
+        )
         assert seg["emotion_applied"] == style["emotion_applied"]
     if "presenter_kind" in exp:
         assert data["voice"]["presenter_kind"] == exp["presenter_kind"]
@@ -113,7 +121,8 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
         assert data["narration"]["sample_rate_hz"] == exp["narration_sample_rate_hz"]
         assert data["narration"]["channels"] == exp["narration_channels"]
     if exp.get("is_sample"):
-        assert data["purpose"] == "SAMPLE" and data["narration"]["asset_id"] is None
+        assert data["purpose"] == "SAMPLE"
+        assert data["narration"]["asset_id"] is None
     for event in exp.get("retry_events", []):
         assert any(c.outcome == event["error_code"] for c in world.tts.engine.calls)
     # A11: the key of each call is the 03 9.2 key of (task, segment, spoken-text hash, voice)
@@ -131,14 +140,19 @@ def test_case(case: dict[str, Any], tmp_path: Path) -> None:
         # VS-23: the task completed once; the case is its replay (DLQ replay or output loss).
         first = world.run()
         assert first.status is OutputStatus.SUCCEEDED
-        rows, assets, licences = len(world.ledger.rows), world.registry.asset_rows, world.registry.licence_rows
+        rows, assets, licences = (
+            len(world.ledger.rows),
+            world.registry.asset_rows,
+            world.registry.licence_rows,
+        )
         world.tts.invocations = 0
         out = world.run()
         assert len(world.ledger.rows) == rows
         assert (world.registry.asset_rows, world.registry.licence_rows) == (assets, licences)
         assert world.tts.invocations == case["expected"]["network_calls"] == 0
         assert out.status is OutputStatus.SUCCEEDED
-        assert out.payload is not None and first.payload is not None
+        assert out.payload is not None
+        assert first.payload is not None
         assert out.payload.data == first.payload.data
         return
     out = world.run()

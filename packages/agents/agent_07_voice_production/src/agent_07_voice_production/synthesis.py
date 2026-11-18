@@ -15,7 +15,6 @@ import wave
 from array import array
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -30,7 +29,6 @@ from amw_core.enums import CostFigureKind, CostOperation, CostUnitKind, Idempote
 from amw_core.errors import (
     CircuitOpenError,
     CorruptedOutputError,
-    IdempotencyConflictError,
     LockConflictError,
     TemporaryError,
 )
@@ -302,7 +300,11 @@ class SegmentSynthesizer:
         _, samples = decode_s16_bytes(data)
         with self._tenancy.transaction(ctx.tenant) as tx:
             original = next(
-                (e for e in self._ledger.for_task(tx, ctx.task_id) if e.entry.idempotency_key == key),
+                (
+                    e
+                    for e in self._ledger.for_task(tx, ctx.task_id)
+                    if e.entry.idempotency_key == key
+                ),
                 None,
             )
         return ClipResult(
@@ -325,12 +327,4 @@ class SegmentSynthesizer:
                 self._idem.fail(tx, key, self._clock.now())
 
 
-__all__ = [
-    "ClipResult",
-    "IdempotencyConflictError",
-    "SegmentSynthesizer",
-    "SynthesisSettings",
-    "estimate_micros",
-    "timedelta",
-    "tts_key",
-]
+__all__ = ["ClipResult", "SegmentSynthesizer", "SynthesisSettings", "estimate_micros", "tts_key"]

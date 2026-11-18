@@ -20,7 +20,6 @@ from agent_07_voice_production.ports import (
     AssetFacts,
     AudioAnalysis,
     JobFacts,
-    LicenceFacts,
     Loudness,
     NarrationRegistration,
     RegisteredNarration,
@@ -39,7 +38,7 @@ from amw_core.errors import (
     InputInvalidError,
     MissingDependencyError,
 )
-from amw_core.ids import ASSET, COST_ENTRY, ChannelId, OrgId, WireId
+from amw_core.ids import ASSET, COST_ENTRY, AssetId, ChannelId, OrgId, WireId
 from amw_core.interfaces.budget_guard import CallCheck
 from amw_core.interfaces.cost_ledger import CostEntry, NewCostEntry
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri
@@ -138,6 +137,15 @@ class MemoryLedger:
     def for_task(self, tx: TenantTransaction, task_id: str) -> list[CostEntry]:
         return [r for r in self.rows.values() if str(r.entry.task_id) == str(task_id)]
 
+    def get(self, tx: TenantTransaction, entry_id: str) -> CostEntry | None:
+        return next((r for r in self.rows.values() if r.id == entry_id), None)
+
+    def for_job(self, tx: TenantTransaction, job_id: str) -> list[CostEntry]:
+        return [r for r in self.rows.values() if str(r.entry.job_id) == str(job_id)]
+
+    def job_totals(self, tx: TenantTransaction, job_id: str) -> None:
+        raise NotImplementedError
+
     @property
     def total_micros(self) -> int:
         return sum(r.entry.amount_micros for r in self.rows.values())
@@ -201,7 +209,9 @@ class FakeFacts:
     music_licensed: bool = True
     script_row_present: bool = True
 
-    def script_row(self, tx: TenantTransaction, script_id: str, version: int) -> ScriptRowFacts | None:
+    def script_row(
+        self, tx: TenantTransaction, script_id: str, version: int
+    ) -> ScriptRowFacts | None:
         if not self.script_row_present or self.script_hash is None:
             return None
         return ScriptRowFacts(self.script_hash)
@@ -230,7 +240,7 @@ class FakeFacts:
 
 class FakeRegistry:
     def __init__(self) -> None:
-        self.by_sha: dict[str, WireId] = {}
+        self.by_sha: dict[str, AssetId] = {}
         self.asset_rows = 0
         self.licence_rows = 0
         self.last: NarrationRegistration | None = None
@@ -240,18 +250,18 @@ class FakeRegistry:
     ) -> RegisteredNarration:
         self.last = registration
         if registration.content_sha256 in self.by_sha:
-            return RegisteredNarration(self.by_sha[registration.content_sha256], False)
+            return RegisteredNarration(WireId(self.by_sha[registration.content_sha256]), False)
         asset = ASSET.new()
         self.by_sha[registration.content_sha256] = asset
         self.asset_rows += 1
         self.licence_rows += 1
-        return RegisteredNarration(asset, True)
+        return RegisteredNarration(WireId(asset), True)
 
 
 # --- audio ----------------------------------------------------------------------------------
 
 
-def tone_samples(duration_ms: int, *, freq: float = 440.0, amplitude: float = 0.3) -> "array[int]":
+def tone_samples(duration_ms: int, *, freq: float = 440.0, amplitude: float = 0.3) -> array[int]:
     """A 440 Hz square wave: never near zero, so edge trimming keeps every sample."""
     n = duration_ms * RATE // 1000
     peak = int(32767 * amplitude)
@@ -259,7 +269,7 @@ def tone_samples(duration_ms: int, *, freq: float = 440.0, amplitude: float = 0.
     return array("h", (peak if (i // half) % 2 == 0 else -peak for i in range(n)))
 
 
-def wav_bytes(samples: "array[int]", rate: int = RATE, channels: int = 1) -> bytes:
+def wav_bytes(samples: array[int], rate: int = RATE, channels: int = 1) -> bytes:
     buf = io.BytesIO()
     with wave.open(buf, "wb") as handle:
         handle.setnchannels(channels)
@@ -294,9 +304,13 @@ class ToneTts(FakeTtsAdapter):
 
 
 def capabilities(
-    *, pace: str = "NATIVE", emotion: str = "NATIVE", phoneme: bool = False,
-    languages: tuple[str, ...] = ("mr-IN", "hi-IN"), max_chars: int | None = None,
-) -> TtsCapabilities:  # fmt: skip
+    *,
+    pace: str = "NATIVE",
+    emotion: str = "NATIVE",
+    phoneme: bool = False,
+    languages: tuple[str, ...] = ("mr-IN", "hi-IN"),
+    max_chars: int | None = None,
+) -> TtsCapabilities:
     return TtsCapabilities(ControlLevel(pace), ControlLevel(emotion), phoneme, languages, max_chars)
 
 
@@ -325,11 +339,14 @@ class PcmTools:
         info = wav_info(path)
         return StreamFacts(info.sample_rate_hz, info.channels, info.frames, "pcm_s16le")
 
-    def analyse(self, path: Path, *, silence_noise_db: float, silence_min_s: float) -> AudioAnalysis:
+    def analyse(
+        self, path: Path, *, silence_noise_db: float, silence_min_s: float
+    ) -> AudioAnalysis:
         info, samples = read_s16(path)
         stream = StreamFacts(info.sample_rate_hz, info.channels, info.frames, "pcm_s16le")
-        return AudioAnalysis(stream, Loudness(-20.0, -6.0, 5.0), count_clipped(samples),
-                             peak_dbfs(samples), (), None)  # fmt: skip
+        return AudioAnalysis(
+            stream, Loudness(-20.0, -6.0, 5.0), count_clipped(samples), peak_dbfs(samples), (), None
+        )
 
     def to_working_format(self, src: Path, dst: Path) -> None:
         shutil.copyfile(src, dst)
@@ -337,9 +354,14 @@ class PcmTools:
 
 def config(**overrides: Any) -> AgentSevenConfig:
     values: dict[str, Any] = {
-        "config_version": "test-1", "provider": "fake_tts", "model_ref": "fake-model",
-        "gap_ms": 300, "trim_keep_ms": 0, "price_micros_per_1k_chars": 80_000,
-        "price_ref": "fake-pricing-v0", "sample_max_segments": 2,
-    }  # fmt: skip
+        "config_version": "test-1",
+        "provider": "fake_tts",
+        "model_ref": "fake-model",
+        "gap_ms": 300,
+        "trim_keep_ms": 0,
+        "price_micros_per_1k_chars": 80_000,
+        "price_ref": "fake-pricing-v0",
+        "sample_max_segments": 2,
+    }
     values.update(overrides)
     return AgentSevenConfig.checked(**values)

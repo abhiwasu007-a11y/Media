@@ -7,11 +7,10 @@ before the first paid call. The task never edits the script and sends only sanit
 text and the voice reference to the provider.
 """
 
-import hashlib
 import io
 import json
 import wave
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -30,7 +29,6 @@ from agent_07_voice_production.outputs import (
     suspended,
     usage,
 )
-from agent_07_voice_production.pcm import wav_info
 from agent_07_voice_production.policy import (
     ResolvedVoice,
     check_consent,
@@ -81,7 +79,6 @@ from amw_core.enums import (
     AssetKind,
     CheckKind,
     CheckVerdict,
-    LicenceSourceType,
     OutputRefKind,
     VoiceKind,
     WaitReason,
@@ -133,11 +130,7 @@ class VoiceDeps:
     clock: Clock
     control: ControlPort
     scratch_root: Path
-    sleep: SleepFn | None = None
-
-
-class SleepFn:  # pragma: no cover - typing helper only
-    def __call__(self, seconds: float) -> None: ...
+    sleep: Callable[[float], None] | None = None
 
 
 @dataclass(slots=True)
@@ -379,7 +372,6 @@ class VoiceSynthesisStage:
             for s in run.segments
         ]
         styles = {s.segment_id: map_style(s.pace, s.emotion, caps) for s in run.segments}
-        original = {s.segment_id: p.sanitised for s, p in zip(run.segments, prepared, strict=True)}
         # Unknown terms are scanned on the text after substitution and before escaping.
         substituted = {
             s.segment_id: _unescape_for_scan(p.spoken_text)
@@ -392,7 +384,6 @@ class VoiceSynthesisStage:
             original_texts={s.segment_id: s.text for s in run.segments},
             substituted_texts=substituted,
         )
-        del original
         assert cfg.price_micros_per_1k_chars is not None  # noqa: S101
         total_estimate = estimate_micros(
             sum(p.characters for p in prepared), cfg.price_micros_per_1k_chars
@@ -621,7 +612,7 @@ class VoiceSynthesisStage:
                     ),
                 )
             asset_id = str(registered.asset_id)
-            log_event("voice.registered", ctx, created=registered.created)
+            log_event("voice.registered", ctx, row_created=registered.created)
 
         dictionary_block = c.DictionaryBlock(
             asset_id=run.dictionary_asset_id,
@@ -948,7 +939,11 @@ class VoiceSynthesisStage:
         info = self._d.storage.head(run.ctx.tenant, BlobUri(clip.clip_uri))
         run.clip_refs += (
             output_ref(
-                clip.clip_uri, OutputRefKind.AUDIO, clip.clip_sha256, info.size_bytes or 0, "audio/wav"
+                clip.clip_uri,
+                OutputRefKind.AUDIO,
+                clip.clip_sha256,
+                info.size_bytes or 0,
+                "audio/wav",
             ),
         )
 
@@ -1029,10 +1024,4 @@ def _wav_bytes(samples: object, rate: int) -> bytes:
     return buffer.getvalue()
 
 
-__all__ = [
-    "LicenceSourceType",
-    "VoiceDeps",
-    "VoiceSynthesisStage",
-    "hashlib",
-    "wav_info",
-]
+__all__ = ["VoiceDeps", "VoiceSynthesisStage"]

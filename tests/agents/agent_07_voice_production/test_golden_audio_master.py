@@ -18,16 +18,15 @@ from agent_07_voice_production.admission import TASK_MASTER, AdmissionState, is_
 from amw_core.contracts.task_output import TaskOutput, gate_failures
 from amw_core.enums import OutputStatus
 from amw_core.errors import ConfigInvalidError
-
-from .master_world import MasterWorld, build
-from .support import config
+from tests.agents.agent_07_voice_production.master_world import MasterWorld, build
+from tests.agents.agent_07_voice_production.support import config
 
 ROOT = Path(__file__).resolve().parents[3]
 CASES = [
     json.loads(line)
-    for line in (
-        ROOT / "docs/v4/evals/agent_07_voice_production/audio_master/cases.jsonl"
-    ).read_text(encoding="utf-8").splitlines()
+    for line in (ROOT / "docs/v4/evals/agent_07_voice_production/audio_master/cases.jsonl")
+    .read_text(encoding="utf-8")
+    .splitlines()
     if line.strip()
 ]
 NOT_RUN = {
@@ -40,7 +39,8 @@ pytestmark = [pytest.mark.integration]
 
 def _assert_success(case: dict[str, Any], world: MasterWorld, out: TaskOutput) -> None:
     exp = case["expected"]
-    assert out.payload is not None and out.payload.data is not None
+    assert out.payload is not None
+    assert out.payload.data is not None
     data = out.payload.data
     assert data["gate_verdict"] == exp["gate_verdict"]
     assert [g["check_id"] for g in data["gate_reasons"]] == exp["gate_reasons"]
@@ -67,12 +67,17 @@ def _assert_success(case: dict[str, Any], world: MasterWorld, out: TaskOutput) -
     profile = exp["codec_profile"]
     cv = data["codec_verification"]
     assert (cv["codec"], cv["profile"], cv["sample_rate_hz"], cv["channels"]) == (
-        profile["codec"], profile["profile"], profile["sample_rate_hz"], profile["channels"]
-    )  # fmt: skip
+        profile["codec"],
+        profile["profile"],
+        profile["sample_rate_hz"],
+        profile["channels"],
+    )
     assert cv["bitrate_bps"] >= profile["bitrate_ge_bps"]
     m = data["mastering"]
     if "gain_db_first_pass" in exp:
-        assert world.ffmpeg.renders[0]["gain"] == pytest.approx(exp["gain_db_first_pass"], abs=0.001)
+        assert world.ffmpeg.renders[0]["gain"] == pytest.approx(
+            exp["gain_db_first_pass"], abs=0.001
+        )
     if "passes" in exp:
         assert m["passes"] == exp["passes"]
     if "passes_ge" in exp:
@@ -114,19 +119,22 @@ def test_case(case: dict[str, Any], tmp_path: Path) -> None:
         raise AssertionError(f"{cid}: status {out.status.value} != {exp['status']} ({out.error})")
     if cid == "AM-29":
         latest = world.checkpoints.latest(_tx(world), _task(world))
-        assert latest is not None and latest.checkpoint.step_key == exp["checkpoint_step_key"]
+        assert latest is not None
+        assert latest.checkpoint.step_key == exp["checkpoint_step_key"]
         assert out.next_action.wait_reason is not None
         assert out.next_action.wait_reason.value == exp["wait_reason"]
         assert not world.master_written()
         return
     if out.status is OutputStatus.FAILED:
-        assert out.error is not None and out.error.code == exp["error_code"]
+        assert out.error is not None
+        assert out.error.code == exp["error_code"]
         assert out.error.retryable is exp.get("retryable", out.error.retryable)
         assert not world.master_written()
         assert exp["gate_verdict"] is None
         if cid == "AM-30":  # retry resumes from the pass-1 checkpoint with no partial file
             latest = world.checkpoints.latest(_tx(world), _task(world))
-            assert latest is not None and latest.checkpoint.step_key == exp["resume_from"]
+            assert latest is not None
+            assert latest.checkpoint.step_key == exp["resume_from"]
             world.ffmpeg.faults.clear()
             renders_before = len(world.ffmpeg.renders)
             again = world.run()
