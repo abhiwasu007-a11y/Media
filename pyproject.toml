@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "AMW AI Media Factory (workspace root). Design baseline: docs/v4/"
 requires-python = "==3.14.*"
 dependencies = [
-  "amw-core", "amw-adapters", "amw-orchestrator",
+  "amw-core", "amw-adapters", "amw-orchestrator", "amw-evals",
   "agent-04-research-knowledge", "agent-05-scriptwriter", "agent-06-fact-checker",
   "agent-07-voice-production", "agent-08-visual-assets", "agent-09-video-director",
 ]
@@ -16,6 +16,7 @@ dev = [
   "mypy>=1.13",
   "ruff>=0.8",
   "jsonschema>=4.23",
+  "types-jsonschema>=4.23",
   "psycopg[binary]>=3.2",
 ]
 
@@ -24,12 +25,13 @@ package = false
 default-groups = ["dev"]
 
 [tool.uv.workspace]
-members = ["packages/amw_core", "packages/amw_adapters", "packages/amw_orchestrator", "packages/agents/*"]
+members = ["packages/amw_core", "packages/amw_adapters", "packages/amw_orchestrator", "packages/amw_evals", "packages/agents/*"]
 
 [tool.uv.sources]
 amw-core = { workspace = true }
 amw-adapters = { workspace = true }
 amw-orchestrator = { workspace = true }
+amw-evals = { workspace = true }
 agent-04-research-knowledge = { workspace = true }
 agent-05-scriptwriter = { workspace = true }
 agent-06-fact-checker = { workspace = true }
@@ -41,7 +43,7 @@ agent-09-video-director = { workspace = true }
 line-length = 100
 extend-exclude = ["docs"]
 target-version = "py314"
-src = ['packages/amw_core/src', 'packages/amw_adapters/src', 'packages/amw_orchestrator/src', 'packages/agents/agent_04_research_knowledge/src', 'packages/agents/agent_05_scriptwriter/src', 'packages/agents/agent_06_fact_checker/src', 'packages/agents/agent_07_voice_production/src', 'packages/agents/agent_08_visual_assets/src', 'packages/agents/agent_09_video_director/src']
+src = ['packages/amw_core/src', 'packages/amw_adapters/src', 'packages/amw_orchestrator/src', 'packages/amw_evals/src', 'packages/agents/agent_04_research_knowledge/src', 'packages/agents/agent_05_scriptwriter/src', 'packages/agents/agent_06_fact_checker/src', 'packages/agents/agent_07_voice_production/src', 'packages/agents/agent_08_visual_assets/src', 'packages/agents/agent_09_video_director/src']
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "C4", "SIM", "RUF", "PT", "N", "ANN", "ASYNC", "TID"]
@@ -57,7 +59,7 @@ ban-relative-imports = "all"
 strict = true
 python_version = "3.14"
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/amw_core/src:$MYPY_CONFIG_FILE_DIR/packages/amw_adapters/src:$MYPY_CONFIG_FILE_DIR/packages/amw_orchestrator/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_04_research_knowledge/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_05_scriptwriter/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_06_fact_checker/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_07_voice_production/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_08_visual_assets/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_09_video_director/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/amw_core/src:$MYPY_CONFIG_FILE_DIR/packages/amw_adapters/src:$MYPY_CONFIG_FILE_DIR/packages/amw_orchestrator/src:$MYPY_CONFIG_FILE_DIR/packages/amw_evals/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_04_research_knowledge/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_05_scriptwriter/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_06_fact_checker/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_07_voice_production/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_08_visual_assets/src:$MYPY_CONFIG_FILE_DIR/packages/agents/agent_09_video_director/src"
 files = ["packages", "tests", "scripts"]
 plugins = ["pydantic.mypy"]
 
@@ -79,7 +81,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["amw_core"]
+source = ["amw_core", "amw_evals"]
 
 [tool.coverage.report]
 fail_under = 90
