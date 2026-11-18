@@ -7,7 +7,9 @@ skipped with a clear reason. Application code runs as ``amw_app`` (``SET ROLE``)
 superuser, so RLS is really enforced.
 """
 
+import fcntl
 import os
+import tempfile
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -45,6 +47,22 @@ def _with_dbname(dsn: str, dbname: str) -> str:
 
 
 @contextmanager
+def _one_migration_at_a_time() -> Iterator[None]:
+    """Serialise migrations of concurrent test processes on one cluster. The migrations create and
+    re-grant cluster-global roles (0001, 0010, 0051), and two sessions doing that at once fail with
+    "tuple concurrently updated" or "must be able to SET ROLE" (observed with three parallel pytest
+    runs; the databases are separate, the roles are not). A host-wide file lock removes that race
+    for local runs; CI has one session per cluster."""
+    path = Path(tempfile.gettempdir()) / "amw_test_migrate.lock"
+    with path.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+@contextmanager
 def scratch_database(*, migrated: bool) -> Iterator[str]:
     """Create a database (optionally migrated), yield its DSN, drop it afterwards."""
     base = admin_dsn()
@@ -54,7 +72,8 @@ def scratch_database(*, migrated: bool) -> Iterator[str]:
     dsn = _with_dbname(base, name)
     try:
         if migrated:
-            migrate(dsn, MIGRATIONS)
+            with _one_migration_at_a_time():
+                migrate(dsn, MIGRATIONS)
         yield dsn
     finally:
         with psycopg.connect(base, autocommit=True) as conn:

@@ -325,6 +325,11 @@ def test_a_row_of_a_can_never_point_at_a_parent_of_b(
                 problems.append(f"{name}: {cur.rowcount} A rows now point at B's {parent}")
             except psycopg.errors.ForeignKeyViolation:
                 pass
+            except psycopg.errors.CheckViolation as exc:
+                # cost_ledger: an ESTIMATE row may not carry estimate_entry_id at all, so the
+                # update is refused before the FK is reached; nothing was written
+                if table != "cost_ledger":
+                    problems.append(f"{name}: unexpected {exc.sqlstate} {exc}")
             except psycopg.Error as exc:
                 problems.append(f"{name}: unexpected {exc.sqlstate} {exc}")
     assert problems == []
@@ -412,6 +417,8 @@ ALLOWED_OUTPUTS = {
     "wait_reason",
     "state",
     "open_until",
+    "admitted",
+    "epoch",
 }
 
 
