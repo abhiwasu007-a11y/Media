@@ -170,25 +170,28 @@ def _stage_route(cell: str) -> dict[str, object] | None:
 
 
 def stage_table(heading_re: str) -> list[dict[str, object]]:
-    """Stages of one 24 section 7 record table as ``amw.production_type`` stage objects
-    (``capabilities`` are not in the tables and are left empty)."""
+    """Stages of one 24 section 7 record table as ``amw.production_type`` stage objects."""
     body = section(doc_text("24_PRODUCTION_TYPES.md"), heading_re, 3)
     stages: list[dict[str, object]] = []
     for row in table_rows(body):
-        if len(row) != 6 or not re.fullmatch(r"[a-z0-9_]{2,32}", row[0]):
+        if len(row) != 7 or not re.fullmatch(r"[a-z0-9_]{2,32}", row[0]):
             continue
-        stage_id, task_cell, req, klass, deps, route = row
+        stage_id, task_cell, req, klass, caps, deps, route = row
         gate = _stage_route(route)
         if route.startswith("blocking") and gate is None:
             raise AssertionError(f"unparsed gate route for {stage_id}: {route}")
         approval = re.match(r"`([A-Z_]+)` / `([a-z_]+)`", route)
+        stage: dict[str, object] = {}
+        if not req.startswith("yes") and "disabled" in req:
+            stage["enabled_by_default"] = False
         stages.append(
-            {
+            stage
+            | {
                 "stage_id": stage_id,
                 "task_type": ticks(task_cell)[0],
                 "required": req.startswith("yes"),
                 "resource_class": klass,
-                "capabilities": [],
+                "capabilities": ticks(caps),
                 "depends_on": re.findall(r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b", deps.split("(")[0]),
                 "gate": gate,
                 "approval": {"approval_kind": approval[1], "workflow_key": approval[2]}
@@ -210,3 +213,21 @@ def system_actor_names() -> list[str]:
     body = section(doc_text("GLOSSARY_AND_IDS.md"), r"2\.3 ", 3)
     row = next(r for r in table_rows(body) if r[0] == "`SYSTEM`")
     return ticks(row[1].split("∈", 1)[1])
+
+
+def r14_tables() -> tuple[list[str], dict[str, list[str]]]:
+    """03 11.6 rule 7: authenticity test IDs and ``{verification kind: record kinds}``."""
+    body = section(doc_text("03_COMMUNICATION_STANDARD.md"), r"11\.6 ", 3)
+    rows = [
+        [c.strip() for c in line.strip().strip("|").split("|")]
+        for line in body.splitlines()
+        if line.strip().startswith("|")
+    ]
+    test_ids: list[str] = []
+    kinds: dict[str, list[str]] = {}
+    for row in rows:
+        if re.fullmatch(r"A\d", row[0]):
+            test_ids += [t for t in re.findall(r"\bA\d\b", " ".join(row)) if t not in test_ids]
+        elif len(row) >= 2 and re.fullmatch(r"`[A-Z]+`", row[0]):
+            kinds[ticks(row[0])[0]] = ticks(row[1].split("(")[0])
+    return test_ids, kinds

@@ -5,6 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "schema_version",
     "title",
     "brief",
     "angle",
@@ -16,6 +17,10 @@
     "shorts_wanted"
   ],
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
     "title": {
       "type": "string",
       "minLength": 3,
