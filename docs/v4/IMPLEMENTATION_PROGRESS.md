@@ -4,7 +4,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 
 | Track | Status |
 |---|---|
-| **Documentation** | Phase 0 complete. Phase 1 in progress. |
+| **Documentation** | Phase 0 complete. Phase 1 in progress (VPS audit and feasibility waiting on owner data). Architecture waves A/B/C started 2026-11-18 on the owner's instruction (in parallel with Phase 1). |
 | **Software** | **Planned.** Nothing implemented. Code starts only after written approval of the V4.0 baseline (rule 1). |
 
 ## Task ledger
@@ -18,7 +18,12 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | P1.2 | Progress ledger | Done | IMPLEMENTATION_PROGRESS.md | — | — | — |
 | P1.3 | Change-request register | Done | CHANGE_REQUESTS.md | — | — | — |
 | P1.4 | Repo & server audit | **Partial**: Parts A, B, D done; Part C blocked | 00_REPO_AND_SERVER_AUDIT.md | private repos inventoried read-only (counts only) | **VPS script output (A1)** | R3 |
-| P1.5 | Research log, wave 1 (§1 constraints) | In progress | RESEARCH_LOG.md | official-source reads | — | R8 |
+| P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
+| P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | In progress | RESEARCH_LOG.md | — | — | R7 |
+| P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
+| W-A | Architecture Wave A (foundation docs) | In progress (1 agent) | branch `claude/v4-wave-a` | — | — | R6 |
+| W-B | Architecture Wave B (17 blueprints + shared docs + ADRs) | Not started | — | — | W-A | R6 |
+| W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
 | P1.6 | Technical feasibility | Not started | 00b_TECHNICAL_FEASIBILITY.md | — | P1.4 Part C, research wave 2 (prices) | R3, R7 |
 
 ## Owner inputs: status
@@ -27,7 +32,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 |---|---|---|
 | A1 | VPS read-only output | **Waiting.** Script delivered; one consolidated command given. |
 | A2 | `trade-data` + `atp-private` read access | **Received** (2026-11-18, read-only clones) |
-| A3 | Research network access | **Received.** Environment network is open (checked 2026-11-18). |
+| A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
 | A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
 | A5 | Channel Google account / Brand Account decision | Waiting (same as A4) |
 | A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status, GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
@@ -47,4 +52,4 @@ Resume from this file after any context reset (directive §6). Finished work is 
 ## Session log
 | Date | Session | Work |
 |---|---|---|
-| 2026-11-18 | 1 | Phase 0 done; Phase 1 started: audit script, skeleton, ledger, CR register, audit Parts A/B/D, research wave 1 |
+| 2026-11-18 | 1 | Phase 0 done; Phase 1: audit script (+ sudo usage fix), skeleton, ledger, CR register, audit Parts A/B/D, research wave 1 complete, Knowledge Library plan; architecture Wave A launched |
