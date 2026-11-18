@@ -290,6 +290,8 @@ class SegmentSynthesizer:
         key: IdempotencyKey,
         result_ref: str | None,
     ) -> ClipResult:
+        """A replay (DLQ replay, retry after output loss): the stored clip and its original ledger
+        row; no provider call, no new row (NFR-2, SC-6)."""
         if result_ref is None:
             raise CorruptedOutputError("a completed key without a stored clip")
         uri = BlobUri(result_ref)
@@ -298,6 +300,11 @@ class SegmentSynthesizer:
             raise CorruptedOutputError("the stored clip is missing")
         data = b"".join(self._storage.get(ctx.tenant, uri, head.sha256))
         _, samples = decode_s16_bytes(data)
+        with self._tenancy.transaction(ctx.tenant) as tx:
+            original = next(
+                (e for e in self._ledger.for_task(tx, ctx.task_id) if e.entry.idempotency_key == key),
+                None,
+            )
         return ClipResult(
             prepared.segment_id,
             samples,
@@ -307,8 +314,8 @@ class SegmentSynthesizer:
             key,
             False,
             prepared.characters,
-            None,
-            0,
+            original.id if original is not None else None,
+            original.entry.amount_micros if original is not None else 0,
         )
 
     def _fail_key(self, ctx: ExecContext, key: IdempotencyKey) -> None:

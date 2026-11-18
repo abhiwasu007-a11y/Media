@@ -513,7 +513,12 @@ class VoiceSynthesisStage:
             if analysis.clipping_samples > 0:
                 raise InputInvalidError(
                     "the recording has clipped samples; re-record it",
-                    details={"clipping_samples": analysis.clipping_samples},
+                    details={
+                        "clipping_samples": analysis.clipping_samples,
+                        "violations": [
+                            {"path": "", "keyword": "clipping", "message": "clipped samples"}
+                        ],
+                    },
                 )
             stem_duration = analysis.stream.duration_ms
             validate_marks(
@@ -933,22 +938,17 @@ class VoiceSynthesisStage:
     # ---------------------------------------------------------------- bookkeeping
 
     def _account(self, run: _Run, clip: ClipResult) -> None:
-        if clip.called_provider:
+        """``calls`` counts the task's billed calls (also on a replay: the output of a replay equals
+        the first run's); the harness counts adapter invocations separately."""
+        if clip.cost_entry_id is not None:
             run.calls += 1
             run.characters += clip.characters
             run.cost_micros += clip.amount_micros
-            if clip.cost_entry_id is not None:
-                run.cost_entry_ids += (str(clip.cost_entry_id),)
-        else:
-            run.reused += 0  # a replayed clip is not a cross-iteration reuse (FR-19 is 3B)
+            run.cost_entry_ids += (str(clip.cost_entry_id),)
         info = self._d.storage.head(run.ctx.tenant, BlobUri(clip.clip_uri))
         run.clip_refs += (
             output_ref(
-                clip.clip_uri,
-                OutputRefKind.AUDIO,
-                clip.clip_sha256,
-                info.size_bytes or 0,
-                "audio/wav",
+                clip.clip_uri, OutputRefKind.AUDIO, clip.clip_sha256, info.size_bytes or 0, "audio/wav"
             ),
         )
 
