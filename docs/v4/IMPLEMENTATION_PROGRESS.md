@@ -19,12 +19,12 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | P1.3 | Change-request register | Done | CHANGE_REQUESTS.md | — | — | — |
 | P1.4 | Repo & server audit | **Partial**: Parts A, B, D done; Part C blocked | 00_REPO_AND_SERVER_AUDIT.md | private repos inventoried read-only (counts only) | **VPS script output (A1)** | R3 |
 | P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
-| P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | In progress | RESEARCH_LOG.md | — | — | R7 |
+| P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | Done (2026-11-18) | RESEARCH_LOG.md | official pricing/licence pages read | Blocked: openai.com, artlist.io, pond5, pexels, pixabay, shutterstock, help.elevenlabs.io, support.storyblocks.com | R7 |
 | P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
 | W-A | Architecture Wave A (foundation docs) | In progress (1 agent) | branch `claude/v4-wave-a` | — | — | R6 |
 | W-B | Architecture Wave B (17 blueprints + shared docs + ADRs) | Not started | — | — | W-A | R6 |
 | W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
-| P1.6 | Technical feasibility | Not started | 00b_TECHNICAL_FEASIBILITY.md | — | P1.4 Part C, research wave 2 (prices) | R3, R7 |
+| P1.6 | Technical feasibility | **Partial** (capabilities verdict done; server verdict + per-video totals REQUIRES REVIEW) | 00b_TECHNICAL_FEASIBILITY.md | every capability cites a research ID | P1.4 Part C (VPS), skeleton measurements, business plan | R3, R7 |
 
 ## Owner inputs: status
 

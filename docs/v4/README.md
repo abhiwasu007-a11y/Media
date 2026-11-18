@@ -19,9 +19,9 @@ Documentation status values: **Not started** · **Draft** · **Partial (blocked)
 | File | Status |
 |---|---|
 | [00_REPO_AND_SERVER_AUDIT.md](00_REPO_AND_SERVER_AUDIT.md) | Partial (blocked: VPS output) |
-| [RESEARCH_LOG.md](RESEARCH_LOG.md) | Draft (wave 1 complete; wave 2 prices in progress) |
+| [RESEARCH_LOG.md](RESEARCH_LOG.md) | Draft (waves 1 and 2 complete) |
 | [KNOWLEDGE_LIBRARY_PLAN.md](KNOWLEDGE_LIBRARY_PLAN.md) | Draft (generic; book location pending) |
-| 00b_TECHNICAL_FEASIBILITY.md | Not started (needs VPS output + prices) |
+| [00b_TECHNICAL_FEASIBILITY.md](00b_TECHNICAL_FEASIBILITY.md) | Partial (server verdict needs VPS output) |
 
 ## 2. Business architecture
 | File | Status |
