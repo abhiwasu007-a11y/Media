@@ -18,6 +18,7 @@ from amw_core.errors import (
     CrossTenantRefError,
     InvalidTransitionError,
     MissingDependencyError,
+    WorkerLostError,
 )
 from amw_core.ids import ATTEMPT, JOB, QUEUE_ITEM, TASK, WORKER, ActorRef
 from amw_core.interfaces.job_store import JobTransition, TaskTransition
@@ -82,11 +83,12 @@ def _org_col(table: str) -> sql.Identifier:
 
 
 @contextmanager
-def as_app(conn: Conn, org: uuid.UUID | None) -> Iterator[Conn]:
-    """One transaction as ``amw_app`` with ``app.org_id`` = ``org`` (or unset); rolled back."""
+def as_app(conn: Conn, org: uuid.UUID | None, role: str = "amw_app") -> Iterator[Conn]:
+    """One transaction as ``role`` (default ``amw_app``) with ``app.org_id`` = ``org`` (or unset);
+    rolled back."""
     tx = conn.transaction(force_rollback=True)
     with tx:
-        conn.execute("SET LOCAL ROLE amw_app")
+        conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
         if org is not None:
             conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org),))
         yield conn
@@ -136,14 +138,36 @@ def test_every_tenant_table_is_seeded(admin: Conn, worlds: tuple[World, World]) 
 
 
 # --- 3.7.2 reads and writes as tenant A --------------------------------------------------------
+SWEEP_ROLES = (
+    "amw_app",
+    "amw_publisher",
+    "amw_readonly",
+    "amw_auth",
+    "amw_operator",
+    "amw_verifier",
+)
+_PRIVILEGE = {"select": "SELECT", "insert": "INSERT", "update": "UPDATE", "delete": "DELETE"}
+
+
+@pytest.mark.parametrize("role", SWEEP_ROLES)
 @pytest.mark.parametrize("probe", ["select", "insert", "update", "delete"])
 def test_tenant_a_never_touches_tenant_b(
-    admin: Conn, worlds: tuple[World, World], probe: str
+    admin: Conn, worlds: tuple[World, World], probe: str, role: str
 ) -> None:
+    """Every login role of the application. A table the role holds the privilege on must be
+    *probed* (a policy answers with zero rows / a WITH CHECK refusal); a plain "permission
+    denied" on such a table is a failure, so a privilege gap cannot mask a missing policy."""
     a, b = worlds
     problems: list[str] = []
+    probed = 0
     for table in tenant_tables(admin):
         ident, col = sql.Identifier(table), _org_col(table)
+        held = admin.execute(
+            "SELECT has_table_privilege(%s, %s, %s)", (role, table, _PRIVILEGE[probe])
+        ).fetchone()
+        if held != (True,):
+            continue  # no privilege: nothing to leak (pg_class level check is the catalogue test)
+        probed += 1
         if probe == "insert":
             row = admin.execute(
                 sql.SQL("SELECT to_jsonb(t) FROM {} t WHERE {} = %s LIMIT 1").format(ident, col),
@@ -154,7 +178,7 @@ def test_tenant_a_never_touches_tenant_b(
             doc[col.as_string(admin).strip('"')] = str(b.tenant.org_uuid)
             if "id" in doc and table != "organisations":
                 doc["id"] = str(uuid.uuid4())
-        with as_app(admin, a.tenant.org_uuid) as conn:
+        with as_app(admin, a.tenant.org_uuid, role) as conn:
             try:
                 with savepoint(conn):
                     if probe == "select":
@@ -191,9 +215,13 @@ def test_tenant_a_never_touches_tenant_b(
                             problems.append(f"{table}: deleted {cur.rowcount} B rows")
             except psycopg.Error as exc:
                 # refused: no privilege / RLS WITH CHECK (42501) or a guard trigger (AMW02)
-                if exc.sqlstate not in ("42501", "AMW02"):
+                if exc.sqlstate == "42501" and "permission denied" in str(exc):
+                    problems.append(f"{table}: privilege held but {exc}")
+                elif exc.sqlstate not in ("42501", "AMW02"):
                     problems.append(f"{table}: unexpected {exc.sqlstate} {exc}")
     assert problems == []
+    if probe == "select":
+        assert probed > 0, f"{role} reads no tenant table: the sweep would be vacuous"
 
 
 def test_tenant_a_sees_its_own_rows(admin: Conn, worlds: tuple[World, World]) -> None:
@@ -477,8 +505,8 @@ def test_queue_methods_see_nothing_of_a(
         "SELECT id FROM task_queue WHERE org_id = %s LIMIT 1", (a.tenant.org_uuid,)
     ).fetchone()
     assert item is not None
-    with pytest.raises(InvalidTransitionError):
-        queue.mark_done(b_tx, QUEUE_ITEM.from_uuid(item[0]))
+    with pytest.raises(WorkerLostError):
+        queue.mark_done(b_tx, QUEUE_ITEM.from_uuid(item[0]), WORKER.new())
     queue.cancel_for_task(b_tx, TASK.from_uuid(a["task"]))
     still = admin.execute("SELECT status FROM task_queue WHERE id = %s", (item[0],)).fetchone()
     assert still == ("DONE",)

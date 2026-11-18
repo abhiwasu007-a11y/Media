@@ -174,6 +174,20 @@ def test_operator_creates_pending_evidence(admin: Conn, world: World) -> None:
     assert not _mac_valid(admin, world, ev)
 
 
+def test_recorded_by_is_derived_from_the_login_role(admin: Conn, world: World) -> None:
+    with as_role(admin, "amw_operator", world.tenant) as c:
+        ev = _insert_evidence(c, world, extra={"recorded_by": "usr_someone_else"})
+    assert admin.execute(
+        "SELECT recorded_by FROM owner_instruction_evidence WHERE id = %s", (ev,)
+    ).fetchone() == ("sys_operator",)
+    mac_input = admin.execute(
+        "SELECT convert_from(amw_evidence_mac_input(e), 'UTF8')::jsonb->>'recorded_by'"
+        " FROM owner_instruction_evidence e WHERE id = %s",
+        (ev,),
+    ).fetchone()
+    assert mac_input == ("sys_operator",)
+
+
 def test_operator_may_store_a_refused_attempt(admin: Conn, world: World) -> None:
     with as_role(admin, "amw_operator", world.tenant) as c:
         ev = _insert_evidence(c, world, state="REFUSED")

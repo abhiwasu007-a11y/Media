@@ -30,7 +30,7 @@ $roles$;
 ALTER ROLE amw_operator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB;
 ALTER ROLE amw_verifier LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB;
 ALTER ROLE amw_verifier_fn NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB;
-GRANT amw_verifier_fn TO amw_owner WITH INHERIT FALSE;
+GRANT amw_verifier_fn TO amw_owner WITH INHERIT FALSE, SET TRUE;
 GRANT USAGE ON SCHEMA public TO amw_operator, amw_verifier;
 GRANT USAGE, CREATE ON SCHEMA public TO amw_verifier_fn;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -154,6 +154,12 @@ BEGIN
               WHERE e.org_id = NEW.org_id AND e.confirmation_event_uuid = NEW.event_uuid) THEN
     RAISE EXCEPTION 'this owner message already confirms another record' USING ERRCODE = 'AMW02';
   END IF;
+  -- Identity comes from the database role, never from the caller (CCR-100): the operator login
+  -- is the only role with INSERT, and its rows are always recorded by sys_operator. recorded_by
+  -- is part of the MAC input.
+  IF session_user = 'amw_operator' THEN
+    NEW.recorded_by := 'sys_operator';
+  END IF;
   RETURN NEW;
 END
 $$;
@@ -233,14 +239,14 @@ CREATE FUNCTION amw_evidence_mac_input(e owner_instruction_evidence) RETURNS byt
     'confirmation_quote', e.confirmation_quote,
     'confirmation_message_at',
       to_char(e.confirmation_message_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-    'on_behalf_of', e.on_behalf_of, 'evidence_sha256', encode(e.evidence_sha256, 'hex'),
+    'on_behalf_of', e.on_behalf_of, 'recorded_by', e.recorded_by, 'evidence_sha256', encode(e.evidence_sha256, 'hex'),
     'supersedes_id', e.supersedes_id, 'mac_key_version', e.mac_key_version)::text, 'UTF8')
 $$;
 REVOKE ALL ON FUNCTION amw_evidence_mac_input(owner_instruction_evidence) FROM PUBLIC;
 
 -- Setup: the migrator loads a key version from the environment's secret mechanism.
 CREATE FUNCTION amw_evidence_mac_key_add(p_version int, p_key bytea) RETURNS void
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 BEGIN
   INSERT INTO evidence_mac_keys (version, key) VALUES (p_version, p_key);
@@ -251,7 +257,7 @@ REVOKE ALL ON FUNCTION amw_evidence_mac_key_add(int, bytea) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION amw_evidence_mac_key_add(int, bytea) TO amw_migrator;
 
 CREATE FUNCTION amw_evidence_mac_of(e owner_instruction_evidence) RETURNS bytea
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
   SELECT hmac(amw_evidence_mac_input(e), k.key, 'sha256')
     FROM evidence_mac_keys k WHERE k.version = e.mac_key_version
@@ -259,7 +265,7 @@ $$;
 REVOKE ALL ON FUNCTION amw_evidence_mac_of(owner_instruction_evidence) FROM PUBLIC;
 
 CREATE FUNCTION amw_evidence_mac_valid(p_evidence_id uuid) RETURNS boolean
-  LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   e owner_instruction_evidence;
@@ -282,7 +288,7 @@ GRANT EXECUTE ON FUNCTION amw_evidence_mac_valid(uuid)
 -- Verifier functions (EXECUTE: amw_verifier; session_user must be amw_verifier).
 -- ---------------------------------------------------------------------------------------------
 CREATE FUNCTION amw_evidence_lock(p_evidence_id uuid) RETURNS owner_instruction_evidence
-  LANGUAGE plpgsql SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   e owner_instruction_evidence;
@@ -301,7 +307,7 @@ $$;
 REVOKE ALL ON FUNCTION amw_evidence_lock(uuid) FROM PUBLIC;
 
 CREATE FUNCTION amw_evidence_current_key() RETURNS int
-  LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public
+  LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   v int;
@@ -317,7 +323,7 @@ REVOKE ALL ON FUNCTION amw_evidence_current_key() FROM PUBLIC;
 
 CREATE FUNCTION amw_evidence_mark_verified(p_evidence_id uuid, p_verifier_result jsonb)
   RETURNS void
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   e owner_instruction_evidence := amw_evidence_lock(p_evidence_id);
@@ -340,7 +346,7 @@ $$;
 CREATE FUNCTION amw_evidence_mark_confirmed(
   p_evidence_id uuid, p_confirmation_event_uuid text, p_confirmation_quote text,
   p_confirmation_message_at timestamptz, p_verifier_result jsonb) RETURNS void
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   e owner_instruction_evidence := amw_evidence_lock(p_evidence_id);
@@ -369,7 +375,7 @@ $$;
 
 CREATE FUNCTION amw_evidence_refuse(p_evidence_id uuid, p_reason text, p_verifier_result jsonb)
   RETURNS void
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   e owner_instruction_evidence := amw_evidence_lock(p_evidence_id);
@@ -506,7 +512,7 @@ CREATE FUNCTION amw_human_record_apply(
   p_contribution_type text DEFAULT NULL,
   p_description text DEFAULT NULL,
   p_rubric_version text DEFAULT NULL) RETURNS void
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   ev owner_instruction_evidence;
@@ -532,6 +538,9 @@ BEGIN
   IF ev.record_kind IN ('STEP_DECISION', 'KNOWLEDGE_RELEASE_REQUEST') THEN
     IF ap.id IS NULL OR ev.step_no IS DISTINCT FROM ap.current_step THEN
       RAISE EXCEPTION 'evidence does not name the approval''s current step' USING ERRCODE = 'AMW02';
+    END IF;
+    IF ap.state <> 'PENDING' THEN
+      RAISE EXCEPTION 'the approval is no longer PENDING' USING ERRCODE = 'AMW02';
     END IF;
     UPDATE approval_steps
        SET state = ev.parsed_decision, decided_by = ev.on_behalf_of, decided_at = now(),

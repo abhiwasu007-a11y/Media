@@ -1,5 +1,6 @@
 """``PgJobStore`` (04 section 5.3; 03 sections 11.3-11.7) against PostgreSQL as ``amw_app``."""
 
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -31,6 +32,7 @@ from amw_core.errors import (
     LoopCapExceededError,
     MissingDependencyError,
     NetworkError,
+    WorkerLostError,
 )
 from amw_core.ids import (
     CORRELATION,
@@ -82,6 +84,28 @@ def worker(admin: Conn) -> Any:
         (wid, f"ai-{wid.hex[-8:]}"),
     )
     return WORKER.from_uuid(wid)
+
+
+def hold_lease(
+    admin: Conn, tenant: Tenant, task: Any, worker: Any, *, lease_s: int = 60
+) -> uuid.UUID:
+    """A CLAIMED queue row of ``task`` held by ``worker`` (what T07 leaves behind)."""
+    admin.execute(
+        "UPDATE task_queue SET status = 'DONE' WHERE org_id = %s AND task_id = %s"
+        " AND status IN ('READY', 'CLAIMED')",
+        (tenant.org_uuid, TASK.to_uuid(task)),
+    )
+    row = admin.execute(
+        "INSERT INTO task_queue (id, org_id, task_id, job_id, queue_name, status, priority,"
+        " resource_class, required_capabilities, scheduled_at, claimed_at, claimed_by,"
+        " lease_expires_at, fair_share_key, envelope)"
+        " SELECT %s, org_id, id, job_id, 'ai', 'CLAIMED', 2, 'AI_IO', ARRAY['llm'], now(), now(),"
+        " %s, now() + make_interval(secs => %s), 'k', '{}'::jsonb FROM tasks"
+        " WHERE org_id = %s AND id = %s RETURNING id",
+        (new_uuid7(), WORKER.to_uuid(worker), lease_s, tenant.org_uuid, TASK.to_uuid(task)),
+    ).fetchone()
+    assert row is not None
+    return uuid.UUID(str(row[0]))
 
 
 @contextmanager
@@ -267,6 +291,7 @@ def test_task_lifecycle_end_to_end(
         a = _move(store, t, a, TransitionId.T03, TaskState.QUEUED)
     with tx(tenancy, tenant_a, WKR) as t:
         a = _move(store, t, a, TransitionId.T07, TaskState.RUNNING)
+        hold_lease(admin, tenant_a, a.id, worker)
         attempt = store.start_attempt(t, a.id, worker, None, False)
         assert attempt.attempt_no == 1
         assert attempt.result is AttemptResult.RUNNING
@@ -302,6 +327,7 @@ def test_task_lifecycle_end_to_end(
         a = _move(store, t, a, TransitionId.T12, TaskState.QUEUED)
     with tx(tenancy, tenant_a, WKR) as t:
         a = _move(store, t, a, TransitionId.T07, TaskState.RUNNING)
+        hold_lease(admin, tenant_a, a.id, worker)
         attempt = store.start_attempt(t, a.id, worker, None, False)
         usage = ResourceUsage(
             cpu_ms=1,
@@ -486,3 +512,99 @@ def test_job_completion_and_failure(
         )
         assert job.completed_at is not None
         assert job.outcome is JobOutcome.DELIVERED
+
+
+def _queued_task(
+    tenancy: PgTenancy, tenant: Tenant, store: PgJobStore, ordinal: int = 1
+) -> TaskRecord:
+    with tx(tenancy, tenant) as t:
+        job_id = _validating_job(store, t, tenant)
+        (a,) = store.create_tasks(t, job_id, [new_task(job_id, tenant, ordinal)])
+        a = _move(
+            store,
+            t,
+            a,
+            TransitionId.T02,
+            TaskState.VALIDATING,
+            input_ref="amw-blob://x/in.json",
+            input_sha256="ab" * 32,
+            input_schema_version="1.0.0",
+        )
+        return _move(store, t, a, TransitionId.T03, TaskState.QUEUED)
+
+
+def test_start_attempt_needs_running_task_and_live_lease(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, store: PgJobStore, worker: Any
+) -> None:
+    """03 T07: an attempt opens only for the worker holding the queue row under a live lease."""
+    ensure_production_type(admin)
+    a = _queued_task(tenancy, tenant_a, store)
+    hold_lease(admin, tenant_a, a.id, worker)
+    with tx(tenancy, tenant_a, WKR) as t:
+        with pytest.raises(InvalidTransitionError):  # not RUNNING yet
+            store.start_attempt(t, a.id, worker, None, False)
+        _move(store, t, a, TransitionId.T07, TaskState.RUNNING)
+        with pytest.raises(WorkerLostError):  # another worker
+            store.start_attempt(t, a.id, WORKER.new(), None, False)
+        assert store.start_attempt(t, a.id, worker, None, False).attempt_no == 1
+    hold_lease(admin, tenant_a, a.id, worker, lease_s=-5)  # lease lapsed, reaper not yet run
+    with tx(tenancy, tenant_a, WKR) as t, pytest.raises(WorkerLostError):
+        store.start_attempt(t, a.id, worker, None, False)
+
+
+def test_completion_clears_stale_error_fields(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, store: PgJobStore
+) -> None:
+    """A task that retried and then COMPLETED keeps no error/next-attempt residue."""
+    ensure_production_type(admin)
+    err = error_object_from_exception(
+        NetworkError("reset"),
+        actor="agent_05",
+        attempt_no=1,
+        occurred_at=datetime.now(UTC),
+        correlation_id=CORRELATION.new(),
+    )
+    a = _queued_task(tenancy, tenant_a, store)
+    with tx(tenancy, tenant_a, WKR) as t:
+        a = _move(store, t, a, TransitionId.T07, TaskState.RUNNING)
+        a = _move(
+            store,
+            t,
+            a,
+            TransitionId.T10,
+            TaskState.RETRY_WAIT,
+            next_attempt_at=datetime.now(UTC) + timedelta(seconds=5),
+            error=err,
+        )
+        assert a.last_error == err
+    with tx(tenancy, tenant_a, ActorRef("sys_scheduler")) as t:
+        a = _move(store, t, a, TransitionId.T12, TaskState.QUEUED)
+    with tx(tenancy, tenant_a, WKR) as t:
+        a = _move(store, t, a, TransitionId.T07, TaskState.RUNNING)
+        a = _move(
+            store,
+            t,
+            a,
+            TransitionId.T08,
+            TaskState.COMPLETED,
+            output_ref="amw-blob://o",
+            output_sha256="cd" * 32,
+        )
+    assert a.last_error is None
+    assert a.next_attempt_at is None
+    row = admin.execute(
+        "SELECT error_code, error_class FROM tasks WHERE id = %s", (TASK.to_uuid(a.id),)
+    ).fetchone()
+    assert row == (None, None)
+
+
+def test_request_cancel_keeps_first_reason(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, store: PgJobStore
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        job_id = _validating_job(store, t, tenant_a)
+        (a,) = store.create_tasks(t, job_id, [new_task(job_id, tenant_a, 1)])
+        store.request_cancel(t, a.id, "first")
+        again = store.request_cancel(t, a.id, "second")
+    assert again.cancel_reason == "first"

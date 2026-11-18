@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 
 from amw_core.contracts.envelope import Envelope
 from amw_core.enums import Capability, Priority, QueueItemStatus, QueueName, ResourceClass
-from amw_core.errors import InputInvalidError, InvalidTransitionError, WorkerLostError
+from amw_core.errors import InputInvalidError, WorkerLostError
 from amw_core.ids import (
     CHECKPOINT,
     JOB,
@@ -146,18 +146,19 @@ class PgTaskQueue:
         until: datetime = row[0]
         return until
 
-    def mark_done(self, tx: TenantTransaction, item_id: QueueItemId) -> None:
+    def mark_done(self, tx: TenantTransaction, item_id: QueueItemId, worker_id: WorkerId) -> None:
         conn = connection_of(tx)
         try:
             cur = conn.execute(
                 "UPDATE task_queue SET status = 'DONE'"
-                " WHERE org_id = %s AND id = %s AND status = 'CLAIMED'",
-                (org_uuid_of(tx), QUEUE_ITEM.to_uuid(item_id)),
+                " WHERE org_id = %s AND id = %s AND status = 'CLAIMED' AND claimed_by = %s"
+                " AND lease_expires_at >= now()",
+                (org_uuid_of(tx), QUEUE_ITEM.to_uuid(item_id), WORKER.to_uuid(worker_id)),
             )
         except psycopg.Error as exc:
             raise translate_db_error(exc) from exc
         if cur.rowcount != 1:
-            raise InvalidTransitionError("queue item is not CLAIMED in this tenant")
+            raise WorkerLostError("queue item is not CLAIMED by this worker under a live lease")
 
     def cancel_for_task(self, tx: TenantTransaction, task_id: TaskId) -> None:
         conn = connection_of(tx)

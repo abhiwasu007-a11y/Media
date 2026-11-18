@@ -18,7 +18,7 @@ CREATE FUNCTION amw_queue_claim(
   p_worker_id uuid, p_capabilities text[], p_resource_classes text[], p_n int,
   p_queue_names text[], p_lease_ms bigint)
   RETURNS TABLE (queue_item_id uuid, org_id uuid, task_id uuid, envelope jsonb)
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   item uuid;
@@ -59,7 +59,7 @@ $$;
 
 CREATE FUNCTION amw_queue_heartbeat(p_item_id uuid, p_worker_id uuid, p_lease_ms bigint)
   RETURNS timestamptz
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   until timestamptz;
@@ -75,7 +75,7 @@ $$;
 
 CREATE FUNCTION amw_due_retries(p_limit int)
   RETURNS TABLE (org_id uuid, task_id uuid)
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
   SELECT t.org_id, t.id FROM tasks t
    WHERE t.state = 'RETRY_WAIT' AND t.next_attempt_at <= now()
@@ -86,7 +86,7 @@ $$;
 -- other wait reason is returned for the scheduler to evaluate (window, quota day, budget, ...).
 CREATE FUNCTION amw_due_resumes(p_limit int)
   RETURNS TABLE (org_id uuid, task_id uuid, wait_reason text)
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
   SELECT t.org_id, t.id, t.wait_reason FROM tasks t
    WHERE t.state = 'CHECKPOINTED'
@@ -98,7 +98,7 @@ $$;
 
 CREATE FUNCTION amw_expired_leases(p_limit int)
   RETURNS TABLE (org_id uuid, task_id uuid, queue_item_id uuid)
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
   SELECT q.org_id, q.task_id, q.id FROM task_queue q
    WHERE q.status = 'CLAIMED' AND q.lease_expires_at < now()
@@ -108,7 +108,7 @@ $$;
 -- 07 section 6 rows that need a transition: VALIDATING too long; FAILED without a DLQ row.
 CREATE FUNCTION amw_stuck_tasks(p_limit int, p_validating_ms bigint, p_failed_no_dlq_ms bigint)
   RETURNS TABLE (org_id uuid, task_id uuid, state text)
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
   SELECT t.org_id, t.id, t.state FROM tasks t
    WHERE (t.state = 'VALIDATING'
@@ -129,7 +129,7 @@ CREATE FUNCTION amw_breaker_record(
   p_failure_ratio numeric, p_consecutive_failures int, p_open_ms bigint, p_open_ms_max bigint,
   p_half_open_successes_to_close int)
   RETURNS TABLE (state text, open_until timestamptz)
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   b circuit_breakers;
@@ -224,3 +224,21 @@ ALTER FUNCTION amw_expired_leases(int) OWNER TO amw_sysfn;
 ALTER FUNCTION amw_stuck_tasks(int, bigint, bigint) OWNER TO amw_sysfn;
 ALTER FUNCTION amw_breaker_record(text, text, text, boolean, boolean, text, bigint, int, numeric,
   int, bigint, bigint, int) OWNER TO amw_sysfn;
+
+-- ---------------------------------------------------------------------------------------------
+-- Hardening after the last ALTER ... OWNER of lane L1a (code review PR #40, M1/M2).
+-- Back to the bootstrap role (the runner's own role; SET LOCAL ROLE amw_owner ends here).
+-- * amw_owner (and through it the login role amw_migrator) keeps ownership of the tables but may no
+--   longer SET ROLE to amw_sysfn (BYPASSRLS) or amw_verifier_fn (owner of evidence_mac_keys):
+--   04 section 3.1/3.6a, "never granted to a login role". A later migration that must hand a new
+--   function to one of them re-grants SET for its own transaction and revokes it again at its end.
+-- * No role may create temporary tables (they shadow real tables for SECURITY DEFINER code).
+-- ---------------------------------------------------------------------------------------------
+RESET ROLE;
+GRANT amw_sysfn TO amw_owner WITH INHERIT FALSE, SET FALSE;
+GRANT amw_verifier_fn TO amw_owner WITH INHERIT FALSE, SET FALSE;
+DO $temp$
+BEGIN
+  EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
+END
+$temp$;

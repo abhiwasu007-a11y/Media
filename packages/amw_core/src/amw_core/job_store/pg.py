@@ -41,6 +41,7 @@ from amw_core.errors import (
     LockConflictError,
     LoopCapExceededError,
     MissingDependencyError,
+    WorkerLostError,
 )
 from amw_core.ids import (
     APPROVAL,
@@ -601,7 +602,8 @@ class PgJobStore:
             cur.execute(
                 "UPDATE tasks SET state = %(to)s, wait_reason = %(wait)s,"
                 " state_version = state_version + 1, state_changed_at = now(),"
-                " next_attempt_at = coalesce(%(next)s, next_attempt_at),"
+                " next_attempt_at = CASE WHEN %(to)s = 'COMPLETED' THEN NULL"
+                " ELSE coalesce(%(next)s, next_attempt_at) END,"
                 " input_ref = coalesce(%(input_ref)s, input_ref),"
                 " input_sha256 = coalesce(%(input_sha)s, input_sha256),"
                 " input_schema_version = coalesce(%(input_schema)s, input_schema_version),"
@@ -609,9 +611,12 @@ class PgJobStore:
                 " output_sha256 = coalesce(%(output_sha)s, output_sha256),"
                 " resume_checkpoint_id = coalesce(%(resume)s, resume_checkpoint_id),"
                 " approval_id = coalesce(%(approval)s, approval_id),"
-                " error_code = coalesce(%(error_code)s, error_code),"
-                " error_class = coalesce(%(error_class)s, error_class),"
-                " last_error = coalesce(%(error)s, last_error),"
+                " error_code = CASE WHEN %(to)s = 'COMPLETED' THEN NULL"
+                " ELSE coalesce(%(error_code)s, error_code) END,"
+                " error_class = CASE WHEN %(to)s = 'COMPLETED' THEN NULL"
+                " ELSE coalesce(%(error_class)s, error_class) END,"
+                " last_error = CASE WHEN %(to)s = 'COMPLETED' THEN NULL"
+                " ELSE coalesce(%(error)s, last_error) END,"
                 " completed_at = CASE WHEN %(to)s = 'COMPLETED' THEN now() ELSE completed_at END"
                 " WHERE org_id = %(org)s AND id = %(id)s AND state = %(from)s"
                 " AND state_version = %(expected)s"
@@ -644,7 +649,8 @@ class PgJobStore:
         with self._cur(tx) as cur:
             cur.execute(
                 "UPDATE tasks SET cancel_requested_at = coalesce(cancel_requested_at, now()),"
-                " cancel_reason = %s WHERE org_id = %s AND id = %s RETURNING *",
+                " cancel_reason = coalesce(cancel_reason, %s)"
+                " WHERE org_id = %s AND id = %s RETURNING *",
                 (reason, org_uuid_of(tx), TASK.to_uuid(task_id)),
             )
             row = cur.fetchone()
@@ -664,14 +670,28 @@ class PgJobStore:
         org = org_uuid_of(tx)
         task_uuid = TASK.to_uuid(task_id)
         with self._cur(tx) as cur:
+            # T07 side effect (03 section 11.3): the task is RUNNING and this worker holds its queue
+            # row under a live lease; a worker whose lease lapsed cannot open an attempt.
             cur.execute(
                 "UPDATE tasks SET attempt_count = attempt_count + 1"
-                " WHERE org_id = %s AND id = %s RETURNING attempt_count",
-                (org, task_uuid),
+                " WHERE org_id = %s AND id = %s AND state = 'RUNNING' AND EXISTS ("
+                "  SELECT 1 FROM task_queue q WHERE q.org_id = tasks.org_id"
+                "   AND q.task_id = tasks.id AND q.status = 'CLAIMED' AND q.claimed_by = %s"
+                "   AND q.lease_expires_at >= now())"
+                " RETURNING attempt_count",
+                (org, task_uuid, WORKER.to_uuid(worker_id)),
             )
             counted = cur.fetchone()
             if counted is None:
-                raise MissingDependencyError("task not found in this tenant")
+                cur.execute(
+                    "SELECT state FROM tasks WHERE org_id = %s AND id = %s", (org, task_uuid)
+                )
+                found = cur.fetchone()
+                if found is None:
+                    raise MissingDependencyError("task not found in this tenant")
+                if found["state"] != "RUNNING":
+                    raise InvalidTransitionError("an attempt starts only on a RUNNING task")
+                raise WorkerLostError("this worker does not hold a live lease on the task")
             cur.execute(
                 "INSERT INTO task_attempts (id, org_id, task_id, attempt_no, worker_id, started_at,"
                 " heartbeat_at, resumed_from_checkpoint_id, is_replay)"

@@ -38,7 +38,7 @@ GRANT SELECT, INSERT, UPDATE ON user_sessions TO amw_auth;
 -- active_org_id must have an ACTIVE membership of the session's user (04 section 5.1). The
 -- membership lives in a tenant table, so the check runs as amw_sysfn (identifier-only read).
 CREATE FUNCTION amw_user_session_org_guard() RETURNS trigger
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 BEGIN
   IF NEW.active_org_id IS NOT NULL AND NOT EXISTS (

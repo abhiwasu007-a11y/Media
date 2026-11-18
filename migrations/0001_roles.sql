@@ -37,7 +37,7 @@ ALTER ROLE amw_sysfn NOLOGIN NOSUPERUSER BYPASSRLS NOCREATEROLE NOCREATEDB;
 GRANT amw_owner TO amw_migrator;
 -- The owner may hand system functions to amw_sysfn (ALTER FUNCTION ... OWNER needs SET ROLE);
 -- INHERIT FALSE: amw_owner never uses amw_sysfn's rights implicitly. No login role is a direct member.
-GRANT amw_sysfn TO amw_owner WITH INHERIT FALSE;
+GRANT amw_sysfn TO amw_owner WITH INHERIT FALSE, SET TRUE;
 
 CREATE EXTENSION IF NOT EXISTS citext;
 

@@ -22,7 +22,6 @@ from amw_core.enums import (
 )
 from amw_core.errors import (
     InputInvalidError,
-    InvalidTransitionError,
     MissingDependencyError,
     PermissionDeniedError,
     WorkerLostError,
@@ -187,11 +186,28 @@ def test_enqueue_claim_heartbeat_done(
     with pytest.raises(WorkerLostError):
         queue.heartbeat(claimed.queue_item_id, worker(admin), 1_000)
     with tenancy.transaction(TenantContext(tenant_a.org_id, ActorRef("agent_05"))) as tx:
-        queue.mark_done(tx, claimed.queue_item_id)
-        with pytest.raises(InvalidTransitionError):
-            queue.mark_done(tx, claimed.queue_item_id)
+        with pytest.raises(WorkerLostError):  # another worker cannot complete it
+            queue.mark_done(tx, claimed.queue_item_id, worker(admin))
+        queue.mark_done(tx, claimed.queue_item_id, w)
+        with pytest.raises(WorkerLostError):
+            queue.mark_done(tx, claimed.queue_item_id, w)
     with pytest.raises(WorkerLostError):
         queue.heartbeat(claimed.queue_item_id, w, 1_000)
+
+
+def test_mark_done_refused_after_lease_expiry(
+    tenancy: PgTenancy, queue: PgTaskQueue, admin: Conn, tenant_a: Tenant
+) -> None:
+    w = worker(admin)
+    enqueue(tenancy, queue, admin, tenant_a)
+    (claimed,) = queue.claim(req(w))
+    admin.execute(
+        "UPDATE task_queue SET lease_expires_at = now() - interval '1 second' WHERE id = %s",
+        (QUEUE_ITEM.to_uuid(claimed.queue_item_id),),
+    )
+    ctx = TenantContext(tenant_a.org_id, ActorRef("agent_05"))
+    with tenancy.transaction(ctx) as tx, pytest.raises(WorkerLostError):
+        queue.mark_done(tx, claimed.queue_item_id, w)
 
 
 def test_one_live_row_per_task_and_cancel(
