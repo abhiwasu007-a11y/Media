@@ -3,12 +3,15 @@
 Documents are valid examples with 1-3 random mutations (replace a value, delete a key, add a key).
 Rules:
 * model accepts  => schema accepts (the model is never more lenient than the schema);
-* schema accepts => model accepts, unless the document breaks a rule 03 states outside the schema
-  (``model_only_violation``), which must then be the reason the model refused.
+* schema accepts => model accepts, except for two documented cases, each of which must then be
+  present in the refused document:
+  1. a rule 03 / 24 states outside the schema (``model_only_violation``);
+  2. **accepted direction: integral floats.** JSON Schema 2020-12 counts ``2.0`` as an
+     ``integer``; the model refuses a float wherever the contract says integer (money, ms,
+     counts, versions), so it is stricter. This is intended and kept (review of PR #13).
 
-Known, intended differences are kept out of the value pool: integral floats such as ``1.0`` (JSON
-Schema calls them integers; the model refuses them as money/counters) and strings with a trailing
-newline (Python ``re`` lets ``$`` match before it; the model's regex does not).
+Strings with a trailing newline stay out of the pool: Python ``re`` lets ``$`` match before it in
+the schema validator while the model's regex does not (the model is again the stricter side).
 """
 
 import copy
@@ -35,7 +38,8 @@ SEED = 20261118
 ROUNDS = 400
 
 POOL: list[Any] = [
-    None, True, False, 0, 1, -1, 7, 101, 2.5, -0.5, "", "1", "0", "true", "x", "PASS",
+    None, True, False, 0, 1, -1, 7, 101, 2.5, -0.5, 2.0, 0.0, 1000.0,
+    "", "1", "0", "true", "x", "PASS",
     "SUCCEEDED", "FAILED", "REJECTED", "SUSPENDED", "WAIT", "CONTINUE", "AWAITING_BUDGET",
     "TEMPORARY", "PERMANENT", "TEMPORARY.TIMEOUT", "PERMANENT.SCHEMA_INVALID", "TEMPORARY.NOPE",
     "s05_script", "s10_render", "s13_deliver", "REVISE", "STOP", "YOUTUBE", "FILE_DELIVERY",
@@ -174,6 +178,17 @@ def _ancestors(stage: str, deps: dict[str, list[Any]], path: tuple[str, ...]) ->
     return found
 
 
+def has_integral_float(node: Any) -> bool:
+    """True if any value is a float with no fractional part (``2.0``)."""
+    if isinstance(node, float):
+        return node.is_integer()
+    if isinstance(node, dict):
+        return any(has_integral_float(v) for v in node.values())
+    if isinstance(node, list):
+        return any(has_integral_float(v) for v in node)
+    return False
+
+
 def model_accepts(model: type[BaseModel], doc: dict[str, Any]) -> bool:
     try:
         model.model_validate_json(json.dumps(doc))
@@ -193,7 +208,7 @@ def test_model_and_schema_agree(
     name: str, make: Callable[[], dict[str, Any]], model: type[BaseModel], version: str
 ) -> None:
     rng = random.Random(f"{SEED}:{name}:{make().get('status', '')}")  # noqa: S311 - test seed
-    accepted = rejected = 0
+    accepted = rejected = stricter = 0
     for round_no in range(ROUNDS):
         doc = make() if round_no == 0 else mutate(make(), rng)
         schema_ok = not contracts.schema_violations(name, version, doc)
@@ -205,8 +220,9 @@ def test_model_and_schema_agree(
         else:
             rejected += 1
             if schema_ok:
-                assert model_only_violation(name, doc), (
-                    f"model refused a schema-valid doc: {context}"
-                )
+                explained = model_only_violation(name, doc) or has_integral_float(doc)
+                assert explained, f"model refused a schema-valid doc: {context}"
+                stricter += 1
     assert accepted >= 1
     assert rejected >= ROUNDS // 4
+    assert stricter < ROUNDS // 4  # the documented exceptions stay rare

@@ -64,8 +64,15 @@ class StopOnFail(AmwModel):
 
 
 class Gate(AmwModel):
-    blocking: Literal[True]
+    blocking: StrictBool
+    """Schema ``const: true``; strict, so ``1`` is refused like the schema refuses it."""
     on_fail: Annotated[ReviseOnFail | StopOnFail, Field(discriminator="action")]
+
+    @model_validator(mode="after")
+    def _blocking_true(self) -> Self:
+        if self.blocking is not True:
+            raise ValueError("gate.blocking must be true")
+        return self
 
 
 class StageApproval(AmwModel):
