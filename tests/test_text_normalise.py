@@ -573,3 +573,217 @@ def test_shingles_defeat_evasion_in_copy_guard() -> None:
 def test_token_and_ngram_are_value_objects() -> None:
     assert Token("a", 0, 1) == Token("a", 0, 1)
     assert NGram(("a",), 0, 1) == NGram(("a",), 0, 1)
+
+
+# --- idempotence property, fix-ups of the code review (PR #41) ---------------------------------
+
+FUZZ_STRINGS = 60_000
+FUZZ_ALPHABET = (
+    "abcXYZ buy ﬁ¨\t\n\xa0⠀"
+    + "".join(INVISIBLES)
+    + "".join(chr(cp) for cp in range(0x0900, 0x0980))  # the whole Devanagari block
+    + "ͅŉͺﳲำຳـ￼‑̀́᪰⃐"
+    + "ТАВЕОРСХροϲıᴀ١٢३४ⅠéÅ"
+)
+
+
+def _fuzz_strings(seed: int, count: int) -> list[str]:
+    rng = random.Random(seed)  # noqa: S311 - deterministic test data, not security
+    strings = []
+    for index in range(count):
+        length = rng.randint(0, 24)
+        if index % 4 == 3:  # a quarter of the strings draw from the whole BMP and beyond
+            pool = [
+                chr(rng.choice((rng.randint(0, 0x3FFF), rng.randint(0xA000, 0x1FFFF), 0xE0001)))
+                for _ in range(length)
+            ]
+            strings.append("".join(ch for ch in pool if not 0xD800 <= ord(ch) < 0xE000))
+        else:
+            strings.append("".join(rng.choice(FUZZ_ALPHABET) for _ in range(length)))
+    return strings
+
+
+def _assert_spans_sound(raw: str, result: NormalisedText) -> None:
+    assert result.text == result.text.strip()
+    assert "  " not in result.text
+    previous = (0, 0)
+    for start, end in result.spans:
+        assert 0 <= start < end <= len(raw), raw
+        assert start >= previous[0], raw
+        assert end >= previous[1], raw
+        previous = (start, end)
+
+
+def test_idempotent_over_seeded_fuzz_incl_devanagari_marks() -> None:
+    strings = _fuzz_strings(20260, FUZZ_STRINGS)
+    assert len(strings) >= 60_000
+    for raw in strings:
+        result = normalise_for_matching(raw)
+        again = normalise_for_matching(result.text).text
+        assert again == result.text, (raw, result.text, again)
+        _assert_spans_sound(raw, result)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        NormaliseOptions(strip_diacritics=False),
+        NormaliseOptions(strip_nukta=False, fold_chandrabindu=False),
+        NormaliseOptions(strip_nukta=False, fold_chandrabindu=False, strip_diacritics=False),
+    ],
+)
+def test_idempotent_with_other_options(options: NormaliseOptions) -> None:
+    for raw in _fuzz_strings(7, 6000):
+        text = normalise_for_matching(raw, options).text
+        assert normalise_for_matching(text, options).text == text, raw
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["षͅऺ", "aͅँऺ", "ŉँऺ", "aͺँऺ", "aำँऺ", "aﳲँऺ", "ﳲषऺ", "ͅ", "कͅँ"],
+)
+def test_idempotent_known_failures_of_the_review(raw: str) -> None:
+    text = norm(raw)
+    assert norm(text) == text
+
+
+def test_ypogegrammeni_is_dropped_not_casefolded_into_a_letter() -> None:
+    assert norm("षͅऺ") == norm("षऺ")
+    assert norm("buyͅ") == "buy"
+
+
+def test_spans_stay_in_the_original_after_extra_passes() -> None:
+    raw = "x ŉँऺ y"
+    result = normalise_for_matching(raw)
+    assert result.quote(0, len(result.text)) == raw
+    for start, end in result.spans:
+        assert raw[start:end]
+
+
+# --- more invisible / decorative characters ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["bـuy", "buــy", "buy", "bu￼y", "b‑uy", "b\U000e0080uy", "b\ud800uy"],
+)
+def test_decorative_characters_inside_words_are_removed(raw: str) -> None:
+    assert norm(raw) == "buy"
+    result = normalise_for_matching(raw)
+    assert result.quote(0, 3) == raw
+
+
+def test_ordinary_hyphens_are_punctuation_not_removed() -> None:
+    # Caller policy: only the NON-BREAKING hyphen (a pure layout character) is invisible.
+    assert norm("b-uy") == "b-uy"
+    assert norm("b‐uy") == "b‐uy"
+
+
+# --- ASCII fast path and the input-length cap ---------------------------------------------------
+
+
+def test_ascii_fast_path_equals_general_path() -> None:
+    rng = random.Random(5)  # noqa: S311 - deterministic test data, not security
+    alphabet = "abcXYZ019 \t\n\r\x0b\x0c\x1c\x1f\x00\x01\x7f.,-!"
+    for _ in range(3000):
+        raw = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 20)))
+        fast = normalise_for_matching(raw)
+        slow = tn._normalise_once(raw, tn.DEFAULT_OPTIONS)
+        assert (fast.text, fast.spans) == (slow.text, slow.spans), raw
+
+
+def test_input_longer_than_cap_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tn, "MAX_INPUT_CHARS", 10)
+    assert norm("a" * 10) == "a" * 10
+    for raw in ("a" * 11, "खरेदी" * 3):
+        with pytest.raises(InputInvalidError) as caught:
+            normalise_for_matching(raw)
+        assert caught.value.details["max_chars"] == 10
+
+
+def test_cap_constant_is_public_and_large() -> None:
+    assert tn.MAX_INPUT_CHARS == 1_000_000
+    assert "MAX_INPUT_CHARS" in tn.__all__
+
+
+def test_long_inputs_below_the_cap_run_linearly() -> None:
+    raw = "buy शेअर " * 20_000
+    result = normalise_for_matching(raw)
+    assert result.text == raw.rstrip()
+    assert len(result.spans) == len(result.text)
+
+
+# --- quote() / original_span stability ----------------------------------------------------------
+
+
+def test_quote_of_whole_words_renormalises_to_the_match() -> None:
+    checked = 0
+    for raw in _fuzz_strings(11, 4000):
+        result = normalise_for_matching(raw)
+        spans = result.spans
+        position = 0
+        for chunk in result.text.split(" "):
+            low, high = position, position + len(chunk)
+            position = high + 1
+
+            # Only chunks bounded by a space that is whitespace in the ORIGINAL (a space that comes
+            # from NFKC of one source character, for example U+037A, splits a source word).
+            def real_space(
+                index: int, raw: str = raw, spans: tuple[tuple[int, int], ...] = spans
+            ) -> bool:
+                return all(tn._is_space(ch) for ch in raw[spans[index][0] : spans[index][1]])
+
+            if not chunk or (low > 0 and not real_space(low - 1)):
+                continue
+            if high < len(spans) and not real_space(high):
+                continue
+            assert normalise_for_matching(result.quote(low, high)).text == chunk, (raw, chunk)
+            checked += 1
+    assert checked > 2000
+
+
+def test_quote_of_part_of_a_word_may_renormalise_differently() -> None:
+    # Documented limit: the look-alike fold is decided per WORD, so a fragment quoted on its
+    # own is folded without the other letters of its word.
+    result = normalise_for_matching("buy\u03a3\u041e")  # Greek capital sigma + Cyrillic O
+    assert result.text == "buy\u03c3o"
+    fragment = result.quote(3, 5)
+    assert normalise_for_matching(fragment).text == "\u03c3\u043e"  # Cyrillic o stays Cyrillic
+    assert normalise_for_matching(result.quote(0, len(result.text))).text == result.text
+
+
+# --- Cyrillic / Greek residual risk (PROVISIONAL table) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("сор", "cop"),  # a real Russian word made only of table letters folds to Latin
+        ("хор", "xop"),
+        ("ΑΝΑ", "ana"),
+        ("ВЕТЕР", "betep"),  # upper case folds ...
+        ("ветер", "ветер"),  # ... lower case does not: documented asymmetry
+        ("привет", "привет"),
+        ("Москва", "москва"),
+        ("Αθήνα", "αθηνα"),
+    ],
+)
+def test_cyrillic_greek_residual_risk_is_pinned(raw: str, expected: str) -> None:
+    assert norm(raw) == expected
+
+
+# --- Devanagari known gaps (documented, not folded) ----------------------------------------------
+
+
+def test_devanagari_spelling_variants_are_known_gaps() -> None:
+    # Lexicon authors list both spellings (see the module docstring, "Known gaps").
+    assert norm("संकट") != norm("सङ्कट")
+    assert norm("हिंदी") != norm("हिन्दी")
+    assert norm("ऑफर") != norm("आफर")
+    assert norm("शेअर") != norm("शेयर")
+
+
+def test_stem_affixes_is_devanagari_only() -> None:
+    assert stem_affixes("shareko") == "shareko"
+    assert stem_affixes("buy") == "buy"
+    assert stem_affixes("बाजारला") == "बाजार"

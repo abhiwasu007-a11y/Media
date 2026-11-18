@@ -26,6 +26,34 @@ normalised on its own and every output character records the ``[start, end)`` sp
 source cluster in the original string. Known limit: compositions that cross cluster
 boundaries (Hangul conjoining jamo L+V) are not composed; irrelevant for Latin/Devanagari.
 
+Input size: texts longer than ``MAX_INPUT_CHARS`` (1,000,000) raise ``InputInvalidError``;
+callers chunk longer documents. Pure-ASCII text takes a linear fast path. Cost is linear;
+measured about 0.3 s for 1M ASCII characters and about 6 s for 1M characters of mixed
+Latin / Devanagari / look-alike text (provisional). Memory: one span tuple per output character.
+
+Stability: the function reruns on its own output until the text no longer changes (NFKC and
+casefold can create characters whose neighbours then re-cluster), so
+``normalise(normalise(x).text).text == normalise(x).text`` always holds (seeded property test,
+60,000 strings). Offsets of every pass are composed back to the original string.
+
+``quote()`` / ``original_span`` return whole source clusters. The look-alike fold is decided per
+WORD, so quoting a fragment of a word and normalising it alone can differ from the match
+("buy" + Greek sigma + Cyrillic O: the Cyrillic O folds inside the word, not alone). Quoting a
+whole word between real whitespace re-normalises to the same text (tested). A match range that
+ends in a collapsed space maps to the whole whitespace run.
+
+Removed as invisible or decorative: format characters (Cf), private use (Co), unassigned (Cn),
+lone surrogates (Cs), controls, U+0345, U+0640 tatweel, U+FFFC, U+2011 non-breaking hyphen.
+Ordinary hyphens and other punctuation inside words are NOT removed (caller policy).
+
+Known gaps (not folded; lexicon authors list both spellings; REQUIRES REVIEW, linguist):
+anusvara versus nasal + virama (संकट / सङ्कट, हिंदी / हिन्दी), ऑ versus आ and ॉ versus ा, and
+spelling variants such as शेअर / शेयर. A safe fold would have to look across clusters and
+decide per word; that is a language decision, not a Unicode one. Residual look-alike risk: a
+real Cyrillic or Greek word made only of table letters folds to Latin in upper case
+(Cyrillic capital SO + O + ER -> "cop"; Greek capital ALPHA NU ALPHA -> "ana"),
+while its lower-case form with letters outside the table stays; the table is PROVISIONAL.
+
 PROVISIONAL, REQUIRES REVIEW (owner / linguist): the confusables table, the two-part vowel
 table, ``DEFAULT_SUFFIXES``, ``DOMINANCE_THRESHOLD`` and the option defaults.
 """
@@ -35,6 +63,7 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import lru_cache
 
 from amw_core.errors import InputInvalidError
 
@@ -42,6 +71,7 @@ __all__ = [
     "DEFAULT_OPTIONS",
     "DEFAULT_SUFFIXES",
     "DOMINANCE_THRESHOLD",
+    "MAX_INPUT_CHARS",
     "NGram",
     "NormaliseOptions",
     "NormalisedText",
@@ -83,18 +113,31 @@ DEFAULT_OPTIONS = NormaliseOptions()
 DOMINANCE_THRESHOLD = 0.8
 """Share of letters one script needs to be dominant; below it the text is MIXED (provisional)."""
 
+MAX_INPUT_CHARS = 1_000_000
+"""Longest text ``normalise_for_matching`` accepts; longer input raises ``InputInvalidError``.
+Callers chunk longer documents (for example by paragraph) and shift the offsets themselves.
+Measured on the development machine: about 0.2 s for 1M ASCII characters and about 2 s for 1M
+characters of mixed Latin / Devanagari text (repeated clusters are cached); memory is one span
+tuple per output character, so a maximum-size text needs a few hundred MB (provisional)."""
+
+_MAX_PASSES = 8
 _SPACE = " "
 _NUKTA = "\u093c"
 _VIRAMA = "\u094d"
 _CHANDRABINDU = "\u0901"
 _ANUSVARA = "\u0902"
 
-# Removed for matching (not replaced by a space). Category Cf (zero-width space / joiners,
-# BOM, soft hyphen, bidi marks and isolates, word joiner, invisible operators, tags) and
-# non-whitespace controls (Cc) are removed by category; these are the invisible non-Cf extras.
+# Removed for matching (not replaced by a space). Categories Cf (zero-width space / joiners,
+# BOM, soft hyphen, bidi marks and isolates, word joiner, invisible operators, tags), Co
+# (private use), Cn (unassigned and noncharacters), Cs (lone surrogates) and non-whitespace
+# controls (Cc) are removed by category; these are the other invisible or decorative extras.
 _REMOVED_EXTRA = frozenset(
     {
         0x034F,  # COMBINING GRAPHEME JOINER
+        0x0345,  # COMBINING GREEK YPOGEGRAMMENI (casefold would turn it into a letter, iota)
+        0x0640,  # ARABIC TATWEEL (a letter-modifier that is only decoration inside a word)
+        0x2011,  # NON-BREAKING HYPHEN (NFKC would turn it into a visible hyphen inside a word)
+        0xFFFC,  # OBJECT REPLACEMENT CHARACTER
         0x115F,  # HANGUL CHOSEONG FILLER
         0x1160,  # HANGUL JUNGSEONG FILLER
         0x3164,  # HANGUL FILLER
@@ -244,7 +287,9 @@ def _is_removed(ch: str) -> bool:
     if cp in _REMOVED_EXTRA or _in_ranges(cp, _VARIATION_SELECTOR_RANGES):
         return True
     category = unicodedata.category(ch)
-    return category == "Cf" or (category == "Cc" and not ch.isspace())
+    if category in {"Cf", "Co", "Cn", "Cs"}:
+        return True  # format, private-use, unassigned (incl. noncharacters), lone surrogate
+    return category == "Cc" and not ch.isspace()
 
 
 def _is_space(ch: str) -> bool:
@@ -320,12 +365,22 @@ def _fold_confusables(text: str) -> str:
 
 
 def _strip_diacritics(text: str) -> str:
-    latin = _letter_script(text[0]) is Script.LATIN
-    return "".join(
-        ch
-        for ch in text
-        if not (_is_mark(ch) and (latin or _in_ranges(ord(ch), _GENERIC_MARK_RANGES)))
-    )
+    """Drop marks that sit on a Latin base (the nearest base before them) and generic marks.
+
+    Decided on the text itself, not on the first character of the cluster: an expansion such as
+    U+0149 or U+037A puts a Latin letter in front of marks that were first seen on another base.
+    This is exactly the decision a second pass over the output would take (idempotence).
+    """
+    out: list[str] = []
+    base = Script.OTHER
+    for ch in text:
+        if _is_mark(ch):
+            if base is Script.LATIN or _in_ranges(ord(ch), _GENERIC_MARK_RANGES):
+                continue
+        else:
+            base = _letter_script(ch)
+        out.append(ch)
+    return "".join(out)
 
 
 def _fold_digits(text: str) -> str:
@@ -344,6 +399,7 @@ def _canonical_devanagari(text: str, options: NormaliseOptions) -> str:
     return text
 
 
+@lru_cache(maxsize=65536)
 def _normalise_cluster(cluster: str, options: NormaliseOptions, *, fold: bool) -> str:
     if cluster == _SPACE:
         return _SPACE
@@ -358,7 +414,8 @@ def _normalise_cluster(cluster: str, options: NormaliseOptions, *, fold: bool) -
     if options.strip_diacritics:
         text = _strip_diacritics(text)
     text = _canonical_devanagari(_fold_digits(text), options)
-    return unicodedata.normalize("NFKC", text)
+    text = unicodedata.normalize("NFKC", text)
+    return _strip_diacritics(text) if options.strip_diacritics else text
 
 
 def _is_word_char(ch: str) -> bool:
@@ -394,6 +451,26 @@ def _choose_fold(plain: Sequence[str], folded: Sequence[str]) -> list[str]:
     return chosen
 
 
+def _normalise_ascii(text: str) -> NormalisedText:
+    """Linear fast path, identical in result to the general path for pure-ASCII input."""
+    chars: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for index, ch in enumerate(text):
+        if ch.isspace():
+            if chars and chars[-1] == _SPACE:
+                spans[-1] = (spans[-1][0], index + 1)
+            elif chars:
+                chars.append(_SPACE)
+                spans.append((index, index + 1))
+        elif ch >= " " and ch != "\x7f":
+            chars.append(ch.lower())
+            spans.append((index, index + 1))
+    if chars and chars[-1] == _SPACE:
+        chars.pop()
+        spans.pop()
+    return NormalisedText(original=text, text="".join(chars), spans=tuple(spans))
+
+
 def normalise_for_matching(
     text: str, options: NormaliseOptions = DEFAULT_OPTIONS
 ) -> NormalisedText:
@@ -402,8 +479,32 @@ def normalise_for_matching(
     Invisible characters are REMOVED (a word broken by U+200B stays one word); whitespace runs
     become one space and leading/trailing whitespace is dropped. Look-alike letters fold to
     Latin per word (see ``_choose_fold``). Apply the same function to lexicon entries before
-    comparing. Idempotent on its own output.
+    comparing. Idempotent (the function reruns on its own output until the text is stable;
+    property-tested): ``normalise(normalise(x).text).text == normalise(x).text``.
     """
+    if len(text) > MAX_INPUT_CHARS:
+        raise InputInvalidError(
+            "text is longer than the normalisation limit; chunk it first",
+            details={"length": len(text), "max_chars": MAX_INPUT_CHARS},
+        )
+    if text.isascii():
+        return _normalise_ascii(text)
+    current = _normalise_once(text, options)
+    for _ in range(_MAX_PASSES):
+        # NFKC / casefold can create new characters (U+0149, U+037A, U+FCF2, Thai SARA AM) whose
+        # neighbours then re-cluster; run again on the output until it is stable. The offsets of
+        # each pass are composed, so every output character still maps to the ORIGINAL text.
+        following = _normalise_once(current.text, options)
+        if following.text == current.text:
+            return current
+        spans = tuple((current.spans[a][0], current.spans[b - 1][1]) for a, b in following.spans)
+        current = NormalisedText(original=text, text=following.text, spans=spans)
+    raise InputInvalidError(  # pragma: no cover - no input is known to need more passes
+        "normalisation did not reach a stable text", details={"passes": _MAX_PASSES}
+    )
+
+
+def _normalise_once(text: str, options: NormaliseOptions) -> NormalisedText:
     clusters = _clusters(text)
     plain = [_normalise_cluster(c, options, fold=False) for c, _, _ in clusters]
     folded = [_normalise_cluster(c, options, fold=True) for c, _, _ in clusters]
@@ -557,7 +658,10 @@ def stem_affixes(
     ``token`` and ``suffixes`` must already be normalised. A suffix is stripped only when the
     stem keeps at least ``min_stem`` base characters (combining marks do not count) and does
     not end in a virama (the suffix would have been half of a conjunct). Match a lexicon entry
-    when either the token or its stem equals the (normalised) entry. Provisional list,
+    when either the token or its stem equals the (normalised) entry. DEVANAGARI ONLY: Latin
+    (Hinglish) suffixes are not stripped, so list romanised forms in the lexicon. Known
+    gaps: locative -त / -ात, oblique plurals leave a stem vowel ("बाजाराचे" -> "बाजारा"),
+    and a few words over-strip ("खालच" -> "खाल"). Provisional list,
     REQUIRES REVIEW (owner / linguist).
     """
     if min_stem < 1 or max_strips < 1:
