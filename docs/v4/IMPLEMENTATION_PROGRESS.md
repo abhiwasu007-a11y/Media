@@ -21,7 +21,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
 | P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | Done (2026-11-18) | RESEARCH_LOG.md | official pricing/licence pages read | Blocked: openai.com, artlist.io, pond5, pexels, pixabay, shutterstock, help.elevenlabs.io, support.storyblocks.com | R7 |
 | P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
-| W-A | Architecture Wave A (foundation docs) | **Done** (2026-11-18); PR abhiwasu007-a11y/Media#2 | GLOSSARY_AND_IDS, 03, 04, 07, 24, 27, prompts/, evals/, CONTRACT_CHANGE_REQUESTS | schemas validated by script (2020-12 metaschema); 75 tables consistent; lead review: lag=30 d (IN-02), FIN-R13 (IN-03) + 2 cases, skeleton per D1 | — | R6 |
+| W-A | Architecture Wave A (foundation docs) | **Done and merged** (2026-11-18); PR abhiwasu007-a11y/Media#2 | GLOSSARY_AND_IDS, 03, 04, 07, 24, 27, prompts/, evals/, CONTRACT_CHANGE_REQUESTS | schemas validated by script (2020-12 metaschema); 75 tables consistent; lead review: lag=30 d (IN-02), FIN-R13 (IN-03) + 2 cases, skeleton per D1 | — | R6 |
 | W-B1 | 3A slice (D2): ADR-001/005/007/008/009/012/013, docs 18, 13, 09, 08, 3A_SLICE_SPEC, blueprints 04–11 + 16, integrator, independent check | In progress | branch `claude/v4-wave-b1` | — | — | R6 |
 | W-B2 | Remaining blueprints 01–03, 12–15, 17 + other shared/enterprise/business docs | Not started (starts after B-1) | — | — | W-B1 | R6 |
 | W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
@@ -47,6 +47,12 @@ Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skelet
 - **In parallel (Wave B-2):** blueprints 01–03, 12–15, 17 and the enterprise/business docs. Each one is approved before its own build begins.
 - "REQUIRES REVIEW (Phase 1)" items do not block 3A unless they change a 3A design decision. Those that do are listed in `3A_SLICE_SPEC.md`.
 - Token discipline applies: at most 4 sub-agents in parallel. A 3-line Marathi progress update (done / next / blocked-on-owner) after each work block.
+
+### D3 (2026-11-18): the assistant merges its own docs-only PRs
+The owner authorised me to merge PRs myself ("तुम्ही स्वतःच मर्ज करत चला"). This replaces plan Q14 ("the owner merges").
+- Scope: docs-only PRs of this repository, after a self-review of the diff. Method: merge commit (keeps stacked PRs mergeable).
+- Not covered: any code PR. Code starts only after the owner's written approval of the 3A slice (D2). Every merged PR is reported in the progress update.
+- PRs merged so far: #1 (Phase 1), #2 (Wave A).
 
 ## Owner inputs: status
 
