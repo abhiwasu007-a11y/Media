@@ -9,8 +9,15 @@ from amw_core.interfaces.budget_guard import (
     Reservation,
     ReservationOutcome,
 )
+from amw_core.interfaces.checkpoint_store import CheckpointRecord, CheckpointStore, NewCheckpoint
 from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.cost_ledger import CostEntry, CostLedger, CostTotals, NewCostEntry
+from amw_core.interfaces.idempotency_store import (
+    BeginAction,
+    BeginDecision,
+    IdempotencyRecord,
+    IdempotencyStore,
+)
 from amw_core.interfaces.job_store import (
     AttemptRecord,
     JobRecord,
@@ -21,39 +28,70 @@ from amw_core.interfaces.job_store import (
     TaskRecord,
     TaskTransition,
 )
-from amw_core.interfaces.queue import ClaimRequest, NewQueueItem, QueueItem, TaskQueue
-from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobStorage, BlobUri
+from amw_core.interfaces.queue import (
+    ClaimedItem,
+    ClaimRequest,
+    NewQueueItem,
+    QueueItem,
+    TaskQueue,
+)
+from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobStorage, BlobUri, ReadableStream
+from amw_core.interfaces.system_functions import (
+    BreakerKey,
+    BreakerState,
+    DueResume,
+    DueTask,
+    ExpiredLease,
+    StuckTask,
+    SystemFunctions,
+)
 from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
 
 __all__ = [
     "AttemptRecord",
     "AuditEntry",
     "AuditLog",
+    "BeginAction",
+    "BeginDecision",
     "BlobHead",
     "BlobInfo",
     "BlobStorage",
     "BlobUri",
+    "BreakerKey",
+    "BreakerState",
     "Budget",
     "BudgetGuard",
     "BudgetStatus",
     "CallCheck",
     "ChainVerification",
+    "CheckpointRecord",
+    "CheckpointStore",
     "ClaimRequest",
+    "ClaimedItem",
     "Clock",
     "CostEntry",
     "CostLedger",
     "CostTotals",
+    "DueResume",
+    "DueTask",
+    "ExpiredLease",
+    "IdempotencyRecord",
+    "IdempotencyStore",
     "JobRecord",
     "JobStore",
     "JobTransition",
     "NewAuditEntry",
+    "NewCheckpoint",
     "NewCostEntry",
     "NewJob",
     "NewQueueItem",
     "NewTask",
     "QueueItem",
+    "ReadableStream",
     "Reservation",
     "ReservationOutcome",
+    "StuckTask",
+    "SystemFunctions",
     "TaskQueue",
     "TaskRecord",
     "TaskTransition",

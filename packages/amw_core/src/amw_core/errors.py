@@ -58,7 +58,11 @@ class ErrorSpec:
 
     @property
     def retryable(self) -> bool:
-        """Catalogue default: RETRY codes, plus NO-ATTEMPT codes that come back (see STEP0 gaps)."""
+        """Catalogue default: RETRY codes, plus the two NO-ATTEMPT codes that come back.
+
+        07 section 2 has no explicit retryable column for NO-ATTEMPT codes; this provisional
+        default is filed with the contract integrator (docs/v4/CONTRACT_CHANGE_REQUESTS.md).
+        """
         return self.disposition is Disposition.RETRY or self.code in _NO_ATTEMPT_RETRYABLE
 
 

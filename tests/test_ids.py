@@ -7,7 +7,7 @@ import pytest
 
 from amw_core import ids
 from amw_core.errors import InputInvalidError
-from tests.docs_tables import glossary_prefixes
+from tests.docs_tables import glossary_prefixes, idempotency_scopes
 
 WIRE_RE = re.compile(
     r"^[a-z]{3}_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -125,9 +125,36 @@ def test_idempotency_key_known_vector() -> None:
 @pytest.mark.parametrize("part", [1.5, True, None])
 def test_idempotency_key_rejects_non_canonical_parts(part: object) -> None:
     with pytest.raises(InputInvalidError):
-        ids.make_idempotency_key(ids.ORG.new(), "x", [part])  # type: ignore[list-item]
+        ids.make_idempotency_key(ids.ORG.new(), "llm.call", [part])  # type: ignore[list-item]
 
 
 def test_idempotency_key_requires_org_wire_id() -> None:
     with pytest.raises(InputInvalidError):
-        ids.make_idempotency_key(ids.JOB.new(), "x", ["a"])
+        ids.make_idempotency_key(ids.JOB.new(), "llm.call", ["a"])
+
+
+def test_scopes_equal_03_table() -> None:
+    doc = idempotency_scopes()
+    assert "task.<task_type>" in doc
+    assert {s.value for s in ids.IdempotencyScope} == {s for s in doc if "<" not in s}
+
+
+@pytest.mark.parametrize(
+    ("scope", "ok"),
+    [
+        ("job.create", True),
+        ("task.agent_06.claim_extraction", True),
+        ("task.svc_s07.request_approval", True),
+        ("task.agent_18.x", False),
+        ("task.", False),
+        ("llm.calls", False),
+        ("conformance", False),
+    ],
+)
+def test_scope_validation(scope: str, ok: bool) -> None:
+    assert ids.is_idempotency_scope(scope) is ok
+    if ok:
+        assert ids.make_idempotency_key(ids.ORG.new(), scope, ["a"])
+    else:
+        with pytest.raises(InputInvalidError, match="scope"):
+            ids.make_idempotency_key(ids.ORG.new(), scope, ["a"])

@@ -15,6 +15,7 @@ they are applied. Implementation: lane L1.
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
 from amw_core.enums import BudgetPeriod, BudgetScopeKind, BudgetState, ReservationStatus
@@ -33,7 +34,8 @@ class Budget:
     period: BudgetPeriod
     limit_minor: int
     currency: str
-    soft_limit_ratio: float
+    soft_limit_ratio: Decimal
+    """numeric(4,3), 0-1 (warning threshold, B7); never a float."""
     state: BudgetState
     non_critical_suspend: bool
 

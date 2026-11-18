@@ -18,6 +18,10 @@ PROTOCOLS = [
     interfaces.TaskQueue,
     interfaces.TenancyContext,
     interfaces.TenantTransaction,
+    interfaces.SystemFunctions,
+    interfaces.IdempotencyStore,
+    interfaces.CheckpointStore,
+    interfaces.ReadableStream,
 ]
 
 
@@ -48,3 +52,27 @@ def test_structural_match() -> None:
             return 0
 
     assert isinstance(FixedClock(), interfaces.Clock)
+
+
+def test_system_functions_return_identifiers_only() -> None:
+    from amw_core.interfaces import system_functions as sf
+
+    for record in (sf.DueTask, sf.DueResume, sf.ExpiredLease, sf.StuckTask):
+        names = {f.name for f in dataclasses.fields(record)}
+        assert names <= {"org_id", "task_id", "wait_reason", "queue_item_id", "state"}
+    claimed = {f.name for f in dataclasses.fields(interfaces.ClaimedItem)}
+    assert claimed == {"queue_item_id", "org_id", "task_id", "envelope"}
+
+
+def test_storage_is_stream_based() -> None:
+    import io
+
+    put = inspect.get_annotations(interfaces.BlobStorage.put)
+    assert put["stream"] is interfaces.ReadableStream
+    assert isinstance(io.BytesIO(b"x"), interfaces.ReadableStream)
+    assert hasattr(interfaces.BlobStorage, "list_prefix")
+
+
+def test_job_store_has_no_cross_tenant_scans() -> None:
+    assert not hasattr(interfaces.JobStore, "retry_due")
+    assert not hasattr(interfaces.JobStore, "stuck_tasks")

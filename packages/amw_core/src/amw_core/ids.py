@@ -256,14 +256,50 @@ def idempotency_key_of(value: str) -> IdempotencyKey:
     return IdempotencyKey(value)
 
 
+class IdempotencyScope(StrEnum):
+    """03 section 9.2 scopes (every external side effect). ``task.<task_type>`` is the pattern
+    ``TASK_SCOPE_PATTERN``; ``webhook.deliver`` is Tier 3 and ``billing.charge`` Tier 2."""
+
+    JOB_CREATE = "job.create"
+    LLM_CALL = "llm.call"
+    TTS_SYNTHESIZE = "tts.synthesize"
+    MEDIA_GENERATE = "media.generate"
+    STOCK_LICENSE = "stock.license"
+    RENDER_MASTER = "render.master"
+    DB_OUTPUT = "db.output"
+    UPLOAD_YOUTUBE = "upload.youtube"
+    PUBLISH_YOUTUBE = "publish.youtube"
+    THUMBNAIL_SET = "thumbnail.set"
+    CAPTIONS_INSERT = "captions.insert"
+    DELIVERY_FILE = "delivery.file"
+    NOTIFY_SEND = "notify.send"
+    WEBHOOK_DELIVER = "webhook.deliver"
+    BILLING_CHARGE = "billing.charge"
+
+
+TASK_SCOPE_PATTERN = r"^task\.(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3]))\.[a-z0-9_]+$"
+_TASK_SCOPE_RE = re.compile(TASK_SCOPE_PATTERN)
+_SCOPES = frozenset(s.value for s in IdempotencyScope)
+NEVER_EXPIRING_SCOPE_PREFIXES = ("upload.", "publish.")
+"""03 section 9.1 rule 4: keys of these scopes never expire."""
+
+
+def is_idempotency_scope(scope: str) -> bool:
+    """A scope of the 03 section 9.2 table (fixed name or ``task.<task_type>``)."""
+    return scope in _SCOPES or _TASK_SCOPE_RE.fullmatch(scope) is not None
+
+
 def make_idempotency_key(
     org_id: str, scope: str, natural_key: Sequence[str | int]
 ) -> IdempotencyKey:
     """03 section 9.1: ``idk_`` + SHA-256 of the canonical ``{org_id, scope, natural_key}``.
 
     Canonical form: UTF-8, sorted keys, no insignificant whitespace, strings and integers only.
+    ``scope`` must be a 03 section 9.2 scope (``PERMANENT.INPUT_INVALID`` otherwise).
     """
     parse_id(org_id, Prefix.ORGANISATION)
+    if not is_idempotency_scope(scope):
+        raise InputInvalidError(f"unknown idempotency scope {scope!r} (03 section 9.2)")
     for part in natural_key:
         if isinstance(part, bool) or not isinstance(part, (str, int)):
             raise InputInvalidError("idempotency natural key parts must be strings or integers")

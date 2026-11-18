@@ -52,6 +52,17 @@ class QueueItem:
 
 
 @dataclass(frozen=True, slots=True)
+class ClaimedItem:
+    """One row returned by ``amw_queue_claim`` (04 section 3.6): identifiers and the envelope only.
+    The worker then opens a tenant transaction for ``org_id`` before reading anything else."""
+
+    queue_item_id: QueueItemId
+    org_id: OrgId
+    task_id: TaskId
+    envelope: Envelope
+
+
+@dataclass(frozen=True, slots=True)
 class ClaimRequest:
     """What a worker can take (T07 guard: capabilities, admission, resource class)."""
 
@@ -60,7 +71,8 @@ class ClaimRequest:
     capabilities: tuple[Capability, ...]
     resource_classes: tuple[ResourceClass, ...]
     lease_ms: int
-    now: datetime
+    limit: int = 1
+    """``n`` of ``amw_queue_claim(worker_id, capabilities[], resource_classes[], n)``."""
 
 
 @runtime_checkable
@@ -69,9 +81,10 @@ class TaskQueue(Protocol):
         """Insert a ``READY`` row; at most one live (READY/CLAIMED) row per task."""
         ...
 
-    def claim(self, request: ClaimRequest) -> QueueItem | None:
-        """T07: claim the best admissible ``READY`` row (``scheduled_at <= now``), set ``CLAIMED``
-        and the lease; ``None`` when nothing is claimable. Cross-tenant via ``amw_queue_claim``."""
+    def claim(self, request: ClaimRequest) -> Sequence[ClaimedItem]:
+        """T07 via ``amw_queue_claim`` (SECURITY DEFINER, ``FOR UPDATE SKIP LOCKED``, fair-share
+        order of 05): up to ``limit`` admissible ``READY`` rows (``scheduled_at <= now()``) set to
+        ``CLAIMED`` with a lease. Not tied to a tenant transaction; returns identifiers only."""
         ...
 
     def heartbeat(self, item_id: QueueItemId, worker_id: WorkerId, lease_ms: int) -> datetime:
@@ -85,10 +98,6 @@ class TaskQueue(Protocol):
 
     def cancel_for_task(self, tx: TenantTransaction, task_id: TaskId) -> None:
         """Set any live row of the task to ``CANCELLED`` (T19)."""
-        ...
-
-    def expired_leases(self, now: datetime, limit: int) -> Sequence[QueueItem]:
-        """``CLAIMED`` rows with an expired lease (reaper input, 07 section 6). Cross-tenant."""
         ...
 
     def notify(self, queue_name: QueueName) -> None:

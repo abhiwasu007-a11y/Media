@@ -8,6 +8,8 @@ The store persists; it does not decide. ``amw_core.state_machine`` (lane L1) cho
 ``state_transition_rules`` -> ``InvalidTransitionError`` (also enforced by the DB trigger).
 Each ``transition_*`` writes the ``state_transitions`` row in the same transaction; the caller
 writes the ``audit_log`` row (03 section 11.7) through ``AuditLog`` in that transaction.
+Cross-tenant scans (due retries, due resumes, stuck tasks) are not here: they are the identifier-
+only system functions of 04 section 3.6 (``SystemFunctions``).
 """
 
 from collections.abc import Sequence
@@ -285,14 +287,3 @@ class JobStore(Protocol):
         ...
 
     def heartbeat_attempt(self, tx: TenantTransaction, attempt_id: AttemptId) -> None: ...
-
-    # --- operational scans (scheduler / reaper, 07 section 6) ---
-    def retry_due(self, tx: TenantTransaction, now: datetime, limit: int) -> Sequence[TaskRecord]:
-        """``RETRY_WAIT`` tasks with ``next_attempt_at <= now`` (T12 / T13 input)."""
-        ...
-
-    def stuck_tasks(
-        self, tx: TenantTransaction, states: Sequence[TaskState], older_than: datetime, limit: int
-    ) -> Sequence[TaskRecord]:
-        """Tasks in ``states`` whose ``state_changed_at < older_than`` (stuck detection index)."""
-        ...

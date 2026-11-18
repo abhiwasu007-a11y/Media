@@ -138,3 +138,9 @@ def doc_json_schemas() -> list[str]:
     """Raw JSON blocks of 03 that declare an ``urn:amw:schema`` ``$id``."""
     blocks = re.findall(r"```json\n(.*?)```", doc_text("03_COMMUNICATION_STANDARD.md"), re.S)
     return [b for b in blocks if '"$id": "urn:amw:schema:' in b]
+
+
+def idempotency_scopes() -> list[str]:
+    """03 section 9.2: every scope name (``task.<task_type>`` kept as written)."""
+    body = section(doc_text("03_COMMUNICATION_STANDARD.md"), r"9\.2 ", 3)
+    return [ticks(r[0])[0] for r in table_rows(body)]
