@@ -18,7 +18,8 @@ from amw_core.enums import (
     InstructionSourceKind,
     QualityDimension,
 )
-from amw_core.interfaces import OwnerEvidenceStore, TenantContext
+from amw_core.interfaces import TenantContext
+from amw_core.owner_evidence_fake import MemorySessionEventSource
 from amw_core.owner_evidence_verifier import (
     DEFAULT_RECORD_KIND_RULES,
     NewEvidence,
@@ -26,17 +27,16 @@ from amw_core.owner_evidence_verifier import (
     VerificationKind,
     VerifierPolicy,
 )
-from amw_core.testing.memory import (
-    MemoryOwnerEvidenceStore,
-    MemorySessionEventSource,
-    MemoryTransaction,
-)
+from amw_core.testing.memory import MemoryTransaction
+from tests.evidence_support import EvidenceHarness
 
 REQUESTED = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 SAID = REQUESTED + timedelta(minutes=5)
 NOW = REQUESTED + timedelta(hours=1)
 POLICY = VerifierPolicy(
-    human_inbound_origins=frozenset({"human"}), owner_account_ids=frozenset({"acct-owner"})
+    human_inbound_origins=frozenset({"human"}),
+    owner_account_ids=frozenset({"acct-owner"}),
+    content_max_age_ms=24 * 3600 * 1000,
 )
 JOB = ids.JOB.new()
 SUBJECT = ids.new_id(ids.Prefix.SCRIPT)
@@ -70,7 +70,7 @@ def evidence(kind: EvidenceRecordKind, quote: str, **change: Any) -> NewEvidence
 
 
 def run(ev: SessionEvent, ne: NewEvidence, policy: VerifierPolicy = POLICY) -> Any:
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource([ev]), policy)
+    store = EvidenceHarness(MemorySessionEventSource([ev]), policy)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     row = store.record(tx, ne)
     return store.verify_recorded(tx, row.id, REQUESTED, NOW)
@@ -187,7 +187,7 @@ def test_scores_stated_exactly_are_verified() -> None:
         ("negative", "R7K2 storytelling -1", [(ST, -1)], "scores_in_range"),
         ("no scores", "R7K2 nice", [], "scores_given"),
         ("no subject reference", "research_accuracy 18", [(RA, 18)], "subject_reference"),
-        ("second review code", "R7K2 Q9Z1 research_accuracy 18", [(RA, 18)], "subject_reference"),
+        ("second review code", "R7K2 Q9Z3 research_accuracy 18", [(RA, 18)], "subject_reference"),
         ("negated", "R7K2 research_accuracy 18, not 20", [(RA, 18)], "negation_or_withholding"),
         ("deferred", "R7K2 research_accuracy 18 for now, later more", [(RA, 18)],
          "question_or_deferred"),
@@ -213,8 +213,8 @@ def test_scores_are_bound_into_the_evidence_hash() -> None:
 
 def _confirmed(ne: NewEvidence, message: str) -> tuple[Any, Any, Any]:
     later = SAID + timedelta(minutes=1)
-    events = [event(message), event(message, uuid="ev-2", timestamp=later)]
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource(events), POLICY)
+    events = [event(message), event("confirm R7K2", uuid="ev-2", timestamp=later)]
+    store = EvidenceHarness(MemorySessionEventSource(events), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     row = store.record(tx, ne)
     store.verify_recorded(tx, row.id, REQUESTED, NOW)
@@ -222,57 +222,60 @@ def _confirmed(ne: NewEvidence, message: str) -> tuple[Any, Any, Any]:
     return store, tx, row
 
 
-def test_trigger_compares_human_score_rows_with_claimed_scores() -> None:
-    from amw_core.errors import PermissionDeniedError
+def test_apply_writes_score_rows_from_claimed_scores() -> None:
+    store, tx, row = _confirmed(
+        score_evidence((RA, 18), (ST, 12)), "R7K2 research_accuracy 18 storytelling 12"
+    )
+    written = store.apply(tx, row.id)
+    assert written.scores == ((RA, 18), (ST, 12))  # the row equals claimed_scores by construction
+    assert written.decided_by == row.evidence.on_behalf_of
+    from amw_core.errors import IdempotencyConflictError
 
-    store, tx, row = _confirmed(score_evidence((RA, 18)), "R7K2 research_accuracy 18")
-    store.authorise_human_score(tx, row.id, "script", SUBJECT, RA, 18)
-    for dimension, points in ((RA, 17), (ST, 18), (RA, True)):
-        with pytest.raises(PermissionDeniedError):
-            store.authorise_human_score(tx, row.id, "script", SUBJECT, dimension, points)
-    with pytest.raises(PermissionDeniedError):
-        store.authorise_human_score(tx, row.id, "script", ids.new_id(ids.Prefix.SCRIPT), RA, 18)
+    with pytest.raises(IdempotencyConflictError):
+        store.apply(tx, row.id)  # exactly one human row per evidence
 
 
-def test_trigger_content_text_is_a_verbatim_substring() -> None:
+def test_apply_content_text_is_a_verbatim_substring() -> None:
     from amw_core.errors import PermissionDeniedError
 
     kind = EvidenceRecordKind.CONTRIBUTION
-    store, tx, row = _confirmed(evidence(kind, TEXT), f"R7K2 {TEXT}")
-    store.authorise_content(tx, row.id, kind, "script", SUBJECT, "the 2008 crash")
-    for text in ("", "the 2009 crash"):
+    for text in ("", "the 2009 crash", None):
+        store, tx, row = _confirmed(evidence(kind, TEXT), f"R7K2 {TEXT}")
         with pytest.raises(PermissionDeniedError):
-            store.authorise_content(tx, row.id, kind, "script", SUBJECT, text)
-    with pytest.raises(PermissionDeniedError):
-        store.authorise_content(tx, row.id, EvidenceRecordKind.OWNER_TOPIC, "script", SUBJECT, TEXT)
+            store.apply(tx, row.id, text)
+    store, tx, row = _confirmed(evidence(kind, TEXT), f"R7K2 {TEXT}")
+    assert store.apply(tx, row.id, "the 2008 crash").text == "the 2008 crash"
 
 
-def test_trigger_refuses_unconfirmed_evidence() -> None:
+def test_apply_refuses_unconfirmed_evidence() -> None:
     from amw_core.errors import PermissionDeniedError
 
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource([]), POLICY)
+    store = EvidenceHarness(MemorySessionEventSource([event("R7K2 research_accuracy 18")]), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     row = store.record(tx, score_evidence((RA, 18)))
     with pytest.raises(PermissionDeniedError):
-        store.authorise_human_score(tx, row.id, "script", SUBJECT, RA, 18)
+        store.apply(tx, row.id)  # pending
+    store.verify_recorded(tx, row.id, REQUESTED, NOW)
+    with pytest.raises(PermissionDeniedError):
+        store.apply(tx, row.id)  # verified but not confirmed
 
 
 # --- one owner message, one subject --------------------------------------------------------
 
 
 def test_one_message_verifies_exactly_one_subject() -> None:
+    from amw_core.errors import IdempotencyConflictError
+
     message = f"R7K2 {CONTRIBUTION_TEXT}"
-    store: OwnerEvidenceStore = MemoryOwnerEvidenceStore(
-        MemorySessionEventSource([event(message)]), POLICY
-    )
+    store = EvidenceHarness(MemorySessionEventSource([event(message)]), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     first = store.record(tx, evidence(EvidenceRecordKind.CONTRIBUTION, CONTRIBUTION_TEXT))
     assert store.verify_recorded(tx, first.id, REQUESTED, NOW).state is EvidenceState.VERIFIED
     other_subject = evidence(
         EvidenceRecordKind.CONTRIBUTION, CONTRIBUTION_TEXT, subject_id=ids.new_id(ids.Prefix.SCRIPT)
     )
-    second = store.record(tx, other_subject)
-    refused(store.verify_recorded(tx, second.id, REQUESTED, NOW), "one_subject_per_message")
+    with pytest.raises(IdempotencyConflictError):
+        store.record(tx, other_subject)  # UNIQUE (org_id, event_uuid) among live rows
 
 
 def test_content_confirmation_needs_subject_reference() -> None:
@@ -280,9 +283,9 @@ def test_content_confirmation_needs_subject_reference() -> None:
     events = [
         event(f"R7K2 {TEXT}"),
         event("yes that is right", uuid="ev-2", timestamp=later),
-        event("R7K2 yes that is right", uuid="ev-3", timestamp=later),
+        event("confirm R7K2", uuid="ev-3", timestamp=later),
     ]
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource(events), POLICY)
+    store = EvidenceHarness(MemorySessionEventSource(events), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     row = store.record(tx, evidence(EvidenceRecordKind.CONTRIBUTION, TEXT))
     store.verify_recorded(tx, row.id, REQUESTED, NOW)
@@ -290,7 +293,8 @@ def test_content_confirmation_needs_subject_reference() -> None:
 
     with pytest.raises(PermissionDeniedError):
         store.confirm(tx, row.id, "ses-1", "ev-2", "yes", NOW)
-    assert store.confirm(tx, row.id, "ses-1", "ev-3", "yes", NOW).state is EvidenceState.CONFIRMED
+    confirmed = store.confirm(tx, row.id, "ses-1", "ev-3", "confirm", NOW)
+    assert confirmed.state is EvidenceState.CONFIRMED
 
 
 def test_rule_table_equals_03_section_11_6_rule_7() -> None:
