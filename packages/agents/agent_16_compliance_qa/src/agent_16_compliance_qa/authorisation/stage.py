@@ -23,6 +23,8 @@ from agent_16_compliance_qa.authorisation.evidence import (
     ApprovalAnchor,
     HumanRecordRef,
     OwnerEvidenceVerifier,
+    VerifiedApprovalState,
+    derive_approval_state,
 )
 from agent_16_compliance_qa.authorisation.facts import (
     ApprovalFacts,
@@ -268,6 +270,96 @@ def _recorder(recorded_by: str | None, decided_by: str | None) -> RecorderKind:
     return "AGENT"
 
 
+def step_ref(approval: ApprovalRow, s: StepRow) -> HumanRecordRef:
+    """One step as the human record G4 re-checks."""
+    return HumanRecordRef(
+        record_kind=EvidenceRecordKind.STEP_DECISION,
+        record_key=s.record_key,
+        org_id=s.org_id,
+        subject_kind=approval.subject_kind,
+        subject_id=approval.subject_id,
+        approval_id=approval.id,
+        step_no=s.step_no,
+        human=UserId(s.decided_by) if s.decided_by else None,
+        approval_channel=s.approval_channel,
+        recorded_by=s.recorded_by,
+        evidence_id=s.evidence_id,
+        step_state=s.state,
+        target_stage_id=s.target_stage_id,
+    )
+
+
+def anchor_of(approval: ApprovalRow) -> ApprovalAnchor:
+    return ApprovalAnchor(approval.id, approval.org_id, approval.review_code, approval.created_at)
+
+
+def step_facts(
+    evidence: OwnerEvidenceVerifier,
+    tx: TenantTransaction,
+    approval: ApprovalRow,
+    steps: Sequence[StepRow],
+    loaded: Sequence[HumanRecordRef],
+) -> tuple[StepFacts, ...]:
+    """Every fact G2 / G4 read for the steps of one approval, computed from the rows."""
+    anchor = anchor_of(approval)
+    return tuple(
+        StepFacts(
+            step_no=s.step_no,
+            state=s.state,
+            decided_by_kind="HUMAN" if _human(s.decided_by) else "AGENT",
+            membership_active=s.membership_active,
+            holds_required_role=s.holds_required_role,
+            recorded_by_kind=_recorder(s.recorded_by, s.decided_by),
+            approval_channel=s.approval_channel,
+            evidence=evidence.facts(tx, step_ref(approval, s), anchor, loaded),
+        )
+        for s in steps
+    )
+
+
+class ApprovalReader(Protocol):
+    """RLS-scoped approval and step reads as ``amw_app`` (explicit ``org_id`` filter)."""
+
+    def approval(self, tx: TenantTransaction, approval_id: str) -> ApprovalRow | None: ...
+    def steps(self, tx: TenantTransaction, approval_id: str) -> Sequence[StepRow]: ...
+
+
+class ApprovalStepVerifier:
+    """F-26 (section 19.3 rule 13, CCR-102): the state of a relied-on approval (FIN-R12 release,
+    V12 quotation) derived from its steps through G2 + G4; ``approvals.state`` alone never
+    counts. An approval of another org, of the wrong kind or for another subject is ``NONE``."""
+
+    def __init__(
+        self,
+        reader: ApprovalReader,
+        evidence: OwnerEvidenceVerifier,
+        accepted_channels: frozenset[ApprovalChannel],
+    ) -> None:
+        self._reader, self._evidence, self._accepted = reader, evidence, accepted_channels
+
+    def derive(
+        self,
+        tx: TenantTransaction,
+        approval_id: str | None,
+        kind: ApprovalKind,
+        subject_sha256: str | None = None,
+    ) -> VerifiedApprovalState:
+        if approval_id is None:
+            return "NONE"
+        approval = self._reader.approval(tx, approval_id)
+        if (
+            approval is None
+            or approval.org_id != tx.context.org_id
+            or approval.kind is not kind
+            or (subject_sha256 is not None and approval.subject_sha256 != subject_sha256)
+        ):
+            return "NONE"
+        steps = [s for s in self._reader.steps(tx, approval.id) if s.org_id == approval.org_id]
+        loaded = [step_ref(approval, s) for s in steps]
+        facts = step_facts(self._evidence, tx, approval, steps, loaded)
+        return derive_approval_state(approval.state, facts, self._accepted)
+
+
 @dataclass(frozen=True, slots=True)
 class AuthorisationResult:
     decision: AuthDecision
@@ -302,43 +394,11 @@ class PublicationAuthorisationStage:
         steps: Sequence[StepRow],
         loaded: Sequence[HumanRecordRef],
     ) -> tuple[StepFacts, ...]:
-        anchor = ApprovalAnchor(
-            approval.id, approval.org_id, approval.review_code, approval.created_at
-        )
-        out = []
-        for s in steps:
-            ref = self._step_ref(approval, s)
-            out.append(
-                StepFacts(
-                    step_no=s.step_no,
-                    state=s.state,
-                    decided_by_kind="HUMAN" if _human(s.decided_by) else "AGENT",
-                    membership_active=s.membership_active,
-                    holds_required_role=s.holds_required_role,
-                    recorded_by_kind=_recorder(s.recorded_by, s.decided_by),
-                    approval_channel=s.approval_channel,
-                    evidence=self._evidence.facts(tx, ref, anchor, loaded),
-                )
-            )
-        return tuple(out)
+        return step_facts(self._evidence, tx, approval, steps, loaded)
 
     @staticmethod
     def _step_ref(approval: ApprovalRow, s: StepRow) -> HumanRecordRef:
-        return HumanRecordRef(
-            record_kind=EvidenceRecordKind.STEP_DECISION,
-            record_key=s.record_key,
-            org_id=s.org_id,
-            subject_kind=approval.subject_kind,
-            subject_id=approval.subject_id,
-            approval_id=approval.id,
-            step_no=s.step_no,
-            human=UserId(s.decided_by) if s.decided_by else None,
-            approval_channel=s.approval_channel,
-            recorded_by=s.recorded_by,
-            evidence_id=s.evidence_id,
-            step_state=s.state,
-            target_stage_id=s.target_stage_id,
-        )
+        return step_ref(approval, s)
 
     def build_rows(
         self, tx: TenantTransaction, req: AuthorisationInput, evaluation_date: date

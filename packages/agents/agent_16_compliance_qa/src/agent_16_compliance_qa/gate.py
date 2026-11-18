@@ -15,6 +15,7 @@ from typing import Any, Final, Literal
 from pydantic import Field
 
 from agent_16_compliance_qa.algebra import evaluate_policy, overall_verdict, post_check
+from agent_16_compliance_qa.authorisation.evidence import VerifiedApprovalState
 from agent_16_compliance_qa.base import Model, worst
 from agent_16_compliance_qa.checks import RuleResult, needs_human
 from agent_16_compliance_qa.checks import rules as R  # noqa: N812
@@ -70,6 +71,9 @@ class SourceItem(Model):
     named_instruments: tuple[str, ...] = ()
     claims: tuple[ItemClaim, ...] = ()
     chart: ItemChart | None = None
+    claim_ids: tuple[str, ...] = ()
+    """``clm_`` ids of the claims inside the item (``claims.final_verdict`` is set from the
+    worst rule verdict over the item)."""
 
 
 class Routing(Model):
@@ -107,8 +111,9 @@ class GateInputs(Model):
     voice_kind: R.VoiceKind | None
     paraphrase_pairs: tuple[ParaphrasePair, ...] = ()
     span_hashes: Mapping[str, str] = Field(default_factory=dict)
-    quotation_approvals: tuple[tuple[str, str], ...] = ()
-    """(span sha256, F-26 derived state) of ``COPYRIGHT_DOUBT`` approvals."""
+    quotation_approvals: tuple[tuple[str, VerifiedApprovalState], ...] = ()
+    """(span sha256, F-26 derived state) of ``COPYRIGHT_DOUBT`` approvals; set only by
+    ``GateInputAssembler`` through ``ApprovalStepVerifier`` (never by an upstream blob)."""
     near_copy: tuple[NearCopyResult, ...] = ()
     frame_ids: tuple[str, ...] = ()
     frames_payload: Mapping[str, Any] | None = None
@@ -169,7 +174,10 @@ class ComplianceGate:
         policy_judge: PolicyJudge,
         paraphrase_judge: ParaphraseJudge,
         frames_judge: FramesJudge,
+        log_fields: Mapping[str, str] | None = None,
     ) -> None:
+        self._log = dict(log_fields or {})
+        """27 section 7.3.6 fields (org, correlation, job, task, attempt, actor)."""
         self._cfg, self._packs = cfg, packs
         self._policy, self._para, self._frames = policy_judge, paraphrase_judge, frames_judge
 
@@ -274,7 +282,7 @@ class ComplianceGate:
             pin = ParaphraseInput(language_script=inp.language, pairs=inp.paraphrase_pairs)
             calls = self._spend(calls)
             pout = self._para(pin)
-            approvals = [QuotationApproval(h, s) for h, s in inp.quotation_approvals]  # type: ignore[arg-type]
+            approvals = [QuotationApproval(h, s) for h, s in inp.quotation_approvals]
             pd = apply_paraphrase(pin, pout, inp.span_hashes, approvals)
             for pv in pd.pairs:
                 cv = {
@@ -300,7 +308,8 @@ class ComplianceGate:
         if injection or quote_failures:  # section 19.3 rule 9 / section 22 (no content text)
             _LOG.warning(
                 "a16.gate.injection_or_quote_failure",
-                extra={"injection_items": len(injection), "quote_failures": quote_failures},
+                extra=self._log
+                | {"injection_items": len(injection), "quote_failures": quote_failures},
             )
         checks: list[FrameCheckId] = ["qc.watermark.visual"]
         if inp.sensitive_channel:

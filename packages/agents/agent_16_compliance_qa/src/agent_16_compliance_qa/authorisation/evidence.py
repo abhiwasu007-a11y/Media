@@ -88,6 +88,17 @@ _RULE_LABEL: Final[Mapping[EvidenceVerificationKind, VerifierTest]] = {
     EvidenceVerificationKind.SCORE: "SCORE_RULES",
 }
 CONFIRMATION_TESTS: Final = ("confirmation_grammar",)
+_AUTH_LABELS: Final[Mapping[str, VerifierTest]] = {
+    "A1": "A1",
+    "A2": "A2",
+    "A3": "A3",
+    "A4": "A4",
+    "A5": "A5",
+    "A6": "A6",
+    "A7": "A7",
+    "A8": "A8",
+    "A9": "A9",
+}
 
 
 def failed_verifier_tests(
@@ -98,7 +109,7 @@ def failed_verifier_tests(
     failed: list[VerifierTest] = []
     for label, names in AUTHENTICITY_TESTS.items():
         if not all(verifier_result.get(n) is True for n in names):
-            failed.append(label)  # type: ignore[arg-type]
+            failed.append(_AUTH_LABELS.get(label, "A1"))  # an unknown label still fails
     kind = DEFAULT_RECORD_KIND_RULES.get(record_kind)
     if kind is None:
         failed.append("DECISION_GRAMMAR")
@@ -241,10 +252,13 @@ class OwnerEvidenceVerifier:
         reader: EvidenceReader,
         index: EvidenceUseIndex,
         log: EvidenceCheckLog | None = None,
+        log_fields: Mapping[str, str] | None = None,
     ) -> None:
         self._reader = reader
         self._index = index
         self.log = log or EvidenceCheckLog()
+        self.log_fields: dict[str, str] = dict(log_fields or {})
+        """27 section 7.3.6 fields; the stage sets them per task."""
 
     def facts(
         self,
@@ -265,7 +279,8 @@ class OwnerEvidenceVerifier:
             self.log.mac_invalid.append((record.record_kind, row.id))
             _LOG.warning(  # security event (section 22): a16_evidence_mac_invalid_total
                 "a16.evidence.mac_invalid",
-                extra={"org_id": org, "evidence_id": row.id, "record_kind": record.record_kind},
+                extra=self.log_fields
+                | {"org_id": org, "evidence_id": row.id, "record_kind": record.record_kind},
             )
         decision_kind = record.record_kind in _DECISION_KINDS
         if decision_kind:
