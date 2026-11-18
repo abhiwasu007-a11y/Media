@@ -37,6 +37,8 @@ class BreakerRow:
     last_error_code: str | None = None
     half_open_probe_until: datetime | None = None
     """Lease of the last admitted probe; once it has passed, unreported probes are reclaimed."""
+    half_open_epoch: int = 0
+    """Probe generation: +1 on every open, close, OPEN -> HALF_OPEN and probe reclaim."""
 
 
 def new_row(key: BreakerKey, now: datetime) -> BreakerRow:
@@ -65,6 +67,7 @@ def _open(row: BreakerRow, now: datetime, cfg: BreakerSettings) -> BreakerRow:
         open_count=row.open_count + 1,
         half_open_in_flight=0,
         half_open_probe_until=None,
+        half_open_epoch=row.half_open_epoch + 1,
         window_started_at=now,
         window_calls=0,
         window_failures=0,
@@ -77,6 +80,7 @@ def _to_half_open(row: BreakerRow, now: datetime) -> BreakerRow:
         state=CircuitState.HALF_OPEN,
         half_open_in_flight=0,
         half_open_probe_until=None,
+        half_open_epoch=row.half_open_epoch + 1,
         window_started_at=now,
         window_calls=0,
         window_failures=0,
@@ -113,7 +117,7 @@ def admit(row: BreakerRow, now: datetime, cfg: BreakerSettings) -> Admission:
         and row.half_open_probe_until is not None
         and now > row.half_open_probe_until
     ):
-        row = replace(row, half_open_in_flight=0)
+        row = replace(row, half_open_in_flight=0, half_open_epoch=row.half_open_epoch + 1)
     if row.half_open_in_flight >= cfg.half_open_max_probes:
         return Admission(False, row)
     timeout = cfg.half_open_probe_timeout_ms
@@ -137,11 +141,13 @@ def record(
     now: datetime,
     cfg: BreakerSettings,
     probe: bool | None = None,
+    probe_epoch: int | None = None,
 ) -> BreakerRow:
     """Apply one call outcome; the exact mirror of ``amw_breaker_record`` (migration 0051).
     ``probe`` is True for a call admitted as a HALF_OPEN probe, False for one admitted while
     CLOSED (its late result in HALF_OPEN changes nothing and frees no probe slot), None when the
-    caller does not use ``admit`` (treated as a probe)."""
+    caller does not use ``admit`` (treated as a probe). ``probe_epoch`` is the epoch ``admit``
+    returned: a probe result of an older epoch is stale and changes nothing."""
     counted = (not succeeded) and counts_as_failure(error_code)
     if row.state is CircuitState.OPEN:
         if row.open_until is None or now < row.open_until:
@@ -150,8 +156,8 @@ def record(
     elif row.state is CircuitState.CLOSED:
         row = _roll_window(row, now, cfg)
     if row.state is CircuitState.HALF_OPEN:
-        if probe is False:
-            return row  # a late result of a call admitted before the breaker opened
+        if probe is False or (probe_epoch is not None and probe_epoch != row.half_open_epoch):
+            return row  # a late result of a call admitted before the breaker opened, or stale
         row = replace(row, half_open_in_flight=max(0, row.half_open_in_flight - 1))
     if not succeeded and not counted:
         return row  # not a provider fault (07 section 4.3): only the probe slot is released
@@ -171,6 +177,7 @@ def record(
                 open_count=0,
                 half_open_in_flight=0,
                 half_open_probe_until=None,
+                half_open_epoch=row.half_open_epoch + 1,
             )
         return row
     row = replace(

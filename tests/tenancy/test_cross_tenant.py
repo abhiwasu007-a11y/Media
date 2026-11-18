@@ -418,6 +418,7 @@ ALLOWED_OUTPUTS = {
     "state",
     "open_until",
     "admitted",
+    "epoch",
 }
 
 

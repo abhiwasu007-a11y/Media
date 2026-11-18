@@ -275,7 +275,7 @@ def test_twenty_parallel_counted_failures_open_once(pg_dsn: str, tenant_a: Tenan
 _COLS = (
     "state, window_calls, window_failures, consecutive_failures, open_count,"
     " half_open_in_flight, opened_at IS NOT NULL, last_error_code, open_until,"
-    " half_open_probe_until"
+    " half_open_probe_until, half_open_epoch"
 )
 
 
@@ -289,6 +289,7 @@ def _pure_view(row: BreakerRow) -> tuple[Any, ...]:
         row.half_open_in_flight,
         row.opened_at is not None,
         row.last_error_code,
+        row.half_open_epoch,
     )
 
 
@@ -324,7 +325,7 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
     rng = random.Random(seed)  # noqa: S311 - deterministic test data
     pure = new_row(key, datetime.now(UTC))
     codes = ["TEMPORARY.NETWORK", "TEMPORARY.UPSTREAM_5XX", "PERMANENT.INPUT_INVALID"]
-    probes: list[bool | None] = []  # admission flag of the calls in flight (any order)
+    probes: list[tuple[bool | None, int | None]] = []  # (probe flag, epoch) of calls in flight
     seen: set[tuple[str, str]] = set()
     for step in range(120):
         op = rng.choice(["ok", "ok", "fail", "fail", "neutral", "admit", "admit", "wait", "lease"])
@@ -347,14 +348,15 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
             got = fns.admit(ADAPTER, key)
             assert got.admitted is admission.allowed, (seed, step, op)
             assert got.probe is admission.probe, (seed, step, op)
+            assert got.epoch == admission.row.half_open_epoch, (seed, step, op)
             pure = admission.row
             if got.admitted:
-                probes.append(got.probe)
+                probes.append((got.probe, got.epoch))
         else:
-            flag = probes.pop(rng.randrange(len(probes))) if probes else None
+            flag, epoch = probes.pop(rng.randrange(len(probes))) if probes else (None, None)
             code = {"ok": None, "fail": rng.choice(codes[:2]), "neutral": codes[2]}[op]
-            pure = record(pure, op == "ok", code, now, cfg, probe=flag)
-            fns.breaker_record(ADAPTER, key, op == "ok", code, probe=flag)
+            pure = record(pure, op == "ok", code, now, cfg, probe=flag, probe_epoch=epoch)
+            fns.breaker_record(ADAPTER, key, op == "ok", code, probe=flag, probe_epoch=epoch)
         stored = admin.execute(
             f"SELECT {_COLS} FROM circuit_breakers WHERE provider = %s",  # noqa: S608
             (key.provider,),
@@ -363,7 +365,7 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
             assert pure.state is CircuitState.CLOSED
             continue
         pure = _sync_clock_columns(pure, tuple(stored))
-        assert tuple(stored[:8]) == _pure_view(pure), (seed, step, op)
+        assert (*stored[:8], stored[10]) == _pure_view(pure), (seed, step, op)
         seen.add((before, pure.state.value))
     assert ("OPEN", "HALF_OPEN") in seen or seed != 1
 
@@ -412,3 +414,23 @@ def test_a_late_result_of_a_non_probe_call_frees_no_probe_slot(
     assert not fns.admit(ADAPTER, key).admitted  # the real probe still holds the slot
     fns.breaker_record(ADAPTER, key, True, None, probe=probe.probe)
     assert fns.admit(ADAPTER, key).admitted  # now it is free
+
+
+def test_a_very_late_probe_result_after_its_lease_was_reclaimed_frees_nothing(
+    pg_dsn: str, tenant_a: Tenant
+) -> None:
+    """The residual of the first fix: probe 1 is reclaimed after its lease, probe 2 is admitted;
+    probe 1's own (very late) result must not free probe 2's slot."""
+    fns = _fns(pg_dsn, half_open_probe_timeout_ms=200)
+    key = BreakerKey("llm_probe_epoch", "llm.completion", "platform")
+    _open_breaker(fns, key)
+    first = fns.admit(ADAPTER, key)
+    assert first.probe
+    time.sleep(0.3)  # lease of probe 1 expires
+    second = fns.admit(ADAPTER, key)
+    assert second.probe
+    assert second.epoch != first.epoch
+    fns.breaker_record(ADAPTER, key, True, None, probe=first.probe, probe_epoch=first.epoch)
+    assert not fns.admit(ADAPTER, key).admitted  # probe 2 still holds the only slot
+    fns.breaker_record(ADAPTER, key, True, None, probe=second.probe, probe_epoch=second.epoch)
+    assert fns.admit(ADAPTER, key).admitted

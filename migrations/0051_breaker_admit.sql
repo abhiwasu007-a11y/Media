@@ -9,6 +9,9 @@
 -- The probe lease needs one column on the L1a table (owner amw_owner).
 SET LOCAL ROLE amw_owner;
 ALTER TABLE circuit_breakers ADD COLUMN half_open_probe_until timestamptz;
+-- Probe generation: +1 on every open, close, OPEN -> HALF_OPEN and reclaim of leaked probes, so a
+-- very late probe result of an earlier generation can never free a newer probe's slot.
+ALTER TABLE circuit_breakers ADD COLUMN half_open_epoch bigint NOT NULL DEFAULT 0;
 RESET ROLE;
 GRANT amw_sysfn TO amw_owner WITH INHERIT FALSE, SET TRUE;
 SET LOCAL ROLE amw_sysfn;
@@ -16,19 +19,23 @@ SET LOCAL ROLE amw_sysfn;
 -- p_probe: TRUE = the call was admitted as a HALF_OPEN probe by amw_breaker_admit; FALSE = it was
 -- admitted while CLOSED, so a late result in HALF_OPEN changes nothing and frees no probe slot;
 -- NULL (callers that do not use amw_breaker_admit) = treated as a probe, the L1a behaviour.
+-- p_probe_epoch: the epoch amw_breaker_admit returned; a probe result of an older epoch is stale
+-- (its slot was reclaimed or the breaker changed state since) and changes nothing.
 DROP FUNCTION amw_breaker_record(text, text, text, boolean, boolean, text, bigint, int, numeric,
   int, bigint, bigint, int);
 CREATE FUNCTION amw_breaker_record(
   p_provider text, p_operation_class text, p_credential_scope text, p_succeeded boolean,
   p_counted boolean, p_error_code text, p_window_ms bigint, p_min_calls int,
   p_failure_ratio numeric, p_consecutive_failures int, p_open_ms bigint, p_open_ms_max bigint,
-  p_half_open_successes_to_close int, p_probe boolean DEFAULT NULL)
+  p_half_open_successes_to_close int, p_probe boolean DEFAULT NULL,
+  p_probe_epoch bigint DEFAULT NULL)
   RETURNS TABLE (state text, open_until timestamptz)
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
   b circuit_breakers;
   open_for bigint;
+  v_probe boolean;
 BEGIN
   INSERT INTO circuit_breakers (id, provider, operation_class, credential_scope, state,
       window_started_at)
@@ -42,6 +49,7 @@ BEGIN
     b.state := 'HALF_OPEN';
     b.half_open_in_flight := 0;
     b.half_open_probe_until := NULL;
+    b.half_open_epoch := b.half_open_epoch + 1;
     b.window_started_at := now();
     b.window_calls := 0;
     b.window_failures := 0;
@@ -52,11 +60,13 @@ BEGIN
     b.window_failures := 0;
   END IF;
 
-  IF b.state = 'HALF_OPEN' AND p_probe IS DISTINCT FROM false THEN
+  v_probe := p_probe IS DISTINCT FROM false
+            AND (p_probe_epoch IS NULL OR p_probe_epoch = b.half_open_epoch);
+  IF b.state = 'HALF_OPEN' AND v_probe THEN
     b.half_open_in_flight := greatest(0, b.half_open_in_flight - 1);  -- this probe is finished
   END IF;
 
-  IF b.state = 'OPEN' OR (b.state = 'HALF_OPEN' AND p_probe = false)
+  IF b.state = 'OPEN' OR (b.state = 'HALF_OPEN' AND NOT v_probe)
      OR (NOT p_succeeded AND NOT p_counted) THEN
     NULL;  -- rejected without I/O while OPEN; an uncounted failure is not a provider fault
   ELSIF p_succeeded THEN
@@ -72,6 +82,7 @@ BEGIN
       b.open_until := NULL;
       b.half_open_in_flight := 0;
       b.half_open_probe_until := NULL;
+      b.half_open_epoch := b.half_open_epoch + 1;
     END IF;
   ELSE
     b.window_calls := b.window_calls + 1;
@@ -89,6 +100,7 @@ BEGIN
       b.state := 'OPEN';
       b.half_open_in_flight := 0;
       b.half_open_probe_until := NULL;
+      b.half_open_epoch := b.half_open_epoch + 1;
       b.window_started_at := now();
       b.window_calls := 0;
       b.window_failures := 0;
@@ -102,7 +114,7 @@ BEGIN
          window_failures = b.window_failures, consecutive_failures = b.consecutive_failures,
          opened_at = b.opened_at, open_until = b.open_until, open_count = b.open_count,
          half_open_in_flight = b.half_open_in_flight,
-         half_open_probe_until = b.half_open_probe_until,
+         half_open_probe_until = b.half_open_probe_until, half_open_epoch = b.half_open_epoch,
          last_error_code = b.last_error_code, row_version = c.row_version + 1
    WHERE c.id = b.id;
   state := b.state;
@@ -113,9 +125,9 @@ $$;
 
 
 REVOKE ALL ON FUNCTION amw_breaker_record(text, text, text, boolean, boolean, text, bigint, int,
-  numeric, int, bigint, bigint, int, boolean) FROM PUBLIC;
+  numeric, int, bigint, bigint, int, boolean, bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION amw_breaker_record(text, text, text, boolean, boolean, text, bigint, int,
-  numeric, int, bigint, bigint, int, boolean) TO amw_app, amw_publisher;
+  numeric, int, bigint, bigint, int, boolean, bigint) TO amw_app, amw_publisher;
 
 -- 07 section 4.3: OPEN rejects until open_until; the first check at or after it moves the row to
 -- HALF_OPEN; HALF_OPEN admits at most p_half_open_max_probes probes at a time (counted in
@@ -124,7 +136,7 @@ GRANT EXECUTE ON FUNCTION amw_breaker_record(text, text, text, boolean, boolean,
 CREATE FUNCTION amw_breaker_admit(
   p_provider text, p_operation_class text, p_credential_scope text, p_half_open_max_probes int,
   p_probe_timeout_ms bigint)
-  RETURNS TABLE (admitted boolean, state text, open_until timestamptz)
+  RETURNS TABLE (admitted boolean, state text, open_until timestamptz, epoch bigint)
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
@@ -138,17 +150,19 @@ BEGIN
      AND c.credential_scope = p_credential_scope FOR UPDATE;
   IF NOT FOUND OR b.state = 'CLOSED' THEN
     admitted := true; state := coalesce(b.state, 'CLOSED'); open_until := NULL;
+    epoch := coalesce(b.half_open_epoch, 0);
     RETURN NEXT;
     RETURN;
   END IF;
   IF b.state = 'OPEN' THEN
     IF now() < b.open_until THEN
-      admitted := false; state := b.state; open_until := b.open_until;
+      admitted := false; state := b.state; open_until := b.open_until; epoch := b.half_open_epoch;
       RETURN NEXT;
       RETURN;
     END IF;
     b.state := 'HALF_OPEN';
     b.half_open_in_flight := 0;
+    b.half_open_epoch := b.half_open_epoch + 1;
     b.window_started_at := now();
     b.window_calls := 0;
     b.window_failures := 0;
@@ -157,6 +171,7 @@ BEGIN
   -- lease of the last admitted probe has expired
   IF b.half_open_in_flight > 0 AND now() > b.half_open_probe_until THEN
     b.half_open_in_flight := 0;
+    b.half_open_epoch := b.half_open_epoch + 1;
   END IF;
   IF b.half_open_in_flight >= p_half_open_max_probes THEN
     admitted := false;
@@ -167,11 +182,11 @@ BEGIN
   END IF;
   UPDATE circuit_breakers c
      SET state = b.state, half_open_in_flight = b.half_open_in_flight,
-         half_open_probe_until = b.half_open_probe_until,
+         half_open_probe_until = b.half_open_probe_until, half_open_epoch = b.half_open_epoch,
          window_started_at = b.window_started_at, window_calls = b.window_calls,
          window_failures = b.window_failures, row_version = c.row_version + 1
    WHERE c.id = b.id;
-  state := b.state; open_until := b.open_until;
+  state := b.state; open_until := b.open_until; epoch := b.half_open_epoch;
   RETURN NEXT;
 END
 $$;

@@ -52,6 +52,8 @@ class ProbeAdmission:
 
     admitted: bool
     state: BreakerState
+    epoch: int = 0
+    """Probe generation: pass it to ``breaker_record`` as ``probe_epoch``."""
 
     @property
     def probe(self) -> bool:
@@ -83,7 +85,8 @@ class PgBreakerFunctions:
             with self._connections() as conn, conn.transaction():
                 conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
                 row = conn.execute(
-                    "SELECT admitted, state, open_until FROM amw_breaker_admit(%s, %s, %s, %s, %s)",
+                    "SELECT admitted, state, open_until, epoch FROM"
+                    " amw_breaker_admit(%s, %s, %s, %s, %s)",
                     (
                         key.provider,
                         key.operation_class,
@@ -95,7 +98,9 @@ class PgBreakerFunctions:
         except psycopg.Error as exc:
             raise translate_db_error(exc) from exc
         assert row is not None  # noqa: S101 - the function always returns one row
-        return ProbeAdmission(bool(row[0]), BreakerState(key, CircuitState(row[1]), row[2]))
+        return ProbeAdmission(
+            bool(row[0]), BreakerState(key, CircuitState(row[1]), row[2]), int(row[3])
+        )
 
     def require_admission(self, caller: ActorRef, key: BreakerKey) -> ProbeAdmission:
         """``admit`` that raises ``CircuitOpenError`` (NO_ATTEMPT, 07 section 2) when refused."""
@@ -122,8 +127,10 @@ class PgBreakerFunctions:
         succeeded: bool,
         error_code: str | None,
         probe: bool | None = None,
+        probe_epoch: int | None = None,
     ) -> BreakerState:
-        """``probe``: ``ProbeAdmission.probe`` of the call's admission (None: no ``admit`` used)."""
+        """``probe`` / ``probe_epoch``: ``ProbeAdmission.probe`` / ``.epoch`` of the call's
+        admission (None: no ``admit`` used)."""
         if not is_actor_ref(caller):
             raise ValueError("caller must be an actor reference")
         cfg = self._settings.breaker_for(key.provider, key.operation_class)
@@ -132,7 +139,7 @@ class PgBreakerFunctions:
                 conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
                 row = conn.execute(
                     "SELECT state, open_until FROM amw_breaker_record("
-                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (
                         key.provider,
                         key.operation_class,
@@ -148,6 +155,7 @@ class PgBreakerFunctions:
                         cfg.open_ms_max,
                         cfg.half_open_successes_to_close,
                         probe,
+                        probe_epoch,
                     ),
                 ).fetchone()
         except psycopg.Error as exc:
@@ -176,7 +184,7 @@ class PgBreakerFunctions:
                 .execute(
                     "SELECT state, window_started_at, window_calls, window_failures,"
                     " consecutive_failures, opened_at, open_until, open_count,"
-                    " half_open_in_flight, last_error_code, half_open_probe_until"
+                    " half_open_in_flight, last_error_code, half_open_probe_until, half_open_epoch"
                     " FROM circuit_breakers"
                     " WHERE provider = %s AND operation_class = %s AND credential_scope = %s",
                     (key.provider, key.operation_class, key.credential_scope),
@@ -200,6 +208,7 @@ class PgBreakerFunctions:
             half_open_in_flight=row[8],
             last_error_code=row[9],
             half_open_probe_until=row[10],
+            half_open_epoch=row[11],
         )
 
 

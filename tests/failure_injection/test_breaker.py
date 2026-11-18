@@ -192,3 +192,17 @@ def test_a_late_result_of_a_call_admitted_before_the_breaker_opened_frees_no_pro
     done = record(row, True, None, t + _ms(3), CFG, probe=True)
     assert done.half_open_in_flight == 0
     assert done.window_calls == 1
+
+
+def test_a_very_late_probe_result_after_reclaim_frees_no_newer_probe_slot() -> None:
+    row, t = _half_open_with_a_probe()
+    first_epoch = row.half_open_epoch
+    second = admit(row, t + _ms(5_001), CFG)  # the lease of probe 1 expired: reclaimed
+    assert second.probe
+    assert second.row.half_open_epoch == first_epoch + 1
+    stale = record(second.row, True, None, t + _ms(5_002), CFG, probe=True, probe_epoch=first_epoch)
+    assert stale == second.row
+    live = record(
+        second.row, True, None, t + _ms(5_003), CFG, probe=True, probe_epoch=first_epoch + 1
+    )
+    assert live.half_open_in_flight == 0
