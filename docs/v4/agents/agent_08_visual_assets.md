@@ -23,7 +23,7 @@ Agent 08 turns the shot plan of Agent 09 into a set of concrete, owned or licens
 
 1. **Hierarchy sourcing.** For every shot it searches the tiers in the order of §1A.1 — owner real material (`A_OWNER_REAL`), licensed stock (`B_LICENSED_STOCK`), code-made graphics and charts (`C_CODE_MOTION`), AI video B-roll (`D_AI_VIDEO`), AI stills (`E_AI_STILL`) — and records, for every tier it skipped, why. The order is enforced by code (ADR-009 §2.1), not by a model.
 2. **Real charts from the owner's historical data.** A chart is drawn by code from an owner-supplied historical dataset and an owner-curated chart case, never from a stock image, never from live data and never with a forward-looking overlay. The last bar must be older than the SEBI price-data lag (IN-02, FIN-R9) and the drawing carries nothing that implies a future direction (IN-03, FIN-R13).
-3. **Licence and provenance.** Each shot gets exactly one covering `licence_ledger` row (18 §2.2, §7.9) against an `ACTIVE` licence that is usable for the tenant and the destination (§1C.8). The same rule covers every other visual element the plan places: Agent 08 writes one `TEMPLATE` row per overlay interval of the overlay track and one whole-timeline `FONT` row per brand font (CCR-031), and, in 3B, the `MUSIC_BED` row of a sourced bed; stock is fetched only through the licensed download path (no preview, no watermark, §1A.6); AI assets carry the disclosure flags that Agent 16's decision needs (YT-06, YT-07).
+3. **Licence and provenance.** Each shot gets exactly one covering `licence_ledger` row (18 §2.2, §7.9) against an `ACTIVE` licence that is usable for the tenant and the destination (§1C.8). The same rule covers every other visual element the plan places: Agent 08 writes one `IMAGE` row per reveal still of a chart shot (manifest `shots[].reveal_stills[]`, interval of the step), one `TEMPLATE` row per overlay interval of the overlay track and one whole-timeline `FONT` row per brand font (CCR-031), and, in 3B, the `MUSIC_BED` row of a sourced bed; stock is fetched only through the licensed download path (no preview, no watermark, §1A.6); AI assets carry the disclosure flags that Agent 16's decision needs (YT-06, YT-07).
 4. **Asset library and reuse engine.** Every asset is stored per tenant with a SHA-256 and a perceptual fingerprint; before a new item is made or bought the engine looks for a reusable one (exact or near-duplicate) that respects licence, expiry and channel permission. AI B-roll is budgeted per video (§1A.11) and stops on breach (D1).
 
 ### 1.2 Where it sits
@@ -85,7 +85,7 @@ One task per shot plan iteration. The task is a blocking gate stage (24 §7.1a):
 | FR-10 | Enforce the hierarchy and record `skips[]` (tier, reason code) for every shot | 18 §2.1: falling to a lower rank requires a recorded reason | every shot | cascade state | manifest `skips[]`; `qc_results.message` text derived | Agent 16, owner report | 3A |
 | FR-11 | Reuse engine: before making or buying, look in the tenant's library for an exact (SHA-256 / spec hash / vendor item) or near-duplicate (perceptual) asset that is `ACTIVE`, unexpired, permitted for the channel and under any reuse cap; reuse it with a new ledger row | cost, consistency, directive row 08 | before FR-04/06/07/08 acquire | `assets`, `asset_fingerprints` | `REUSED` result | cost | 3A (exact) · 3B (near-duplicate calibration) |
 | FR-12 | Fingerprint every registered asset: `SHA256` of the file and `PERCEPTUAL_FRAME` (64-bit difference hash of sampled frames) | reuse, S2 uniqueness, duplicate detection (GLOSSARY §6.45 defers algorithms to this blueprint) | at registration | media file | `asset_fingerprints` rows | S2, FR-11 | 3A |
-| FR-13 | Write ledger rows at sourcing (`render_id` NULL, CCR-030): one row per shot (interval = the shot's `start_ms`/`end_ms`, `shot_id`), one `TEMPLATE` row per overlay interval of the overlay track (`shot_id` = the overlay id), one whole-timeline `FONT` row per brand font (interval 0 to the timeline end), and in 3B the `MUSIC_BED` rows; thumbnails are Agent 11's (it writes its own rows) | §1A.6; 18 §2.2 (any visual track); CCR-031 | after the asset is final | asset, licence, shot, overlay, brand-kit fonts | rows with `usage_kind` `SHOT`, `IMAGE`, `AI_OUTPUT`, `TEMPLATE`, `FONT`, `MUSIC_BED` | Agent 10 `qc.licence.completeness`, Agent 16 | 3A (music rows 3B) |
+| FR-13 | Write ledger rows at sourcing (`render_id` NULL, CCR-030): one row per shot (interval = the shot's `start_ms`/`end_ms`, `shot_id`), one `IMAGE` row per reveal still of a chart shot (`reveal_stills[]`; interval = the step's `start_ms`/`end_ms`, `shot_id` of the chart shot, `asset_id` of the still), one `TEMPLATE` row per overlay interval of the overlay track (`shot_id` = the overlay id), one whole-timeline `FONT` row per brand font (interval 0 to the timeline end), and in 3B the `MUSIC_BED` rows; thumbnails are Agent 11's (it writes its own rows) | §1A.6; 18 §2.2 (any visual track); CCR-031 | after the asset is final | asset, licence, shot, overlay, brand-kit fonts | rows with `usage_kind` `SHOT`, `IMAGE`, `AI_OUTPUT`, `TEMPLATE`, `FONT`, `MUSIC_BED` | Agent 10 `qc.licence.completeness`, Agent 16 | 3A (music rows 3B) |
 | FR-14 | Provenance and watermark control: stock only from the licensed download (ledger row with `vendor_item_id`), never from a preview URL; reject trial files | §1A.6; 18 §7.10 | at download | vendor response | flag in manifest `provenance` | `qc.watermark.provenance` | 3A |
 | FR-15 | Set asset flags `is_realistic_synthetic`, `depicts_real_person`, `release_ref`, `allowed_channel_ids` | YT-06/07 inputs; reuse permission | at registration | asset, release record | asset row | Agent 16 | 3A |
 | FR-16 | Cost control: reserve through S4 before any paid or LLM call, record every call in `cost_ledger`, stop on refusal | D1, rule 8 | before each paid effect | S4, adapters | cost rows, `RESOURCE.BUDGET_EXHAUSTED` suspend | S4, Agent 16 | 3A |
@@ -330,7 +330,7 @@ Skip reason codes (GLOSSARY §6.52 `visual_skip_reason`): `NOT_APPLICABLE_INTENT
 4. **Data age (FIN-R9, IN-02).** `data_end_date` = the **last calendar date covered by the last bar of the window** (a daily bar: its date; a weekly bar: its start + 6 days unless the dataset carries a period end; a monthly bar: its start + 30 days unless it carries a period end; the largest possible span, so the guard errs on the safe side). `age_days = sourcing_day − data_end_date`. `OLDER_THAN_LAG` iff `age_days ≥ lag_days` (config `compliance.finance_sebi_in.price_data_lag_days`, 30 per IN-02, never below the platform minimum, config invalid otherwise). A future date is invalid input. A missing date is `UNKNOWN`, treated as within the lag. Only `OLDER_THAN_LAG` charts are rendered. The check is also re-run by `qc.visual.chart_data_age` and Agent 16 at delivery/publish time (age only grows). The manifest carries `data_end_date`, `earliest_compliant_publish_date = data_end_date + lag_days` (calendar days assumed; whether the circular counts calendar or trading days is REQUIRES REVIEW (Phase 1) ⚖, 13 §1.3) and the overall maximum for the report (3A: the owner uploads by hand). Upstream, a `REAL_HISTORICAL` request reaches Agent 06 at `s06_claims` as a constraint (`chart_data_refs` item with `data_age_vs_lag = OLDER_THAN_LAG`, `data_age_basis = CONSTRAINT`, CCR-004); this step is where the constraint is met or the shot fails `DATA_WITHIN_LAG`, and `qc.visual.chart_data_age` and `s16_comp` re-check the measured end date (the stricter value wins). Calendar arithmetic is in UTC dates; the display zone is IST (GLOSSARY §4).
 5. **Chart content (FIN-R13, FIN-R1/R2/R3).** The renderer draws the window's bars, the indicators of the case and the case's annotations. **Allowed annotation kinds:** `MARK_BAR` (a marker on a bar inside the window), `HLINE_THROUGH_BARS` (a horizontal line that starts and ends inside the window, never extended to the right), `SHADE_RANGE` (a shaded bar range inside the window), `LABEL` (text from the script's `on_screen_text` allowlist for this scene or from the versioned template label set, e.g. "Historical example"; anchored on a bar inside the window). Everything else — forecast or projection kinds, arrows beyond the last bar, extended lines, free text, price targets, "zones" worded as advice, any element to the right of the last bar — is rejected (`a08.chart.annotations`, blocking). The chart title is built from the instrument, the timeframe and the first and last bar dates; it never contains direction words. Levels shown are located on historical bars only and are labelled by the template as historical.
 6. **Schematic charts** (`SCHEMATIC`, `instrument = null`): the points come from an owner-given schematic case; Agent 08 draws only those points; the template adds the label "Illustrative example, not real data" (wording owned by 13, REQUIRES REVIEW (Phase 1)); `data_age_vs_lag` is `null` (a closed set, CCR-042); the asset records `data_kind = SCHEMATIC`; no chart-facts document is emitted.
-7. **Rendering.** Deterministic (§3); one image per requested aspect (16:9 at least the `qc.video.min_*` floor; 9:16 laid out for vertical); a **reveal sequence** of `len(change_events_ms) + 1` stills (Agent 09 gives the reveal steps of a chart shot as `change_events_ms`; each still shows progressively more bars, left to right, never beyond the last bar of the window), so that the change events are realised later by Agent 10 from stills and no video is encoded here. Brand colours and fonts from the brand kit; text from the allowlists only.
+7. **Rendering.** Deterministic (§3); one image per requested aspect (16:9 at least the `qc.video.min_*` floor; 9:16 laid out for vertical); a **reveal sequence** of `len(change_events_ms) + 1` stills, listed in the manifest as `shots[].reveal_stills[]` (§8.2) (Agent 09 gives the reveal steps of a chart shot as `change_events_ms`; each still shows progressively more bars, left to right, never beyond the last bar of the window), so that the change events are realised later by Agent 10 from stills and no video is encoded here. Brand colours and fonts from the brand kit; text from the allowlists only.
 8. **Asset, tier and source type (decided, CCR-045).** The rendered chart is an `assets` row with `kind = CHART`, `visual_source_tier = C_CODE_MOTION` and `source_type = CODE_GENERATED` (18 §2.1 is aligned); the reveal stills are `IMAGE` assets of the same tier; the dataset itself is an owner-made `DOCUMENT` asset (`OWNER_MADE`), linked in the asset's `attributes` (`dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`). The tier-E rule and the hierarchy order are unaffected.
 9. **Chart facts (CCR-004; `ChartFactsBuilder`, FR-22).** For every `REAL_HISTORICAL` chart the code computes, from the dataset window only, the facts `WINDOW_RANGE` (bar count and the first and last bar dates), `WINDOW_HIGH` and `WINDOW_LOW` (the value and the bar date; on equal values the earliest bar), and `CLOSE_CHANGE` (first and last close and the percentage change rounded half up to two decimals), in this order as `f01…f04`, each as a fixed-template English statement of historical numbers (no direction word, no forecast, no method content). They are written as the agent document `agent_08.chart_facts` 1.0.0 (§8.5); the evidence reference is `<chart_id>#<fact_id>`. No model writes a fact. `SCHEMATIC` charts emit none.
 
@@ -808,6 +808,7 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
           "unresolved_reason",
           "reuse",
           "chart",
+          "reveal_stills",
           "disclosure",
           "cost_micros",
           "selection"
@@ -994,6 +995,26 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
                 }
               }
             ]
+          },
+          "reveal_stills": {
+            "type": "array",
+            "maxItems": 64,
+            "description": "ordered reveal stills of a chart shot (`len(change_events_ms) + 1` items, step k = 0 first); empty for every shot that is not a chart shot and for an UNRESOLVED shot",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["k", "asset_id", "asset_uri", "sha256", "start_ms", "end_ms", "licence_id", "ledger_entry_ids"],
+              "properties": {
+                "k": {"type": "integer", "minimum": 0},
+                "asset_id": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+                "asset_uri": {"type": "string", "maxLength": 1024, "pattern": "^(amw-blob://(org_[0-9a-f-]{36}|platform)/[A-Za-z0-9._/-]+|amw-entity://(org_[0-9a-f-]{36}|platform)/[a-z_]+/[a-z]{3}_[0-9a-f-]{36})$"},
+                "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "start_ms": {"type": "integer", "minimum": 0},
+                "end_ms": {"type": "integer", "minimum": 1},
+                "licence_id": {"type": "string", "pattern": "^lic_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+                "ledger_entry_ids": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^lcu_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}
+              }
+            }
           },
           "disclosure": {
             "type": "object",
@@ -1254,13 +1275,14 @@ Notes:
 6. `gate_verdict` is `FAILED` iff `unresolved_shot_ids` is not empty (the gate result of §8.3); the manifest then still lists every shot, with `status = UNRESOLVED` for the failed ones, so the revision run and the owner's report can see what was sourced.
 7. `overlays[]` has one entry per overlay of the plan, in plan order, each with exactly one `TEMPLATE` ledger row; `fonts[]` one entry per brand-kit font, each with one whole-timeline `FONT` row (`used_from_ms = 0`, `used_to_ms` = the timeline end); `music_beds[]` is empty in 3A (3B: one `MUSIC_BED` entry per sourced bed). Thumbnails are Agent 11's rows, not listed here.
 8. `chart_facts[]` has one entry per real chart shot's `chart_id` (several aspects of the same chart share one document).
+9. `shots[].reveal_stills[]` carries the reveal sequence of a chart shot (the stills of §6 item 7): exactly `len(change_events_ms) + 1` entries for a `SOURCED` or `REUSED` chart shot, ordered by `k` (0 first), contiguous and covering the shot interval (`reveal_stills[0].start_ms` = the shot's `start_ms`, `reveal_stills[k].start_ms` = `change_events_ms[k-1]`, each `end_ms` = the next `start_ms`, the last `end_ms` = the shot's `end_ms`); an empty array for every other shot and for an `UNRESOLVED` shot. Each still is an `IMAGE` asset (`source_type = CODE_GENERATED`, `visual_source_tier = C_CODE_MOTION`) with its own `sha256` and exactly one `IMAGE` ledger row written at sourcing (§13.2) covering its `[start_ms, end_ms)` interval. Agent 10 reads this field and no other (agent_10 `RevealStepBuilder`).
 
 ### 8.3 `validation_results` (check ids match `^[a-z0-9_.-]{3,96}$`; kind `DETERMINISTIC`; `blocking` as shown; `gate` is `false` for every row except the one marked gate; a `WARN` or `SKIPPED` result is always `blocking: false`, 03 §5.2)
 | check_id | Criterion | Blocking |
 |---|---|---|
 | `a08.pre.tenant`, `a08.pre.refs`, `a08.pre.shot_plan`, `a08.pre.config`, `a08.pre.licence_rows`, `a08.pre.budget`, `a08.pre.batch_size` | preconditions of §7.4 | yes |
 | `a08.cov.all_shots_resolved` | no `UNRESOLVED` shot. **The only gate result** (`gate: true`, `blocking: true`): `FAIL` makes the gate fail with `remedy_stage_id = s09_plan`, or the script stage (`script_stage_id`) when a `DATA_WITHIN_LAG` shot is present (the earliest stage that fixes every cause; 24 §3.3 rule 1). Owner-material reasons are not gate results (§18) | yes (gate) |
-| `a08.cov.licence_row_per_shot` | exactly one covering ledger row per sourced shot (`CoverageVerifier`, same rule as 18 §7.9) | yes |
+| `a08.cov.licence_row_per_shot` | exactly one covering ledger row per sourced shot and exactly one covering `IMAGE` row per entry of `reveal_stills[]` (`CoverageVerifier`, same rule as 18 §7.9) | yes |
 | `a08.cov.overlay_rows` | exactly one covering `TEMPLATE` ledger row per overlay of the plan (`TimelineLedgerPlanner`, 18 §2.2) | yes |
 | `a08.cov.font_rows` | exactly one whole-timeline `FONT` ledger row per brand-kit font | yes |
 | `a08.cov.interval_match` | each shot and overlay row's interval equals the element's `start_ms`/`end_ms` | yes |
@@ -1347,6 +1369,10 @@ Notes:
         "annotation_count": 3,
         "method_content": false
       },
+      "reveal_stills": [
+        {"k": 0, "asset_id": "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e40", "asset_uri": "amw-blob://org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e01/assets/ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e40/chart_16x9_r0.png", "sha256": "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6", "start_ms": 0, "end_ms": 2000, "licence_id": "lic_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e15", "ledger_entry_ids": ["lcu_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e42"]},
+        {"k": 1, "asset_id": "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e41", "asset_uri": "amw-blob://org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e01/assets/ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e41/chart_16x9_r1.png", "sha256": "a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7", "start_ms": 2000, "end_ms": 4000, "licence_id": "lic_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e15", "ledger_entry_ids": ["lcu_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e43"]}
+      ],
       "disclosure": {"is_realistic_synthetic": false, "depicts_real_person": false},
       "cost_micros": 0,
       "selection": null
@@ -1378,6 +1404,7 @@ Notes:
       "unresolved_reason": null,
       "reuse": null,
       "chart": null,
+      "reveal_stills": [],
       "disclosure": {"is_realistic_synthetic": false, "depicts_real_person": false},
       "cost_micros": 0,
       "selection": {"fit": "STRONG", "candidate_count": 3}
@@ -1409,6 +1436,7 @@ Notes:
       "unresolved_reason": null,
       "reuse": null,
       "chart": null,
+      "reveal_stills": [],
       "disclosure": {"is_realistic_synthetic": false, "depicts_real_person": false},
       "cost_micros": 0,
       "selection": null
@@ -1437,7 +1465,7 @@ Notes:
   },
   "ai_broll": {"clips": 0, "total_ms": 0, "cost_micros": 0, "currency": "INR"},
   "cost_summary": {"llm_micros": 0, "stock_micros": 0, "ai_video_micros": 0, "ai_still_micros": 0, "currency": "INR", "figure_kind": "ESTIMATE"},
-  "licence_summary": {"ledger_rows_written": 6, "overlay_rows": 2, "font_rows": 1, "music_rows": 0, "warnings": []},
+  "licence_summary": {"ledger_rows_written": 8, "overlay_rows": 2, "font_rows": 1, "music_rows": 0, "warnings": []},
   "reuse_summary": {"reused_exact": 0, "reused_near_duplicate": 0, "new_assets": 3, "near_duplicate_flags": 0},
   "earliest_compliant_publish_date": "2000-10-30",
   "unresolved_shot_ids": [],
@@ -1773,7 +1801,7 @@ agent_08_visual_assets/
 DB role `amw_app` (`NOBYPASSRLS`, not superuser; 04 §3.1); no `TRUNCATE`, no DDL.
 
 ### 13.2 Licence ledger at sourcing time (decided, CCR-030)
-`licence_ledger.render_id` is nullable (04) and no render exists when Agent 08 runs: rows are written with `render_id = NULL`, `job_id`, `task_id` (the writing task), `shot_id` (the plan shot or overlay id; NULL for font and music rows), `asset_id`, `licence_id`, `usage_kind`, `used_from_ms`/`used_to_ms` (the element's interval on the render timeline; font and music rows cover the whole timeline), `source_url`/`vendor_item_id` (stock), `expiry_at`, `client_permission_ref` (when the licence is platform-held and the tenant is another org), `recorded_by = agent_08`, inside the task's `db.output` transaction. The row key is `UNIQUE NULLS NOT DISTINCT (org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)`, so a replay writes nothing twice and a revision iteration (a new task) appends new rows without touching earlier ones. 18 §7.9 matches a row to a timeline element of render R of job J when `asset_id` matches, the interval covers the element, and `render_id = R` **or** (`render_id IS NULL` and `job_id = J`); rows of earlier iterations whose asset or interval no longer appears in the render are simply not matched. `CoverageVerifier` evaluates the same rule at sourcing and Agent 10 re-evaluates it as `qc.licence.completeness`.
+`licence_ledger.render_id` is nullable (04) and no render exists when Agent 08 runs: rows are written with `render_id = NULL`, `job_id`, `task_id` (the writing task), `shot_id` (the plan shot or overlay id; for a reveal still the chart shot's id; NULL for font and music rows), `asset_id`, `licence_id`, `usage_kind`, `used_from_ms`/`used_to_ms` (the element's interval on the render timeline; font and music rows cover the whole timeline), `source_url`/`vendor_item_id` (stock), `expiry_at`, `client_permission_ref` (when the licence is platform-held and the tenant is another org), `recorded_by = agent_08`, inside the task's `db.output` transaction. The row key is `UNIQUE NULLS NOT DISTINCT (org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)`, so a replay writes nothing twice and a revision iteration (a new task) appends new rows without touching earlier ones. 18 §7.9 matches a row to a timeline element of render R of job J when `asset_id` matches, the interval covers the element, and `render_id = R` **or** (`render_id IS NULL` and `job_id = J`); rows of earlier iterations whose asset or interval no longer appears in the render are simply not matched. `CoverageVerifier` evaluates the same rule at sourcing and Agent 10 re-evaluates it as `qc.licence.completeness`.
 
 ### 13.3 Owner-made and code-generated items: self-grant rows (decided, CCR-031/039; 18 §2.2 note (a), ADR-009 §2.2)
 `licence_ledger.licence_id` is NOT NULL and 18 §7.9's query treats a missing licence as a failure, so this blueprint uses **tenant-held standing licence rows**, not a nullable `licence_id`:
@@ -1827,7 +1855,7 @@ Rules: memory holds pointers and IDs, never title, description or on-screen text
 ### 15.2 Downstream (who consumes Agent 08)
 | Consumer | Uses | Contract |
 |---|---|---|
-| Agent 10 `render` (`s10_render`; depends on `s08_assets` and `s06_chart`) | per shot: `asset_uri`, `media` (size, duration, `source_in_ms`, crop), reveal sequences, `usage_kind`; per overlay: `template_asset_id`; licence rows | manifest §8.2; Agent 10 never re-sources and fails `PERMANENT.MISSING_DEPENDENCY` for a shot without an asset; it writes no ledger rows (CCR-031) |
+| Agent 10 `render` (`s10_render`; depends on `s08_assets` and `s06_chart`) | per shot: `asset_uri`, `media` (size, duration, `source_in_ms`, crop), `reveal_stills[]` (per chart shot: `k`, `asset_id`, `asset_uri`, `sha256`, `start_ms`, `end_ms`, `licence_id`, `ledger_entry_ids`), `usage_kind`; per overlay: `template_asset_id`; licence rows | manifest §8.2; Agent 10 never re-sources and fails `PERMANENT.MISSING_DEPENDENCY` for a shot without an asset; it writes no ledger rows (CCR-031) |
 | Agent 10 `technical_qc` | `qc.licence.completeness` (18 §7.9; shots, overlays and fonts), `qc.licence.expiry_window`, `qc.visual.tier_share_e`, `qc.visual.tier_mix_report`, `qc.visual.chart_data_age`, `qc.watermark.provenance` (needs `vendor_item_id` rows); its gate may route `REVISE → s10_render` with alternative target `s08_assets` | database + manifest |
 | Agent 16 `compliance_gate` | licence completeness and validity (YTG-R6), disclosure inputs (`is_realistic_synthetic`, `depicts_real_person`, AI asset list), FIN-R9 / FIN-R12 / FIN-R13 evidence (per-chart dates, dataset hashes, `method_content`), presenter-persona check inputs (FIN-R11) | manifest + `assets` |
 | Agent 16 `quality_score` | VISUAL_QUALITY D inputs (tier mix, resolution, charts from real data) and COMPLIANCE D input | manifest |
