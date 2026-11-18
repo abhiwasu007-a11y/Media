@@ -129,6 +129,10 @@ def test_basic_folds(raw: str, expected: str) -> None:
         ("άlpha", "alpha"),  # Greek alpha with tonos
         ("ԁip", "dip"),  # Cyrillic komi de
         ("ϲall", "call"),  # Greek lunate sigma
+        ("b\u057dy", "buy"),  # Armenian seh (CCR-110)
+        ("b\u057ey", "buy"),  # Armenian vo (CCR-110)
+        ("bu\u13a9", "buy"),  # Cherokee gi (CCR-110)
+        ("B\u054dY", "buy"),  # Armenian capital SEH casefolds to U+057D
     ],
 )
 def test_confusables_fold_to_latin(raw: str, expected: str) -> None:
