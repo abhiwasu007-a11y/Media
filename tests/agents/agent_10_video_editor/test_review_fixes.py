@@ -165,7 +165,7 @@ def test_a_source_shorter_than_its_shot_is_refused_at_compile_time() -> None:
              "total_duration_ms": 3000, "content_end_ms": 3000,
              "shots": [{"shot_id": "sh01", "start_ms": 0, "end_ms": 3000}]}
         )  # fmt: skip
-        from agent_10_video_editor.ports import AssetRecord
+        from agent_10_video_editor.inputs import AssetRecord
 
         assets = {"a1": AssetRecord(asset_id="a1", uri=entry["asset_uri"], sha256=digest)}
         return TimelineCompiler.compile(
