@@ -48,7 +48,7 @@ TEMPORARY.TIMEOUT | RETRY | temporary | yes | L1 | provider or internal call tim
 TEMPORARY.RATE_LIMITED | RETRY | rate_limited | yes | L1 | HTTP 429 or provider rate limit
 TEMPORARY.UPSTREAM_5XX | RETRY | temporary | yes | L1 | HTTP 5xx from a provider
 TEMPORARY.DB_TRANSIENT | RETRY | db | no | L1 | serialization failure, deadlock, blip
-TEMPORARY.LOCK_CONFLICT | NO-ATTEMPT | - | no | L1 | optimistic-lock mismatch on a transition
+TEMPORARY.LOCK_CONFLICT | NO_ATTEMPT | - | no | L1 | optimistic-lock mismatch on a transition
 PERMANENT.SCHEMA_INVALID | FAIL | - | no | L2 | contract or payload failed its schema
 PERMANENT.SCHEMA_VERSION_UNSUPPORTED | FAIL | - | no | L2 | version outside the supported set
 PERMANENT.INPUT_INVALID | FAIL | - | no | L2 | semantically invalid input
@@ -83,7 +83,7 @@ INFRASTRUCTURE.DB_UNAVAILABLE | RETRY | infra | no | L1 | database unreachable
 INFRASTRUCTURE.QUEUE_UNAVAILABLE | RETRY | infra | no | L1 | queue functions unavailable
 INFRASTRUCTURE.STORAGE_UNAVAILABLE | RETRY | infra | no | L1 | storage backend unreachable
 INFRASTRUCTURE.NETWORK_OUTAGE | RETRY | infra | yes | L1 | all outbound calls failing
-INFRASTRUCTURE.CIRCUIT_OPEN | NO-ATTEMPT | - | no | L1 | breaker for the provider is OPEN
+INFRASTRUCTURE.CIRCUIT_OPEN | NO_ATTEMPT | - | no | L1 | breaker for the provider is OPEN
 INFRASTRUCTURE.WORKER_LOST | RETRY | infra | no | L1 | lease expired, heartbeat stale
 PUBLISHING.UPLOAD_INTERRUPTED | RETRY | publish_resume | no | L1 | resumable upload broke
 PUBLISHING.UPLOAD_REJECTED | FAIL | - | no | L3 | destination rejected file/metadata

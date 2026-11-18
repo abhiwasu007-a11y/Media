@@ -15,6 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import NewType
+from urllib.parse import urlsplit, urlunsplit
 
 from amw_core.errors import InputInvalidError
 
@@ -328,16 +329,63 @@ def make_idempotency_key(
 
 
 EXTERNAL_REF_PATTERN = r"^ext_[0-9a-f]{24}$"
+_UNRESERVED = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+_PCT = re.compile(r"%([0-9A-Fa-f]{2})")
 
 
-def make_external_ref_id(org_id: str, normalised_url: str) -> str:
+def _percent(text: str) -> str:
+    def fix(match: re.Match[str]) -> str:
+        char = chr(int(match[1], 16))
+        return char if char in _UNRESERVED else "%" + match[1].upper()
+
+    return _PCT.sub(fix, text)
+
+
+def _remove_dot_segments(path: str) -> str:
+    """RFC 3986 section 5.2.4."""
+    output: list[str] = []
+    for segment in path.split("/"):
+        if segment == "..":
+            if len(output) > 1:
+                output.pop()
+        elif segment != ".":
+            output.append(segment)
+    if path.endswith(("/.", "/..")):
+        output.append("")
+    result = "/".join(output)
+    return result if result.startswith("/") or not path.startswith("/") else "/" + result
+
+
+def normalise_reference_url(url: str) -> str:
+    """GLOSSARY section 2.4 URL normalisation (CCR-066), in the stated order."""
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise InputInvalidError("external references are absolute https URLs")
+    host = parts.hostname.rstrip(".")
+    try:
+        host = host.encode("idna").decode("ascii").lower()
+    except UnicodeError as exc:
+        raise InputInvalidError("host cannot be IDNA-encoded") from exc
+    netloc = host
+    if parts.port is not None and parts.port != 443:
+        netloc = f"{host}:{parts.port}"
+    if parts.username is not None:
+        userinfo = parts.netloc.rsplit("@", 1)[0]
+        netloc = f"{userinfo}@{netloc}"
+    path = _remove_dot_segments(_percent(parts.path)) or "/"
+    params = [_percent(p) for p in parts.query.split("&")] if parts.query else []
+    params.sort(key=lambda p: tuple(p.split("=", 1)) if "=" in p else (p, ""))
+    query = "&".join(params)
+    return urlunsplit(("https", netloc, path, query, ""))
+
+
+def make_external_ref_id(org_id: str, url: str) -> str:
     """GLOSSARY section 2.4 (CCR-044): ``ext_`` + first 24 hex of SHA-256 over the canonical
-    ``{"org_id": ..., "url": <normalised URL>}``. The caller passes the URL already normalised
-    (the normalisation rule is not yet defined in the glossary)."""
+    ``{"org_id": ..., "url": <normalised URL>}``; the URL is normalised here (CCR-066)."""
     parse_id(org_id, Prefix.ORGANISATION)
-    if not normalised_url.startswith("https://"):
-        raise InputInvalidError("external references are HTTPS URLs")
     canonical = json.dumps(
-        {"org_id": org_id, "url": normalised_url}, sort_keys=True, separators=(",", ":")
+        {"org_id": org_id, "url": normalise_reference_url(url)},
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return "ext_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]

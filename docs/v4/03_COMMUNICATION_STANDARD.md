@@ -180,9 +180,10 @@ The one topic contract of 3A: the owner gives the topic in chat; the operator to
   "title": "AMW owner topic input",
   "type": "object",
   "additionalProperties": false,
-  "required": ["title", "brief", "angle", "language", "video_kind", "course_chapter_pointer",
+  "required": ["schema_version", "title", "brief", "angle", "language", "video_kind", "course_chapter_pointer",
                "owner_references", "target_duration_ms", "shorts_wanted"],
   "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
     "title": { "type": "string", "minLength": 3, "maxLength": 400 },
     "brief": { "oneOf": [ { "type": "string", "maxLength": 2000 }, { "type": "null" } ] },
     "angle": { "oneOf": [ { "type": "string", "maxLength": 500 }, { "type": "null" } ] },
@@ -370,7 +371,7 @@ The output carries no IDs of its own: it is stored at `amw-blob://<org>/jobs/<jo
           "unit": { "oneOf": [ { "type": "string", "maxLength": 16 }, { "type": "null" } ] },
           "message": { "type": "string", "maxLength": 2000 },
           "evidence_ref": { "oneOf": [ { "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri" }, { "type": "null" } ] },
-          "gate": { "type": "boolean", "default": false },
+          "gate": { "type": "boolean" },
           "remedy_stage_id": { "oneOf": [ { "type": "string", "pattern": "^[a-z0-9_]{2,32}$" }, { "type": "null" } ] }
         },
         "allOf": [
@@ -683,6 +684,27 @@ Blocking outcomes: when a blocking gate (compliance, originality, QC) returns `B
    - A refused attempt is stored as an evidence row with `refused_reason` (and the refused `source_kind`) and backs nothing.
    - Every record is audited (`approval.recorded_from_owner_chat`, `approval.owner_confirmed`, `approval.record_refused`; the same three verbs for `editorial_contribution.*` and `quality_score.*`) and echoed back to the owner in chat; his reply is stored once in the evidence row's confirmation fields.
    - Agents (`agent_NN`, `svc_sNN`) can never write these records, on any channel (04 §5.16 triggers).
+7. **Verification per record kind (CCR-059; the code and this table must agree).** The evidence **store** verifies: it fetches the event itself (session event source) and runs the check itself, both when the evidence is recorded and when it is confirmed; it accepts no verification result from a caller. Authenticity tests (every kind, every event incl. the confirmation):
+
+   | # | Test |
+   |---|---|
+   | A1 | the event exists and is the requested one (same `session_id`, `event_uuid`) |
+   | A2 | role `user`; A3 not synthetic; A4 inbound origin is the human user, not a peer session, sub-agent, notification, tool result, scheduled message or document |
+   | A5 | the sender is the **owner's own account** (config `approvals.owner_chat.owner_account_ids`), not another human in a shared channel; the session is a **top-level** owner session, not a child or sub-agent session |
+   | A6 | `quote` is a non-empty verbatim substring of the event content; `message_at` equals the event timestamp |
+   | A7 | order: later than the request (`approvals.created_at`, or the job for content kinds) and than any evidence it supersedes; a confirmation is a second, distinct, later event |
+   | A8 | exactly one subject reference: the approval's `review_code` once as a whole token or, for `CONTENT` and `SCORE` kinds, the job wire ID; one message verifies one subject |
+   | A9 | the message is not a question, a conditional or a deferral (e.g. "Approve R7K2?", "after I check", "tomorrow"): such a message yields `NEEDS_CLARIFICATION` and is never verified; the operator asks the owner |
+
+   Rule sets (`evidence_verification_kind`, GLOSSARY §6.44):
+
+   | Kind | Record kinds | Rule |
+   |---|---|---|
+   | `DECISION` | `STEP_DECISION`, `COMPLIANCE_DECISION`, `KNOWLEDGE_RELEASE_REQUEST` (a release authorisation) | `review_code` and `parsed_decision` mandatory; strict closed grammar: every token from the decision list (config `approvals.owner_chat.decision_words.<lang>`) maps to the same decision, one stands directly next to the review code, and **any** negation token anywhere makes the message ambiguous (`NEEDS_CLARIFICATION`) |
+   | `CONTENT` | `CONTRIBUTION`, `OWNER_TOPIC`, `DATASET_INTAKE` | no decision may be recorded; the quote carries content, not only decision words, negations or references; negation or withholding language anywhere refuses verification; the stored record text (e.g. `editorial_contributions.description`, the topic title) is a verbatim substring of the quote; a contribution has at least the configured minimum length |
+   | `SCORE` | `HUMAN_SCORE` | no decision; `claimed_scores` (04 §5.16) is non-empty; each `(dimension, points)` is written in the message as `<dimension label> <integer>` exactly (no inferred numbers), `0 ≤ points ≤ max_points` of the 18 §9 dimension, each dimension once; the stored HUMAN `quality_scores` rows must equal `claimed_scores` (DB trigger) |
+
+   Until the real session event source exists (ticket 3A-13) only a fake source exists, so no 3A approval recorded this way is production-verified.
 
 ### 11.7 Audit of every transition
 Each transition writes `audit_log` with: `actor_kind`, `actor_ref`, `authority` (role or policy under which the actor acted), `action` (audit event name above), `target_kind = TASK|JOB`, `target_id`, `details = {from, to, transition_id, wait_reason, error_code, state_version}`, `correlation_id`. The hash chain makes the history tamper-evident (04 §5.13).

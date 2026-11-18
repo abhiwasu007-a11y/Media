@@ -176,3 +176,24 @@ def test_external_ref_id() -> None:
     )  # tenant-specific
     with pytest.raises(InputInvalidError):
         ids.make_external_ref_id(org, "http://example.org/a")
+    same = ids.make_external_ref_id(org, "HTTPS://Example.ORG.:443/a#frag")
+    assert same == ref
+
+
+@pytest.mark.parametrize(
+    ("raw", "normal"),
+    [
+        ("https://Example.ORG./", "https://example.org/"),
+        ("https://example.org", "https://example.org/"),
+        ("https://example.org:443/a", "https://example.org/a"),
+        ("https://example.org:8443/a", "https://example.org:8443/a"),
+        ("https://example.org/a#x", "https://example.org/a"),
+        ("https://example.org/%7euser/%2fx%3a", "https://example.org/~user/%2Fx%3A"),
+        ("https://example.org/a/./b/../c", "https://example.org/a/c"),
+        ("https://example.org/a/", "https://example.org/a/"),
+        ("https://example.org/p?b=2&a=1&a=&b=1", "https://example.org/p?a=&a=1&b=1&b=2"),
+        ("https://bücher.example/x", "https://xn--bcher-kva.example/x"),
+    ],
+)
+def test_reference_url_normalisation(raw: str, normal: str) -> None:
+    assert ids.normalise_reference_url(raw) == normal
