@@ -6,28 +6,28 @@
 | Owner | Agent 07 Voice Production; integration owner: Agent 01 (orchestrator) |
 | Package | `agent_07_voice_production` (27 §7.2); prompts: **none (no LLM step, §5)**; evals `evals/agent_07_voice_production/` (deterministic golden datasets, §26) |
 | Directive sections covered | §3.1 row 07 (TTS adapters, pronunciation dictionaries, audio mastering engine: loudness, clipping, silence, noise, sync), §1A.3 (voice), §1A.4 (audio delivery spec), §1A.6 and §1A.7 (the audio share of QC and score), §1B.2 (presenter: owner voice or neutral narration, no AI persona), §1C.8 (third-party use), §3.2a (provider-independent TTS adapter), §3.3 (contracts, failures, quality, observability, AI providers), §3.5 (code, test and eval standards), §4 (26 sections) |
-| Owner decisions applied | D1 (3A production line with Agents 04–11 and the Agent 16 gates; topic owner-given; outputs are files; no upload, no OAuth; paid calls only inside owner-set provider limits; per-video and pilot budgets enforced by the cost ledger, stop on breach; keys only through the environment's secret mechanism; render never in market hours), D2 (full blueprint for 3A agents; REQUIRES REVIEW does not block 3A unless it changes a 3A design decision), plan Q11 (narration choice: owner recording or neutral voice; owner decides after hearing samples) |
+| Owner decisions applied | D6 (no 3B scoring without a licensed music bed, so music mixing is 3B and gated), D1 (3A production line with Agents 04–11 and the Agent 16 gates; topic owner-given; outputs are files; no upload, no OAuth; paid calls only inside owner-set provider limits; per-video and pilot budgets enforced by the cost ledger, stop on breach; keys only through the environment's secret mechanism; render never in market hours), D2 (full blueprint for 3A agents; REQUIRES REVIEW does not block 3A unless it changes a 3A design decision), plan Q11 (narration choice: owner recording or neutral voice; owner decides after hearing samples) |
 | Binding contracts | GLOSSARY_AND_IDS.md (§2 IDs, §3 units, §6.6, §6.17–6.22, §6.27–6.28, §6.30–6.32, §6.44, §6.45, §6.52), 03_COMMUNICATION_STANDARD.md (§3–§9, §11), 04_DATABASE_ARCHITECTURE.md (§3, §5.7, §5.9, §5.10, §5.12, §5.14, §5.15), 07_FAILURE_MANAGEMENT.md (§2–§4, §8–§10), 24_PRODUCTION_TYPES.md §3.2 (`agent_07.voice_synthesis`, `agent_07.audio_master`), §5, §7.1 (`s07_voice`, `s07_master`), 27_ENGINEERING_STANDARDS.md (§3, §7, §8, §9) |
-| Shared docs referenced by name/§ only | 18_PRODUCTION_QUALITY_STANDARD.md (§4 voice, §5 audio, §7 QC commands, §9.2 AUDIO_QUALITY, §11 pilot, §13 config keys), 13_COMPLIANCE_YOUTUBE_POLICY.md (§3.2 YTG-R2, §3.3 disclosure), 09_COST_AND_BUDGET.md (§3, §8, §10.1), 08_SECURITY.md (§3 secrets, §8 tenant isolation), 3A_SLICE_SPEC.md (§2.4, §3, item 3A-07, O4, R4, R16), ADR-005 (storage), ADR-008 (TTS), ADR-009 (music: none in 3A), ADR-012 (render placement, market-hours guard), agent_05_scriptwriter.md (script document), agent_06_fact_checker.md (stage verdict) |
+| Shared docs referenced by name/§ only | 18_PRODUCTION_QUALITY_STANDARD.md (§4 voice, §5 audio, §7 QC commands, §9.2 AUDIO_QUALITY, §11 pilot, §13 config keys), 13_COMPLIANCE_YOUTUBE_POLICY.md (§3.2 YTG-R2, §3.3 disclosure), 09_COST_AND_BUDGET.md (§3, §8, §10.1), 08_SECURITY.md (§3 secrets, §8 tenant isolation), 3A_SLICE_SPEC.md (§2.4, §3, item 3A-07, O4, R4, R16), ADR-005 (storage), ADR-008 (TTS), ADR-009 (music: none in 3A technical runs; a licensed bed is a 3B precondition, D6), ADR-012 (render placement, market-hours guard), agent_05_scriptwriter.md (script document, §8.3), agent_06_fact_checker.md (stage verdict), CONTRACT_CHANGE_REQUESTS.md §4/§5 (CCR-001, 003, 007, 008, 018, 020, 021, 024, 026–028, 030, 035, 038, 050, 051, 055, 056) |
 | Facts cited | RESEARCH_LOG PR-04 (ElevenLabs plans, Marathi model list, API price, cloning consent), PR-05 (client use NOT CONFIRMED), PR-07 (Google TTS candidate, PARTIAL), INF-09 (FFmpeg `ebur128`, `silencedetect`), INF-10 (AAC-LC 48 kHz stereo 384 kbps), INF-03 / INF-04 (resource caps), INF-11 (RLS), YT-07 (cloning one's own voice needs no disclosure), YT-09 (no AI persona on finance) |
 | Marking | Every section states its **MVP** in the first line: 3A / 3B / 3C (owner build stages of D1) and Tier 0–3 (GLOSSARY §6.47) |
-| Conventions | `(pending CCR)` = a contract item that does not exist in Wave A and is listed in the structured return for the integrator; this blueprint is written against the proposed name. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. A figure called "design default" is an ESTIMATE of this document, not a fact. Config key names are proposals until the registry exists (18 §13). No book text, private method or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config. Agent-local check IDs use the prefix `a07.`; the `qc.*` IDs are those fixed by 18. |
+| Conventions | Contract items that were pending when this blueprint was first drafted are now decided and applied in the Wave A documents (register: CONTRACT_CHANGE_REQUESTS.md §4, §5 "Resolved for blueprint 07"); each is cited as `CCR-nnn` where used, and no pending marker remains. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. A figure called "design default" is an ESTIMATE of this document, not a fact. Config key names are proposals until the registry exists (18 §13). No book text, private method or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config. Agent-local check IDs use the prefix `a07.` (listed in §20 with their default `blocking`, CCR-020); the `qc.*` IDs are those fixed by 18. |
 
 ---
 
 ## 1 Identity and mission
-**MVP: 3A (both task types, all deterministic checks, owner-recording intake, one TTS provider) · 3B (thresholds and the dictionary tuned on the golden samples, owner listening check, voice sample) · 3C (music bed mix, second provider, dubbing track, client voices). Tier 0 designed for Tier 1+.**
+**MVP: 3A (both task types, all deterministic checks, owner-recording intake, one TTS provider) · 3B (thresholds and the dictionary tuned on the golden samples, owner listening check, voice sample, music bed mix once the owner has chosen a licensed source, D6/CCR-007) · 3C (second provider, dubbing track, client voices). Tier 0 designed for Tier 1+.**
 
 ### 1.1 Mission
 Agent 07 turns an approved script into the narration track of the video, and turns that narration into an audio master that meets the delivery spec. It does two jobs on one script version:
 
-1. **Voice synthesis** (`agent_07.voice_synthesis`, stage `s07_voice`): produce the narration stem, one clip per script sentence, in the one voice the owner chose — a neutral provider voice (`PROVIDER_STOCK`), a **consented** clone of the owner's own voice (`CONSENTED_CLONE`) or the owner's own recorded narration (`HUMAN_RECORDED`, intake instead of synthesis). Before any paid call it checks that the script is the verified one, that the voice is licensed and (for a clone) consented, applies the channel's **pronunciation dictionary**, passes the per-sentence pace and emotion tags to the provider where it supports them, and records cost per call. It emits the **narration timeline** (start and end of every sentence) that subtitle sync and duration checks use (18 §4).
-2. **Audio master** (`agent_07.audio_master`, stage `s07_master`, blocking gate): measure the narration (and, from 3C, the music bed) and master the programme audio to **−14 LUFS integrated, ≤ −1 dBTP true peak, 48 kHz**, with a verification encode in the delivery codec (AAC-LC stereo ≥ 384 kbps; INF-10) so that the loudness and peak survive the final encode. It checks clipping, silence, noise floor and that no sample shifted (sync). It is the remedy owner for loudness and true peak (18 §7.2): `agent_10.technical_qc` only measures the final MP4.
+1. **Voice synthesis** (`agent_07.voice_synthesis`, stage `s07_voice`): produce the narration stem, one clip per script sentence, in the one voice the owner chose — a neutral provider voice (`PROVIDER_STOCK`), a **consented** clone of the owner's own voice (`CONSENTED_CLONE`) or the owner's own recorded narration (`HUMAN_RECORDED`, intake instead of synthesis; in 3A it must come with per-sentence marks, CCR-051). Before any paid call it checks that the script is the verified one, that the voice is licensed and (for a clone) consented, applies the channel's **pronunciation dictionary**, passes the per-sentence pace and emotion tags to the provider where it supports them, and records cost per call. It emits the **narration timeline** (start and end of every sentence) that subtitle sync and duration checks use (18 §4).
+2. **Audio master** (`agent_07.audio_master`, stage `s07_master`, blocking gate): measure the narration (and, from 3B, the music bed) and master the programme audio to **−14 LUFS integrated, ≤ −1 dBTP true peak, 48 kHz**, with a verification encode in the delivery codec (AAC-LC stereo ≥ 384 kbps; INF-10) so that the loudness and peak survive the final encode. It checks clipping, silence, noise floor and that no sample shifted (sync). It reports its domain results as gate results (`gate: true`, `remedy_stage_id = s07_voice`, 03 §5.3 rule 4, CCR-001). It is the remedy owner for loudness and true peak (18 §7.2): `agent_10.technical_qc` only measures the final MP4.
 
 Agent 07 contains **no LLM**. Every decision is a deterministic function; the TTS model is an external service behind an adapter (§5, §6, §11).
 
 ### 1.2 Where it sits
-Stages `s07_voice` (depends on `s06_verify` and the optional `a_script` approval; class `AI_IO`) then `s07_master` (class `HEAVY_CPU`; blocking; `on_fail REVISE → s07_voice`) of every production type that has a spoken track (24 §7.1; 24 §7.2 Shorts reuses the stages on the child script). In 3A both run for `CHANNEL_LONG_FORM` (v2, pending CCR-3A-1) and for the Shorts child job where the owner asks for a 9:16 cut. In the 3A job flow (3A_SLICE_SPEC §3) `s07_master` feeds `s10_render`. Other production types: advertising and corporate types reuse the same two stages (3C); dubbing uses `svc_s03.dub_timing_fit` between them (3C). Downstream consumers: Agent 10 (render, subtitles, technical QC), Agent 09 (timeline durations), Agent 16 (`compliance_gate`, `quality_score` AUDIO_QUALITY), S4 (cost), the orchestrator (routing).
+Stages `s07_voice` (depends on `s06_verify` and the optional `a_script` approval; class `AI_IO`) then `s07_master` (class `HEAVY_CPU`; blocking gate; `on_fail REVISE → s07_voice`) of every production type that has a spoken track. In 3A both run in `CHANNEL_LONG_FORM` v2 (24 §7.1a) and in the `SHORTS` v2 child job (24 §7.2a), where the owner asks for a 9:16 cut (CCR-003). `s09_plan` depends on `s07_voice` (measured narration timeline), `s10_render` on `s07_master`; the gates `s10_qc` and `s16_score` list `s07_voice` as an alternative revision target (24 §7.1a), so a failing result of those gates may name `remedy_stage_id = s07_voice` and re-run both of this agent's stages as a new iteration (24 §3.3 rules 1, 5). In the 3A job flow (3A_SLICE_SPEC §3) `s07_master` feeds `s10_render`. Other production types: advertising and corporate types reuse the same two stages (3C); dubbing uses `svc_s03.dub_timing_fit` between them (3C). Downstream consumers: Agent 10 (render, subtitles, technical QC), Agent 09 (timeline durations), Agent 16 (`compliance_gate`, `quality_score` AUDIO_QUALITY), S4 (cost), the orchestrator (routing).
 
 ### 1.3 Authority boundaries
 | Agent 07 **decides** | Agent 07 **does not decide** (owner of the decision) |
@@ -46,7 +46,7 @@ It never creates tasks, never approves, never changes a budget or a voice record
 | SC-1 | No render with an unverified voice | 0 narration stems from a clone whose consent state is not `VERIFIED` (or is withdrawn or expired), from an expired or non-`ACTIVE` licence, or from an unverified script (mandatory test thresholds, §26) |
 | SC-2 | Audio meets the delivery spec after mastering | 100 % of mastered masters have post-codec true peak ≤ −1.0 dBTP (`qc.audio.true_peak`) and sample rate 48 000 Hz; integrated loudness within `qc.loudness.tolerance_lu` of −14.0 once the tolerance is set (**REQUIRES REVIEW (Phase 1): calibrate in 3B**) |
 | SC-3 | Every dictionary term of the script is rendered through its entry | 100 % (`qc.voice.dictionary_applied`, blocking) |
-| SC-4 | Every sentence has a timeline entry (TTS path) | 100 % (`a07.timeline.complete`, blocking); human-narration path: see §2.2 FR-12 |
+| SC-4 | Every sentence has an aligned timeline entry (TTS path and owner recording with marks; a recording without marks is refused, CCR-051) | 100 % (`a07.timeline.complete`, blocking) |
 | SC-5 | No paid call without an `ACTIVE` provider budget row, an idempotency key and a ledger row | 0 violations (`a07.cost.recorded`, blocking; failure-injection tests) |
 | SC-6 | Replays create no second paid call and no duplicate asset or licence row | 1 call per (task, segment, spoken-text hash, voice) |
 | SC-7 | No cross-tenant read or write; no script text, consent personal data or secret in any log | 0 occurrences in the tenancy and log-leak suites |
@@ -64,39 +64,39 @@ It never creates tasks, never approves, never changes a budget or a voice record
 |---|---|---|---|---|---|
 | `agent_07.voice_synthesis` | canonical (24 §3.2) | narration stem + timeline: TTS, or intake of the owner's recording | orchestrator creates it when `s07_voice` is ready (`s06_verify` `SUCCEEDED` with a passing verdict and, if enabled, `a_script` decided) | `AI_IO` / `ai` / `tts`, `media_probe` | 3A |
 | `agent_07.audio_master` | canonical (24 §3.2) | loudness, true peak, clipping, silence, noise and sync master of the programme audio; gate verdict | orchestrator creates it when `s07_voice` is `SUCCEEDED` | `HEAVY_CPU` / `render` / `render_ffmpeg`, `media_probe` | 3A |
-Agent 07 files no other task type. The 3B voice sample (§2.2 FR-17) is the same task type with `purpose = SAMPLE`; the optional stage and approval that carry it need a registry change (pending CCR, §15).
+Agent 07 files no other task type. The 3B voice sample (§2.2 FR-17) is the same task type with `purpose = SAMPLE`; it is **not** in the 3A graph: the optional `VOICE_SAMPLE` stage was rejected for 3A (CCR-050) and is refiled with 3B planning; until then the owner's choice is recorded by the operator as a standalone `VOICE_SAMPLE` approval.
 
 ### 2.2 Requirements
 | ID | Requirement | Why | When / trigger | Inputs | Outputs | Dependants | MVP |
 |---|---|---|---|---|---|---|---|
 | FR-1 | Validate the Task Input, tenant context and every reference before any work (03 §7) | rule 9; 07 `PERMANENT.*` | start of each task | Task Input | structured rejection or go | all | 3A |
-| FR-2 | Refuse to synthesise a script that is not the verified one: the script blob hash equals the hash the verification stage saw, and the stage verdict is `ALLOWED` (or `NEEDS_HUMAN_REVIEW` with the linked approval `APPROVED`) | no paid audio for an unchecked or blocked script; the recording or TTS output must match what Agent 06 and 16 judged | start of `s07_voice` | script ref + SHA-256, Agent 06 output ref, approval ref | go or `PERMANENT.INPUT_INVALID` | 06, 16 | 3A |
+| FR-2 | Refuse to synthesise a script that is not the verified one. The binding is by version: `payload.script_sha256` equals `scripts.content_sha256` of the write-once row `(script_id, script_version)` and the hash of the blob at `script_ref`; the Agent 06 `s06_verify` output (`agent_06.claim_verification.output`) names the same `script_id` and `script_version`, and its `overall.verification_verdict` is `ALLOWED` (or `NEEDS_HUMAN_REVIEW` with the linked approval `APPROVED` whose `subject_sha256` equals the script hash) | no paid audio for an unchecked or blocked script; the recording or TTS output must match what Agent 06 and 16 judged (Agent 06's output carries no script hash of its own; the immutable script version row is the binding) | start of `s07_voice` | script ref + SHA-256, Agent 06 output ref, approval ref | go or `PERMANENT.INPUT_INVALID` | 06, 16 | 3A |
 | FR-3 | Resolve the voice under RLS; check status `ACTIVE`, the language, the binding to the channel's current brand kit, and the adapter's declared language support before any paid call | §1A.3; 18 §4 (unsupported language fails before any paid call) | start | `voice_id`, channel | `ResolvedVoice` or `PERMANENT.UNSUPPORTED_TASK` / `MISSING_DEPENDENCY` | — | 3A |
 | FR-4 | Consent gate: a `CONSENTED_CLONE` voice is rendered only with a `voice_consents` row in state `VERIFIED`, not withdrawn, not expired, whose voice owner is an owner of this org (Tier 0 rule); anything else is `PERMANENT.PERMISSION_DENIED` (18 §4) | §1A.3 never clone anyone else; ADR-008 §2.5; PR-04 consent | before the first call, again before each resume | voice, consent row | go or deny | 16 | 3A |
-| FR-5 | Licence gate: the voice has an `ACTIVE` licence row; `covers_monetized_youtube` is true (NULL blocks); `third_party_permission` is `PERMITTED` when the licence is platform-held and the org is not the platform owner (`UNKNOWN` blocks, PR-05, §1C.8) | licence ledger completeness (18 §2.2); 04 §5.15 | before the first call | voice, licence, org | go or deny | 16, 10 | 3A |
+| FR-5 | Licence gate: the voice's licence (`voices.licence_id`, CCR-026) is `ACTIVE`; `covers_monetized_youtube` is true whenever `jobs.monetized_destination` is true (CCR-028; always in 3A; NULL blocks); `third_party_permission` is `PERMITTED` when the licence is platform-held and the org is not the platform owner (`UNKNOWN` blocks, PR-05, §1C.8) | licence ledger completeness (18 §2.2); 04 §5.15 | before the first call | voice, licence, org | go or deny | 16, 10 | 3A |
 | FR-6 | Load the channel's pronunciation dictionary (versioned, hash-verified, channel-permitted), substitute entries by deterministic longest-match rules, log every substitution, list tokens that are candidates but not in the dictionary (unknown terms) | §1A.3; 18 §4 `qc.voice.dictionary_applied` | before synthesis | dictionary ref, segments, candidates | spoken text per segment, substitution log, unknown terms | owner (dictionary upkeep), 16 | 3A |
 | FR-7 | Sanitise text for the provider: Unicode NFC, control characters removed, whitespace collapsed, markup-significant characters escaped so script text is never interpreted as provider markup | provider markup injection; deterministic text | before each call | segment text | spoken text | — | 3A |
 | FR-8 | Map each sentence's `pace` and `emotion` to the adapter's style controls through the adapter's declared capabilities; record requested versus applied style per sentence; never invent a control the adapter lacks | §1A.3 sentence-level control; ADR-008 (support not yet verified) | before each call | tags, `TtsCapabilities`, style map | `TtsStyle`, `style_applied` record | 16 (`qc.voice.variation`) | 3A |
 | FR-9 | Synthesise one clip per sentence through the `TtsAdapter` with an idempotency key (`tts.synthesize`), a breaker check, a budget guard before the call, a ledger row per call, bounded retries per 07, and a checkpoint every `agent_07.checkpoint_every_n` clips | 03 §9; 07 §3, §4, §10; 09 §3 | per sentence | `SegmentUnit` | clip blob, ledger row | S4 | 3A |
 | FR-10 | Validate each clip (decodable, non-empty, sample rate known, duration plausible), normalise to the working format (PCM mono, 48 000 Hz), trim leading and trailing silence to the configured keep length | a provider returning silence or garbage must not become a "success" | per clip | provider audio | clip facts | — | 3A |
-| FR-11 | Assemble the narration stem from the clips with the configured inter-sentence gap and the scene `deliberate_pause_ms`; emit the **narration timeline** (start, end, duration per sentence, in ms from stem start) | 18 §4 segment timeline; §7.6 subtitle sync; §7.7 duration | after all clips | clips, scene pauses | stem WAV, timeline JSON | 10, 09 | 3A |
-| FR-12 | **Owner-recording intake** (`HUMAN_RECORDED`): take the owner's audio asset instead of calling a provider; probe, convert to the working format, measure clipping, noise floor, silence spans and loudness; require the owner's attestation that the recording follows the verified script; timeline from the owner's segment marks if given, else `UNALIGNED` (sync then falls to the HUMAN check of 18 §7.6) | §1A.3 owner narration; ADR-008 option 1; Q11 | start, instead of FR-6…FR-10 | asset ref, marks, attestation | stem WAV, timeline, intake report | 10, 16 | 3A |
+| FR-11 | Assemble the narration stem from the clips with the configured inter-sentence gap and the scene `deliberate_pause_ms`; emit the **narration timeline** (start, end, duration per sentence, in ms from stem start) | 18 §4 segment timeline; §7.6 subtitle sync; §7.7 duration | after all clips | clips, scene pauses | stem WAV, timeline JSON | 09 (`s09_plan`), 10 | 3A |
+| FR-12 | **Owner-recording intake** (`HUMAN_RECORDED`): take the owner's audio asset instead of calling a provider; probe, convert to the working format, measure clipping, noise floor, silence spans and loudness; require the owner's attestation that the recording follows the verified script (recorded by the operator with confirmed owner evidence, CCR-010); build the timeline from the owner's per-sentence segment marks. In 3A a recording **without marks is refused** with `PERMANENT.INPUT_INVALID` (CCR-051): every narration reaches `s09_plan` and Agent 10 with an aligned per-sentence timeline, until a forced-alignment tool is chosen | §1A.3 owner narration; ADR-008 option 1; Q11; CCR-051 | start, instead of FR-6…FR-10 | asset ref, marks, attestation | stem WAV, timeline, intake report | 10, 16 | 3A |
 | FR-13 | Measure the raw narration (clipping count, peak, noise floor, integrated loudness, silence runs) and report it; the blocking decision belongs to the gate in `s07_master` (except intake clipping, FR-12) | 18 §4 `qc.voice.clipping`; keeps one gate | end of `s07_voice` | stem | `voice_measurements` | master | 3A |
 | FR-14 | Register the narration as an `assets` row (`AUDIO_VOICE`) and write the `licence_ledger` row (`usage_kind = VOICE`) for the job; both idempotent | 18 §4 Licence; 04 §5.15 | end of `s07_voice` | stem, licence | rows | 10, 16 | 3A |
-| FR-15 | Master the audio: solve the gain, apply gain and a true-peak limiter, re-measure, repeat within a hard pass cap; never change duration | §1A.4; 18 §5 | `s07_master` | stem (3C: music stem), timeline, targets from config | master WAV | 10 | 3A |
+| FR-15 | Master the audio: solve the gain, apply gain and a true-peak limiter, re-measure, repeat within a hard pass cap; never change duration | §1A.4; 18 §5 | `s07_master` | stem (3B: music stem), timeline, targets from config | master WAV | 10 | 3A |
 | FR-16 | Verification encode in the delivery codec profile (AAC-LC, 48 kHz, stereo, bitrate ≥ `qc.audio.min_bitrate_bps`), decode, measure true peak and loudness again; lower the limiter ceiling by a configured step and repeat if the post-codec peak exceeds the ceiling | INF-10; the final MP4 is re-measured by Agent 10, so the peak must survive the encode | `s07_master` | master | `codec_verification` | 10 | 3A |
-| FR-17 | **Voice sample** (`purpose = SAMPLE`): synthesise only the first `agent_07.sample.max_segments` sentences with a candidate voice for the owner's listening test; not licensed into a video, not mastered, not consumed by `s07_master` | Q11: owner decides after hearing samples | 3B pilot | script, candidate voice | sample clips (output refs) | owner | 3B |
-| FR-18 | Mix a music bed (3C): gain the licensed music stem so its level over narration-active spans is 15–20 dB below the narration, then master the sum; refuse a music stem without a licence-ledger row. **No music in 3A** (ADR-009) | §1A.4; 18 §7.4 | 3C | music stem ref | mixed master, offset measured | 10 | 3C |
-| FR-19 | Reuse an identical earlier clip inside the same tenant (same spoken-text hash, voice, model, style) without a paid call; the clip hash is verified | cost on revision loops and dictionary fixes | per sentence, 3B optimisation | clip cache | clip | S4 | 3B |
+| FR-17 | **Voice sample** (`purpose = SAMPLE`; not carried by the 3A graph, CCR-050): synthesise only the first `agent_07.sample.max_segments` sentences with a candidate voice for the owner's listening test; not licensed into a video, not mastered, not consumed by `s07_master` | Q11: owner decides after hearing samples | 3B pilot | script, candidate voice | sample clips (output refs) | owner | 3B |
+| FR-18 | Mix a music bed (**3B**, gated on the owner's licensed-source decision D6, CCR-007): gain the licensed music stem so its level over narration-active spans is 15–20 dB below the narration, produce the leveled music stem next to the narration stem, then master the sum; refuse a music stem without a licence-ledger row (`MUSIC_BED`). **No music in 3A technical runs** (ADR-009; `music_stem` null, `qc.audio.music_bed_offset` `SKIPPED`) | §1A.4; 18 §7.4; D6 | 3B, when the production-type version enabling the bed is in use | music stem ref (Agent 08 sourcing, Agent 09 cue plan) | mixed master, music stem, offset measured | 10 | 3B |
+| FR-19 | Reuse an identical earlier clip inside the same tenant (same spoken-text hash, voice, model, style) without a paid call; the clip hash is verified; the earlier clip is found through the `PRIOR_OUTPUT` context ref of the previous iteration (24 §3.3 rule 6, CCR-008) or the tenant clip cache | cost on revision loops and dictionary fixes | per sentence, 3B optimisation | clip cache | clip | S4 | 3B |
 | FR-20 | Honour `DRAIN` / pause controls at segment boundaries (voice) and at pass boundaries (master): checkpoint, release, resume later | 07 §8, §10 | on control | control message | `SUSPENDED` output | orchestrator | 3A |
 
 ### 2.3 Out of scope (explicit)
-- Creating, cloning or deleting a voice at the provider, and verifying consent (an operator action and a human act; the voice row arrives complete with `provider_voice_ref`, `consent_id` and the licence). Automation is a 3C change (CCR).
+- Creating, cloning or deleting a voice at the provider, and verifying consent (an operator action and a human act; the voice row arrives complete with `provider_voice_ref`, `consent_id` and the licence). Automation is a 3C change.
 - Editing the script, choosing pace or emotion, choosing words for the dictionary, translating, dubbing timing fit (`svc_s03.dub_timing_fit`, 3C).
 - The final MP4 encode, subtitles, technical QC of the MP4 (Agent 10), compliance and quality scoring (Agent 16).
 - Automatic speech recognition to prove the owner's recording equals the script (tool **REQUIRES REVIEW (Phase 1)**; the attestation of FR-12 is the 3A control).
 - Post-hoc time-stretching or pitch change to imitate a pace the provider cannot produce (not researched; quality risk).
-- Any music selection, sourcing or licence purchase (Agents 08/09; ADR-009).
+- Any music selection, sourcing, cue planning or licence purchase (Agents 08/09; ADR-009, CCR-007); Agent 07 only mixes a delivered, licensed stem (3B).
 
 ---
 
@@ -107,12 +107,12 @@ Agent 07 files no other task type. The 3B voice sample (§2.2 FR-17) is the same
 |---|---|---|---|---|
 | NFR-1 | Determinism | same input, same config, same adapter response ⇒ same timeline and same output payload except IDs and timestamps; the mastering step is a pure function of the stem and parameters on one pinned FFmpeg build | U-30, regression set | 3A |
 | NFR-2 | Idempotency | one paid call per (task, segment, spoken-text SHA-256, voice) (03 §9.2); DLQ replay creates no second call, row or asset | F-10, failure-injection | 3A |
-| NFR-3 | Cost safety | fail closed: no network call without an `ACTIVE` provider budget row (09 §8.2), without a reservation covering the worst case, or while the breaker is `OPEN` | FI-05…FI-07 | 3A |
+| NFR-3 | Cost safety | fail closed: no network call without an `ACTIVE` provider budget row (`budgets.scope_kind = PROVIDER`, CCR-035; 09 §8.2), without a reservation covering the worst case, or while the breaker is `OPEN` | FI-08…FI-10 | 3A |
 | NFR-4 | Tenant isolation | §19; every DB access in a tenant transaction; every URI org-checked; scratch space per task | tenancy and security suites | 3A |
 | NFR-5 | No secrets or content in logs | no script text, spoken text, consent person data, provider voice reference or key in any log, metric label, error, audit row or output (counts, IDs, hashes only; 27 §7.3.6) | log-leak test S-05 | 3A |
-| NFR-6 | Resumability | resume after a kill from the latest checkpoint without re-calling a completed segment; no half-written file at a final path (07 §8.1) | FI-12, FI-13 | 3A |
+| NFR-6 | Resumability | resume after a kill from the latest checkpoint without re-calling a completed segment; no half-written file at a final path (07 §8.1) | FI-11, FI-12 | 3A |
 | NFR-7 | Wall time | voice: sequential provider calls × latency + local processing; master: a few FFmpeg passes over the stem; budgets `resource_budget.max_wall_ms` set from measurement | **REQUIRES REVIEW (Phase 1): MEASURED in the 3A skeleton** | 3B |
-| NFR-8 | Resource caps | `s07_master` runs under the factory slice caps (INF-03, INF-04) and only outside market hours; `s07_voice` is light CPU | acceptance 27 §9 tests 4, 6 | 3A |
+| NFR-8 | Resource caps | `s07_master` (`HEAVY_CPU`) runs under the factory slice caps (INF-03, INF-04) and only outside market hours (ADR-012 §3.3); `s07_voice` is light CPU and its light FFmpeg conversions are not rendering (CCR-056) | acceptance 27 §9 tests 4, 6 | 3A |
 | NFR-9 | Format fidelity | internal working format PCM 48 000 Hz; masters are never resampled after mastering; duration preserved to the sample | `a07.master.duration_preserved` | 3A |
 | NFR-10 | Configurability | provider, model, voice reference, thresholds, gaps, steps and caps are config (rule 5); no literal in code | config lint | 3A |
 | NFR-11 | Language | Marathi (`mr`) is a hard requirement of the first channel; a language the adapter does not declare fails before any paid call | Q-01 | 3A |
@@ -151,9 +151,9 @@ flowchart TD
 flowchart TD
   IN["Task Input (03 §7 validated)"] --> M1["M1 TenantScope + load stem, timeline (SHA-256 verified), refuse SAMPLE stems"]
   M1 --> M2["M2 Pre-measure: ebur128 I, TP, LRA; clipping; silence runs; noise floor"]
-  M2 --> M3{"music stem present (3C)?"}
+  M2 --> M3{"music stem present (3B)?"}
   M3 -- "yes" --> M4["M4 Licence check, offset gain 15 to 20 dB under narration, mix"]
-  M3 -- "no (3A)" --> M5
+  M3 -- "no (3A technical runs)" --> M5
   M4 --> M5["M5 LoudnessSolver: gain, limiter ceiling"]
   M5 --> M6["M6 MasteringEngine: gain + true-peak limiter (pass k of max passes)"]
   M6 --> M7["M7 Re-measure; adjust within pass cap"]
@@ -176,10 +176,10 @@ flowchart TD
 | `HumanNarrationIntake` | owner recording path | storage, `AudioProbe` |
 | `AudioProbe` | FFmpeg/ffprobe runner and parsers (INF-09) | local binaries |
 | `StemAssembler`, `TimelineBuilder` | stem and timeline | storage |
-| `LoudnessSolver`, `MasteringEngine`, `CodecVerifier`, `MusicMixer` (3C) | mastering | `AudioProbe` |
+| `LoudnessSolver`, `MasteringEngine`, `CodecVerifier`, `MusicMixer` (3B) | mastering | `AudioProbe` |
 | `VoiceChecks`, `MasterChecks` | `validation_results` | — |
 | `NarrationRegistrar`, `CheckpointWriter`, `ErrorMapper` | persistence, resume, error mapping | DB, storage |
-Dependency rule (27 §7.1): the package imports `amw_core` and the `TtsAdapter` Protocol only; the concrete adapter is injected by the worker. No package imports another agent.
+Dependency rule (27 §7.1): the package imports `amw_core` and the narrowed stage-facing `TtsSynthesizer` Protocol (§9) only; the concrete adapter is injected by the worker. No package imports another agent.
 
 ### 4.4 Control flow guarantees
 1. The orchestrator creates both tasks; Agent 07 creates none.
@@ -213,7 +213,7 @@ Revisit trigger: the 3B listening test shows recurring pronunciation misses that
 ### 6.1 Deterministic versus model, and why
 | # | Decision | Kind | Rule | Why |
 |---|---|---|---|---|
-| 1 | Is the script the verified one | deterministic | `sha256(script blob) == verified hash` and stage verdict `ALLOWED`, or `NEEDS_HUMAN_REVIEW` with the linked approval `APPROVED` | paid audio must follow the checked words |
+| 1 | Is the script the verified one | deterministic | `sha256(script blob) == payload.script_sha256 == scripts.content_sha256` of the version row, Agent 06 output names the same script ID and version, and `overall.verification_verdict` is `ALLOWED`, or `NEEDS_HUMAN_REVIEW` with the linked approval `APPROVED` | paid audio must follow the checked words |
 | 2 | May this voice be rendered | deterministic | table in §6.2 | compliance and licence (§1A.3, §1C.8) |
 | 3 | Which text is sent | deterministic | §6.3 order | reproducible, auditable, no hidden rewrite |
 | 4 | Which sentences are synthesised | deterministic | all, in script order; reuse only an identical earlier clip (FR-19) | no arbitrary selection |
@@ -222,16 +222,16 @@ Revisit trigger: the 3B listening test shows recurring pronunciation misses that
 | 7 | Is a clip acceptable | deterministic | decodable ∧ non-empty ∧ duration inside the plausibility band (config) | a silent or garbage clip must not pass |
 | 8 | Segment times | deterministic | cumulative sum of trimmed clip durations, gaps, pauses | exact, no estimation |
 | 9 | Mastering gain and limiter | deterministic | §6.4 | pure function of measurements |
-| 10 | Gate verdict | deterministic | `PASSED` iff every blocking check of §20 passes | routing must be reproducible |
+| 10 | Gate verdict | deterministic | `FAILED` iff any gate result of §20 (`gate: true`, `blocking: true`) is `FAIL`, else `PASSED`; `gate_verdict` is the payload echo of that rule (03 §5.3 rule 4) | routing must be reproducible |
 | 11 | Voice sample choice, narration choice | **human** (owner) | outside the agent | Q11 |
 
 ### 6.2 Voice policy table (V3)
 | `voice_kind` | Required to pass | Failure code |
 |---|---|---|
-| `PROVIDER_STOCK` | voice `ACTIVE`; `provider` set; licence `ACTIVE`, `source_type = TTS_PROVIDER`; `covers_monetized_youtube = true` when the job's destination is monetised; if licence `org_id` is NULL and org is not the platform owner then `third_party_permission = PERMITTED` | `PERMANENT.PERMISSION_DENIED` (licence), `PERMANENT.MISSING_DEPENDENCY` (row absent) |
-| `CONSENTED_CLONE` | all of the above with `source_type = VOICE_CLONE`; `consent_id` set; consent `state = VERIFIED`; `withdrawn_at` null; `expires_at` null or later than now; `voice_owner_user_id` set and is an `ORG_OWNER` / `PLATFORM_OWNER` member of this org (Tier 0 rule; **REQUIRES REVIEW (Phase 1): Tier 1 rule for client voices, owner decision, blocked by PR-05 for ElevenLabs output**); channel in the consent's machine-readable scope (`permitted_channel_ids`, pending CCR; until applied the `scope_note` is a HUMAN check at consent verification) | `PERMANENT.PERMISSION_DENIED` |
-| `HUMAN_RECORDED` | `provider` null; licence `ACTIVE`, `source_type = HUMAN_NARRATION`; narration asset in this org, kind `AUDIO_VOICE`, status `ACTIVE`, `allowed_channel_ids` null or contains the channel; attestation true | `PERMANENT.PERMISSION_DENIED`, `PERMANENT.INPUT_INVALID` |
-A voice whose kind is `PROVIDER_STOCK` or `CONSENTED_CLONE` is never used on another provider; one video uses one voice (ADR-008 §2.9).
+| `PROVIDER_STOCK` | voice `ACTIVE`; `provider` set; `voices.licence_id` (CCR-026) resolves to a licence `ACTIVE`, `source_type = TTS_PROVIDER`; `covers_monetized_youtube = true` when `jobs.monetized_destination` is true (CCR-028; NULL blocks); if licence `org_id` is NULL and org is not the platform owner then `third_party_permission = PERMITTED` | `PERMANENT.PERMISSION_DENIED` (licence), `PERMANENT.MISSING_DEPENDENCY` (row absent) |
+| `CONSENTED_CLONE` | all of the above with `source_type = VOICE_CLONE`; `consent_id` set; consent `state = VERIFIED`; `withdrawn_at` null; `expires_at` null or later than now; `voice_owner_user_id` set and is an `ORG_OWNER` / `PLATFORM_OWNER` member of this org (Tier 0 rule; **REQUIRES REVIEW (Phase 1): Tier 1 rule for client voices, owner decision, blocked by PR-05 for ElevenLabs output**); channel in the consent's machine-readable scope (`voice_consents.permitted_channel_ids`, CCR-026; NULL = no channel permitted; the `scope_note` stays the human-readable counterpart checked at consent verification) | `PERMANENT.PERMISSION_DENIED` |
+| `HUMAN_RECORDED` | `provider` null; licence (`voices.licence_id`, the self-grant row) `ACTIVE`, `source_type = HUMAN_NARRATION`; narration asset in this org, kind `AUDIO_VOICE`, status `ACTIVE`, `allowed_channel_ids` null or contains the channel; attestation true; `segment_marks` present (CCR-051) | `PERMANENT.PERMISSION_DENIED`, `PERMANENT.INPUT_INVALID` |
+`presenter_kind` is read from `voices.presenter_kind` (CCR-027, provisional until the owner answers 3A R4) and echoed; Agent 07 never sets or changes it. A voice whose kind is `PROVIDER_STOCK` or `CONSENTED_CLONE` is never used on another provider; one video uses one voice (ADR-008 §2.9).
 
 ### 6.3 Request construction order (V5)
 1. Take the script sentence text exactly as stored.
@@ -247,7 +247,7 @@ Let `T` = `qc.loudness.target_lufs` (−14.0), `C` = limiter ceiling, `P` = `age
 2. `gain_db = T − I`. Predicted peak `TP + gain_db`. If it exceeds `C`, the limiter must act; report `limiter_gain_reduction_db` after the pass.
 3. Render pass k: linear gain, then a true-peak limiter at `C`. Re-measure. If `|I' − T| > qc.loudness.tolerance_lu` (when set) and k < P: `gain_db += (T − I')`, repeat.
 4. Verification encode in the delivery profile (§7 `codec_profile`), decode, measure `TP''` and `I''`. If `TP'' > qc.true_peak.max_dbtp`: `C -= agent_07.master.codec_headroom_step_db`, repeat from 3 (counts as a pass).
-5. After P passes without meeting all targets the result is `gate_verdict = FAILED` with reasons; the orchestrator routes REVISE to `s07_voice` (24 §3.3; cap `limits.max_revision_loops`).
+5. After P passes without meeting all targets the failing results carry `gate: true`, `blocking: true`, verdict `FAIL`, `remedy_stage_id = s07_voice`; the task is still `SUCCEEDED` (payload `gate_verdict = FAILED`) and the orchestrator routes REVISE to `s07_voice` (03 §5.3 rule 4; 24 §3.3; cap `limits.max_revision_loops`).
 No normalisation of a stem to a loudness it cannot hold without audible limiting: if `limiter_gain_reduction_db > agent_07.master.max_limiter_reduction_db` the check `a07.master.limiter_reduction` is `FAIL` (blocking once the value is set; **REQUIRES REVIEW (Phase 1): calibrate in 3B**). The filter implementations (a loudness normaliser, a true-peak limiter, an optional noise reducer) are PROPOSALS: **REQUIRES REVIEW (Phase 1): verify the exact filters and options against the official FFmpeg documentation and record them in RESEARCH_LOG; INF-09 verifies only `ebur128`, `silencedetect`, `blackdetect`, `freezedetect`**. The 18 §7.11 self-test is run on the pinned FFmpeg.
 
 ### 6.5 Config keys (proposals; no default is shipped where the value is not sourced)
@@ -271,10 +271,10 @@ No normalisation of a stem to a loudness it cannot hold without audible limiting
 ---
 
 ## 7 Input schema
-**MVP: 3A (3B adds `purpose = SAMPLE`; 3C adds `music_stem`) · Tier 0. Payload schemas are agent-owned (24 §3.2); the envelope, Task Input and `payload_object` are 03 §3.**
+**MVP: 3A (3B adds `purpose = SAMPLE` and `music_stem`) · Tier 0. Payload schemas are agent-owned (24 §3.2); the envelope, Task Input and `payload_object` are 03 §3.**
 
 ### 7.1 Task Input fields used
-`org_id`, `job_id`, `task_id`, `project_id`, `channel_id` (required for both tasks), `agent_id = agent_07`, `source_agent = agent_01`, `context_refs` (`PRIOR_OUTPUT`: script document, Agent 06 output; `ASSET`: dictionary, owner narration; `APPROVAL` when a `NEEDS_HUMAN_REVIEW` approval applies), `resource_budget` (`max_cost_micros` worst case from §17, `max_wall_ms`; `max_llm_calls = 0`), `payload` (below), `idempotency_key` (`task.agent_07.*`, 03 §9.2), `retry_count`.
+`org_id`, `job_id`, `task_id`, `project_id`, `channel_id` (required for both tasks), `agent_id = agent_07`, `source_agent = agent_01`, `context_refs` (`PRIOR_OUTPUT`: script document, Agent 06 `s06_verify` output, and, on a revision iteration, this agent's previous output set by the orchestrator, 24 §3.3 rule 6, CCR-008; `ASSET`: dictionary, owner narration; `APPROVAL` when a `NEEDS_HUMAN_REVIEW` approval applies), `resource_budget` (`max_cost_micros` worst case from §17, `max_wall_ms`; `max_llm_calls = 0`), `payload` (below), `idempotency_key` (`task.agent_07.*`, 03 §9.2), `retry_count`.
 
 ### 7.2 `agent_07.voice_synthesis.input` 1.0.0
 ```json
@@ -299,17 +299,16 @@ No normalisation of a stem to a loudness it cannot hold without audible limiting
     "voice_id": {"type": "string", "pattern": "^vce_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
     "dictionary_ref": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"},
     "dictionary_sha256": {"oneOf": [{"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}, {"type": "null"}]},
-    "destination_monetised": {"type": "boolean", "default": true},
     "human_narration": {
       "oneOf": [{"type": "null"}, {
         "type": "object", "additionalProperties": false,
-        "required": ["asset_ref", "asset_sha256", "attests_follows_verified_script"],
+        "required": ["asset_ref", "asset_sha256", "attests_follows_verified_script", "segment_marks"],
         "properties": {
           "asset_ref": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"},
           "asset_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"},
           "attests_follows_verified_script": {"type": "boolean"},
           "segment_marks": {
-            "type": ["array", "null"], "maxItems": 500,
+            "type": "array", "minItems": 1, "maxItems": 500,
             "items": {"type": "object", "additionalProperties": false,
                       "required": ["segment_id", "start_ms", "end_ms"],
                       "properties": {"segment_id": {"type": "string", "pattern": "^s[0-9]{1,4}$"},
@@ -320,7 +319,7 @@ No normalisation of a stem to a loudness it cannot hold without audible limiting
   }
 }
 ```
-Rules: `voice_id` kind decides the path (`HUMAN_RECORDED` ⇒ `human_narration` required; otherwise it must be null). `dictionary_sha256` null means "use the hash stored with the dictionary row" (the loader always verifies a hash). The script text, pace, emotion, scene pauses and pronunciation candidates are **read from the script document** (agent_05 §8.2: `segments[]`, `scenes[]`), never copied into the payload (no narration text in payloads or logs).
+Rules: `voice_id` kind decides the path (`HUMAN_RECORDED` ⇒ `human_narration` required, with `segment_marks` for every script segment: a recording without marks is `PERMANENT.INPUT_INVALID` in 3A, CCR-051; otherwise `human_narration` must be null). Whether the destination is monetised is not a payload field: licence checks read `jobs.monetized_destination` (CCR-028). `dictionary_sha256` null means "use the hash stored with the dictionary row" (the loader always verifies a hash). The script text, pace, emotion, scene pauses and pronunciation candidates are **read from the script document** (agent_05 §8.3 `agent_05.script_document`: `segments[]`, `scenes[]`), never copied into the payload (no narration text in payloads or logs).
 
 ### 7.3 `agent_07.audio_master.input` 1.0.0
 ```json
@@ -355,10 +354,10 @@ Rules: `voice_id` kind decides the path (`HUMAN_RECORDED` ⇒ `human_narration` 
   }
 }
 ```
-`music_stem` must be null in 3A (ADR-009: no music bed); a non-null value while `agent_07.music_enabled` is false is `PERMANENT.INPUT_INVALID`. Targets (−14 LUFS, −1 dBTP, 48 kHz, codec profile) come from config keys, not from the payload (a payload cannot loosen the spec).
+`music_stem` must be null in 3A technical runs (ADR-009, CCR-007); it is enabled in 3B by a production-type version after the owner's licensed-source decision (D6). A non-null value while `agent_07.music_enabled` is false is `PERMANENT.INPUT_INVALID`. Targets (−14 LUFS, −1 dBTP, 48 kHz, codec profile) come from config keys, not from the payload (a payload cannot loosen the spec).
 
 ### 7.4 Pronunciation dictionary document `agent_07.pronunciation_dictionary` 1.0.0 (agent-owned blob)
-Stored write-once as an `assets` row (`kind = DOCUMENT`, `source_type = OWNER_MADE`, `allowed_channel_ids` = the channel) and referenced by `voices.pronunciation_dict_ref`. A change is a **new version** (new blob, new asset row); nothing is edited in place.
+Registered under the agent-document naming rule `<agent_id>.<snake_case>` (GLOSSARY §2.4, CCR-018). Stored write-once as an `assets` row (`kind = DOCUMENT`, `source_type = OWNER_MADE`, `allowed_channel_ids` = the channel) and referenced by `voices.pronunciation_dict_ref`. A change is a **new version** (new blob, new asset row); nothing is edited in place.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -410,42 +409,42 @@ Stored write-once as an `assets` row (`kind = DOCUMENT`, `source_type = OWNER_MA
                "timeline", "dictionary", "voice_measurements", "cost", "provenance"],
   "properties": {
     "purpose": {"enum": ["PRODUCTION", "SAMPLE"]},
-    "script_id": {"type": "string"},
-    "script_version": {"type": "integer"},
-    "iteration": {"type": "integer"},
-    "language": {"type": "string"},
+    "script_id": {"type": "string", "pattern": "^scr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "script_version": {"type": "integer", "minimum": 1},
+    "iteration": {"type": "integer", "minimum": 0},
+    "language": {"type": "string", "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$"},
     "voice": {
       "type": "object", "additionalProperties": false,
       "required": ["voice_id", "voice_kind", "licence_id", "provider", "model_ref", "consent_id", "presenter_kind"],
       "properties": {
-        "voice_id": {"type": "string"},
+        "voice_id": {"type": "string", "pattern": "^vce_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
         "voice_kind": {"enum": ["PROVIDER_STOCK", "CONSENTED_CLONE", "HUMAN_RECORDED"]},
-        "licence_id": {"type": "string"},
-        "provider": {"type": ["string", "null"]},
-        "model_ref": {"type": ["string", "null"]},
-        "consent_id": {"type": ["string", "null"]},
-        "presenter_kind": {"enum": ["NEUTRAL_NARRATION", "OWNER_VOICE", "UNSET"], "description": "pending CCR (13 §3.2, 3A R4); echoed so Agent 16 can decide FIN-R11 / YTG-R2, never decided here"}
+        "licence_id": {"type": "string", "pattern": "^lic_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+        "provider": {"type": ["string", "null"], "maxLength": 64},
+        "model_ref": {"type": ["string", "null"], "maxLength": 128},
+        "consent_id": {"oneOf": [{"type": "string", "pattern": "^vcn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, {"type": "null"}]},
+        "presenter_kind": {"enum": ["NEUTRAL_NARRATION", "OWNER_VOICE", "SYNTHETIC_PERSONA"], "description": "copied from voices.presenter_kind (CCR-027, provisional until the owner answers 3A R4); echoed so Agent 16 can decide FIN-R11 / YTG-R2, never decided here"}
       }
     },
     "narration": {
       "type": "object", "additionalProperties": false,
       "required": ["stem_uri", "sha256", "duration_ms", "sample_rate_hz", "channels", "asset_id"],
       "properties": {
-        "stem_uri": {"type": ["string", "null"]},
-        "sha256": {"type": ["string", "null"]},
+        "stem_uri": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"},
+        "sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"},
         "duration_ms": {"type": "integer", "minimum": 0},
         "sample_rate_hz": {"const": 48000},
         "channels": {"const": 1},
-        "asset_id": {"type": ["string", "null"], "description": "null for SAMPLE"}
+        "asset_id": {"oneOf": [{"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, {"type": "null"}], "description": "null for SAMPLE"}
       }
     },
     "timeline": {
       "type": "object", "additionalProperties": false,
       "required": ["source", "timeline_uri", "timeline_sha256", "segments"],
       "properties": {
-        "source": {"enum": ["PROVIDER_CLIPS", "OWNER_MARKS", "UNALIGNED"]},
-        "timeline_uri": {"type": ["string", "null"]},
-        "timeline_sha256": {"type": ["string", "null"]},
+        "source": {"enum": ["PROVIDER_CLIPS", "OWNER_MARKS"], "description": "no UNALIGNED value in 3A: a recording without marks is refused (CCR-051)"},
+        "timeline_uri": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"},
+        "timeline_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"},
         "segments": {
           "type": "array", "maxItems": 500,
           "items": {
@@ -453,39 +452,39 @@ Stored write-once as an `assets` row (`kind = DOCUMENT`, `source_type = OWNER_MA
             "required": ["segment_id", "start_ms", "end_ms", "duration_ms", "pace_requested", "emotion_requested",
                          "pace_applied", "emotion_applied", "spoken_text_sha256", "reused_clip", "idempotency_key"],
             "properties": {
-              "segment_id": {"type": "string"},
-              "start_ms": {"type": ["integer", "null"]},
-              "end_ms": {"type": ["integer", "null"]},
-              "duration_ms": {"type": ["integer", "null"]},
+              "segment_id": {"type": "string", "pattern": "^s[0-9]{1,4}$"},
+              "start_ms": {"type": "integer", "minimum": 0},
+              "end_ms": {"type": "integer", "minimum": 1},
+              "duration_ms": {"type": "integer", "minimum": 1},
               "pace_requested": {"enum": ["SLOW", "NORMAL", "FAST"]},
               "emotion_requested": {"enum": ["NEUTRAL", "CURIOUS", "SERIOUS", "WARM", "ENERGETIC", "EMPHASIS"]},
               "pace_applied": {"enum": ["SLOW", "NORMAL", "FAST", "NONE"]},
               "emotion_applied": {"enum": ["NEUTRAL", "CURIOUS", "SERIOUS", "WARM", "ENERGETIC", "EMPHASIS", "NONE"]},
-              "spoken_text_sha256": {"type": ["string", "null"]},
+              "spoken_text_sha256": {"oneOf": [{"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}, {"type": "null"}], "description": "null on the owner-recording path (no text is sent)"},
               "reused_clip": {"type": "boolean"},
-              "idempotency_key": {"type": ["string", "null"]}
+              "idempotency_key": {"type": ["string", "null"], "maxLength": 256}
             }
           }
         },
         "pauses": {"type": "array", "items": {"type": "object", "additionalProperties": false,
                    "required": ["after_segment_id", "start_ms", "end_ms", "kind"],
-                   "properties": {"after_segment_id": {"type": "string"}, "start_ms": {"type": "integer"},
-                                  "end_ms": {"type": "integer"}, "kind": {"enum": ["GAP", "SCENE_PAUSE"]}}}}
+                   "properties": {"after_segment_id": {"type": "string", "pattern": "^s[0-9]{1,4}$"}, "start_ms": {"type": "integer", "minimum": 0},
+                                  "end_ms": {"type": "integer", "minimum": 1}, "kind": {"enum": ["GAP", "SCENE_PAUSE"]}}}}
       }
     },
     "dictionary": {
       "type": "object", "additionalProperties": false,
       "required": ["asset_id", "version", "dictionary_sha256", "hits_total", "hits", "unknown_terms"],
       "properties": {
-        "asset_id": {"type": "string"}, "version": {"type": "integer"}, "dictionary_sha256": {"type": "string"},
+        "asset_id": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}, "version": {"type": "integer", "minimum": 1}, "dictionary_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"},
         "hits_total": {"type": "integer", "minimum": 0},
         "hits": {"type": "array", "items": {"type": "object", "additionalProperties": false,
                  "required": ["entry_id", "segment_id", "count", "mode"],
-                 "properties": {"entry_id": {"type": "string"}, "segment_id": {"type": "string"},
+                 "properties": {"entry_id": {"type": "string", "pattern": "^d[0-9]{1,5}$"}, "segment_id": {"type": "string", "pattern": "^s[0-9]{1,4}$"},
                                 "count": {"type": "integer", "minimum": 1}, "mode": {"enum": ["SPOKEN_FORM", "PHONEME"]}}}},
         "unknown_terms": {"type": "array", "items": {"type": "object", "additionalProperties": false,
                  "required": ["term_sha256", "segment_ids", "source"],
-                 "properties": {"term_sha256": {"type": "string"}, "segment_ids": {"type": "array", "items": {"type": "string"}},
+                 "properties": {"term_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 over the org wire id, a 0x00 byte and the normalised term (org-bound; see §14)"}, "segment_ids": {"type": "array", "items": {"type": "string", "pattern": "^s[0-9]{1,4}$"}},
                                 "source": {"enum": ["SCRIPT_CANDIDATE", "NUMERAL", "MARKUP_CHARACTER"]}}}}
       }
     },
@@ -501,26 +500,40 @@ Stored write-once as an `assets` row (`kind = DOCUMENT`, `source_type = OWNER_MA
                          "required": ["start_ms", "end_ms"], "properties": {"start_ms": {"type": "integer"}, "end_ms": {"type": "integer"}}}}
       }
     },
-    "intake": {"type": ["object", "null"], "description": "HUMAN_RECORDED only: source format facts and attestation flag; no personal data"},
+    "intake": {
+      "oneOf": [{"type": "null"}, {
+        "type": "object", "additionalProperties": false,
+        "required": ["source_sha256", "source_sample_rate_hz", "source_channels", "source_duration_ms", "attestation_recorded", "marks_count"],
+        "properties": {"source_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}, "source_sample_rate_hz": {"type": "integer", "minimum": 8000},
+                       "source_channels": {"type": "integer", "minimum": 1, "maximum": 8}, "source_duration_ms": {"type": "integer", "minimum": 1},
+                       "attestation_recorded": {"const": true}, "marks_count": {"type": "integer", "minimum": 1}}}],
+      "description": "HUMAN_RECORDED only (null otherwise): source format facts, attestation flag and mark count; no personal data"
+    },
     "cost": {
       "type": "object", "additionalProperties": false,
       "required": ["calls", "reused_clips", "characters", "unit_kind", "figure_kind", "cost_entry_ids"],
       "properties": {
         "calls": {"type": "integer", "minimum": 0}, "reused_clips": {"type": "integer", "minimum": 0},
-        "characters": {"type": "integer", "minimum": 0}, "unit_kind": {"const": "characters"},
-        "figure_kind": {"const": "ESTIMATE"}, "cost_entry_ids": {"type": "array", "items": {"type": "string"}}
+        "characters": {"type": "integer", "minimum": 0}, "unit_kind": {"enum": ["characters", "audio_ms"], "description": "cost_unit_kind (GLOSSARY §6.52): characters unless the chosen provider bills by audio (ADR-008 §2.7); then `characters` holds the billed units"},
+        "figure_kind": {"const": "ESTIMATE"}, "cost_entry_ids": {"type": "array", "items": {"type": "string", "pattern": "^cst_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}}
       }
     },
     "provenance": {
       "type": "object", "additionalProperties": false,
       "required": ["adapter", "adapter_capabilities", "config_version", "script_sha256", "dictionary_sha256"],
-      "properties": {"adapter": {"type": "string"}, "adapter_capabilities": {"type": "object"},
-                     "config_version": {"type": "string"}, "script_sha256": {"type": "string"}, "dictionary_sha256": {"type": "string"}}
+      "properties": {"adapter": {"type": "string", "maxLength": 64},
+                     "adapter_capabilities": {"type": "object", "additionalProperties": false,
+                       "required": ["pace_control", "emotion_control", "phoneme_support", "languages", "max_chars_per_request"],
+                       "properties": {"pace_control": {"enum": ["NONE", "NATIVE"]}, "emotion_control": {"enum": ["NONE", "NATIVE"]},
+                                      "phoneme_support": {"type": "boolean"},
+                                      "languages": {"type": "array", "items": {"type": "string", "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$"}},
+                                      "max_chars_per_request": {"type": ["integer", "null"], "minimum": 1}}},
+                     "config_version": {"type": "string", "maxLength": 64}, "script_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}, "dictionary_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}}
     }
   }
 }
 ```
-There is no `refusal` property (no LLM). A refused or failed task returns `status = FAILED` / `REJECTED` with an `amw.error` and a null payload (03 §7.2). Narration and spoken text never appear in the payload; clips are referenced by `output_refs` (`kind = AUDIO`, SHA-256, size).
+`cst` is the GLOSSARY §2 prefix of cost-ledger entries. There is no `refusal` property (no LLM). A refused or failed task returns `status = FAILED` / `REJECTED` with an `amw.error` and a null payload (03 §7.2). Narration and spoken text never appear in the payload; clips are referenced by `output_refs` (`kind = AUDIO`, SHA-256, size).
 
 ### 8.2 `agent_07.audio_master.output` 1.0.0
 ```json
@@ -533,16 +546,17 @@ There is no `refusal` property (no LLM). A refused or failed task returns `statu
   "required": ["gate_verdict", "gate_reasons", "iteration", "master", "measurements", "mastering", "codec_verification",
                "codec_profile", "music", "provenance"],
   "properties": {
-    "gate_verdict": {"enum": ["PASSED", "FAILED"]},
-    "gate_reasons": {"type": "array", "items": {"type": "object", "additionalProperties": false,
-                     "required": ["check_id", "measured", "threshold"],
-                     "properties": {"check_id": {"type": "string"}, "measured": {"type": ["number", "string", "null"]},
-                                    "threshold": {"type": ["number", "string", "null"]}}}},
-    "iteration": {"type": "integer"},
+    "gate_verdict": {"enum": ["PASSED", "FAILED"], "description": "echo of the gate rule of 03 §5.3 rule 4: FAILED iff a validation result has gate true, blocking true and verdict FAIL (CCR-001)"},
+    "gate_reasons": {"type": "array", "description": "echo of the failing gate results, for reports; the orchestrator routes from validation_results, not from this array",
+                     "items": {"type": "object", "additionalProperties": false,
+                     "required": ["check_id", "measured", "threshold", "remedy_stage_id"],
+                     "properties": {"check_id": {"type": "string", "pattern": "^[a-z0-9_.-]{3,96}$"}, "measured": {"type": ["number", "string", "null"]},
+                                    "threshold": {"type": ["number", "string", "null"]}, "remedy_stage_id": {"const": "s07_voice"}}}},
+    "iteration": {"type": "integer", "minimum": 0},
     "master": {"type": "object", "additionalProperties": false,
                "required": ["master_uri", "sha256", "duration_ms", "sample_rate_hz", "channels"],
-               "properties": {"master_uri": {"type": ["string", "null"]}, "sha256": {"type": ["string", "null"]},
-                              "duration_ms": {"type": "integer"}, "sample_rate_hz": {"const": 48000}, "channels": {"const": 2}}},
+               "properties": {"master_uri": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"}, "sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"},
+                              "duration_ms": {"type": "integer", "minimum": 1}, "sample_rate_hz": {"const": 48000}, "channels": {"const": 2}}},
     "measurements": {
       "type": "object", "additionalProperties": false,
       "required": ["pre", "post", "clipping_samples", "silence_runs", "noise_floor_dbfs", "duration_delta_samples"],
@@ -566,9 +580,23 @@ There is no `refusal` property (no LLM). A refused or failed task returns `statu
                            "properties": {"codec": {"const": "aac"}, "profile": {"const": "LC"}, "sample_rate_hz": {"const": 48000},
                                           "channels": {"const": 2}, "bitrate_bps": {"type": "integer", "minimum": 384000},
                                           "post_codec": {"$ref": "#/$defs/loudness"}}},
-    "codec_profile": {"type": "object", "description": "the profile Agent 10 must use for the final encode (same parameters as the verification encode)"},
-    "music": {"type": ["object", "null"], "description": "3C: offset_db measured over narration-active spans, asset_ids, licence rows verified"},
-    "provenance": {"type": "object"}
+    "codec_profile": {"type": "object", "additionalProperties": false,
+                      "required": ["codec", "profile", "sample_rate_hz", "channels", "bitrate_bps", "encoder", "rate_mode"],
+                      "description": "the profile Agent 10 must use for the final encode (same parameters as the verification encode; CCR-055)",
+                      "properties": {"codec": {"const": "aac"}, "profile": {"const": "LC"}, "sample_rate_hz": {"const": 48000},
+                                     "channels": {"const": 2}, "bitrate_bps": {"type": "integer", "minimum": 384000},
+                                     "encoder": {"type": "string", "minLength": 1, "maxLength": 64, "description": "encoder name and version of the pinned build; REQUIRES REVIEW (Phase 1): choose and pin (F-23)"},
+                                     "rate_mode": {"type": "string", "minLength": 1, "maxLength": 16, "description": "rate mode of the pinned encoder; REQUIRES REVIEW (Phase 1)"}}},
+    "music": {"oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": false,
+                        "required": ["offset_db", "asset_ids", "stem_uri", "stem_sha256", "licence_rows_verified"],
+                        "properties": {"offset_db": {"type": "number"},
+                                       "asset_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}},
+                                       "stem_uri": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"}, "stem_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}, "licence_rows_verified": {"const": true}}}],
+              "description": "3B only (null in 3A technical runs, CCR-007): offset measured over narration-active spans, the leveled music stem and the verified licence rows"},
+    "provenance": {"type": "object", "additionalProperties": false,
+                   "required": ["ffmpeg_build", "config_version", "narration_sha256", "timeline_sha256"],
+                   "properties": {"ffmpeg_build": {"type": "string", "maxLength": 128}, "config_version": {"type": "string", "maxLength": 64},
+                                  "narration_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}, "timeline_sha256": {"$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"}}}
   },
   "$defs": {
     "loudness": {"type": "object", "additionalProperties": false, "required": ["integrated_lufs", "true_peak_dbtp", "lra_lu"],
@@ -576,12 +604,12 @@ There is no `refusal` property (no LLM). A refused or failed task returns `statu
   }
 }
 ```
-Both outputs: `output_refs` list every stem, clip, timeline, master and report with SHA-256 (03 §5.3.2c); `validation_results` use the check IDs of §20 and §26; `quality_score` is null (Agent 16 scores); `confidence` null; `next_action` `CONTINUE` (advisory).
+Both outputs: `output_refs` list every stem (narration; 3B: music), clip, timeline, master and report with SHA-256 (03 §5.3.2c); `validation_results` use the check IDs of §20 and §26; `quality_score` is null (Agent 16 scores); `confidence` null; `next_action` is `CONTINUE` (advisory). `s07_master` marks its domain-quality results `gate: true` and, when one fails, sets `remedy_stage_id = s07_voice` (03 §5.2); the task is then still `SUCCEEDED` with `next_action.reason = "gate FAILED: <check_ids>"` (03 §5.3 rule 4). Process-integrity results (tenant, schema, duration preserved, parser, caps) keep `gate: false`.
 
 ---
 
 ## 9 Python package and class architecture
-**MVP: 3A (3B: `ClipCache`; 3C: `MusicMixer`, second adapter) · Tier 0. Names follow 27 §7.2; no code exists in this phase.**
+**MVP: 3A (3B: `ClipCache`, `MusicMixer`; 3C: second adapter) · Tier 0. Names follow 27 §7.2; no code exists in this phase.**
 
 ```text
 agent_07_voice_production/            (code package; imports amw_core + TtsAdapter Protocol only)
@@ -599,19 +627,20 @@ agent_07_voice_production/            (code package; imports amw_core + TtsAdapt
 ├── intake.py              HumanNarrationIntake
 ├── probe.py               AudioProbe (FFmpeg/ffprobe runner + parsers for ebur128, silencedetect, clipping, noise floor)
 ├── assemble.py            StemAssembler, TimelineBuilder
-├── master.py              LoudnessSolver, MasteringEngine, CodecVerifier, MusicMixer (3C)
+├── master.py              LoudnessSolver, MasteringEngine, CodecVerifier, MusicMixer (3B)
 ├── checks.py              VoiceChecks, MasterChecks (build validation_results)
 ├── registry.py            NarrationRegistrar (assets row, licence_ledger row)
 ├── checkpoints.py         CheckpointWriter
 └── observability.py       metric and audit names (§22)
-amw_adapters/tts/          TtsAdapter Protocol, TtsCapabilities, TtsRequest, TtsResult, FakeTtsAdapter (+ recorded fixtures), concrete adapter(s)
+amw_adapters/tts/          TtsAdapter Protocol (+ stage-facing TtsSynthesizer view), TtsCapabilities, TtsRequest, TtsResult, FakeTtsAdapter (+ recorded fixtures), concrete adapter(s)
 ```
 | Class | Responsibility | Collaborators (constructor-injected) |
 |---|---|---|
 | `VoiceSynthesisStage` | implements the stage Protocol for `agent_07.voice_synthesis`; orchestrates V1–V10 | all of `voice_synthesis` path, `amw_core.{tenancy,storage,cost,audit,retries,observability}` |
 | `AudioMasterStage` | same for `agent_07.audio_master`; M1–M9 | `AudioProbe`, `LoudnessSolver`, `MasteringEngine`, `CodecVerifier`, `MasterChecks` |
 | `TenantScope` | org/channel/URI checks, tenant transaction helper | `amw_core.tenancy`, `amw_core.storage` |
-| `TtsAdapter` (Protocol) | `capabilities() -> TtsCapabilities`; `synthesize(request, idempotency_key) -> TtsResult`; `list_voices() -> list[ProviderVoice]` | concrete adapter chosen by the worker |
+| `TtsAdapter` (Protocol) | `capabilities() -> TtsCapabilities`; `synthesize(request, idempotency_key) -> TtsResult`; `list_voices() -> list[ProviderVoice]` (operation `tts.list_voices`, GLOSSARY §6.52) | concrete adapter chosen by the worker |
+| `TtsSynthesizer` (Protocol view) | `capabilities()` and `synthesize(...)` only; this is the only type the stages receive. `list_voices` is not on it: it is an operator tool of the platform owner and is never callable from a task (a provider account lists the voices of every tenant, §19.1 control 1) | the worker passes the adapter through this view |
 | `FakeTtsAdapter` | deterministic clip generator (duration = code points × configured ms per character, tone or silence PCM generated in code), fault injection (429, 5xx, timeout, garbage audio, silent clip, auth error, refusal) | tests, evals |
 Design rules: pure functions for every decision (27 §7.3.7); no module reads the environment (27 §7.3.1); no module opens a DB cursor outside `amw_core.tenancy`; every external effect through an adapter that takes an idempotency key; the FFmpeg runner takes an argument list, never a shell string (no injection); the binaries are the pinned build of 18 §7.0.2.
 
@@ -623,30 +652,30 @@ Design rules: pure functions for every decision (27 §7.3.7); no module reads th
 | ID | Function | Signature (types) | Side effects | Raises | Validation and logic | Tests |
 |---|---|---|---|---|---|---|
 | F-01 | `VoiceSynthesisStage.run` | `(task_input: TaskInput, ctx: ExecContext) -> TaskOutput` | blobs, ledger rows, assets/licence rows, checkpoints, audit, metrics | all of §18 | runs V1–V10; builds `validation_results`; `SUCCEEDED` only when every blocking check passes (03 §5.3) | U-01, IT-01 |
-| F-02 | `ScriptGate.check` | `(ctx, payload) -> ScriptContext` | read script blob + Agent 06 output blob | `InputInvalid`, `CrossTenantRef`, `MissingDependency`, `CorruptedOutput` | URI org = task org; `sha256(blob) == payload.script_sha256`; Agent 06 output `script_id` and `script_version` equal the payload's; stage verdict `ALLOWED`, or `NEEDS_HUMAN_REVIEW` with `verification_approval_id` found and `APPROVED` with `subject_sha256` equal to the script hash | U-02, U-03 |
+| F-02 | `ScriptGate.check` | `(ctx, payload) -> ScriptContext` | read script row, script blob + Agent 06 output blob | `InputInvalid`, `CrossTenantRef`, `MissingDependency`, `CorruptedOutput` | URI org = task org; `sha256(blob) == payload.script_sha256 == scripts.content_sha256` of the row `(script_id, script_version)`; Agent 06 output `script_id` and `script_version` equal the payload's; `overall.verification_verdict` is `ALLOWED`, or `NEEDS_HUMAN_REVIEW` with `verification_approval_id` found and `APPROVED` with `subject_sha256` equal to the script hash | U-02, U-03 |
 | F-03 | `VoiceResolver.resolve` | `(ctx, voice_id, channel_id, purpose) -> ResolvedVoice` | DB reads (`voices`, `channels`, `brand_kits`) | `MissingDependency`, `PermissionDenied`, `UnsupportedTask` | voice in org, `status = ACTIVE`; for `PRODUCTION` the channel's current brand kit `voice_id` equals it (voice sample: any `ACTIVE` voice of the org); `language` in `voices.languages` and in `adapter.capabilities().languages` | U-13, U-14 |
 | F-04 | `ConsentChecker.check` | `(ctx, voice, channel_id, now) -> ConsentResult` | DB read (`voice_consents`, `memberships`) | `PermissionDenied` | only for `CONSENTED_CLONE`; rules of §6.2; re-run on resume and before each checkpointed batch (withdrawal mid-task stops further calls) | U-15…U-18 |
-| F-05 | `LicenceChecker.check` | `(ctx, voice, destination_monetised, now) -> LicenceResult` | DB read (`licences`, `organisations`) | `PermissionDenied`, `MissingDependency` | rules of §6.2; `NULL` flags block; expiry window warning only | U-19, U-20 |
+| F-05 | `LicenceChecker.check` | `(ctx, voice, job, now) -> LicenceResult` | DB read (`licences` via `voices.licence_id`, `organisations`, `jobs.monetized_destination`) | `PermissionDenied`, `MissingDependency` | rules of §6.2; `NULL` flags block (`covers_monetized_youtube` is checked when `jobs.monetized_destination` is true, which is always the case in 3A); expiry window warning only | U-19, U-20 |
 | F-06 | `DictionaryLoader.load` | `(ctx, ref, sha256, channel_id, language) -> PronunciationDictionary` | storage read | `CrossTenantRef`, `CorruptedOutput`, `InputInvalid` | URI org; SHA-256; schema 7.4; `assets.allowed_channel_ids` contains the channel; language equals the script language; duplicate `entry_id` or duplicate matches with different replacements rejected | U-04, U-05 |
 | F-07 | `DictionaryApplier.apply` | `(text: str, d: PronunciationDictionary, caps: TtsCapabilities) -> AppliedText(text, hits)` | none | — | §6.3 step 3: longest match first, non-overlapping, left to right; `WORD` boundaries over letters, marks, digits, ZWJ/ZWNJ; `PHONEME` entries skipped when `caps.phoneme_support` is false (WARN); pure; idempotent on its own output only when replacements contain no match (checked at load: a replacement that matches any entry is rejected to prevent chained rewrites) | U-06…U-09 |
 | F-08 | `UnknownTermScanner.scan` | `(segments, candidates, d, allow_list) -> list[UnknownTerm]` | none | — | candidates from the script scenes and Latin/numeral tokens in the sentence that no entry matches and the allow-list does not cover; markup characters found before escaping are listed with source `MARKUP_CHARACTER`; terms reported by hash and segment IDs only | U-10 |
 | F-09 | `TextSanitiser.prepare` | `(text: str, caps) -> str` | none | `InputInvalid` | §6.3 steps 2, 4, 5 | U-11, U-12 |
-| F-10 | `SegmentSynthesizer.synthesize` | `(ctx, unit: SegmentUnit, voice, caps) -> ClipResult` | idempotency row, paid call, ledger row, clip blob | `RateLimited`, `Timeout`, `Upstream5xx`, `AuthInvalid`, `ProviderRefusal`, `BudgetExhausted`, `CircuitOpen`, `CorruptedOutput` | key `tts.synthesize` = (`task_id`, `segment_id`, `spoken_text_sha256`, `voice_id`) (03 §9.2); `COMPLETED` same hash ⇒ return stored clip, no call; different hash ⇒ `IdempotencyConflict`; breaker `OPEN` ⇒ `CircuitOpen` before any I/O; budget guard ⇒ `BudgetExhausted` before any I/O; after the call the ledger row (`operation = tts.synthesize`, `units` = characters, `unit_kind = characters`, `figure_kind = ESTIMATE`, `price_ref`) is written in the same transaction as `COMPLETED` | U-21…U-24, FI-01…FI-08 |
-| F-11 | `ClipValidator.validate` | `(audio: bytes, unit, cfg) -> ClipFacts` | none | `CorruptedOutput` | decodable; ≥ 1 sample; duration within `[min_ms_per_char, max_ms_per_char] × characters` (config); provider sample rate recorded; converted to PCM mono 48 000 Hz; trim to `trim.keep_ms` | U-25 |
+| F-10 | `SegmentSynthesizer.synthesize` | `(ctx, unit: SegmentUnit, voice, caps) -> ClipResult` | idempotency row, paid call, ledger row, clip blob | `RateLimited`, `Timeout`, `Upstream5xx`, `AuthInvalid`, `ProviderRefusal`, `BudgetExhausted`, `CircuitOpen`, `CorruptedOutput` | key `tts.synthesize` = (`task_id`, `segment_id`, `spoken_text_sha256`, `voice_id`) (03 §9.2); `COMPLETED` same hash ⇒ return stored clip, no call; different hash ⇒ `IdempotencyConflict`; breaker `OPEN` ⇒ `CircuitOpen` before any I/O; budget guard ⇒ `BudgetExhausted` before any I/O; after the call the ledger row (`operation = tts.synthesize`, `units` = characters, `unit_kind = characters` (or `audio_ms` if the provider bills by audio), `figure_kind = ESTIMATE`, `price_ref`) is written in the same transaction as `COMPLETED` | U-21…U-24, FI-01…FI-08 |
+| F-11 | `ClipValidator.validate` | `(audio: bytes, unit, cfg) -> ClipFacts` | none | `CorruptedOutput` (undecodable, empty or implausible provider media, CCR-021) | decodable; ≥ 1 sample; duration within `[min_ms_per_char, max_ms_per_char] × characters` (config); provider sample rate recorded; converted to PCM mono 48 000 Hz; trim to `trim.keep_ms` | U-25 |
 | F-12 | `ClipCache.lookup/store` (3B) | `(ctx, key) -> ClipRef or None` | cache read/write | `CrossTenantRef` | key `amw:<org wire id>:tts:<sha256(spoken_text_sha256, voice_id, model_ref, style)>` built by `amw_core.tenancy.cache_key()`; hit verified by clip SHA-256; hit whose stored org differs is rejected | U-26 |
-| F-13 | `HumanNarrationIntake.run` | `(ctx, human_narration, script_ctx, voice) -> IntakeResult` | storage read, converted stem write | `InputInvalid`, `CrossTenantRef`, `CorruptedOutput` | asset org, kind, status, SHA-256, channel permission; `attests_follows_verified_script` true; decodable, duration > 0; clipping samples = 0 (else `InputInvalid` with the time spans so the owner can re-record); resample to 48 kHz, down-mix to mono; marks (if given) strictly increasing, inside the duration, one per script segment, no gaps larger than config else `UNALIGNED` | U-27…U-29 |
+| F-13 | `HumanNarrationIntake.run` | `(ctx, human_narration, script_ctx, voice) -> IntakeResult` | storage read, converted stem write | `InputInvalid`, `CrossTenantRef`, `CorruptedOutput` | asset org, kind, status, SHA-256, channel permission; `attests_follows_verified_script` true; decodable, duration > 0; clipping samples = 0 (else `InputInvalid` with the time spans so the owner can re-record); resample to 48 kHz, down-mix to mono; marks required (else `InputInvalid`, CCR-051), strictly increasing, inside the duration, one per script segment, no gaps larger than config (else `InputInvalid` with the offending segment IDs); there is no `UNALIGNED` result in 3A | U-27…U-29 |
 | F-14 | `StemAssembler.assemble` | `(clips, gap_ms, scene_pauses) -> Stem` | stem blob write (temp file, atomic rename) | `ResourceDiskFull` | concatenation at sample precision; gap after every sentence except the last; scene pause after the scene's last sentence | U-30 |
 | F-15 | `TimelineBuilder.build` | `(stem, clips, pauses, source) -> NarrationTimeline` | timeline blob write | — | `start_ms` of sentence *n* = end of *n−1* + gap (+ pause); `end_ms − start_ms` = trimmed clip duration; monotonic; last `end_ms` ≤ stem duration; total equals the stem duration | U-31 |
-| F-16 | `AudioProbe.measure` | `(path, what: set[str]) -> AudioFacts` | runs FFmpeg/ffprobe with an argument list; stderr stored as evidence | `CorruptedOutput`, `RenderCrash` | `ebur128` with true-peak mode (18 §7.2): parses the `Summary:` block; `silencedetect` (18 §7.5 proposals); clipping = count of samples at full scale; noise floor = level in the `silencedetect` runs; non-zero exit, missing summary or unparsable output ⇒ error, never `PASS` | U-32…U-34 |
+| F-16 | `AudioProbe.measure` | `(path, what: set[str]) -> AudioFacts` | runs FFmpeg/ffprobe with an argument list; stderr stored as evidence | `AgentCrash` (missing summary or unparsable output, 18 §7.0.3), `RenderCrash` (abnormal exit) | `ebur128` with true-peak mode (18 §7.2): parses the `Summary:` block; `silencedetect` (18 §7.5 proposals); clipping = count of samples at full scale; noise floor = level in the `silencedetect` runs; non-zero exit ⇒ `RenderCrash`; missing summary or unparsable output ⇒ `AgentCrash` (`AGENT.CRASH`, 18 §7.0.3); either way never `PASS` | U-32…U-34 |
 | F-17 | `VoiceChecks.evaluate` | `(facts, plan, results) -> list[ValidationResult]` | none | — | §20 voice checks | U-35 |
-| F-18 | `NarrationRegistrar.register` | `(ctx, stem, voice, licence) -> Registration` | rows `assets` (`AUDIO_VOICE`, `source_type` from voice kind, `licence_id`), `licence_ledger` (`usage_kind = VOICE`) | `PermissionDenied`, `IdempotencyConflict` | lookup by `(org_id, content_sha256)` first (unique); a replay returns the existing row; the ledger insert guard trigger (04 §5.15) is the second line; not called for `SAMPLE` | U-36, FI-09 |
+| F-18 | `NarrationRegistrar.register` | `(ctx, stem, voice, licence) -> Registration` | rows `assets` (`AUDIO_VOICE`, `source_type` from voice kind, `licence_id`), `licence_ledger` (`usage_kind = VOICE`, `render_id` null, `task_id` = this task, `shot_id` null, `used_from_ms` null, `recorded_by = agent_07`) | `PermissionDenied`, `IdempotencyConflict` | lookup by `(org_id, content_sha256)` first (unique); a replay returns the existing row; the key `UNIQUE NULLS NOT DISTINCT (org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)` of 04 §5.15 (CCR-030) inside the `db.output` transaction is the second line, with the insert guard trigger; not called for `SAMPLE` | U-36, FI-09 |
 | F-19 | `CheckpointWriter.write` | `(ctx, step_key, state, completed_effects) -> CheckpointRef` | `checkpoints` row (`is_latest`), state blob | — | state holds IDs and hashes only (no text); `completed_effects` = idempotency keys of finished calls; resume skips them (07 §10) | U-37 |
 | F-20 | `AudioMasterStage.run` | `(task_input, ctx) -> TaskOutput` | master blob, report blob, metrics | §18 | M1–M9; `gate_verdict` from `MasterChecks`; hard cap `max_passes` | U-38, IT-02 |
 | F-21 | `LoudnessSolver.solve` | `(facts, target, ceiling, tolerance, pass_no) -> MasterPlan` | none | `InputInvalid` | §6.4 steps 1–3; pure | U-39 |
 | F-22 | `MasteringEngine.render` | `(plan, stem, music, out_path) -> MasterFile` | temp file → atomic rename | `RenderCrash`, `ResourceDiskFull` | gain + true-peak limiter (+ optional denoise when `denoise_mode = LIGHT`); output PCM stereo 48 kHz; sample count of output equals input | U-40 |
 | F-23 | `CodecVerifier.verify` | `(master, profile) -> CodecFacts` | temp encode and decode, deleted after | `RenderCrash` | AAC-LC, 48 kHz, 2 channels, bitrate ≥ `qc.audio.min_bitrate_bps`; encoder pinned in the render image (**REQUIRES REVIEW (Phase 1): choose and pin the AAC encoder; INF-10 gives the format only**); measures post-codec TP and I | U-41 |
-| F-24 | `MusicMixer.mix` (3C) | `(narration, music, spans, band) -> MixPlan` | none | `PermissionDenied`, `InputInvalid` | refuses a music asset without a licence-ledger row; offset measured on stems as 18 §7.4; gain so that `qc.music_bed.min_db ≤ offset ≤ qc.music_bed.max_db`; `SKIPPED` when no active span | U-42 |
-| F-25 | `MasterChecks.evaluate` | `(pre, post, codec, cfg) -> (list[ValidationResult], GateVerdict)` | none | — | §20 master checks; `PASSED` iff every blocking check passes | U-43 |
+| F-24 | `MusicMixer.mix` (3B) | `(narration, music, spans, band) -> MixPlan` | none | `PermissionDenied`, `InputInvalid` | refuses a music asset without a licence-ledger row; offset measured on stems as 18 §7.4; gain so that `qc.music_bed.min_db ≤ offset ≤ qc.music_bed.max_db`; `SKIPPED` when no active span | U-42 |
+| F-25 | `MasterChecks.evaluate` | `(pre, post, codec, cfg) -> (list[ValidationResult], GateVerdict)` | none | — | §20 master checks; each gate result carries `gate: true` and, on `FAIL`, `remedy_stage_id = s07_voice`; `gate_verdict = FAILED` iff any gate result is a blocking `FAIL`; process-integrity results keep `gate: false` | U-43 |
 | F-26 | `StyleMapper.map` | `(pace, emotion, caps, table) -> (TtsStyle, applied)` | none | `ConfigInvalid` | table lookup; missing capability ⇒ `applied = NONE`, never a guessed control | U-44 |
 | F-27 | `CostEstimator.estimate` | `(plan, price_ref) -> CostEstimate(micros, characters)` | none | `ConfigInvalid` | `characters` = Unicode code points of spoken text; micros = ceil(characters × price per 1 000 characters / 1 000) in integer arithmetic; price from the pricing config, never a literal; unit definition **REQUIRES REVIEW (Phase 1): how the provider counts characters** | U-45 |
 | F-28 | `ErrorMapper.map` | `(exc) -> amw.error` | none | — | one typed exception to one 07 §2 code; `retryable` filled by the policy engine (03 §6.2) | U-46 |
@@ -654,7 +683,7 @@ Design rules: pure functions for every decision (27 §7.3.7); no module reads th
 ---
 
 ## 11 AI provider use
-**MVP: 3A (one TTS provider + owner-recording intake) · 3B (listening test chooses the model; fallback verified) · 3C (second provider) · Tier 0; Tier 1 blocked for ElevenLabs output until PR-05 is confirmed in writing (ADR-008).**
+**MVP: 3A (one TTS provider + owner-recording intake) · 3B (listening test chooses the model; fallback verified) · 3C (second provider in production) · Tier 0; Tier 1 blocked for ElevenLabs output until PR-05 is confirmed in writing (ADR-008).**
 
 | Topic | Rule |
 |---|---|
@@ -664,7 +693,7 @@ Design rules: pure functions for every decision (27 §7.3.7); no module reads th
 | Owner recording | always available: `HUMAN_RECORDED`, no provider, no spend. |
 | Data sent | only the sanitised sentence text and the voice reference; never an `org_id`, script ID, channel name, consent data or secret. **REQUIRES REVIEW (Phase 1): provider retention and training terms for submitted text and for clone audio, before Tier 1.** |
 | Cost | integer micros per call; PR-04 price rows (v4 / v3 / Multilingual v2: $0.08 per 1K characters; v4 Turbo / v3 Conversational / Flash: $0.04) are config inputs through `price_ref`, never hard-coded; a 10-minute Marathi script ≈ 8–10K characters ≈ $0.64–0.80 per take is an **ESTIMATE** (PR-04) until the pilot measures characters per finished minute and the retake rate. Currency conversion source: **REQUIRES REVIEW (Phase 1): 09 FX source**. |
-| Spend control | `budgets` row `scope_kind = PROVIDER` for the TTS provider must be `ACTIVE` before any call (09 §8.1, pending CCR of 09); per-video and pilot budgets enforced by S4; a breach suspends with `AWAITING_BUDGET`; no top-up (rule 8). |
+| Spend control | `budgets` row `scope_kind = PROVIDER` (`scope_key` = the provider config key, CCR-035) for the TTS provider must be `ACTIVE` before any call (09 §8.1); per-video and pilot budgets enforced by S4; a breach suspends with `AWAITING_BUDGET`; no top-up (rule 8). |
 | Quality control of the service | the provider's output is never trusted: F-11 validates every clip; the owner's listening check (3B) is the quality authority; findings go to the dictionary. |
 | Style control | ADR-008 open item: whether the chosen model supports sentence-level emotion and pace is **not recorded** in PR-04. The adapter declares `TtsCapabilities(pace_control, emotion_control, phoneme_support, languages, max_chars_per_request)`; unsupported controls are recorded as `applied = NONE` and shown as WARN (`a07.style.applied_ratio`), not faked. |
 | Keys | only the AI worker process holds the TTS key, through the environment's secret mechanism (08 §3.1); the render worker holds none. |
@@ -697,10 +726,10 @@ Normalisation (adapter responsibility; codes from 07 §2):
 | response says credits or provider limit exhausted | `RESOURCE.BUDGET_EXHAUSTED` | SUSPEND `AWAITING_BUDGET`, L3 to the owner; no automatic top-up |
 | unknown voice or model reference | `PERMANENT.MISSING_DEPENDENCY` | FAIL |
 | other 4xx | `PERMANENT.INPUT_INVALID` | FAIL |
-Breaker key `(provider, operation_class = tts.synthesize, credential_scope)` (07 §4); counted failures are the codes marked "Breaker counts: yes".
+Breaker key `(provider, operation_class = tts.synthesize, credential_scope)` (07 §4); counted failures are the codes marked "Breaker counts: yes". In Tier 0 one platform key means one `credential_scope`, so repeated failures caused by one tenant's request open the breaker for every tenant of the platform (accepted, one tenant in 3A); Tier 1 needs a per-tenant or per-key scope (**REQUIRES REVIEW (Phase 1): provider key model**).
 
 ### 12.2 Local tools (not network APIs)
-FFmpeg and ffprobe, pinned build in the render image (18 §7.0.2): `ebur128` with true-peak mode and `silencedetect` (INF-09); AAC-LC 48 kHz stereo at ≥ 384 kbps is the delivery profile (INF-10). Other filters: §6.4 note.
+FFmpeg and ffprobe, pinned build in the render image (18 §7.0.2); the AI worker carries the same pinned binaries for the light conversions of `s07_voice` (probe, resample, down-mix, concatenate), which are not rendering (CCR-056): `ebur128` with true-peak mode and `silencedetect` (INF-09); AAC-LC 48 kHz stereo at ≥ 384 kbps is the delivery profile (INF-10). Other filters: §6.4 note.
 
 ### 12.3 Not used
 YouTube Data API (zero quota units), Google OAuth (D1), any web fetch.
@@ -733,16 +762,20 @@ Not touched: `renders` (Agent 10 writes `integrated_lufs` and `true_peak_dbtp` o
 | Row | Natural key | Idempotency | Notes |
 |---|---|---|---|
 | `assets` (narration stem) | `(org_id, content_sha256)` | existing row returned on replay | `kind = AUDIO_VOICE`, `visual_source_tier` null, `source_type` ∈ `TTS_PROVIDER` / `VOICE_CLONE` / `HUMAN_NARRATION`, `licence_id` set (CHECK needs it), `is_realistic_synthetic` true for synthetic voices (feeds YT-07 disclosure; a clone of the owner's own voice is `NOT_REQUIRED`, decided by Agent 16, 13 §3.3), `depicts_real_person` false |
-| `licence_ledger` | `(org_id, job_id, asset_id, usage_kind)` | insert guard + lookup first | `used_from_ms`/`used_to_ms` null (render positions are known only to Agent 10) |
+| `licence_ledger` | `(org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)` `UNIQUE NULLS NOT DISTINCT` (04 §5.15, CCR-030) | the key inside the task's `db.output` transaction, plus the insert guard trigger | `render_id` null (matched by `job_id`), `shot_id` and `used_from_ms`/`used_to_ms` null (render positions are known only to Agent 10), `recorded_by = agent_07` (NOT NULL), `client_permission_ref` null |
 | `cost_ledger` | key of scope `llm.call`-style per call, here the `tts.synthesize` key | `UNIQUE (org_id, idempotency_key, figure_kind, occurred_at)` | `operation = tts.synthesize`, `units`, `unit_kind = characters`, `price_ref`, `figure_kind = ESTIMATE` |
 | `checkpoints` | `(org_id, task_id, seq)` | — | IDs and hashes only |
 | `memory_items` | §14 | — | |
 
-### 13.2 Items that need a contract change (pending CCR; listed in the structured return)
-1. `voices.licence_id` (TFK → `licences`): today the voice-to-licence link is implicit; the blueprint reads it as `voices.licence_id (pending CCR)`.
-2. `voice_consents.permitted_channel_ids uuid[]`: machine-readable counterpart of `scope_note`, so the channel scope of a clone is enforceable (pending CCR).
-3. `voices.presenter_kind` or the equivalent job input of 3A_SLICE_SPEC R4 / 13 §3.2 (owned by 13's CCR); echoed in the output only.
-4. `budgets.scope_kind = PROVIDER` and `period = PILOT_TOTAL`: already pending from 09 §14; used as written there.
+### 13.2 Contract items (all decided and applied; none pending)
+| Item | Where | CCR |
+|---|---|---|
+| `voices.licence_id` (NOT NULL for `ACTIVE` voices), `voice_consents.permitted_channel_ids` | 04 §5.12 | CCR-026 |
+| `voices.presenter_kind` = `NEUTRAL_NARRATION` · `OWNER_VOICE` · `SYNTHETIC_PERSONA` (provisional, owner question Q-O1 / 3A R4); `UNSET` does not exist | GLOSSARY §6.44, 04 §5.12 | CCR-027 |
+| `jobs.monetized_destination` read by the licence checks | 04 §5.3, §5.15 | CCR-028 |
+| `licence_ledger` replay-safe key | 04 §5.15 | CCR-030 |
+| `budgets.scope_kind = PROVIDER`, `period = PILOT_TOTAL` | GLOSSARY §6.45, 04 §5.14 | CCR-035 |
+| Human records (consent verification, licence verification, attestation, listening scores, dictionary versions) are recorded by the operator against confirmed `owner_instruction_evidence` rows (`oie`) | 04 §5.16 | CCR-010 |
 
 ---
 
@@ -752,10 +785,10 @@ Not touched: `renders` (Agent 10 writes `integrated_lufs` and `true_peak_dbtp` o
 | Scope | Key | Content | Expiry | Read by |
 |---|---|---|---|---|
 | `WORKING` | `voice.scratch` | local paths of decoded clips, probe results of this attempt | attempt end | same attempt |
-| `TASK` | `voice.plan` | plan hash, per-segment `spoken_text_sha256`, dictionary hits, unknown-term hashes | job retention | `audio_master` of the same job; next iteration (reuse, FR-19) |
+| `TASK` | `voice.plan` | plan hash, per-segment `spoken_text_sha256`, dictionary hits, unknown-term hashes | job retention | later attempts of the same task only (04 §5.10 rule 1: `TASK` memory is same-task). Hand-offs to `audio_master` go by output refs (`narration_ref`, `timeline_ref` in its payload); the previous iteration reaches the next one as a `PRIOR_OUTPUT` context ref set by the orchestrator (24 §3.3 rule 6, CCR-008); clip reuse (FR-19) reads that ref, never `TASK` memory of another task |
 | `CHANNEL` | `voice.unknown_terms_backlog` | hashes and counts of terms seen unknown, with segment-independent first/last-seen job IDs; the owner resolves terms to dictionary entries (a human act) | `review_after` set (config) | the operator tool listing "what to add to the dictionary" (3B) |
-| `CHANNEL` | `voice.measured_chars_per_minute` | MEASURED characters per finished minute and retake rate per language, `figure_kind = MEASURED` after the pilot | `review_after` | `CostEstimator` (replaces the PR-04 ESTIMATE) |
-Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 rule 1); never another channel or project. A term hash is a SHA-256 of the normalised term; the term text is shown to the owner only by the operator tool reading the script under the owner's session, never from memory.
+| `CHANNEL` | `voice.measured_chars_per_minute` | MEASURED characters per finished minute and retake rate per language, `figure_label = MEASURED` after the pilot (GLOSSARY §6.46; cost figures stay `ESTIMATE`/`VERIFIED`, CCR-038) | `review_after` | `CostEstimator` (replaces the PR-04 ESTIMATE) |
+Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 rule 1); never another channel or project. A term hash is a SHA-256 over the org wire id, a 0x00 byte and the normalised term, so identical terms of two tenants never produce the same hash; the hashes appear only in the owning tenant's outputs and memory, so a dictionary attack on a short term needs access to that tenant's data and the residual risk is accepted. The term text is shown to the owner only by the operator tool reading the script under the owner's session, never from memory.
 
 ---
 
@@ -765,23 +798,23 @@ Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 
 ### 15.1 Upstream
 | From | Receives | Mapping and guard |
 |---|---|---|
-| Agent 05 (script document, agent_05 §8.2) | `segments[]` (`segment_id`, `text`, `pace`, `emotion`, `scene_id`), `scenes[]` (`deliberate_pause_ms`, `pronunciation_candidates`), language | one synthesis unit per segment; read by hash-verified URI, never copied into a payload |
-| Agent 06 (`agent_06.claim_verification.output`, `overall` block, agent_06 §8.2) | stage verdict, script ID and version | FR-2; `ALLOWED`, or `NEEDS_HUMAN_REVIEW` plus an `APPROVED` `SENSITIVE_CLAIM` approval |
+| Agent 05 (script document `agent_05.script_document`, agent_05 §8.3; the Shorts child script has `scenes[]` and no `sections[]`, 24 §7.2a) | `segments[]` (`segment_id`, `text`, `pace`, `emotion`, `scene_id`), `scenes[]` (`deliberate_pause_ms`, `pronunciation_candidates`), language | one synthesis unit per segment; read by hash-verified URI, never copied into a payload |
+| Agent 06 (`agent_06.claim_verification.output` of stage `s06_verify`, `overall.verification_verdict`, agent_06 §8.2) | stage verdict, script ID and version (the output has no script hash; the binding is `scripts.content_sha256`, FR-2) | FR-2; `ALLOWED`, or `NEEDS_HUMAN_REVIEW` plus an `APPROVED` `SENSITIVE_CLAIM` approval. The `s06_chart` result (CCR-004) is not an input of this agent |
 | Orchestrator | Task Input (§7), `resource_budget`, controls (`DRAIN`) | 03 §3, §4.3 |
 | Operator / owner | voice choice (3A_SLICE_SPEC O4: TTS voice, consented clone or own recording), owner recording asset, dictionary versions, licence rows, consent verification | human acts; Agent 07 only reads their records |
 | S4 | reservation at T03, provider budget row | 09 §3, §8 |
-| Agent 09 / 08 (3C) | music stem and its asset IDs | `music_stem` input; 3C only |
+| Agent 08 / 09 (3B) | licensed music stem and its asset IDs (Agent 08 sources, Agent 09 plans the cue and ducking range) | `music_stem` input; 3B only, after the owner's licensed-source decision (D6, CCR-007); null in 3A |
 
 ### 15.2 Downstream
 | To | What it receives | Mapping rule |
 |---|---|---|
 | Agent 10 `agent_10.render` | master WAV URI + SHA-256, `codec_profile`, narration timeline | the render muxes the master (not the raw stem) and encodes with the same codec parameters as the verification encode |
-| Agent 10 `agent_10.subtitles` | narration timeline (start, end per sentence) | cue sync reference (18 §7.6); `UNALIGNED` ⇒ sync is the HUMAN check |
+| Agent 10 `agent_10.subtitles` | narration timeline (start, end per sentence) | cue sync reference (18 §7.6); the timeline is always aligned in 3A (a recording without marks never leaves `s07_voice`, CCR-051); Agent 10 still refuses an `UNALIGNED` timeline |
 | Agent 10 `agent_10.technical_qc` | the pre/post measurements for cross-reference; the final MP4 is re-measured by Agent 10 | Agent 07 never writes `renders` |
-| Agent 09 `agent_09.shot_plan` | per-sentence durations (from the timeline) | planned shot lengths use measured narration, replacing the estimate of agent_05 `est_duration_ms` |
+| Agent 09 `agent_09.shot_plan` (stage `s09_plan` depends on `s07_voice`, 24 §7.1/§7.1a, CCR-003) | per-sentence durations (from the timeline) | planned shot lengths use measured narration, replacing the estimate of agent_05 `est_duration_ms`; no estimated-timing mode (CCR-051) |
 | Agent 16 | `voice` block (kind, licence ID, consent ID, `presenter_kind`), `validation_results`, licence-ledger and asset rows | FIN-R11 / YTG-R2 and the disclosure decision are Agent 16's; the AUDIO_QUALITY deterministic part (7 points) reads `qc.audio.*` |
 | S4 | `cost_ledger` rows | per-stage cost report (09 §12) |
-| Orchestrator | `gate_verdict` of `s07_master`; advisory `next_action` | `FAILED` ⇒ REVISE → `s07_voice` (24 §7.1), capped by `limits.max_revision_loops` |
+| Orchestrator | gate results of `s07_master` (`gate: true`, `remedy_stage_id = s07_voice`), payload echo `gate_verdict`; advisory `next_action` | gate failed ⇒ REVISE → `s07_voice` (24 §3.3, §7.1a), capped by `limits.max_revision_loops`. Agent 07 is also an alternative target of the gates `s10_qc` and `s16_score` (24 §7.1a): when their failing results name `remedy_stage_id = s07_voice`, `s07_voice` and `s07_master` re-run as a new iteration |
 | `svc_s03.dub_timing_fit` (3C) | timeline | dubbing production type |
 
 ---
@@ -791,14 +824,14 @@ Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 
 
 | Aspect | Rule |
 |---|---|
-| Task states used | `RUNNING` → `COMPLETED`; `CHECKPOINTED` with `wait_reason` `DRAIN` (control), `AWAITING_BUDGET` (`RESOURCE.BUDGET_EXHAUSTED`), `AWAITING_EXTERNAL` (retry-after beyond the cap); `RETRY_WAIT` for retryable codes; `FAILED` → `DEAD_LETTER` for permanent ones |
+| Task states used | `RUNNING` → `COMPLETED`; `CHECKPOINTED` (worker returns `SUSPENDED`, 03 T09) with `wait_reason` `DRAIN` (control), `AWAITING_BUDGET` (`RESOURCE.BUDGET_EXHAUSTED`), `RETRY_WAIT` with `next_attempt_at` for retryable codes, including a provider `retry_after` beyond the in-attempt cap (`AWAITING_EXTERNAL` means "external processing pending", GLOSSARY §6.3, and is not used); `FAILED` → `DEAD_LETTER` for permanent ones |
 | Checkpoint step keys | `voice.plan_done`, `voice.clips_<n>` (every `agent_07.checkpoint_every_n` clips), `voice.stem_done`, `voice.registered`; `master.pass_<k>` (after each pass), `master.codec_<k>` |
 | Checkpoint state | IDs, hashes, blob URIs of finished clips and passes; `completed_effects` = idempotency keys of finished provider calls |
 | Resume | a new attempt loads `resume_checkpoint_id`, re-verifies the clip hashes, re-runs the consent and licence checks (a withdrawal between attempts stops the render), skips `completed_effects`, continues at the next sentence or pass |
 | Atomic write unit | one clip, the stem, the master: temp file in the same storage area, flush, atomic rename to a write-once path (07 §8.1); a kill leaves no partial file at a final path |
 | `DRAIN` | voice: finish the in-flight call (its result is stored), checkpoint, return `SUSPENDED` with `WAIT / DRAIN`; master: stop at the pass boundary, checkpoint, `SUSPENDED`; the master task is not admitted after the drain flag or inside market hours |
 | Replays | DLQ replay re-runs the task with the same keys: provider calls skipped, rows found, outputs identical (NFR-2) |
-| Revision loops | each REVISE creates new tasks with new idempotency keys (24 §3.3): a new iteration re-synthesises, except reused clips (FR-19) |
+| Revision loops | each REVISE creates new tasks with new idempotency keys (24 §3.3; the key includes `stage_id` and iteration, CCR-005): a new iteration re-synthesises, except reused clips (FR-19) |
 | Partial output | never returned as success (03 §5.3); a partially synthesised script is a checkpoint, not an output |
 
 ---
@@ -819,7 +852,7 @@ Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 
 | Disk (arithmetic, not measured) | PCM 48 000 Hz, 24-bit mono ≈ 144 kB per second ≈ 86 MB per 10 minutes; stereo master twice that; clips are the same total again until the stem is built (the working format is a PROPOSAL; **REQUIRES REVIEW (Phase 1): confirm in 3B**) | ≈ 0.4 GB per 10-minute video before retention (clips, stem, master, verification encode) |
 | Network | outbound HTTPS to the TTS provider only (voice worker) | — |
 | Concurrency | provider calls 1 (`agent_07.tts.concurrency`) until limits are verified; one task per job at a time; master concurrency limited by the render class caps (05) | design |
-| Window | voice: any time (light CPU, `DRAIN` honoured); master: only outside market hours, in the development environment or the night window under ADR-012; never admitted after the drain flag | D1 |
+| Window | voice: any time in the development environment and, on the VPS, only in the night window (light media work inside `AI_IO` is not rendering, ADR-012 §3.3, CCR-056; `DRAIN` honoured); master (`HEAVY_CPU`): only outside market hours, in the development environment or the night window under ADR-012; never admitted after the drain flag | D1 |
 | Retention | intermediates (clips, verification encode) are config-retained; the narration stem and master are final media and never deleted by retention (04 §7) | **REQUIRES REVIEW (Phase 1): retention values** |
 
 ---
@@ -830,28 +863,29 @@ Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 
 | Situation | Code | Disposition |
 |---|---|---|
 | envelope or payload fails schema | `PERMANENT.SCHEMA_INVALID` / `SCHEMA_VERSION_UNSUPPORTED` | FAIL, L2 |
-| wrong ID prefix, unverified or mismatched script, blocked verdict, `human_narration` with a non-human voice, sentence longer than the provider limit, intake clipping, missing attestation, silent stem, SAMPLE stem sent to master | `PERMANENT.INPUT_INVALID` (with `details.violations[]`) | FAIL, L2 |
+| wrong ID prefix, unverified or mismatched script, blocked verdict, `human_narration` with a non-human voice, recording without segment marks (CCR-051), sentence longer than the provider limit, intake clipping, missing attestation, silent stem, SAMPLE stem sent to master | `PERMANENT.INPUT_INVALID` (with `details.violations[]`) | FAIL, L2 |
 | org IDs disagree | `PERMANENT.TENANT_MISMATCH` | FAIL, L3 security |
 | URI, voice, dictionary or asset of another tenant | `PERMANENT.CROSS_TENANT_REF` | FAIL + security event, L3 |
 | voice, licence, dictionary, consent or recording row absent | `PERMANENT.MISSING_DEPENDENCY` | FAIL, L2 |
 | consent not `VERIFIED` / withdrawn / expired / not the owner's voice; licence not `ACTIVE`, flag NULL, `UNKNOWN` third-party permission | `PERMANENT.PERMISSION_DENIED` (18 §4) | FAIL, L3 security |
-| language not declared by the adapter or voice | `PERMANENT.UNSUPPORTED_TASK` before any paid call | FAIL, L2 |
+| language not declared by the adapter or voice | `PERMANENT.UNSUPPORTED_TASK` (meaning widened to "a required capability value, e.g. a language, is not supported", CCR-021) before any paid call | FAIL, L2 |
 | required config key unset (gap, plausibility band, price ref, model ref) or secret unreadable | `PERMANENT.CONFIG_INVALID` | FAIL, L3 operations |
 | provider key rejected | `PERMANENT.AUTH_INVALID` | FAIL, L3 |
 | provider refused the content or the clone | `PERMANENT.PROVIDER_REFUSAL` | FAIL, L2→L3 if a compliance question |
 | same key, different request hash | `PERMANENT.IDEMPOTENCY_CONFLICT` | FAIL, L3 |
 | network, timeout, 5xx, 429 | `TEMPORARY.*` | RETRY (resume from checkpoint; completed calls skipped) |
-| breaker `OPEN` | `INFRASTRUCTURE.CIRCUIT_OPEN` | NO-ATTEMPT until `open_until` |
+| breaker `OPEN` | `INFRASTRUCTURE.CIRCUIT_OPEN` | NO-ATTEMPT until `open_until` (retryable, `RETRY_WAIT`, no attempt consumed, 07 §4, 03 T12) |
 | no `ACTIVE` provider budget row, estimate above the reservation, provider says credits exhausted | `RESOURCE.BUDGET_EXHAUSTED` | SUSPEND `AWAITING_BUDGET`; zero network calls when raised before the call |
 | FFmpeg exits abnormally | `RESOURCE.RENDER_CRASH` | RETRY from the last pass checkpoint |
+| FFmpeg ran but its output is unparsable or the summary is missing (18 §7.0.3) | `AGENT.CRASH` | RETRY |
 | out of memory, disk full | `RESOURCE.OOM` / `RESOURCE.DISK_FULL` | per 07 |
-| provider audio undecodable, empty, duration implausible; hash mismatch on a stored clip, stem or master | `AGENT.CORRUPTED_OUTPUT` | RETRY (the clip is re-requested under the same key once; then L2) |
-| success claimed but 03 §5.3 rule failed | `AGENT.INCOMPLETE_OUTPUT` | RETRY once |
+| provider audio undecodable, empty, duration implausible; hash mismatch on a stored clip, stem or master (meaning widened, CCR-021) | `AGENT.CORRUPTED_OUTPUT` | RETRY (the clip is re-requested under the same key once; then L2) |
+| success claimed but 03 §5.3 rule 2 failed (a non-gate blocking result is not `PASS`, an output ref is missing, or `gate: true` came from a non-gate stage) | `AGENT.INCOMPLETE_OUTPUT` | RETRY once |
 | unhandled exception, stale heartbeat | `AGENT.CRASH` / `AGENT.HANG` | RETRY |
 | any cap reached (`max_segments`, `max_passes`, attempts, revision loops) | `AGENT.LOOP_CAP_EXCEEDED` | FAIL, L3 |
 | the gate failed on every allowed iteration | `AGENT.QUALITY_REPEATED_FAILURE` (orchestrator, after `limits.max_revision_loops`) | FAIL, L3 quality; job outcome per 24 §3.3 |
 | host restart, worker lost, storage or DB outage | `INFRASTRUCTURE.*` | RETRY from checkpoint |
-A **failed gate** (`gate_verdict = FAILED`) is a successful task whose verdict routes REVISE (see §20 note and the pending CCR of §15 on 03 §5.3.2(b)). Safe defaults: when a measurement cannot be parsed, the check is never `PASS`; when consent or licence state is unknown, deny.
+A **failed gate** is not an error: `s07_master` returns `SUCCEEDED` with at least one result `gate: true`, `blocking: true`, `FAIL` (payload echo `gate_verdict = FAILED`) and the orchestrator takes the `on_fail` route to `s07_voice` (03 §5.3 rule 4, CCR-001; 24 §3.3), never a retry. Failures of process-integrity checks keep `gate: false` and are classified by 03 §5.3 rule 2. Safe defaults: when a measurement cannot be parsed, the check is never `PASS`; when consent or licence state is unknown, deny.
 
 ---
 
@@ -867,7 +901,7 @@ A **failed gate** (`gate_verdict = FAILED`) is a successful task whose verdict r
 | 4 Cache keys | the clip cache and any memo use `amw_core.tenancy.cache_key()` (`amw:<org wire id>:tts:<hash>`); a key without the org part is refused; a hit whose stored org differs is rejected; no cache is shared across tenants even when two tenants synthesise identical text | S-04 |
 | 5 Logs and metrics | every line and metric carries `org_id`; no script or spoken text, consent person data, `provider_voice_ref` or key is ever logged; unknown terms leave only as hashes; a canary-content test proves it | S-05 |
 Further controls specific to this agent:
-1. **A voice, a dictionary and a recording belong to one tenant.** The shared platform provider account holds voices of several tenants (including clones): isolation is by the `voices` row (RLS) and `provider_voice_ref` never leaves that row except into the one adapter call of the owning tenant's task; it is never returned in a payload, error or log.
+1. **A voice, a dictionary and a recording belong to one tenant.** The shared platform provider account holds voices of several tenants (including clones): isolation is by the `voices` row (RLS) and `provider_voice_ref` never leaves that row except into the one adapter call of the owning tenant's task; it is never returned in a payload, error or log. `TtsAdapter.list_voices()` (a whole-account read) is not on the `TtsSynthesizer` view that stages receive (§9); it is an operator tool of the platform owner, and a task has no code path to it (test S-09).
 2. **Consent is evaluated in code, not in a prompt.** There is no model whose output could widen a permission (08 §5.3).
 3. **Markup and path injection.** Script text is data: escaped for the provider (§6.3), never used in a path, shell string or SQL; FFmpeg gets argument lists; the owner recording is probed as an untrusted file (decoder errors become `INPUT_INVALID` / `CORRUPTED_OUTPUT`).
 4. **Secrets.** The TTS key is injected only into the AI worker through the environment's secret mechanism (08 §3.1.4); the render worker, which runs `s07_master`, holds no provider key; a missing secret fails startup with `PERMANENT.CONFIG_INVALID`; no value, length or prefix is printed.
@@ -893,14 +927,14 @@ Further controls specific to this agent:
 | script edited after verification | hash gate (FR-2) |
 | spend runaway | fail closed on budget row, reservation, breaker, cap on segments |
 | injected markup in the script | escaped, listed as an unknown term |
-| unlicensed music (3C) | refused (`a07.music.licensed`) |
+| unlicensed music (3B) | refused (`a07.music.licensed`) |
 
 ---
 
 ## 20 Quality criteria
-**MVP: 3A unless marked · 3B calibrates every "REQUIRES REVIEW: calibrate" value (18 §11) · Tier 0. Verdict mapping follows 18 §7.0.4: a sourced threshold is `PASS`/`FAIL` with `blocking: true`; an unsourced threshold records the measured value, `threshold` null, verdict `WARN`, until calibrated.**
+**MVP: 3A unless marked · 3B calibrates every "REQUIRES REVIEW: calibrate" value (18 §11) · Tier 0. Verdict mapping follows 18 §7.0.4: a sourced threshold is `PASS`/`FAIL` with `blocking: true`; an unsourced threshold records the measured value, `threshold` null, verdict `WARN` with `blocking: false` (03 §5.3 rule 5), until calibrated. Every `a07.*` check ID of this table is owned by this blueprint (CCR-020); "Blocking" is the default of the check.**
 
-**Gate reporting note.** Process-integrity checks (schema, tenant, consent, licence, dictionary, cost) must pass for a task to be `SUCCEEDED`. Domain-quality checks of `s07_master` are reported with `blocking: true` and their own verdict; the gate decision is the payload field `gate_verdict`, and a `FAILED` gate is a `SUCCEEDED` task that routes REVISE (24 §3.3), in the same way a `BLOCKED` compliance verdict is not a failure (03 §5.3.3). 03 §5.3.2(b) as written would classify such a task as `AGENT.INCOMPLETE_OUTPUT`; the clarification is a pending CCR (§15 return).
+**Gate reporting note (03 §5.3 rule 4, CCR-001).** `s07_voice` is not a gate stage: all its results have `gate: false`, and a failing blocking result fails the task by 03 §5.3 rule 2. `s07_master` is a registered blocking gate (24 §3.1): its domain-quality results carry `gate: true`, `blocking: true`, verdict `PASS`/`FAIL`, and every failing one names `remedy_stage_id = s07_voice`; the task is then `SUCCEEDED`, and the orchestrator takes `on_fail` (REVISE → `s07_voice`, 24 §3.3). Its process-integrity results (`a07.tenant.scope`, `a07.master.duration_preserved`, `a07.caps`, parser and persistence checks) keep `gate: false`: a FAIL there fails the task (rule 2). A measurement that cannot be made is never `PASS`: it is a process-integrity FAIL. The column "Gate" below marks the gate results.
 
 ### 20.1 §1A rules as measurable requirements
 | ID | §1A rule | Measurable requirement | check_id | Kind | Blocking | Step | MVP |
@@ -912,25 +946,25 @@ Further controls specific to this agent:
 | Q-05 | §1A.3 sentence-level control reaches the provider | share of sentences whose requested non-default style was applied (`applied ≠ NONE`) | `a07.style.applied_ratio` | DETERMINISTIC | WARN (ADR-008 open item) | voice | 3A |
 | Q-06 | §1A.3 consented clone only; never clone anyone else | clone rendered only with consent `VERIFIED`, not withdrawn/expired, owner's voice (Tier 0) | `qc.voice.consent_verified` | DETERMINISTIC | yes | voice | 3A |
 | Q-07 | §1A.3 owner's own recording option | intake passes decode, clipping = 0, attestation true; HUMAN attestation recorded | `a07.intake.attestation`, `a07.intake.clipping` | HUMAN, DETERMINISTIC | yes | voice | 3A |
-| Q-08 | §1A.3 human listening check on the pilot set | the owner's pronunciation, pace and tone score is recorded (3 of the 10 AUDIO_QUALITY points, 18 §9.2); row is `SKIPPED` until the owner scores | `qc.voice.listening` | HUMAN | no | final approval | 3B (mandatory), then sampled (rate **REQUIRES REVIEW (Phase 1)**) |
+| Q-08 | §1A.3 human listening check on the pilot set | the owner's pronunciation, pace and tone score is recorded (3 of the 10 AUDIO_QUALITY points, 18 §9.2); row is `SKIPPED` until the owner scores | `qc.voice.listening` (registered in 18 §4, CCR-020) | HUMAN | no; the human row is recorded with confirmed owner evidence (CCR-010) | final approval | 3B (mandatory), then sampled (rate **REQUIRES REVIEW (Phase 1)**) |
 | Q-09 | §1B.2 neutral narration or owner voice, no AI persona (FIN-R11, YT-09) | `voice_kind` and `presenter_kind` recorded in the output for Agent 16; Agent 07 does not decide | `a07.voice.kind_recorded` | DETERMINISTIC | yes | voice | 3A |
 | Q-10 | §1C.8 / 18 §4 licence | `ACTIVE` licence; `licence_ledger` row `VOICE` and `assets` row written, once | `a07.licence.active`, `a07.licence.recorded` | DETERMINISTIC | yes | voice | 3A |
-| Q-11 | §1A.4 integrated loudness −14 LUFS | `|I_post − (−14.0)| ≤ qc.loudness.tolerance_lu`; measured on the master and on the post-codec decode | `qc.audio.integrated_lufs` | DETERMINISTIC | WARN until the tolerance is set (**REQUIRES REVIEW (Phase 1): calibrate in 3B**; display proposal 1.0 LU, 18 §5) | master | 3A |
-| Q-12 | §1A.4 true peak −1 dBTP | `TP_post_codec ≤ −1.0` dBTP | `qc.audio.true_peak` | DETERMINISTIC | yes | master | 3A |
-| Q-13 | §1A.4 sample rate 48 kHz | master and verification encode `sample_rate = 48000` | `qc.audio.sample_rate` | DETERMINISTIC | yes | master | 3A |
-| Q-14 | §1A.4 AAC-LC ≥ 384 kbps stereo | verification encode `codec = aac`, `profile = LC`, `channels = 2`, `bit_rate ≥ 384000` | `qc.audio.codec`, `qc.audio.channels`, `qc.audio.bitrate` | DETERMINISTIC | yes | master | 3A |
-| Q-15 | §1A.4 music bed 15–20 dB under narration | `−20.0 ≤ offset ≤ −15.0` dB over narration-active spans (18 §7.4); `SKIPPED` without a music stem | `qc.audio.music_bed_offset` | DETERMINISTIC | yes | master | 3C (none in 3A, ADR-009) |
-| Q-16 | §1A.4 licensed music and SFX only | each music asset has a licence-ledger row | `a07.music.licensed` | DETERMINISTIC | yes | master | 3C |
-| Q-17 | §1A.6 / 18 §4 clipping | 0 samples at full scale in the stem and the master | `qc.voice.clipping`, `qc.audio.clipping` | DETERMINISTIC | yes | master (measured in voice) | 3A |
-| Q-18 | §1A.2 / 18 `edit.dead_air` | no silence run ≥ `qc.silence.max_ms` outside `deliberate_pause` spans | `a07.silence.max_run` | DETERMINISTIC | WARN until calibrated | master | 3A |
+| Q-11 | §1A.4 integrated loudness −14 LUFS | `|I_post − (−14.0)| ≤ qc.loudness.tolerance_lu`; measured on the master and on the post-codec decode | `qc.audio.integrated_lufs` | DETERMINISTIC | gate; WARN until the tolerance is set (**REQUIRES REVIEW (Phase 1): calibrate in 3B**; display proposal 1.0 LU, 18 §5) | master | 3A |
+| Q-12 | §1A.4 true peak −1 dBTP | `TP_post_codec ≤ −1.0` dBTP | `qc.audio.true_peak` | DETERMINISTIC | yes, gate | master | 3A |
+| Q-13 | §1A.4 sample rate 48 kHz | master and verification encode `sample_rate = 48000` | `qc.audio.sample_rate` | DETERMINISTIC | yes, gate | master | 3A |
+| Q-14 | §1A.4 AAC-LC ≥ 384 kbps stereo | verification encode `codec = aac`, `profile = LC`, `channels = 2`, `bit_rate ≥ 384000` | `qc.audio.codec`, `qc.audio.channels`, `qc.audio.bitrate` | DETERMINISTIC | yes, gate | master | 3A |
+| Q-15 | §1A.4 music bed 15–20 dB under narration (3B, D6) | `−20.0 ≤ offset ≤ −15.0` dB over narration-active spans (18 §7.4); `SKIPPED` without a music stem | `qc.audio.music_bed_offset` | DETERMINISTIC | yes, gate | master | 3B (`SKIPPED`, `blocking: false` in 3A technical runs, CCR-007) |
+| Q-16 | §1A.4 licensed music and SFX only | each music asset has a licence-ledger row | `a07.music.licensed` | DETERMINISTIC | yes (process-integrity: a missing licence row fails the task) | master | 3B |
+| Q-17 | §1A.6 / 18 §4 clipping | 0 samples at full scale in the stem and the master | `qc.voice.clipping`, `qc.audio.clipping` | DETERMINISTIC | yes, gate (the voice step only reports the measurement, `blocking: false`; the master decides) | master (measured in voice) | 3A |
+| Q-18 | §1A.2 / 18 `edit.dead_air` | no silence run ≥ `qc.silence.max_ms` outside `deliberate_pause` spans | `a07.silence.max_run` | DETERMINISTIC | gate; WARN until calibrated | master | 3A |
 | Q-19 | 18 §4 raw-voice noise | noise floor measured and recorded; limit `agent_07.noise_floor.max_dbfs` | `a07.noise.floor` | DETERMINISTIC | WARN until calibrated | voice, master | 3A |
-| Q-20 | 18 §4 segment timeline for 100 % of sentences | timeline entry for every segment; monotonic; total = stem duration; `UNALIGNED` only for owner recordings without marks (reported) | `a07.timeline.complete` | DETERMINISTIC | yes (TTS path) | voice | 3A |
-| Q-21 | §1A.6 A/V sync | master duration = stem duration to the sample; no resampling after mastering | `a07.master.duration_preserved` | DETERMINISTIC | yes | master | 3A |
+| Q-20 | 18 §4 segment timeline for 100 % of sentences | timeline entry for every segment; monotonic; total = stem duration; an owner recording without marks never gets here (`INPUT_INVALID`, CCR-051) | `a07.timeline.complete` | DETERMINISTIC | yes | voice | 3A |
+| Q-21 | §1A.6 A/V sync | master duration = stem duration to the sample; no resampling after mastering | `a07.master.duration_preserved` | DETERMINISTIC | yes (process-integrity, not a gate result) | master | 3A |
 | Q-22 | §1A.7 AUDIO_QUALITY (10 points: 7 deterministic, 3 human; 18 §9.2) | Agent 07 supplies LUFS, true peak, music offset, codec/rate/bitrate, clipping, dead air to the deterministic 7 points; the 3 human points are Q-08 | (Q-11…Q-19) | — | — | master | 3A |
 | Q-23 | rule 8 / D1 cost | every paid call has a ledger row; Σ ledger ≤ reservation | `a07.cost.recorded` | DETERMINISTIC | yes | voice | 3A |
 | Q-24 | rule 9 tenant isolation | all refs and rows in the task's org | `a07.tenant.scope` | DETERMINISTIC | yes | both | 3A |
-| Q-25 | master loudness without audible damage | `limiter_gain_reduction_db ≤ agent_07.master.max_limiter_reduction_db` | `a07.master.limiter_reduction` | DETERMINISTIC | WARN until calibrated | master | 3B |
-| Q-26 | rule 5 loops | passes ≤ `max_passes`, sentences ≤ `max_segments` | `a07.caps` | DETERMINISTIC | yes | both | 3A |
+| Q-25 | master loudness without audible damage | `limiter_gain_reduction_db ≤ agent_07.master.max_limiter_reduction_db` | `a07.master.limiter_reduction` | DETERMINISTIC | gate; WARN until calibrated | master | 3B |
+| Q-26 | rule 5 loops | passes ≤ `max_passes`, sentences ≤ `max_segments` | `a07.caps` | DETERMINISTIC | yes (process-integrity; a reached cap is `AGENT.LOOP_CAP_EXCEEDED`, a master that exhausts its passes without meeting a target reports the gate results `FAIL`) | both | 3A |
 
 ### 20.2 What Agent 07 deliberately does not score
 Subjective voice quality (the owner's listening check), prosody naturalness and whether a voice "sounds like" a persona (Agent 16 for FIN-R11) are not scored by code. There is no LLM judge.
@@ -946,19 +980,19 @@ Subjective voice quality (the owner's listening check), prosody naturalness and 
 | | U-13…U-20 | voice resolver (inactive, wrong language, brand-kit mismatch, sample exception); consent matrix (`PENDING_VERIFICATION`, `VERIFIED`, `WITHDRAWN`, `EXPIRED`, `REJECTED`, not the owner's voice, out-of-scope channel); licence matrix (state, NULL flags, `UNKNOWN` permission, platform-held licence for a non-owner org) |
 | | U-21…U-29 | idempotency matrix of `tts.synthesize`; budget and breaker guards before any I/O; ledger row shape; clip validation (garbage, silent, implausible duration); cache key and tenant rejection; intake (clipping, attestation, marks, resample) |
 | | U-30…U-37 | stem assembly and timeline arithmetic (gap, scene pause, sum equals duration); probe parsers fed with recorded FFmpeg stderr; clipping count; checks; registrar replay; checkpoint contents without text |
-| | U-38…U-46 | solver passes and cap; limiter reduction; codec verification and ceiling step-down; music offset band (3C); gate verdict truth table; style mapper; cost estimator integer arithmetic; error mapper 1:1 |
+| | U-38…U-46 | solver passes and cap; limiter reduction; codec verification and ceiling step-down; music offset band (3B); gate truth table (`gate: true` results, `remedy_stage_id`, rule 4 versus rule 2 classification, `gate: true` from the voice step is `INCOMPLETE_OUTPUT`); style mapper; cost estimator integer arithmetic; error mapper 1:1 |
 | Integration | IT-01 | `s07_voice` end to end with the fake adapter on a Postgres with RLS: rows, blobs, ledger, checkpoints, output validates |
 | | IT-02 | `s07_master` on a synthetic stem with real FFmpeg (pinned build): measured values equal the expectations; the 18 §7.11 self-test passes on the same build |
 | | IT-03 | `s07_voice` → `s07_master` → Agent 10 render stub: the render receives master and profile; timeline hash chain verified |
-| | IT-04 | owner-recording path end to end |
+| | IT-04 | owner-recording path end to end (with marks; a recording without marks is refused) |
 | | IT-05 | admission: the queue returns no `agent_07.audio_master` row inside market hours or after the drain flag; `s07_voice` is still admitted |
 | Contract | C-01…C-06 | every output validates against §8 schemas; every example of §7 validates; envelope and Task Output (03); `TtsAdapter` Protocol contract test run against the fake and, when it exists, each concrete adapter's recorded fixtures; dictionary schema |
 | Regression (golden) | G-01 | the deterministic datasets of §26 (≥ 20 cases per task type), re-run on any change of code, config key or dictionary schema; thresholds §26.4 |
-| Failure injection (07 §12) | FI-01…FI-14 | 429, 5xx, timeout, auth error, provider refusal, garbage audio, silent clip, breaker open, provider budget row missing, estimate over reservation, kill mid-segment (resume, one call per segment), kill mid-master (no partial file at a final path), DLQ replay (no second call, row or asset), disk full, FFmpeg crash, drain at a segment boundary, consent withdrawn between attempts |
+| Failure injection (07 §12) | FI-01…FI-17 | FI-01 429 (retry-after honoured, `RETRY_WAIT`), FI-02 5xx, FI-03 timeout, FI-04 auth error, FI-05 provider refusal, FI-06 garbage audio, FI-07 silent clip, FI-08 breaker open (no attempt consumed, zero network calls), FI-09 provider budget row missing (zero network calls), FI-10 estimate over reservation (zero network calls), FI-11 kill mid-segment (resume, one call per segment), FI-12 kill mid-master (no partial file at a final path), FI-13 DLQ replay (no second call, row or asset), FI-14 disk full, FI-15 FFmpeg crash (and unparsable FFmpeg output as `AGENT.CRASH`), FI-16 drain at a segment boundary, FI-17 consent withdrawn between attempts |
 | Performance | P-01…P-03 | wall time and CPU of mastering a 10-minute stem under the cgroup caps (INF-04); characters per finished minute and retake rate (feeds §14 `measured_chars_per_minute`); memory ceiling of FFmpeg passes. Results are MEASURED with sample counts, never asserted as thresholds before the pilot |
-| Security | S-01…S-08 | cross-tenant voice, consent, dictionary, asset, script, cache and URI refs (04 §3.7, 08 §8.2); canary secret and canary script text never reach logs, errors, outputs or metric labels; markup and path injection in script text; no provider key in the render worker environment; permission matrix (§19.2); consent person data absent from every output; scratch directories removed |
-| E2E | E-01 | the 3A skeleton path (27 §9): owner topic → script → voice → master → render → QC → approval → bundle, with the fake adapter in CI and one live, budget-capped smoke call per adapter by marker `live` (owner authorises the cap, 27 §8.4) |
-| | E-02 | revision loop: a failed gate returns to `s07_voice`, cap reached ⇒ job outcome `BLOCKED_COMPLIANCE` path of 24 §3.3 |
+| Security | S-01…S-09 | cross-tenant voice, consent, dictionary, asset, script, cache and URI refs (04 §3.7, 08 §8.2); canary secret and canary script text never reach logs, errors, outputs or metric labels; markup and path injection in script text; no provider key in the render worker environment; permission matrix (§19.2); consent person data absent from every output; scratch directories removed; S-09: `list_voices` is unreachable from a stage (the injected view has no such method) |
+| E2E | E-01 | the 3A walking skeleton (27 §9; 3A_SLICE_SPEC 3A-01 lists `voice_synthesis → render` for ticket 3A-01 itself: `s07_master` joins with ticket 3A-07, and the graph of 24 §7.1a always runs voice → master → render): owner topic → script → voice → master → render → QC → approval → bundle, with the fake adapter in CI and one live, budget-capped smoke call per adapter by marker `live` (owner authorises the cap, 27 §8.4) |
+| | E-02 | revision loop: a failed `s07_master` gate (`SUCCEEDED` task, gate result `FAIL`) returns to `s07_voice` as a new iteration; the cap is counted per gate per job and, once reached, the outcome follows 24 §3.3 rules 1, 5 |
 | Tenancy | T-01…T-03 | org mismatch at envelope/input/context; table list of §13 inside the 04 §3.7 suite |
 
 ---
@@ -992,15 +1026,15 @@ Evidence kept per master (owner rule A.12, 18 §11 evidence package): the FFmpeg
 
 | Human act | Who | When | Kind | MVP |
 |---|---|---|---|---|
-| Narration choice: neutral TTS voice, consented clone of the owner's voice, or own recording (O4, Q11) | owner | before the first 3A job; recorded as a `voices` row and the brand kit's `voice_id` | operator action (audited), not an approval row | 3A |
+| Narration choice: neutral TTS voice, consented clone of the owner's voice, or own recording (O4, Q11) | owner | before the first 3A job; recorded by the operator as a `voices` row and the brand kit's `voice_id` from the owner's chat message (D5, CCR-010) | operator action (audited, with its `owner_instruction_evidence`), not an approval row | 3A |
 | Consent verification (`voice_consents.state = VERIFIED`, `verified_by`) | owner / reviewer | before any clone render | operator action | 3A (only if a clone is chosen) |
 | Licence verification of the TTS provider terms (`licences.state = ACTIVE`) | owner | before the first paid call | operator action | 3A |
 | Owner recording and attestation that it follows the verified script | owner | at intake | input field `attests_follows_verified_script` (HUMAN check `a07.intake.attestation`) | 3A |
-| Voice sample listening and choice between candidate voices or models | owner | pilot start | approval kind `VOICE_SAMPLE` (GLOSSARY §6.15) with `owner_one_tap`; carried by an optional stage in the registry (pending CCR) | 3B |
-| Pronunciation, pace and tone listening check and score (3 points of AUDIO_QUALITY) | owner | at `FINAL_VIDEO` approval | HUMAN rows in `quality_scores` (18 §9.3) | 3B (mandatory), sampled after |
+| Voice sample listening and choice between candidate voices or models | owner | pilot start | approval kind `VOICE_SAMPLE` (GLOSSARY §6.15) with `owner_one_tap`, recorded by the operator as a standalone approval; an in-graph optional stage was rejected for 3A (CCR-050) and is refiled with 3B planning | 3B |
+| Pronunciation, pace and tone listening check and score (3 points of AUDIO_QUALITY) | owner | at `FINAL_VIDEO` approval | HUMAN rows in `quality_scores` (18 §9.3), written under the human-row rule (04 §5.16): only against `CONFIRMED` owner evidence | 3B (mandatory), sampled after |
 | New dictionary version after listening (add or correct entries) | owner or delegate | after a listening finding | operator action creating a new write-once dictionary asset and moving `voices.pronunciation_dict_ref` (audited); then a new iteration of `s07_voice` | 3A (v1 exists before the pilot, 18 §11), 3B tuning |
 | Spend limits at the provider and budget rows | owner | before 3A | rule 8, D1 | 3A |
-Agent 07 never approves, never records a human check itself, and never waits for a human inside a task (a suspended task holds no worker, 03 §11.6).
+Consent verification, licence verification, the recording attestation and dictionary versions are likewise recorded by the operator against `CONFIRMED` evidence rows (`oie`, 04 §5.16, CCR-010). Agent 07 never approves, never records a human check itself, and never waits for a human inside a task (a suspended task holds no worker, 03 §11.6).
 
 ---
 
@@ -1010,7 +1044,7 @@ Agent 07 never approves, never records a human check itself, and never waits for
 ### 24.1 Services
 | Unit | Process | Task types | Capabilities | Window | Placement | MVP |
 |---|---|---|---|---|---|---|
-| Voice executor | inside `workers/ai_worker`, package `agent_07_voice_production` | `agent_07.voice_synthesis` | `tts`, `media_probe` | any time (light CPU, external API); obeys `DRAIN` | the factory Compose project | 3A |
+| Voice executor | inside `workers/ai_worker`, package `agent_07_voice_production` | `agent_07.voice_synthesis` | `tts`, `media_probe` (the light FFmpeg conversions run under it; they are not rendering, CCR-056) | any time in the development environment, the VPS night window only on the VPS (ADR-012 §3.3); obeys `DRAIN` | the factory Compose project | 3A |
 | Master executor | inside `workers/render_worker`, same package | `agent_07.audio_master` | `render_ffmpeg`, `media_probe` | never in market hours; not admitted after the drain flag; the render worker is movable (ADR-012) | development environment or VPS night window under the §1 limits | 3A |
 The package is a library; no HTTP server, no public port.
 
@@ -1019,10 +1053,10 @@ The package is a library; no HTTP server, no public port.
 |---|---|---|---|
 | `AMW_ENV` | plain | environment label | all services |
 | `AMW_DB_APP_DSN_REF` / secret `AMW_DB_APP_PASSWORD` | reference / secret | login of role `amw_app` | workers |
-| `AMW_TTS_PROVIDER_KEY` | secret | TTS provider key (name proposed; the registry is pending) | `ai_worker` only |
+| `AMW_TTS_PROVIDER_KEY` | secret | TTS provider key (name of this blueprint, listed here as the registry entry for the TTS adapter; 08 §3.1) | `ai_worker` only |
 | `AMW_STORAGE_ROOT_REF` | plain | storage backend reference (ADR-005) | workers |
 | `AMW_SCRATCH_DIR_REF` | plain | per-task scratch root (one sub-directory per org and task) | workers |
-| `AMW_FFMPEG_BIN_REF`, `AMW_FFPROBE_BIN_REF` | plain | references to the pinned binaries | `render_worker`, `ai_worker` (probe only) |
+| `AMW_FFMPEG_BIN_REF`, `AMW_FFPROBE_BIN_REF` | plain | references to the same pinned binaries | `render_worker` (mastering, `render_ffmpeg`); `ai_worker` (probe and the light conversions of `s07_voice` under `media_probe`; no rendering) |
 Config keys (not env): `agent_07.*`, `qc.*` (§6.5), `evals.agent_07.*`. Startup check: each required secret name must be readable, else `PERMANENT.CONFIG_INVALID`; no value, length or prefix is printed.
 
 ### 24.3 Health checks
@@ -1038,7 +1072,7 @@ A failed readiness check means the worker does not claim tasks.
 Start: database (migrations only by the deploy step) → storage → orchestrator and queue functions → shared services (S4 cost guard, audit) → AI worker and render worker. Stop: stop claiming; at `DRAIN` finish the in-flight call or pass, checkpoint, release the lease; then workers → services → orchestrator → database. The service stop timeout exceeds `limits.max_atomic_write_ms` of the render worker (07 §8.3).
 
 ### 24.5 Release and rollback
-No prompt files exist. Changes to the dictionary schema, mastering parameters, config keys or the style map are versioned; a change re-runs the golden datasets (G-01) before merge. Rollback is the previous package and config version; written blobs are write-once and unaffected. No migration is written in this phase; the items of §13.2 ship with RLS in one file when approved.
+No prompt files exist. Changes to the dictionary schema, mastering parameters, config keys or the style map are versioned; a change re-runs the golden datasets (G-01) before merge. Rollback is the previous package and config version; written blobs are write-once and unaffected. No migration is written in this phase; the 04 changes of §13.2 are applied in the Wave A documents.
 
 ---
 
@@ -1050,16 +1084,16 @@ No prompt files exist. Changes to the dictionary schema, mastering parameters, c
 | AC-01 | A clone is never rendered without a `VERIFIED`, unexpired, unwithdrawn consent of an owner of the org (§1A.3) | U-15…U-18, golden VS-12…VS-16 |
 | AC-02 | An unverified, edited or blocked script produces no paid call (FR-2) | U-02, U-03, VS-03…VS-05 |
 | AC-03 | Every dictionary term of the script is rendered through its entry and logged; Devanagari word boundaries are respected (§1A.3) | U-06…U-09, VS-07…VS-10 |
-| AC-04 | Every sentence has a timeline entry on the TTS path; timeline arithmetic is exact (18 §4) | U-30, U-31, VS-01, VS-02 |
+| AC-04 | Every sentence has an aligned timeline entry (TTS path and owner marks); timeline arithmetic is exact (18 §4) | U-30, U-31, VS-01, VS-02 |
 | AC-05 | Pace and emotion requested per sentence are passed through capabilities; unsupported ones are reported, never faked (§1A.3) | U-44, VS-11, VS-17 |
-| AC-06 | The owner recording path passes intake only with attestation and no clipping; marks drive the timeline or it is `UNALIGNED` (§1A.3) | U-27…U-29, VS-18…VS-22 |
+| AC-06 | The owner recording path passes intake only with attestation, no clipping and per-sentence marks; a recording without marks is `PERMANENT.INPUT_INVALID` (§1A.3, CCR-051) | U-27…U-29, VS-18…VS-22 |
 | AC-07 | Mastered audio: post-codec true peak ≤ −1.0 dBTP, 48 kHz, AAC-LC ≥ 384 kbps stereo; integrated loudness at −14 LUFS within the tolerance once set (§1A.4) | IT-02, AM-01…AM-12 |
 | AC-08 | Mastering never changes duration (sync) | U-40, AM-13 |
-| AC-09 | Clipped input fails the gate; silent input is `INPUT_INVALID` (§1A.6) | AM-14, AM-15 |
-| AC-10 | No music in 3A; a music stem without a licence-ledger row is refused (3C) (§1A.4) | AM-16, AM-21 |
-| AC-11 | One paid call per (task, segment, spoken-text hash, voice); replay creates no second call, ledger row, asset or licence row (03 §9) | U-21, FI-09, VS-23 |
-| AC-12 | No paid call without an `ACTIVE` provider budget row, a covering reservation and a closed breaker; zero network calls in those cases (D1, 09 §8) | U-22, FI-05…FI-07, VS-24…VS-26 |
-| AC-13 | Kill during synthesis or mastering resumes from the checkpoint with no partial file at a final path (07 §8) | FI-12, FI-13 |
+| AC-09 | Clipped input fails the gate (task `SUCCEEDED`, gate result `FAIL`, `remedy_stage_id = s07_voice`); silent input is `INPUT_INVALID` (§1A.6) | AM-14, AM-15 |
+| AC-10 | No music bed in 3A technical runs (`music_stem` null, `qc.audio.music_bed_offset` `SKIPPED`); a music stem without a licence-ledger row is refused (3B, D6) (§1A.4) | AM-16, AM-21 |
+| AC-11 | One paid call per (task, segment, spoken-text hash, voice); replay creates no second call, ledger row, asset or licence row (03 §9) | U-21, FI-13, VS-23 |
+| AC-12 | No paid call without an `ACTIVE` provider budget row, a covering reservation and a closed breaker; zero network calls in those cases (D1, 09 §8) | U-22, FI-08…FI-10, VS-24…VS-26 |
+| AC-13 | Kill during synthesis or mastering resumes from the checkpoint with no partial file at a final path (07 §8) | FI-11, FI-12 |
 | AC-14 | Master is not admitted during market hours or after the drain flag (D1, 27 §9 test 6) | IT-05, AM-24 |
 | AC-15 | Cross-tenant refs of every kind are rejected with the code of §18 and a security event; nothing of another tenant is read or logged (rule 9, 08 §8.2) | S-01…S-06, VS-27…VS-29, AM-22 |
 | AC-16 | No script text, spoken text, person data, provider voice reference or key in logs, errors, outputs or metric labels (NFR-5) | S-05 |
@@ -1068,6 +1102,8 @@ No prompt files exist. Changes to the dictionary schema, mastering parameters, c
 | AC-19 | Deterministic datasets of §26 pass at the thresholds of §26.4 | G-01 |
 | AC-20 | Provider, model, voice reference, thresholds and keys appear only as config or secrets (rule 5) | config lint, S-07 |
 | AC-21 | The pilot listening check is recorded for each golden sample (§1A.3, 3B) | E-01 pilot evidence, 18 §11 |
+| AC-22 | A failed loudness, peak, clipping, codec or silence gate is reported as a `SUCCEEDED` task with `gate: true`, `blocking: true`, `FAIL` results naming `remedy_stage_id = s07_voice`, never as `AGENT.INCOMPLETE_OUTPUT`; the REVISE route is taken (03 §5.3 rule 4, CCR-001) | U-38…U-46, IT-02, E-02, AM-08, AM-14, AM-20, AM-27 |
+| AC-23 | `list_voices` is not reachable from a task; the term hashes of one tenant differ from those of another for the same term | S-09, U-10 |
 
 ---
 
@@ -1075,7 +1111,7 @@ No prompt files exist. Changes to the dictionary schema, mastering parameters, c
 **MVP: 3A (datasets and checks) · 3B (thresholds calibrated; listening rubric used) · Tier 0.**
 
 ### 26.1 Statement
-Agent 07 has **no LLM step**, so there is no prompt file and no LLM judge (§5). 27 §6.1 requires a golden dataset per LLM step; this agent provides, by the assignment's rule for steps without an LLM, **deterministic golden datasets** (44 cases for `voice_synthesis`, 32 for `audio_master`, each ≥ 20): an input fixture description and the expected deterministic result. The cases run against the `FakeTtsAdapter` and a generator of synthetic test signals, so they cost nothing and run in every CI build.
+Agent 07 has **no LLM step**, so there is no prompt file and no LLM judge (§5). 27 §6.1 requires a golden dataset per LLM step; this agent provides, by the assignment's rule for steps without an LLM, **deterministic executor datasets** (CCR-024, 27 §6.1; ≥ 20 cases each, counts in §26.5): `input = {payload, fixtures}` where `payload` is a valid `<task_type>.input` of §7 (validated by CI against the schema) and `fixtures` describes the rows, blobs and fake adapter around it; `expected` is the exact deterministic result. The cases run against the `FakeTtsAdapter` and a generator of synthetic test signals, so they cost nothing and run in every CI build.
 
 ### 26.2 Paths
 | Item | Path |
@@ -1083,7 +1119,7 @@ Agent 07 has **no LLM step**, so there is no prompt file and no LLM judge (§5).
 | Prompt files | none (`prompts/agent_07_voice_production/` is intentionally not created) |
 | Voice synthesis dataset | `evals/agent_07_voice_production/voice_synthesis/` (`README.md`, `cases.jsonl`, `rubric.md`) |
 | Audio master dataset | `evals/agent_07_voice_production/audio_master/` (`README.md`, `cases.jsonl`, `rubric.md`) |
-`rubric.md` in these folders is **not** an LLM-judge rubric: it is the owner's human listening rubric (3B) for the HUMAN rows `qc.voice.listening`, kept next to the data so calibration of the three AUDIO_QUALITY human points is reproducible.
+`rubric.md` in these folders is **not** an LLM-judge rubric: it is the owner's human listening rubric (3B) for the HUMAN row `qc.voice.listening` (18 §4), kept next to the data so calibration of the three AUDIO_QUALITY human points is reproducible.
 
 ### 26.3 Deterministic checks and assertions
 All assertions are deterministic and listed in each dataset README: output schema validity (§8), error code equality, number of network calls, ledger rows, timeline arithmetic, dictionary hits, unknown terms, validation verdicts per `check_id`, measured loudness relations, duration preservation, and admission decisions. The case `expected` object fixes the exact result; relations to unsourced thresholds (`qc.loudness.tolerance_lu`, `qc.silence.max_ms`, noise limit) are asserted as the verdict `WARN` with the measured value recorded, and become `PASS`/`FAIL` when the owner sets the value (18 §7.0.4).
@@ -1095,13 +1131,13 @@ All assertions are deterministic and listed in each dataset README: output schem
 | Cases whose expected result is a denial (consent, licence, tenant, budget, script gate) returning the expected code with **zero network calls** | 100 % — mandatory |
 | Any case where a paid call or a licence/asset row is created that the expectation forbids | 0 — mandatory |
 | Cost and latency | recorded per case (fake adapter: zero cost); reported, no threshold |
-CI fails the PR if any threshold is missed. Recording fields per case per run: `run_id`, `case_id`, `passed`, `assertions` (id → pass/fail + detail), `config_version`, `adapter` (`fake`), `ffmpeg_build` (master dataset), `started_at`, `figure_kind`.
+CI fails the PR if any threshold is missed. Recording fields per case per run (27 §6.4, with the LLM-only fields not applicable and no `prompt_id`): `run_id`, `case_id`, `passed`, `assertions` (id → pass/fail + detail), `config_version`, `adapter` (`fake`), `provider` (`fake`), `model` (`fake`), `ffmpeg_build` (master dataset), `cost_micros` and `currency` (fake adapter: 0), `latency_ms`, `started_at`, `figure_kind`.
 
 ### 26.5 Coverage summary
 | Dataset | Cases | Categories |
 |---|---|---|
 | `voice_synthesis` | 44 | positive paths of the three voice kinds; hard negatives (look-alikes that must pass); denials (consent, licence, script gate, budget, breaker, tenant); edge cases (empty and markup text, long sentence, Devanagari boundaries, duplicate sentences, replay); voice sample |
-| `audio_master` | 32 | loud, quiet and on-target stems; peaky and clipped stems; silent and mono-edge stems; codec headroom step-down; pass cap; music (3C); tenancy; admission |
+| `audio_master` | 32 | loud, quiet and on-target stems; peaky and clipped stems; silent and mono-edge stems; codec headroom step-down; pass cap; music (3B); tenancy; admission |
 
 ### 26.6 Revisit
 When a concrete adapter exists, recorded provider fixtures (redacted, 27 §8.2) are added as extra cases; when the 3B listening test changes the dictionary or style map, the affected cases are re-run; when a LLM step is ever added (§5.2), it gets a prompt file per 27 §4 and a ≥ 20-case judged dataset in this folder.
