@@ -35,7 +35,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `PERMANENT.SCHEMA_VERSION_UNSUPPORTED` | version outside the supported set | FAIL | never | no | L2 |
 | `PERMANENT.INPUT_INVALID` | semantically invalid input (wrong ID prefix, impossible values) | FAIL | never | no | L2 |
 | `PERMANENT.CONFIG_INVALID` | missing/invalid configuration (model, provider, limit) | FAIL | never | no | L3 (operations) |
-| `PERMANENT.UNSUPPORTED_TASK` | task type not registered for the executor | FAIL | never | no | L2 |
+| `PERMANENT.UNSUPPORTED_TASK` | task type not registered for the executor, or a required capability value (e.g. the job language) not supported by the executor or its adapter (CCR-021) | FAIL | never | no | L2 |
 | `PERMANENT.MISSING_DEPENDENCY` | referenced row/blob absent | FAIL | never | no | L2 |
 | `PERMANENT.AUTH_INVALID` | provider credential rejected (HTTP 401/403, not refreshable) | FAIL | never | no | L3 (security/ops) |
 | `PERMANENT.PERMISSION_DENIED` | actor lacks the permission (RBAC) | FAIL | never | no | L3 (security) |
@@ -46,7 +46,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `PERMANENT.INVALID_TRANSITION` | state transition not allowed (03 §11.3) | FAIL | never | no | L2; L3 if repeated |
 | `PERMANENT.DEADLINE_EXCEEDED` | deadline passed or wait timed out | FAIL | never | no | L2 |
 | `PERMANENT.PROVIDER_REFUSAL` | provider refused the content (safety/policy) | FAIL (after configured fallback provider inside the attempt, if any) | never | no | L2 → L3 if a compliance question |
-| `PERMANENT.INSUFFICIENT_INPUT` | LLM step returned a refusal `INSUFFICIENT_INPUT` (27 §4) | FAIL | never | no | L2 (orchestrator re-plans upstream) |
+| `PERMANENT.INSUFFICIENT_INPUT` | LLM step returned a refusal `INSUFFICIENT_INPUT` (27 §4), or the step's deterministic checks found no usable input to produce a valid output (e.g. zero usable research notes; CCR-021) | FAIL | never | no | L2 (orchestrator re-plans upstream) |
 | `RESOURCE.OOM` | process killed for memory | RETRY with reduced concurrency (05) | `resource` | no | L1 → L2 |
 | `RESOURCE.CPU_SATURATION` | task aborted under CPU pressure | RETRY | `resource` | no | L1 → L2 |
 | `RESOURCE.DISK_FULL` | write failed: no space | SUSPEND:`OPERATOR_PAUSE` + heavy admission paused | none | no | L3 (operations) |
@@ -56,8 +56,8 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `AGENT.HANG` | heartbeat stale / wall budget exceeded | RETRY | `agent` | no | L1 → L2 |
 | `AGENT.INVALID_JSON` | LLM output not parseable | RETRY once with the parse error appended (§3.5.2) | `agent_parse` | no | L2 after cap |
 | `AGENT.OUTPUT_SCHEMA_INVALID` | parsed output fails the Pydantic/JSON schema | RETRY once with the validation error (§3.5.2) | `agent_parse` | no | L2 after cap |
-| `AGENT.CORRUPTED_OUTPUT` | output blob hash/size mismatch | RETRY | `agent` | no | L2 |
-| `AGENT.INCOMPLETE_OUTPUT` | success claimed but 03 §5.3 rule failed | RETRY once | `agent_parse` | no | L2 |
+| `AGENT.CORRUPTED_OUTPUT` | output blob, or provider-returned media, fails hash, size or decode validation (CCR-021) | RETRY | `agent` | no | L2 |
+| `AGENT.INCOMPLETE_OUTPUT` | success claimed but 03 §5.3 rule 2 failed. A failed blocking **gate** (03 §5.3 rule 4: results with `gate: true`) is not this code; it routes `on_fail` (24 §3.3) (CCR-001) | RETRY once | `agent_parse` | no | L2 |
 | `AGENT.QUALITY_REPEATED_FAILURE` | the step's own deterministic checks failed on every allowed attempt | FAIL | never (already capped) | no | L3 (quality) |
 | `AGENT.LOOP_CAP_EXCEEDED` | any hard cap of §9 reached | FAIL | never | no | L3 |
 | `INFRASTRUCTURE.HOST_RESTART` | host or container restarted mid-attempt | RETRY from checkpoint | `infra` | no | L1 |
@@ -207,6 +207,8 @@ L3 routing: security (`CROSS_TENANT_REF`, `TENANT_MISMATCH`, `PERMISSION_DENIED`
 | `limits.max_job_active_ms` (excludes `CHECKPOINTED` time) | 86,400,000 | reaper | L2, then L3 |
 | `caps.lock_conflict_reevaluations` | 5 per transition | state machine | FAIL `PERMANENT.INVALID_TRANSITION` |
 | LLM self-repair | 1 retry with the validation error | `agent_parse` policy | DLQ |
+| In-attempt repair (CCR-022) | per LLM step: at most 1 parse repair and at most 1 quality repair inside the attempt, declared in the blueprint; every repair call counts against `resource_budget.max_llm_calls` | step code | parse: `AGENT.INVALID_JSON` / `OUTPUT_SCHEMA_INVALID` → `agent_parse`; quality: `AGENT.QUALITY_REPEATED_FAILURE` |
+| Per-agent structural caps (CCR-022) | declared in the agent blueprint (§24 config keys, e.g. `agent_09.max_slots`) | agent code, before any paid call | FAIL `AGENT.LOOP_CAP_EXCEEDED` |
 Structural guarantees: only the orchestrator creates tasks; graphs come from the registry and are validated as DAGs at load (24 §3); revision edges are bounded counters, not cycles; no task type may enqueue another task.
 
 ## 10. Checkpoint, resume and restart-only-the-failed-component
