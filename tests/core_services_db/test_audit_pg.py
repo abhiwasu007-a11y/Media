@@ -174,3 +174,15 @@ def test_tenant_b_sees_none_of_tenant_a_audit_rows(
             "INSERT INTO audit_chain_heads (org_id, last_seq, last_hash) VALUES (%s, 0, %s)",
             (tenant_a.org_uuid, bytes(32)),
         )
+
+
+@pytest.mark.security
+@pytest.mark.parametrize("table", ["audit_log", "audit_log_default"])
+@pytest.mark.parametrize("role", ["amw_owner", "amw_migrator", "amw_app"])
+def test_audit_partition_cannot_be_truncated(admin: Any, table: str, role: str) -> None:
+    """PR #44 m3: statement triggers are not cloned to partitions; the default partition has its
+    own, so not even the owner can wipe the audit trail of every tenant."""
+    with admin.transaction(force_rollback=True):
+        admin.execute(f"SET LOCAL ROLE {role}")
+        with pytest.raises(psycopg.Error):
+            admin.execute(f"TRUNCATE {table}")

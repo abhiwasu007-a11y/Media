@@ -172,13 +172,18 @@ def test_currency_rules() -> None:
     led = MemoryCostLedger()
     tx = tx_for(ORG_A)
     usd = led.record(tx, _e(1_000_000, currency="USD", fx_rate=Decimal("83.25"), fx_source="rbi"))
-    assert amount_in(usd, "INR") == 83_250_000
+    pairs = ["USD/INR"]
+    assert amount_in(usd, "INR", pairs) == 83_250_000
     assert amount_in(usd, "USD") == 1_000_000
+    with pytest.raises(ConfigInvalidError):  # the rate is for one pair only: never guessed for EUR
+        amount_in(usd, "EUR", pairs)
+    with pytest.raises(ConfigInvalidError):  # no pair configured: fail closed
+        amount_in(usd, "INR")
     odd = led.record(tx, _e(3, currency="USD", fx_rate=Decimal("0.5"), fx_source="x"))
-    assert amount_in(odd, "INR") == 2  # rounded up: a budget is never under-counted
+    assert amount_in(odd, "INR", pairs) == 2  # rounded up: a budget is never under-counted
     plain = led.record(tx, _e(5, currency="USD"))
     with pytest.raises(ConfigInvalidError):
-        amount_in(plain, "INR")
+        amount_in(plain, "INR", pairs)
     led.record(tx, _e(5))
     with pytest.raises(ConfigInvalidError):
         led.job_totals(tx, JOB_A)

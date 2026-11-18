@@ -11,7 +11,7 @@ same key with different content is ``IdempotencyConflictError``.
 
 import re
 import threading
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass, fields
 from decimal import Decimal
 
@@ -187,12 +187,19 @@ class MemoryCostLedger:
         ]
 
 
-def amount_in(row: CostEntry, currency: str) -> int:
+def amount_in(row: CostEntry, currency: str, fx_pairs: Collection[str] = ()) -> int:
     """The row's amount in ``currency`` micros: same currency as is; otherwise the recorded
     ``fx_rate`` (row currency -> ``currency``), rounded up so a budget is never under-counted.
-    A missing rate is a refusal, not a guess (09 section 3.3)."""
+    The rate is used only for a pair named in ``finance.fx_pairs`` (``"USD/INR"`` = row currency /
+    target currency); the row does not record its target, so any other pair is refused, as is a
+    missing rate: a refusal, not a guess (09 section 3.3)."""
     if row.entry.currency == currency:
         return row.entry.amount_micros
+    if f"{row.entry.currency}/{currency}" not in fx_pairs:
+        raise ConfigInvalidError(
+            "no fx pair is configured for this row currency and target currency",
+            details={"row_currency": row.entry.currency, "currency": currency},
+        )
     if row.entry.fx_rate is None:
         raise ConfigInvalidError(
             "ledger row in another currency has no fx_rate",

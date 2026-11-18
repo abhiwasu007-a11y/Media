@@ -65,6 +65,7 @@ class MemoryBudgetBackend:
         task_id: TaskId | None = None,
         budget_id: BudgetId | None = None,
         status: ReservationStatus | None = None,
+        lock: bool = False,
     ) -> Sequence[Reservation]:
         return [
             r
@@ -115,5 +116,5 @@ class MemoryBudgetBackend:
     def tenant_timezone(self, tx: TenantTransaction) -> str | None:
         return self._t(tx).timezone
 
-    def new_reservation_id(self) -> str:
+    def new_reservation_id(self) -> ReservationId:
         return RESERVATION.new()

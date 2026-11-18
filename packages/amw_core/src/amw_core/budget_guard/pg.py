@@ -25,6 +25,7 @@ from amw_core.ids import (
     WORKSPACE,
     BudgetId,
     JobId,
+    ReservationId,
     TaskId,
 )
 from amw_core.interfaces.budget_guard import Budget, Reservation
@@ -163,6 +164,7 @@ class PgBudgetBackend:
         task_id: TaskId | None = None,
         budget_id: BudgetId | None = None,
         status: ReservationStatus | None = None,
+        lock: bool = False,
     ) -> Sequence[Reservation]:
         clauses = ["org_id = %s"]
         params: list[Any] = [org_uuid_of(tx)]
@@ -179,7 +181,7 @@ class PgBudgetBackend:
             tx,
             f"SELECT {_R_COLS} FROM budget_reservations WHERE "  # noqa: S608
             + " AND ".join(clauses)
-            + " ORDER BY id",
+            + (" ORDER BY id FOR UPDATE" if lock else " ORDER BY id"),
             params,
         )
         return [self._reservation(r) for r in rows]
@@ -264,5 +266,5 @@ class PgBudgetBackend:
         )
         return str(rows[0][0]) if rows else None
 
-    def new_reservation_id(self) -> str:
+    def new_reservation_id(self) -> ReservationId:
         return RESERVATION.new()

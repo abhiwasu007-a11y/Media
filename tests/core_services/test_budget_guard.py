@@ -215,18 +215,18 @@ def test_b4_non_paid_work_is_not_blocked_by_a_breach() -> None:
 
 # ---- B5 -------------------------------------------------------------------------------------
 def test_b5_breach_returns_the_changed_budgets_and_is_audited() -> None:
-    w = world(per_video_rupees=3, pilot_rupees=100)
+    w = world(per_video_rupees=100, pilot_rupees=3)
     job = w.job()
     task = w.task(job)
     w.guard.reserve(w.tx, task, 3 * M, "INR")
     row = w.ledger.record(w.tx, _entry(w, job, task, 3 * M))
     changed = w.guard.after_call(w.tx, row)
-    assert [b.id for b in changed] == [w.video]
+    assert [b.id for b in changed] == [w.pilot]
     assert changed[0].state is BudgetState.SUSPENDED_EXCEEDED
     assert w.guard.after_call(w.tx, row) == []  # already suspended: no second notice
     (audit,) = list(w.audit.export(w.tx))
     assert audit.entry.action == "budget.suspended"
-    assert audit.entry.target_id == w.video
+    assert audit.entry.target_id == w.pilot
     assert audit.entry.details["enforcement_point"] == "E3"
     assert audit.entry.details["committed_micros"] == 3 * M
     assert audit.entry.job_id == job
@@ -533,3 +533,38 @@ def test_budgets_never_span_tenants() -> None:
 
 def test_settings_helper_has_exponents() -> None:
     assert settings().finance.currency_minor_exponent["INR"] == 2
+
+
+def test_per_video_breach_stops_only_that_job_and_never_suspends_the_shared_row() -> None:
+    """CCR-107: the per-video cap of job A refuses A's reserve and calls; job B and the row live."""
+    w = world(per_video_rupees=3, pilot_rupees=100)
+    job_a, job_b = w.job(), w.job()
+    task_a, task_b = w.task(job_a), w.task(job_b)
+    assert w.guard.reserve(w.tx, task_a, 3 * M, "INR").granted
+    check(w, job_a, task_a, 3 * M)
+    row = w.ledger.record(w.tx, _entry(w, job_a, task_a, 3 * M))
+    assert w.guard.after_call(w.tx, row) == []  # no budget changed state
+    assert w.backend.get_budget(w.tx, w.video).budget.state is BudgetState.ACTIVE  # type: ignore[union-attr]
+    audits = [a.entry for a in w.audit.export(w.tx)]
+    assert [a.action for a in audits] == ["budget.job_cap_reached"]
+    assert audits[0].job_id == job_a
+    # job A: no new paid task, no further call
+    assert not w.guard.reserve(w.tx, w.task(job_a), 1, "INR").granted
+    with pytest.raises(BudgetExhaustedError):
+        check(w, job_a, task_a, 1)
+    # job B is untouched
+    assert w.guard.reserve(w.tx, task_b, 2 * M, "INR").granted
+    check(w, job_b, task_b, 2 * M)
+    assert w.guard.status(w.tx, w.video, job_b).remaining_micros == 1 * M
+
+
+def test_e2_per_video_cap_refuses_a_call_that_would_cross_it_inside_the_hold() -> None:
+    w = world(per_video_rupees=3, pilot_rupees=100)
+    job = w.job()
+    task = w.task(job)
+    other = w.task(job)
+    assert w.guard.reserve(w.tx, task, 3 * M, "INR").granted
+    w.spend(job, other, 2 * M)  # another task of the job already spent 2 of the 3 rupees
+    with pytest.raises(BudgetExhaustedError) as err:
+        check(w, job, task, 2 * M)
+    assert "per-job cap" in str(err.value)

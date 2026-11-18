@@ -1,7 +1,7 @@
 """PostgreSQL persistence for breakers and dead letters.
 
 * ``PgBreakerFunctions.breaker_record`` is ``SystemFunctions.breaker_record``: it calls
-  ``amw_breaker_record`` (migration 0010, lane L1a), the only writer of ``circuit_breakers``, in
+  ``amw_breaker_record`` (migrations 0010 and 0051), the only writer of ``circuit_breakers``, in
   its own short transaction (not bound to a tenant transaction, 04 section 3.6). ``read`` returns
   the shared row (tenants may read platform rows, 04 section 3.5) for the pure ``admit`` check.
 * ``PgDeadLetterStore`` writes the T14 row and moves its workflow columns (07 section 5).
@@ -9,7 +9,7 @@
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -42,6 +42,15 @@ Connection = psycopg.Connection[tuple[Any, ...]]
 _log = get_logger("retries.breaker")
 
 
+@dataclass(frozen=True, slots=True)
+class ProbeAdmission:
+    """Outcome of ``amw_breaker_admit``: ``admitted`` is the decision, ``state`` the breaker state
+    after it (``HALF_OPEN`` admissions are probes and must be followed by ``breaker_record``)."""
+
+    admitted: bool
+    state: BreakerState
+
+
 class PgBreakerFunctions:
     """``amw_breaker_record`` caller. ``connections`` yields an ``amw_app`` connection."""
 
@@ -50,6 +59,29 @@ class PgBreakerFunctions:
     ) -> None:
         self._connections = connections
         self._settings = settings
+
+    def admit(self, caller: ActorRef, key: BreakerKey) -> ProbeAdmission:
+        """Atomic admission before a call (07 section 4.3): at most ``half_open_max_probes``
+        concurrent probes while ``HALF_OPEN``, counted in the database under a row lock."""
+        if not is_actor_ref(caller):
+            raise ValueError("caller must be an actor reference")
+        cfg = self._settings.breaker_for(key.provider, key.operation_class)
+        try:
+            with self._connections() as conn, conn.transaction():
+                conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
+                row = conn.execute(
+                    "SELECT admitted, state, open_until FROM amw_breaker_admit(%s, %s, %s, %s)",
+                    (
+                        key.provider,
+                        key.operation_class,
+                        key.credential_scope,
+                        cfg.half_open_max_probes,
+                    ),
+                ).fetchone()
+        except psycopg.Error as exc:
+            raise translate_db_error(exc) from exc
+        assert row is not None  # noqa: S101 - the function always returns one row
+        return ProbeAdmission(bool(row[0]), BreakerState(key, CircuitState(row[1]), row[2]))
 
     def breaker_record(
         self, caller: ActorRef, key: BreakerKey, succeeded: bool, error_code: str | None

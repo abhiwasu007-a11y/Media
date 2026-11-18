@@ -131,6 +131,9 @@ class FinanceSettings(_Model):
     currency_minor_exponent: dict[str, int] = Field(default_factory=dict)
     """ISO 4217 minor-unit exponent per budget currency (e.g. INR 2); a budget whose currency has
     no entry cannot be converted to micros and is refused (fail closed)."""
+    fx_pairs: list[str] = Field(default_factory=list)
+    """Currency pairs ``"<row currency>/<budget currency>"`` for which a ledger row's recorded
+    ``fx_rate`` may be applied (e.g. ``"USD/INR"``). Empty: no conversion (fail closed)."""
 
 
 class EvalSettings(_Model):

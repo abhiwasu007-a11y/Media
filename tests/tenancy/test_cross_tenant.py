@@ -417,6 +417,7 @@ ALLOWED_OUTPUTS = {
     "wait_reason",
     "state",
     "open_until",
+    "admitted",
 }
 
 

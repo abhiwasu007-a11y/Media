@@ -3,17 +3,15 @@
 ``BudgetGuardCore`` implements the ``BudgetGuard`` Protocol over a ``BudgetBackend`` (in-memory or
 PostgreSQL). Everything here is deterministic code; no model call.
 
-**Committed amount.** 09 section 3.3 defines ``committed = sum(ledger, VERIFIED else ESTIMATE) +
-sum(HELD reservations)``. Taken literally, the spend of a running task is counted twice (once in
-the ledger and again inside its own HELD reservation), which would suspend a budget mid-task even
-when the task stays inside the amount admitted for it, and would contradict 09 section 3.4 step 2
-("the difference returns to remaining" at CONSUMED) and B2. This implementation therefore counts
-each HELD reservation net of the spend already recorded for its task in the budget's scope:
-``committed = sum(ledger) + sum over HELD of max(0, hold - task spend)``. It is never lower than
-the literal sum of spend and never lower than the literal formula minus that double count. Filed
-as an open contract question (lane L1b report).
+**Committed amount (CCR-106, PROPOSED).** 09 section 3.3 as written, ``committed = sum(ledger) +
+sum(HELD reservations)``, counts the spend of a running task twice (in the ledger and inside its
+own HELD hold). CCR-106 proposes the corrected text implemented here, no more and no less:
+``committed = sum(ledger) + sum over HELD of max(0, hold - spend already recorded for that task in
+the budget's scope and period)``; the hold is counted net of its own task's spend.
 
-**PER_VIDEO / PER_JOB** budgets apply per job: the ledger rows and holds of that job only.
+**PER_VIDEO / PER_JOB** budgets apply per job: the ledger rows and holds of that job only. A
+breach stops only that job (E1 refuses its new tasks, E2 refuses its further calls, E3 audits it);
+the shared ``budgets`` row keeps its state (CCR-107, PROPOSED), so other jobs are unaffected.
 **PILOT_TOTAL** never resets. **DAY / MONTH** follow the tenant time zone; a suspended DAY/MONTH
 budget returns to ACTIVE only when the period has rolled over since it was suspended (B6).
 **PROVIDER** budgets are the start gate (09 section 8) and cap the provider's spend; they are not
@@ -42,6 +40,7 @@ from amw_core.ids import (
     BudgetId,
     ChannelId,
     JobId,
+    ReservationId,
     TaskId,
     WorkspaceId,
 )
@@ -103,6 +102,7 @@ class BudgetBackend(Protocol):
         task_id: TaskId | None = None,
         budget_id: BudgetId | None = None,
         status: ReservationStatus | None = None,
+        lock: bool = False,
     ) -> Sequence[Reservation]: ...
 
     def insert_reservation(self, tx: TenantTransaction, reservation: Reservation) -> None: ...
@@ -126,7 +126,7 @@ class BudgetBackend(Protocol):
 
     def tenant_timezone(self, tx: TenantTransaction) -> str | None: ...
 
-    def new_reservation_id(self) -> str: ...
+    def new_reservation_id(self) -> ReservationId: ...
 
 
 def actor_kind_of(actor: str) -> ActorKind:
@@ -183,7 +183,7 @@ class BudgetGuardCore:
         backend: BudgetBackend,
         settings: AmwSettings,
         clock: Clock,
-        audit: AuditLog | None = None,
+        audit: AuditLog,
     ) -> None:
         self._b = backend
         self._settings = settings
@@ -241,7 +241,7 @@ class BudgetGuardCore:
         spend_by_task: dict[TaskId, int] = {}
         total = 0
         for row in in_scope:
-            amount = amount_in(row, budget.currency)
+            amount = amount_in(row, budget.currency, self._settings.finance.fx_pairs)
             total += amount
             if row.entry.task_id is not None:
                 spend_by_task[row.entry.task_id] = spend_by_task.get(row.entry.task_id, 0) + amount
@@ -288,6 +288,11 @@ class BudgetGuardCore:
             (s for s in self._b.budgets(tx, lock=True) if self._applies_to_job(s.budget, scope)),
             key=lambda s: s.budget.id,
         )
+        # The budget rows are locked now: a concurrent reserve of the same task has either
+        # finished (its HELD rows are visible) or is waiting behind this lock (no duplicate row).
+        held = self._b.reservations(tx, task_id=task_id, status=ReservationStatus.HELD)
+        if held:
+            return ReservationOutcome(True, tuple(held), ())
         enforced = []
         refused: list[BudgetId] = []
         for s in stored:
@@ -307,7 +312,8 @@ class BudgetGuardCore:
             limit = limit_micros(budget, self._settings)
             committed = self._committed(tx, budget, job_id, now)
             if committed >= limit:
-                self._suspend(tx, budget, committed, limit, "E1", job_id, now)
+                if budget.period not in PER_ITEM_PERIODS:  # CCR-107: a per-job cap stops that job
+                    self._suspend(tx, budget, committed, limit, "E1", job_id, now)
                 refused.append(budget.id)
             elif limit - committed < amount_micros:
                 refused.append(budget.id)
@@ -319,7 +325,7 @@ class BudgetGuardCore:
         made = []
         for budget in enforced:
             reservation = Reservation(
-                id=self._b.new_reservation_id(),  # type: ignore[arg-type]
+                id=self._b.new_reservation_id(),
                 budget_id=budget.id,
                 task_id=task_id,
                 amount_micros=amount_micros,
@@ -348,26 +354,55 @@ class BudgetGuardCore:
         )
 
     def check_call(self, tx: TenantTransaction, check: CallCheck) -> None:
+        """E2. Locks the task's HELD reservation rows until the transaction ends, so concurrent
+        calls of one task are checked one at a time. The caller MUST write the call's ledger row
+        in this same transaction: check and debit are then atomic (B2, 09 section 4)."""
         if check.estimated_cost_micros < 0:
             raise InputInvalidError("estimated_cost_micros is >= 0")
         self.check_provider_gate(tx, check.provider)
         if self._b.task_job(tx, check.task_id) != check.job_id:
             raise InputInvalidError("CallCheck task does not belong to its job")
-        held = self._b.reservations(tx, task_id=check.task_id, status=ReservationStatus.HELD)
         if check.estimated_cost_micros == 0:
             return
+        held = self._b.reservations(
+            tx, task_id=check.task_id, status=ReservationStatus.HELD, lock=True
+        )
         if not held:
             raise BudgetExhaustedError("paid call without a HELD reservation (E1 not passed)")
         spent_rows = effective_rows(self._b.ledger_rows(tx, task_id=check.task_id))
         for hold in held:
             if hold.currency != check.currency:
                 raise ConfigInvalidError("call currency differs from the reservation currency")
-            spent = sum(amount_in(r, hold.currency) for r in spent_rows)
+            spent = sum(
+                amount_in(r, hold.currency, self._settings.finance.fx_pairs) for r in spent_rows
+            )
             if spent + check.estimated_cost_micros > hold.amount_micros:
                 raise BudgetExhaustedError(
                     "the call would exceed the task's HELD reservation (B2)",
                     provider=check.provider,
                     details={"budget_id": hold.budget_id},
+                )
+        self._check_job_caps(tx, check)
+
+    def _check_job_caps(self, tx: TenantTransaction, check: CallCheck) -> None:
+        """CCR-107: a PER_VIDEO / PER_JOB cap refuses the calls of that job only."""
+        now = self._clock.now()
+        scope = self._b.job_scope(tx, check.job_id)
+        rows = effective_rows(self._b.ledger_rows(tx, job_id=check.job_id))
+        for s in self._b.budgets(tx):
+            b = s.budget
+            if b.period not in PER_ITEM_PERIODS or not self._applies_to_job(b, scope):
+                continue
+            if self._effective_state(tx, s, now) is not BudgetState.ACTIVE:
+                continue
+            if b.currency != check.currency:
+                raise ConfigInvalidError("call currency differs from the budget currency")
+            spent = sum(amount_in(r, b.currency, self._settings.finance.fx_pairs) for r in rows)
+            if spent + check.estimated_cost_micros > limit_micros(b, self._settings):
+                raise BudgetExhaustedError(
+                    "the call would exceed the per-job cap (E2, CCR-107)",
+                    provider=check.provider,
+                    details={"budget_id": b.id, "job_id": check.job_id},
                 )
 
     # ---- E3 ----------------------------------------------------------------------------------
@@ -389,7 +424,22 @@ class BudgetGuardCore:
             limit = limit_micros(b, self._settings)
             committed = self._committed(tx, b, job_id, now)
             if committed >= limit:
-                changed.append(self._suspend(tx, b, committed, limit, "E3", job_id, now))
+                if b.period in PER_ITEM_PERIODS:  # CCR-107: audit only; the row stays ACTIVE
+                    self._write_audit(
+                        tx,
+                        "budget.job_cap_reached",
+                        b,
+                        {
+                            "enforcement_point": "E3",
+                            "committed_micros": committed,
+                            "limit_micros": limit,
+                            "job_id": job_id,
+                        },
+                        now,
+                        job_id,
+                    )
+                else:
+                    changed.append(self._suspend(tx, b, committed, limit, "E3", job_id, now))
         return changed
 
     def _suspend(
@@ -546,8 +596,6 @@ class BudgetGuardCore:
         now: datetime,
         job_id: JobId | None = None,
     ) -> None:
-        if self._audit is None:
-            return
         actor = tx.context.actor
         self._audit.append(
             tx,

@@ -31,7 +31,9 @@ def test_no_migration_after_l1a_changes_function_owner_without_set_grant_and_rev
             continue
         text = path.read_text(encoding="utf-8")
         for role in HARDENED_OWNERS:
-            owner_stmts = [m.start() for m in re.finditer(rf"OWNER TO {role}\b", text)]
+            owner_stmts = [
+                m.start() for m in re.finditer(rf"(?:OWNER TO|SET LOCAL ROLE) {role}\b", text)
+            ]
             if not owner_stmts:
                 continue
             grant = re.search(rf"GRANT {role} TO amw_owner[^;]*SET TRUE", text)
@@ -40,6 +42,13 @@ def test_no_migration_after_l1a_changes_function_owner_without_set_grant_and_rev
             assert grant.start() < owner_stmts[0], path.name
             assert revoke, path.name
             assert revoke[-1].start() > owner_stmts[-1], path.name
+
+
+def test_the_breaker_admission_migration_regrants_and_revokes_set() -> None:
+    text = (MIGRATIONS[-1].parent / "0051_breaker_admit.sql").read_text(encoding="utf-8")
+    assert "GRANT amw_sysfn TO amw_owner WITH INHERIT FALSE, SET TRUE" in text
+    assert "GRANT amw_sysfn TO amw_owner WITH INHERIT FALSE, SET FALSE" in text
+    assert text.index("SET TRUE") < text.index("SET LOCAL ROLE amw_sysfn") < text.index("SET FALSE")
 
 
 def test_l1b_migrations_add_no_security_definer_without_pg_temp_last() -> None:
