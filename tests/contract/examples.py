@@ -184,6 +184,7 @@ def task_output(status: str = "SUCCEEDED") -> dict[str, Any]:
 
 def owner_topic() -> dict[str, Any]:
     return {
+        "schema_version": "1.0.0",
         "title": "RSI divergence on a weekly chart",
         "brief": None,
         "angle": "history only",
@@ -220,6 +221,7 @@ def gate_result(verdict: str = "FAIL", remedy: str | None = "s07_voice") -> dict
 
 def production_type(stages: list[dict[str, Any]]) -> dict[str, Any]:
     return {
+        "schema_version": "1.0.0",
         "key": "CHANNEL_LONG_FORM",
         "version": 2,
         "display_name": "Channel long-form (3A)",
