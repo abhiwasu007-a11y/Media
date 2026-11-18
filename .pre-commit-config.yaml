@@ -23,3 +23,9 @@ repos:
         language: system
         pass_filenames: false
         files: ^(tests/|pyproject\.toml)
+      - id: prompt-eval-lint
+        name: prompt and eval lint
+        entry: uv run python -m amw_evals lint --baseline scripts/docs_lint_baseline.json
+        language: system
+        pass_filenames: false
+        files: ^(docs/v4/(prompts|evals)/|scripts/docs_lint_baseline\.json)

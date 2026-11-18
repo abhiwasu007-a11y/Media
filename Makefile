@@ -16,8 +16,11 @@ test:
 markers:
 	uv run python scripts/check_markers.py
 
+evals:
+	uv run python -m amw_evals lint --baseline scripts/docs_lint_baseline.json --report docs-lint-report.md
+
 secrets:
 	uv run python scripts/secret_scan.py
 
 # Same gates as .github/workflows/ci.yml (docs/v4/27_ENGINEERING_STANDARDS.md section 5).
-ci: sync lint types markers test secrets
+ci: sync lint types markers test evals secrets
