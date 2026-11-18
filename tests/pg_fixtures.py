@@ -183,3 +183,29 @@ def insert_user(
         (new_uuid7(), tenant.org_uuid, user, role),
     )
     return user
+
+
+def insert_task(
+    conn: psycopg.Connection[tuple[Any, ...]],
+    tenant: Tenant,
+    job: uuid.UUID,
+    task_type: str = "agent_05.script_draft",
+) -> uuid.UUID:
+    """A PENDING task row inserted as the superuser (fixtures only)."""
+    task = new_uuid7()
+    conn.execute(
+        "INSERT INTO tasks (id, org_id, job_id, task_type, agent_id, priority, resource_class,"
+        " required_capabilities, idempotency_key, payload_schema, payload_schema_version,"
+        " resource_budget, max_attempts)"
+        " VALUES (%s, %s, %s, %s, %s, 2, 'AI_IO', ARRAY['llm'], %s, %s, '1.0.0', '{}'::jsonb, 3)",
+        (
+            task,
+            tenant.org_uuid,
+            job,
+            task_type,
+            task_type.split(".", 1)[0],
+            "idk_" + task.hex.ljust(64, "0"),
+            f"{task_type}.input",
+        ),
+    )
+    return task
