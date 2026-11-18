@@ -1,0 +1,8 @@
+# Package-local coverage config (the root config measures only amw_core and amw_evals).
+# Run: uv run pytest tests/agents/agent_08_visual_assets --cov --cov-config=packages/agents/agent_08_visual_assets/coveragerc --cov-fail-under=80
+[run]
+branch = True
+source = agent_08_visual_assets
+
+[report]
+show_missing = True

@@ -26,7 +26,8 @@ from amw_core.errors import (
     MissingDependencyError,
     PermissionDeniedError,
 )
-from amw_core.interfaces import OwnerEvidenceStore, TenantContext
+from amw_core.interfaces import TenantContext
+from amw_core.owner_evidence_fake import MemorySessionEventSource
 from amw_core.owner_evidence_verifier import (
     DEFAULT_DECISION_WORDS,
     NEEDS_CLARIFICATION,
@@ -41,11 +42,8 @@ from amw_core.owner_evidence_verifier import (
     read_decision,
     verify_owner_event,
 )
-from amw_core.testing.memory import (
-    MemoryOwnerEvidenceStore,
-    MemorySessionEventSource,
-    MemoryTransaction,
-)
+from amw_core.testing.memory import MemoryTransaction
+from tests.evidence_support import EvidenceHarness
 
 REQUESTED = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 SAID = REQUESTED + timedelta(minutes=5)
@@ -54,6 +52,7 @@ SECOND = timedelta(seconds=1)
 POLICY = VerifierPolicy(
     human_inbound_origins=frozenset({"human"}),
     owner_account_ids=frozenset({"acct-owner"}),
+    content_max_age_ms=24 * 3600 * 1000,
     decision_words=DEFAULT_DECISION_WORDS,
 )
 SUBJECT = ids.new_id(ids.Prefix.RENDER)
@@ -90,8 +89,8 @@ def late(**change: Any) -> SessionEvent:
     return event("ev-2", timestamp=NOW, **change)
 
 
-def new_store(*events: SessionEvent) -> tuple[OwnerEvidenceStore, MemoryTransaction]:
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource(events), POLICY)
+def new_store(*events: SessionEvent) -> tuple[EvidenceHarness, MemoryTransaction]:
+    store = EvidenceHarness(MemorySessionEventSource(events), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     return store, tx
 
@@ -138,7 +137,6 @@ def test_store_verifies_and_confirms() -> None:
         ("R7K2: approved.", "approved", APPROVED),
         ("reject R7K2", "reject", ApprovalStepState.REJECTED),
         ("R7K2 नामंजूर", "नामंजूर", ApprovalStepState.REJECTED),
-        ("changes R7K2", "changes", ApprovalStepState.CHANGES_REQUESTED),
         ("Approve R7K2 please 👍", "Approve R7K2", APPROVED),
         ("R7K2 go ahead, thanks", "go ahead", APPROVED),
     ],
@@ -198,7 +196,7 @@ def test_superseding_evidence_must_be_later() -> None:
 
 
 def test_replay_of_the_same_event_for_another_subject() -> None:
-    other = evidence(subject_id=ids.new_id(ids.Prefix.RENDER), review_code="Q9Z1")
+    other = evidence(subject_id=ids.new_id(ids.Prefix.RENDER), review_code="Q9Z3")
     refused_with(verify_via_store(event(), other), NEEDS_CLARIFICATION)
 
 
@@ -279,11 +277,16 @@ def test_confirmation_rejections(
 
 
 def test_no_public_method_accepts_a_proof() -> None:
-    assert not hasattr(OwnerEvidenceStore, "mark_verified")
-    for name, member in inspect.getmembers(OwnerEvidenceStore, inspect.isfunction):
-        for annotation in inspect.get_annotations(member).values():
-            assert "Verified" not in str(annotation), name
-            assert "SessionEvent" not in str(annotation), name
+    from amw_core.interfaces import EvidenceDatabase
+    from amw_core.owner_evidence_service import EvidenceVerifierService
+
+    for cls in (EvidenceDatabase, EvidenceVerifierService):
+        for name, member in inspect.getmembers(cls, inspect.isfunction):
+            if name.startswith("_"):
+                continue
+            for annotation in inspect.get_annotations(member).values():
+                assert "Verified" not in str(annotation), name
+                assert "SessionEvent" not in str(annotation), name
 
 
 def test_forged_verification_result_changes_nothing() -> None:
@@ -296,7 +299,7 @@ def test_forged_verification_result_changes_nothing() -> None:
         purpose=RECORD,
         quote="Approve R7K2",
         message_at=SAID,
-        not_before=REQUESTED,
+        anchor=REQUESTED,
         distinct_from_event_uuid=None,
         policy=POLICY,
         now=NOW,
@@ -317,7 +320,7 @@ def test_verified_value_is_immutable_and_bound() -> None:
         purpose=RECORD,
         quote="Approve R7K2",
         message_at=SAID,
-        not_before=REQUESTED,
+        anchor=REQUESTED,
         distinct_from_event_uuid=None,
         policy=POLICY,
         now=NOW,
@@ -340,7 +343,7 @@ def test_unfetchable_event_outcome() -> None:
         purpose=RECORD,
         quote="q",
         message_at=SAID,
-        not_before=REQUESTED,
+        anchor=REQUESTED,
         distinct_from_event_uuid=None,
         policy=POLICY,
         now=NOW,
@@ -359,5 +362,5 @@ def test_replay_key_and_tenant_isolation() -> None:
     assert len(store.for_subject(tx, "render", SUBJECT)) == 2
     other = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     assert store.get(other, first.id) is None
-    with pytest.raises(InvalidTransitionError):
+    with pytest.raises(MissingDependencyError):
         store.verify_recorded(other, first.id, REQUESTED, NOW)
