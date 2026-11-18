@@ -51,7 +51,7 @@ Doubt resolves to `NEEDS_HUMAN_REVIEW`, never to `ALLOWED` (13 §1.1.7). An LLM 
 ---
 
 ## 2 Functional requirements
-**MVP: per row · Tier 0.**
+**MVP: per row (3A / 3B / 3C in the last column) · Tier 0.**
 
 | ID | What | Why (source) | When / trigger | Inputs | Outputs | Dependants | MVP |
 |---|---|---|---|---|---|---|---|
@@ -66,7 +66,7 @@ Doubt resolves to `NEEDS_HUMAN_REVIEW`, never to `ALLOWED` (13 §1.1.7). An LLM 
 | FR-09 | Verify (read-only) the human records at `s16_auth`: every HUMAN `quality_scores` row, step decision, contribution and human compliance row has its `approval_channel` and a `CONFIRMED` `owner_instruction_evidence` row; HUMAN score rows bound to the current render hash only | §1A.7 human wins; 18 §9.3; R14, D5 | `s16_auth`; the rows are written by the operator tool through S7, never by Agent 16 | evidence rows, human rows | guard results G3, G4, G9a | authorisation | 3A |
 | FR-10 | Publication authorisation: final deterministic guard; in 3A authorises **delivery** | 24 §7.1 `s16_auth`; Q5; 13 §1.2; 3A_SLICE_SPEC §2.4, §4 | `s16_auth` after `a_final` | approval, steps, contributions, evidence records, verdicts, scores, render, licences | final verdict (`is_final`), `authorised_action`, earliest compliant publish date | Agent 13 (`s13_deliver` in 3A) | 3A (delivery); 3C (publish-time re-check FIN-R9, YTG-R8) |
 | FR-11 | Report data: every check row, the score breakdown (machine, human, used points per dimension), disclosure statement, disclaimer status ("DRAFT, not lawyer-approved", 3A R5), earliest compliant publish date (FIN-R9) | 3A_SLICE_SPEC §4 row 5; 18 §9.3 | end of `s16_score` and `s16_auth` | verdict and score rows | report section blob for the `qc_report` preset (24 §4, CCR-043) | Agent 13 bundle | 3A |
-| FR-12 | Raise human review items: every `NEEDS_HUMAN_REVIEW` verdict names the rule, the evidence and the approval kind to insert (`SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT`) | 24 §3.3.2 | end of `s16_comp`, `s02u_unique` | verdicts | `review_requests[]` in the payload | orchestrator → S7 | 3A |
+| FR-12 | Raise human review items: every `NEEDS_HUMAN_REVIEW` verdict names the rule, the evidence and the approval kind to insert (`SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT`) | 24 §3.3 rule 2 | end of `s16_comp`, `s02u_unique` | verdicts | `review_requests[]` in the payload | orchestrator → S7 | 3A |
 | FR-13 | Contribution quality guard: exact and near-duplicate of the channel's earlier contributions → WARNING shown to the approver | 13 §3.4 | `s16_auth` | contributions of the channel | `qc_results` `ytg.r4.contribution_repeat` (WARN) | owner | 3A (exact), 3B (near-duplicate threshold) |
 | FR-14 | Ad rule pack and sector packs (§1D.3): substantiation document per claim, releases for real persons/brands, sector packs by category, disclosure label by risk test, client final approval before delivery | §1D.3; 25_ADVERTISING_COMPLIANCE (planned) | `s16_comp` of `AD_SPOT`, `ECOMMERCE_PRODUCT` | claims with `substantiation_ref`, assets with `release_ref` | verdicts under `rp.advertising_asci_in`, `rp.ad_sector_<sector>` | client approval, delivery | 3C · Tier 1+ |
 | FR-15 | Tenant brand-safety pack, stub packs (health, kids, political/news) | §1C.7; 13 §6, §7 | as FR-03 | tenant pack | verdicts | — | 3C · Tier 1–2 |
@@ -104,7 +104,7 @@ flowchart TD
     U1["Load script, shot plan, thumbnails, template skeleton"] --> U2["Masked-structure identity (YTG-R1 c)"]
     U2 --> U3["Measures: template text share, section-role sequence, shot-type sequence"]
     U3 --> U4["Cross-video comparator (3C; 3A: SKIPPED / NEEDS_HUMAN_REVIEW)"]
-    U4 --> U5["Uniqueness report + qc_results uniq.*"]
+    U4 --> U5["Uniqueness report + qc_results a16.uniq.*"]
   end
   subgraph CG["agent_16.compliance_gate (s16_comp)"]
     C0["C0 PackLoader: union(profile, category), hash verify"] --> C1["C1 Deterministic rule checks (licence, FIN-R9 dates, disclaimer, persona, method release, assets)"]
@@ -183,7 +183,7 @@ Shared design rules (27 §4.2, 08 §5.3):
 | 14 | Overall verdict, final authorisation | code (§6.3, §6.5) | rule 5; Q5 |
 | 15 | `edit.promise_alignment`, `edit.hook.beat_content` | **LLM judge** (group G2 call) → check rows, `blocking: false` (18 §3) | meaning; a mismatch is a score matter, a misleading claim is a compliance matter (18 §9) |
 | 16 | `qc.watermark.visual`, `qc.visual.no_synthetic_presenter` judged part | **LLM judge (vision) on Agent 10's sampled frames**, combined by code with Agent 10's deterministic parts (`qc.watermark.provenance`, asset metadata) | needs meaning; Agent 10 has no model (agent_10 §226) |
-| 17 | G4 evidence consistency, G1–G14 | code | rule 5; the judge never sees approval state |
+| 17 | G4 evidence consistency, G0–G14 and G9a | code | rule 5; the judge never sees approval state |
 
 ### 6.2 Pre-filter (C2) — selects judge candidates (adds work, never clears)
 An item (script segment, on-screen text, thumbnail text, working title, description draft) is a candidate for rule set *R* when any holds:
@@ -220,7 +220,7 @@ Per rule *r* of an active pack (severity from the pack file):
 | V11 | YTG-R7: judge `VIOLATION` or `UNCERTAIN` (child-directed content on a channel without `rp.kids`) | `WARN` | `NEEDS_HUMAN_REVIEW` (13 §3.7: never `BLOCKED` by a judge, never `ALLOWED`; a video is declared made-for-kids only by a human approval) |
 | V12 | YTG-R9 paraphrase judge: `CLOSE_PARAPHRASE` ⇒ `FAIL`/`BLOCKED`; `UNCERTAIN` ⇒ `WARN`/`NEEDS_HUMAN_REVIEW`; `OWN_WORDS` ⇒ `PASS`/`ALLOWED`; a span the judge marks `is_quotation = true` (short quotation with attribution) is `NEEDS_HUMAN_REVIEW` (`COPYRIGHT_DOUBT`) **unless code finds an `APPROVED` `COPYRIGHT_DOUBT` approval for that span's hash backed by `CONFIRMED` evidence (G4 rules)**, then `ALLOWED`. The approval is applied by code after the judge; the model never sees approval state | as stated | as stated |
 | V13 | otherwise | `PASS` | `ALLOWED` |
-Rows are evaluated V1…V13 in order; the first matching row of the worst outcome applies, and no row can improve a verdict set by an earlier row (monotonic, P-01). Pack verdict = worst rule verdict (`BLOCKED` > `NEEDS_HUMAN_REVIEW` > `ALLOWED`). Overall gate verdict = worst pack verdict, also counting the S2 uniqueness verdict (YTG-R1 a/c) and the disclosure decision (`NEEDS_HUMAN_REVIEW` decision ⇒ overall at least `NEEDS_HUMAN_REVIEW`). A disclaimer never changes any other rule's verdict: rules are evaluated as if the disclaimer were absent (FIN-R10, IN-03). Tenant rules are evaluated after platform rules and can only add `BLOCKED`/`WARN` (13 §4).
+Every row is evaluated for each rule and item; the worst outcome among the matching rows applies, V13 applies only when no other row matched, and no row can improve a verdict set by another row (monotonic, P-01). Pack verdict = worst rule verdict (`BLOCKED` > `NEEDS_HUMAN_REVIEW` > `ALLOWED`). Overall gate verdict = worst pack verdict, also counting the S2 uniqueness verdict (YTG-R1 a/c) and the disclosure decision (`NEEDS_HUMAN_REVIEW` decision ⇒ overall at least `NEEDS_HUMAN_REVIEW`). A disclaimer never changes any other rule's verdict: rules are evaluated as if the disclaimer were absent (FIN-R10, IN-03). Tenant rules are evaluated after platform rules and can only add `BLOCKED`/`WARN` (13 §4).
 
 `claims.final_verdict` = the worst verdict of the rules evaluated on items containing the claim; never better than `claims.proposed_verdict` unless the deterministic evidence that cleared it is recorded (e.g. the claim was removed in a revision: then the claim belongs to an older script version and is not re-judged).
 
@@ -242,7 +242,7 @@ Agent 16 never trusts the recorder: it re-reads the rows and re-checks them. It 
 | G2 | every approval step `APPROVED`; `decided_by` is a human with an `ACTIVE` membership holding the step's `required_role`; `recorded_by` is that same `usr_` or `sys_operator`, never an `agent_NN` / `svc_sNN` | 04 §5.16 trigger |
 | G3 | ≥ 1 `editorial_contributions` row with `approval_id` = this approval (a contribution bound to an earlier, rejected approval does not count), type in GLOSSARY §6.16, `description` ≥ `editorial.min_description_chars` (20), contributor a human | YTG-R4; §1A.7; 04 §5.21 binding |
 | G4 | **R14 evidence for every human-originated record** used by this authorisation: each approval step decision, each contribution (G3), each HUMAN `quality_scores` row (G9, G9a) and each human `compliance_verdicts` row (NHR resolution or override, G5, G6). A record with a NULL or non-accepted `approval_channel` (3A accepts only `OWNER_CHAT_OPERATOR`, config `approvals.accepted_channels`) or without `evidence_id` ⇒ FAIL (a record outside this scope does not exist: G4 is not opt-in). The evidence row must satisfy **all** of: `state = CONFIRMED`; `source_kind = OWNER_CHAT_MESSAGE`; same `org_id`; `on_behalf_of` = the record's human; `subject_kind`/`subject_id` (and `approval_id`/`step_no`, `record_kind`) match the record; `review_code` = the approval's `review_code` where required; `parsed_decision` = the step's recorded state (a quote that says reject cannot back an `APPROVED` step); `message_at` later than `approvals.created_at`; `confirmation_message_at` later than `message_at`; `verifier_result` has every test passed; `evidence_sha256` recomputed from the stored columns equals the stored value; no second non-refused row with the same `(event_uuid, record_kind, subject_kind, subject_id)` (replay). Any other state (`PENDING_VERIFICATION`, `VERIFIED`, `REFUSED`) ⇒ FAIL. `WEB_DASHBOARD` (3C) is accepted only when the authenticated `usr_` session is the evidence (04 §5.16 human-row rule) | owner requirement R14, D5; CCR-010 |
-| G5 | latest `agent_16.compliance_gate` overall verdict for this render hash is `ALLOWED`, or every `NEEDS_HUMAN_REVIEW` item has a resolving human verdict row (`is_final = true`, `decided_by` a `usr_`, `evidence_id` per G4, bound to the same subject hash) | 13 §1.1.7; 24 §3.3.2 |
+| G5 | latest `agent_16.compliance_gate` overall verdict for this render hash is `ALLOWED`, or every `NEEDS_HUMAN_REVIEW` item has a resolving human verdict row (`is_final = true`, `decided_by` a `usr_`, `evidence_id` per G4, bound to the same subject hash) | 13 §1.1.7; 24 §3.3 rule 2 |
 | G6 | no `BLOCKED` verdict exists for the subject hash without a recorded human override (3C path; in 3A any `BLOCKED` fails this guard) | §1A.7; 13 §11.9 |
 | G7 | disclosure decision ∈ {`REQUIRED`, `NOT_REQUIRED`} (a `NEEDS_HUMAN_REVIEW` decision must have been resolved by a human verdict row per G5) | Agent 13 G4; 13 §3.3 |
 | G8 | render `status = QC_PASSED`; no `qc_results` row with `blocking = true` and `verdict = FAIL` for this render | 18 §9.1.4 |
@@ -1049,7 +1049,7 @@ The R14 operator recording component (`OwnerChatRecorder`), the session-event ve
 | F-12 | `QuoteVerifier.verify` | `(finding: Finding, item: TextItem) -> Finding` | none | — | exact substring after NFC only; else finding → UNCERTAIN | U-26 |
 | F-13 | `NearCopyChecker.check` | `(sentences, chunks: PrivateChunkReader, n: int) -> list[NearCopyResult]` | private storage reads | `PERMANENT.CROSS_TENANT_REF` | chunk must belong to org and channel collection | U-27, S-05 |
 | F-14 | `ParaphraseJudge.judge` | `(pairs: list[Pair], ctx) -> list[ParaphraseFinding]` | LLM calls (private worker only) | as F-11 | text never persisted; only IDs + scores | IT-04, EV |
-| F-15 | `VerdictAlgebra.combine` | `(det: list[RuleResult], findings, upstream_flags, uniq: UniquenessResult, disc: DisclosureResult, packs) -> GateDecision` | none (pure) | — | §6.3 V1–V9; monotonic | U-28…U-35, P-01 |
+| F-15 | `VerdictAlgebra.combine` | `(det: list[RuleResult], findings, upstream_flags, uniq: UniquenessResult, disc: DisclosureResult, packs) -> GateDecision` | none (pure) | — | §6.3 V1–V13; monotonic | U-28…U-35, U-84, U-85, P-01 |
 | F-16 | `VerdictWriter.write` | `(decision, subject, tx) -> list[VerdictId]` | INSERT `compliance_verdicts`, `qc_results`; UPDATE `claims.final_verdict`; evidence blob; `audit_log` | `TEMPORARY.DB_TRANSIENT`, `PERMANENT.IDEMPOTENCY_CONFLICT` | idempotency `db.output` (task, kind) | IT-05 |
 | F-17 | `UniquenessCheckStage.run` | `(ti, ctx) -> TaskOutput` | reads; `qc_results`; report blob; audit | §18 | §8.3 rule | U-36…U-40 |
 | F-18 | `DeterministicCriteria.score` | `(qc: list[QcRow], claims, script, thumbs, gate) -> list[CriterionScore]` | none | — | missing input ⇒ criterion 0 + finding, never full points | U-41…U-45 |
@@ -1223,6 +1223,7 @@ Safe defaults: an unparseable measure is never `PASS`; an unknown licence term o
 7. **Judge inputs carry one tenant only.** A judge batch is assembled from one task's inputs; the cached system prefix contains the system text and platform packs only, tenant packs follow the cache breakpoint (CCR-025; test S-03); cache keys are built with `amw_core.tenancy.cache_key()` (`amw:<org>:…`, GLOSSARY §2.4).
 8. **Private library text.** Chunk text for YTG-R9 is read only in the private worker from the org's channel-isolated collection (ADR-013); only chunk IDs and scores are written.
 9. **Logs and metrics** carry `org_id`; no content text (27 §7.3.6).
+   Tier 1+: the review-code lookup and every operator-tool read are scoped by `org_id` (`UNIQUE (org_id, review_code)`, RLS on `owner_instruction_evidence`); tenant rule-pack text is injected after the cache breakpoint and never enters a shared cached prefix (CCR-025; a 3C item for tenant packs).
 10. **Evidence and human rows** are read under the same context: an `owner_instruction_evidence` row of another org is invisible (RLS) and unusable (composite FK, G13); G4 also requires the evidence `org_id` = the record's `org_id` (SEC-R14-25).
 11. **Tests:** the 04 §3.7 suite for every table Agent 16 touches, plus S-01…S-06 (§21).
 
@@ -1234,7 +1235,7 @@ Safe defaults: an unparseable measure is never `PASS`; an unknown licence term o
 ### 19.3 R14 security rules (owner approval channel; D5, CCR-010; 04 §5.16, 03 §11.6 rule 6)
 The operator is an AI assistant, so **its own text is never evidence**. Evidence exists only as a row bound to the platform's own session event record, created and verified by code.
 1. **One path.** Owner decisions, scores and editorial contributions enter the factory only through the operator path (`sys_operator`, §23.3). No Agent 16, S2 or LLM component can create, alter or infer them; the human-row trigger (04 §5.16) rejects any `agent_NN` / `svc_sNN` writer on every channel.
-2. **Event-bound evidence.** The operator supplies only `session_id`, `event_uuid`, the record kind and the decision it read. Code fetches the event from the session event store and writes `quote` and `message_at` from it. The code check (04 §5.16) requires: the event exists; role `user`; not synthetic; inbound origin = the human user (not a peer session, a notification, a tool result, a scheduled message or a document, **and not a turn in a child or sub-agent session**); the sender is the owner's own account in the owner's own top-level session; `quote` is a verbatim substring of the owner-authored part of the content (a mobile reply-quote of the operator's own read-back counts only for the owner's own words); `message_at` equals the event time; the content holds the approval's `review_code` and a decision word that maps to `parsed_decision`; the event is later than `approvals.created_at`. A row whose event cannot be fetched stays `PENDING_VERIFICATION` and backs nothing; any other source is stored only as `REFUSED` with its `source_kind` (`TOOL_RESULT`, `SUBAGENT_MESSAGE`, `NOTIFICATION`, `DOCUMENT`).
+2. **Event-bound evidence.** The operator supplies only `session_id`, `event_uuid`, the record kind and the decision it read. Code fetches the event from the session event store and writes `quote` and `message_at` from it. The code check (04 §5.16) requires: the event exists; role `user`; not synthetic; inbound origin = the human user (not a peer session, a notification, a tool result, a scheduled message or a document, **and not a turn in a child or sub-agent session**); the sender is the owner's own account in the owner's own top-level session; `quote` is a verbatim substring of the owner-authored part of the content (a mobile reply-quote of the operator's own read-back counts only for the owner's own words); `message_at` equals the event time; the content holds the approval's `review_code` and a decision word that maps to `parsed_decision`; the event is later than `approvals.created_at`. A row whose event cannot be fetched stays `PENDING_VERIFICATION` and backs nothing; any other source is stored only as `REFUSED` with its `source_kind` (`TOOL_RESULT`, `SUBAGENT_MESSAGE`, `NOTIFICATION`, `DOCUMENT`). 04 §5.16 states the origin test as "human inbound origin"; the explicit sender test (the owner's own account, not another human in a shared channel) and session test (the owner's top-level session, not a child or sub-agent session) are this blueprint's reading of it, and the dataset and SEC-R14-09…11 assume them: 04 §5.16 should name them (contract need in the structured return).
 3. **One code, one approval.** `approvals.review_code` is unique per approval (derived from the approval ID, the subject hash and a nonce; 04 §5.16). Two pending approvals on the same render hash therefore have two codes; one message with one code decides exactly one approval.
 4. **No inference.** The operator never paraphrases, completes or infers a decision; an ambiguous message ("looks fine", no code, two codes with one verb) creates no record and the operator asks back in chat.
 5. **Two phases.** Record → echo to the owner → a **second** verified owner event (later, same checks) sets the confirmation fields and `state = CONFIRMED`. Only `CONFIRMED` evidence may back a record, and the approval stays `PENDING` until then. G4 refuses every other state.
@@ -1368,11 +1369,11 @@ Alerts: any `PERMANENT.CROSS_TENANT_REF` (L3 security); pack hash mismatch (L3 o
 ### 23.1 Approval points touching Agent 16
 | Point | Kind / workflow (24 §3.4) | Inserted by | Subject | Agent 16 role |
 |---|---|---|---|---|
-| NHR on a rule or disclosure | `SENSITIVE_CLAIM` (finance, disclosure doubt) or `COPYRIGHT_DOUBT` (YTG-R5/R6/R9, quotation) / `owner_sensitive` | orchestrator from `review_requests` | script or render hash | supplies rule, evidence, rationale; the human decision becomes a verdict row `is_final = true`, `decided_by` the owner (13 §1.1.7) |
+| NHR on a rule or disclosure | `SENSITIVE_CLAIM` (finance, disclosure doubt) or `COPYRIGHT_DOUBT` (YTG-R5/R6/R9, quotation) / `owner_sensitive` | orchestrator from `review_requests` | script or render hash | supplies rule, evidence, rationale; the human decision becomes a verdict row `is_final = true`, `decided_by` the owner, with `approval_channel` and a `CONFIRMED` `evidence_id` (13 §1.1.7; G4, G5) |
 | `a_final` | `FINAL_VIDEO` / `owner_one_tap`, ≥ 1 contribution (24 §3.4), human score | registry | render hash | none in the decision; checks it at G1–G4, G9 |
 | knowledge release | `KNOWLEDGE_RELEASE` / `owner_sensitive` | Agent 04 / owner | knowledge source | reads its state (FIN-R12) |
 | rule pack change, BLOCKED override | `POLICY_CHANGE` | Platform Owner | pack version | 3C; never FIN-R9/R13 without lawyer sign-off (13 §11.9 proposal ⚖) |
-A disclosure doubt uses `SENSITIVE_CLAIM` because 24 §3.3.2 offers only that kind and `COPYRIGHT_DOUBT`; REQUIRES REVIEW (Phase 1): integrator confirms (no new kind is created here).
+A disclosure doubt uses `SENSITIVE_CLAIM` because 24 §3.3 rule 2 offers only that kind and `COPYRIGHT_DOUBT` for a `NEEDS_HUMAN_REVIEW` verdict; no new kind is created here.
 
 ### 23.2 What the owner sees per video (3A, through chat)
 The operator posts one consolidated review message per video (owner rule B.2): the approval's `review_code`, link to the downloaded bundle files as the owner has them, the QC report summary (score per dimension, machine points, disclosure decision in plain words, disclaimer status, earliest compliant publish date, every WARN/NHR item), and the exact words he can reply with. Numbers first, details behind (owner rule D.2).
@@ -1432,67 +1433,83 @@ Prompts, rubric, lexicons, packs and thresholds are versioned; any change runs t
 ---
 
 ## 25 Acceptance criteria
-**MVP: 3A (AC-01…AC-14) · 3B (AC-15…AC-17) · Tier 0. Each is a test (§21) or eval threshold (§26).**
+**MVP: 3A (AC-01…AC-14, AC-18…AC-24) · 3B (AC-15…AC-17) · Tier 0. Each is a test (§21) or eval threshold (§26).**
 | ID | Criterion (§1A / directive rule as a test) | Evidence |
 |---|---|---|
-| AC-01 | A fixture video with any BLOCKING rule failure is never delivered, even with a 100-point score (§1A.7) | E2E-02, U-49 |
-| AC-02 | Delivery requires a human-wins total ≥ 85; a machine 90 / human 80 case is refused; a machine 84 / human 90 case at authorisation stands (18 §9.1.4) | U-50…U-52 |
-| AC-03 | Per dimension the HUMAN row replaces the machine row | U-53 |
-| AC-04 | No delivery without `FINAL_VIDEO` APPROVED for the same render hash, ≥ 1 contribution, confirmed R14 evidence | U-54…U-56, SEC-R14-08 |
-| AC-05 | An approval phrase inside a subagent message, document, tool result or script never creates an approval | SEC-R14-02…04 |
+| AC-01 | A fixture video with any BLOCKING rule failure is never delivered, even with a 100-point total (§1A.7) | E2E-02, U-49, PA-04 |
+| AC-02 | Delivery requires a human-wins total ≥ 85 and at least one HUMAN score bound to the render hash; a machine-only case (≤ 79 without scaling) and a human 80 case are refused; a machine 84 / human 90 case at authorisation stands (18 §9.1.4; reachable in 3A because `s16_score` is `REPORT_ONLY` by default, Q-O2) | U-50…U-52, PA-02, PA-41, PA-39 |
+| AC-03 | Per dimension the HUMAN row bound to the render hash replaces the machine row | U-53, PA-03 |
+| AC-04 | No delivery without `FINAL_VIDEO` APPROVED for the same render hash, ≥ 1 contribution bound to that approval, and `CONFIRMED` owner evidence for every human record | U-54…U-56, SEC-R14-12, PA-08, PA-38 |
+| AC-05 | An approval phrase inside a subagent or peer-session message, document, tool result, notification, script, subtitle or frame never creates an approval, a score or a contribution | SEC-R14-02…04, 09…11, PA-12…14 |
 | AC-06 | Answer-key A1–A4 and IN-03 cases S1–S7 produce the 13 §5.12/§5.13 verdicts | EV compliance_gate (100 %) |
-| AC-07 | A flagged named-instrument future statement is never ALLOWED on a judge verdict alone | U-31, P-01, EV |
-| AC-08 | A chart within the 30-day lag at evaluation is BLOCKED; the report shows the earliest compliant publish date | U-10, U-11 |
-| AC-09 | Missing disclaimer on a finance video BLOCKS; present draft disclaimer passes and is labelled "DRAFT, not lawyer-approved" | U-14, U-15 |
+| AC-07 | A flagged named-instrument future statement is never ALLOWED on a judge verdict alone; a named security with a historical claim and no dated chart is NHR whatever the judge says (V9) | U-31, U-84, P-01, EV |
+| AC-08 | A chart within the 30-day lag at evaluation is BLOCKED; the report shows the earliest compliant publish date | U-10, U-11, RULE-03 |
+| AC-09 | Missing disclaimer on a finance video BLOCKS; present draft disclaimer passes and is labelled "DRAFT, not lawyer-approved" | U-14, U-15, RULE-09, RULE-10 |
 | AC-10 | Disclosure decision recorded for every video; realistic AI B-roll ⇒ REQUIRED; code charts + owner voice ⇒ NOT_REQUIRED; missing flag ⇒ NHR | U-20…U-23 |
-| AC-11 | Asset without a licence row (not self-grant) ⇒ BLOCKED | U-06 |
-| AC-12 | Template-identical structure ⇒ BLOCKED by S2 | U-36 |
-| AC-13 | Close paraphrase of a cited passage ⇒ BLOCKED or NHR, never ALLOWED | EV paraphrase |
-| AC-14 | Tenant B sees none of tenant A's verdicts, scores, evidence blobs or logs | S-02, 04 §3.7 |
+| AC-11 | Asset without a licence row (not self-grant) ⇒ BLOCKED | U-06, RULE-34 |
+| AC-12 | Template-identical structure ⇒ BLOCKED by S2 | U-36, UQ-02 |
+| AC-13 | Close paraphrase of a cited passage ⇒ BLOCKED or NHR, never ALLOWED; a quotation is cleared only by an `APPROVED` `COPYRIGHT_DOUBT` approval with `CONFIRMED` evidence, applied by code | EV paraphrase, U-81, U-82 |
+| AC-14 | Tenant B sees none of tenant A's verdicts, scores, evidence rows, blobs or logs | S-02, 04 §3.7, SEC-R14-25 |
 | AC-15 | 3B: all three golden samples pass authorisation with owner scores ≥ 85 and no BLOCKED | 18 §11 exit |
 | AC-16 | 3B: judge thresholds of §26 met at the tier chosen (cheapest that passes, ADR-007) | eval run records |
 | AC-17 | 3B: machine–human gap per dimension within the target set by the owner | calibration table |
+| AC-18 | Every `validation_results` row of a gate stage uses `gate: true` with `remedy_stage_id` only from the input `routing`; `a16.out.*` rows are `gate: false`; a BLOCKED gate task is `SUCCEEDED` | C-03…C-05 |
+| AC-19 | A presenter or watermark finding from the frames judge never yields `BLOCKED` alone; an unreadable frame is never `NONE_FOUND` | U-68…U-70, EV frames |
+| AC-20 | Child-directed content on a channel without `rp.kids` is never ALLOWED without a human decision (YTG-R7) | EV compliance_gate (EDGE-K7-*), U-85 |
+| AC-21 | `quality.score_gate.mode = BLOCKING` with `quality.machine_scaling = NONE` is refused at startup | U-83 |
+| AC-22 | A human record without `approval_channel` or evidence fails G4 on every record kind (step, contribution, HUMAN score, human verdict) | PA-10, PA-32…34 |
+| AC-23 | `edit.promise_alignment` and `edit.hook.beat_content` are emitted as non-blocking judged check rows under the 18 IDs | EV quality_score (AK-25, EDGE-26, EDGE-27), IT-06 |
+| AC-24 | Two pending approvals on one render have different review codes; a message with one code decides one approval | SEC-R14-22, PA-37 |
 
 ---
 
 ## 26 Prompt and evaluation pack
 **MVP: 3A (prompts v1 + datasets v1) · 3B (calibration subset with owner labels; thresholds recalibrated) · Tier 0.**
 
-### 26.1 Prompt files (27 §4; template `prompts/_TEMPLATE.v1.md`)
+### 26.1 Prompt files (27 §4; template `prompts/_TEMPLATE.v1.md`; `python -m amw_evals lint --root docs/v4` is the CI check)
 | Prompt ID | File | Status |
 |---|---|---|
 | `agent_16/compliance_gate.v1` | `prompts/agent_16_compliance_qa/compliance_gate.v1.md` | Draft |
 | `agent_16/compliance_gate_paraphrase.v1` | `prompts/agent_16_compliance_qa/compliance_gate_paraphrase.v1.md` | Draft |
+| `agent_16/compliance_gate_frames.v1` | `prompts/agent_16_compliance_qa/compliance_gate_frames.v1.md` | Draft |
 | `agent_16/quality_score.v1` | `prompts/agent_16_compliance_qa/quality_score.v1.md` | Draft |
 
 ### 26.2 Golden datasets
 | Dataset | Path | Cases | Kind | Key thresholds (README of each) |
 |---|---|---|---|---|
-| Policy judge + verdict algebra | `evals/agent_16_compliance_qa/compliance_gate/` | 103 (A1–A4, S1–S7, the IN-03 order wording as a hard negative, 10 per judged rule incl. ≥ 1 near-miss ALLOWED for R1, R2, R3, R13, Marathi and English sets, injection, refusal) | LLM + deterministic post-check | answer-key + IN-03 100 %; false ALLOWED 0; overall ≥ 0.90; false BLOCKED on hard negatives ≤ 10 % |
-| Close paraphrase | `evals/agent_16_compliance_qa/compliance_gate_paraphrase/` | 24 (synthetic passages only; no book text) | LLM + deterministic | false ALLOWED on copy/paraphrase cases 0; overall ≥ 0.90 |
-| Quality judge | `evals/agent_16_compliance_qa/quality_score/` | 24 | LLM, score bands | ≥ 0.85 of cases inside their band; anchors 100 %; injection cases 100 % |
-| Publication authorisation (deterministic) | `evals/agent_16_compliance_qa/publication_authorisation/` | 28 incl. R14 negatives | deterministic | 100 % |
+| Policy judge + verdict algebra | `evals/agent_16_compliance_qa/compliance_gate/` | 112 (A1–A4, S1–S7 with S1/S4 asserting R13 + R3 and S2 asserting R6, the IN-03 order wording as a hard negative, 10 per judged rule incl. ≥ 1 near-miss ALLOWED for R1, R2, R3, R13, YTG-R7 and V9 cases, Marathi and English sets, injection, refusal) | LLM + deterministic post-check | answer-key + IN-03 100 %; false ALLOWED 0; overall ≥ 0.90; false BLOCKED on hard negatives ≤ 10 % |
+| Close paraphrase | `evals/agent_16_compliance_qa/compliance_gate_paraphrase/` | 26 (synthetic passages only; no book text; quotation path with approval fixtures) | LLM + deterministic | false ALLOWED on copy/paraphrase cases 0; overall ≥ 0.90 |
+| Frames judge (watermark, synthetic presenter) | `evals/agent_16_compliance_qa/compliance_gate_frames/` | 25 (frame descriptions as stand-ins) | LLM (vision) + deterministic | answer-key 100 %; false clean 0; overall ≥ 0.90 |
+| Quality judge | `evals/agent_16_compliance_qa/quality_score/` | 29 (incl. the judged edit checks) | LLM, score bands | ≥ 0.85 of cases inside their band; anchors 100 %; injection cases 100 % |
+| Publication authorisation (deterministic) | `evals/agent_16_compliance_qa/publication_authorisation/` | 43 incl. 18 R14 / human-record negatives | deterministic | 100 % |
 | Uniqueness check (deterministic) | `evals/agent_16_compliance_qa/uniqueness_check/` | 20 | deterministic | 100 % |
+| Deterministic rule checks | `evals/agent_16_compliance_qa/compliance_rules_core/` | 39 (FIN-R4, R9, R10, R12, persona, YTG-R5/R6) | deterministic | 100 % |
+Case IDs follow evals/README.md §2: category prefixes in the LLM datasets, component prefixes `PA-`, `UQ-`, `RULE-` in the deterministic ones (declared in each README, 27 §6.1). Every LLM case input validates against the step schema defined in its prompt file; the fixture schemas of the deterministic datasets are in their READMEs.
 
 ### 26.3 Deterministic checks wrapped around every LLM step
-D-1 schema validity (Pydantic = prompt schema); D-2 local IDs exist in the input; D-3 quote is an exact substring (else UNCERTAIN); D-4 rule IDs ⊆ rules sent; D-5 verdict computed by the algebra, never taken from the model; D-6 integer scores within 0–max; D-7 refusal ⇒ no findings/scores; D-8 injection items reported, never obeyed; D-9 no finding for a rule whose pack is inactive.
+D-1 schema validity (Pydantic = prompt schema); D-2 local IDs exist in the input; D-3 quote is an exact substring (else UNCERTAIN); D-4 rule IDs ⊆ rules sent; D-5 verdict computed by the algebra, never taken from the model; D-6 integer scores within 0–max (judged-check element scores 0–2); D-7 refusal ⇒ no findings/scores; D-8 injection items reported, never obeyed (and counted, §19.3 rule 9); D-9 no finding for a rule whose pack is inactive; D-10 a quotation (`is_quotation = true`) is cleared only by code from approval rows (V12), the paraphrase step has no approval field in its input or output; D-11 frame IDs exist and `NOT_EVALUATED` is never mapped to a clean result; D-12 a vision finding never produces `BLOCKED`.
 
 ### 26.4 Judge rubric and evaluation judge
-Each dataset has a `rubric.md`. Verdicts are always deterministic assertions; the evaluation judge scores only rationale quality and evidence precision (integer 1–5). The evaluation-judge prompts (`agent_16/compliance_gate_judge.v1`, `agent_16/quality_score_judge.v1`) are written with the first eval run (3A build ticket 3A-12) and regression-tested against a human-labelled calibration subset; REQUIRES REVIEW (Phase 1): the 3B owner-labelled subset.
+Each dataset has a `rubric.md`. Verdicts are always deterministic assertions; the evaluation judge scores only rationale quality and evidence precision (integer 1–5). The evaluation-judge prompts (`agent_16/compliance_gate_judge.v1`, which also covers the paraphrase and frames datasets, and `agent_16/quality_score_judge.v1`) are written with the first eval run (3A build ticket 3A-12) and regression-tested against a human-labelled calibration subset; REQUIRES REVIEW (Phase 1): the 3B owner-labelled subset.
 
 ### 26.5 Run records
-27 §6.4 fields for every case; cost and latency mandatory; eval spend counts against the pilot budget (09 §8.7) under `evals.max_run_cost_micros` (owner-set, rule 8).
+27 §6.4 fields for every case; cost and latency mandatory; eval spend counts against the pilot budget (09 §8.7) under `evals.max_run_cost_micros` (owner-set, rule 8). No eval run makes a paid call before the owner has set the budgets and limits and supplied keys through the secret mechanism (D8 rule 3).
 
 ---
 
 ## Appendix A — Open items
 | # | Item | Blocks |
 |---|---|---|
-| OI-1 | Pro-rata machine scaling (§6.6.2) — owner/18 confirmation | 3A design (score gate passability) |
-| OI-2 | `s16_score` blocking before judge calibration vs 18 §9.1.4 human-wins (§6.6.6) | 3B procedure |
+| OI-1 | Owner question Q-O2 (a): machine scaling. Default `NONE` (machine total ≤ 79, the owner's HUMAN rows complete it, G9a requires one); owner option `PRO_RATA` with SKIPPED criteria out of both sums (§6.6.2); whether an unscored video may pass | 3A design (score gate passability); G9a default |
+| OI-2 | Owner question Q-O2 (b): `s16_score` blocking before judge calibration. Default `quality.score_gate.mode = REPORT_ONLY` (stage registered blocking in 24 §7.1a; result `WARN`, `blocking: false`, precondition "not calibrated"); `BLOCKING` needs scaling or a calibrated threshold | 3B procedure |
 | OI-3 | YTG-R1 (b) "no recorded human contribution" cannot be evaluated at `s02u_unique` (the contribution is recorded later at `a_final`); this blueprint evaluates it at authorisation (G3) — 3A_SLICE_SPEC §2.4 wording to align | none (rule still enforced before delivery) |
-| OI-4 | Decision lexicon and score message template for R14 (owner) | 3A-13 |
+| OI-4 | Decision words (`approvals.owner_chat.decision_words.<lang>`) and the score message template for R14 (owner) | 3A-13 |
 | OI-5 | Uniqueness, near-copy, paraphrase thresholds (13 §15; 3A R7) | none (WARN/NHR until 3B) |
-| OI-6 | Pre-filter lexicons for Marathi/Hindi (owner confirmation) | 3B |
-| OI-7 | Licensed music source before 3B (owner decision; no purchase without the owner, rule 8): music-bed criteria are `SKIPPED` in 3A; golden samples should not be judged without a music bed | 3B entry |
+| OI-6 | Pre-filter lexicons for Marathi/Hindi, incl. the child-directed markers of YTG-R7 (owner confirmation) | 3B |
+| OI-7 | Licensed music source (D6; no purchase without the owner, rule 8): music-bed criteria are `SKIPPED` in 3A technical runs; golden samples are not judged without a music bed | 3B entry |
 | OI-8 | Disclaimer text, lag counting, realism boundary (⚖, 13 §14) | publish (3C) |
+| OI-9 | Frame-sampling procedure (count, spacing) for the frames judge and the watermark method (18 §7.10, §2.3); `compliance.watermark_visual.calibrated` stays false until the owner sets it | 3B |
+| OI-10 | Channel `audience_kind` record (13 §3.7) has no column in 04: the deterministic part of YTG-R7 waits for it; 3A uses the judge and the lexicon only (contract need in the structured return) | none for 3A |
+| OI-11 | Source of `audience_level` for the quality judge (not in `amw.owner_topic`); default from config `quality.judge.default_audience_level` | 3B calibration |
+| OI-12 | Two-step `owner_sensitive` approvals need two owner messages under the 04 replay key; one message for both steps would change the key (contract request, owner decision) | none (default: two messages) |
+| OI-13 | 18 §9.1.3 "the score is still computed for diagnosis" on a BLOCKED gate: the graph never runs `s16_score` after a blocked `s16_comp`; the report says "score not computed" (§6.6.6) | none |
