@@ -106,7 +106,7 @@ FFmpeg / ffprobe are local tools of the render worker (INF-09), not paid adapter
 | 13 | `agent_13.file_delivery`, **the only Agent 13 piece in 3A** |
 
 Limits on the 16 gates in 3A, all taken from 13:
-- `svc_s02.uniqueness_check` runs the deterministic part (c) and records its measures; YTG-R1 (b) "no recorded human contribution" is enforced at `s16_auth` (the publish guard, 04 §5.21), not at `s02u_unique` (CCR-082). The cross-video part records `SKIPPED`, because there are no prior videos on the channel (13 §3.1, §13).
+- `svc_s02.uniqueness_check` runs the deterministic part (c) and records its measures; YTG-R1 (b) "no recorded human contribution" is enforced at `s16_auth` by Agent 16's guard G3 (`a16.auth.g3.contribution`: a contribution bound to the approval) and again by the publish guard (04 §5.21) when a publication is written, not at `s02u_unique` (CCR-082). The cross-video part records `SKIPPED`, because there are no prior videos on the channel (13 §3.1, §13).
 - `agent_16.publication_authorisation`: the re-run of date checks at the real publish time (FIN-R9) is 3C (13 §1.2).
 - Task types **not** used in 3A: `agent_02.*`, `agent_03.*`, `agent_12.metadata`, `agent_13.upload_private`, `agent_13.publish`, `agent_13.verify_publication`, `agent_14.*`, `agent_17.*`, `svc_s03.*`.
 

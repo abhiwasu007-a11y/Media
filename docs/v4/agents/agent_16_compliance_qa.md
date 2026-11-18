@@ -191,7 +191,7 @@ An item (script segment, on-screen text, thumbnail text, working title, descript
 | Signal | Rules |
 |---|---|
 | Agent 06 `rule_flags` on a claim inside the item (any severity) | the flagged rule IDs |
-| claim type `RECOMMENDATION`, `FORWARD_VIEW`, `PRICE_LEVEL`, `PERFORMANCE_CLAIM`, `TESTIMONIAL`, `PROMOTION` | R1, R3/R13, R2, R6, R7, R8 |
+| claim type `RECOMMENDATION`, `FORWARD_VIEW`, `PRICE_LEVEL`, `PERFORMANCE_CLAIM`, `TESTIMONIAL`, `PROMOTION`, `HYPOTHETICAL_EXAMPLE` (CCR-109) | R1, R3/R13, R2, R6, R7, R8, R6 |
 | named instrument (channel instrument lexicon + chart `instrument`) **and** a future/modal/expectation marker (lexicon per language; 13 §5.4 list: "will", "should", "likely to", "target", "next move", "again", "repeat", "same setup now" and the Marathi/Hindi equivalents in config `compliance.prefilter.lexicon.<lang>`) | R3, R13 |
 | imperative trade verb (buy/sell/hold/enter/exit/add/accumulate/avoid/go long/short, per language) | R1 |
 | number adjacent to an instrument, strike, "target", "stop" | R2 |
@@ -432,7 +432,7 @@ Timing: `s16_auth` starts only after the approval is final (T15), and a step dec
 ```
 
 ### 7.4 `agent_16.quality_score.input` 1.0.0
-`frames_ref` (here and in §7.2) is the one evidence manifest Agent 10 writes, `agent_10.evidence_manifest` 1.0.0 (agent_10 §8.3a, its `evidence.manifest_ref`; CCR-097 registers the document, lane 10 published it under this name): `render_id`, `render_sha256`, `frames[] {frame_id, frame_index, t_ms, shot_id, uri, sha256}`, `contact_sheet {uri, sha256}`, `overlays[]`. Agent 16 reads frames only through it: `render_sha256` must equal `subject.render_sha256` (`PERMANENT.INPUT_INVALID`), every `frames[].sha256` must equal the stored blob (`AGENT.CORRUPTED_OUTPUT`), and the judges cite the manifest's own `frame_id` values. `metadata_ref` is null in 3A.
+`frames_ref` (here and in §7.2) is the one evidence manifest Agent 10 writes, `agent_10.evidence_manifest` 1.0.0 (agent_10 §8.3a, its `evidence.manifest_ref`; CCR-097 registers the document; CCR-112 makes this name the contract name): `render_id`, `render_sha256`, `frames[] {frame_id, frame_index, t_ms, shot_id, uri, sha256}`, `contact_sheet {uri, sha256}`, `overlays[]`. Agent 16 reads frames only through it: `render_sha256` must equal `subject.render_sha256` (`PERMANENT.INPUT_INVALID`), every `frames[].sha256` must equal the stored blob (`AGENT.CORRUPTED_OUTPUT`), and the judges cite the manifest's own `frame_id` values. `metadata_ref` is null in 3A.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -137,6 +137,7 @@ Key = `(provider, operation_class, credential_scope)` in `circuit_breakers` (04 
 | `open_ms_max` | 900,000 | ceiling for repeated openings |
 | `half_open_max_probes` | 1 | concurrent trial calls allowed in `HALF_OPEN` |
 | `half_open_successes_to_close` | 2 | consecutive probe successes to close |
+| `half_open_probe_timeout_ms` (CCR-108) | — (no default; unset ⇒ `amw_breaker_admit` is refused, `PERMANENT.CONFIG_INVALID`) | lease of an admitted probe: after it, an unreported probe's slot is reclaimed so a crashed worker cannot wedge `HALF_OPEN`. Value and a server-side upper bound **REQUIRES REVIEW (Phase 1): measure the slowest legitimate call per operation class** |
 
 Counted failures: codes marked "Breaker counts: yes" in §2 only. Client-side errors (`PERMANENT.*`) never count, so bad input cannot open a breaker.
 
@@ -146,7 +147,8 @@ Counted failures: codes marked "Breaker counts: yes" in §2 only. Client-side er
 | `CLOSED` | `OPEN` | `window_calls ≥ min_calls` and ratio ≥ `failure_ratio`, or `consecutive_failures` reached | `opened_at = now`, `open_until = now + min(open_ms × 2^open_count, open_ms_max)`, `open_count += 1`; S8 alert (L1 info) |
 | `OPEN` | `HALF_OPEN` | first check with `now ≥ open_until` | allow up to `half_open_max_probes` calls |
 | `HALF_OPEN` | `CLOSED` | `half_open_successes_to_close` consecutive probe successes | reset window counters and `open_count = 0` |
-| `HALF_OPEN` | `OPEN` | any counted failure of a probe | reopen with the doubled duration |
+| `HALF_OPEN` | `OPEN` | any counted failure of a probe | reopen with the doubled duration; the first `opened_at` is kept |
+Admission and probes (CCR-108): every call is admitted by `amw_breaker_admit` (04 §3.6) under a row lock, so concurrent workers cannot over-admit: `OPEN` before `open_until` rejects; the first check at or after it moves the row to `HALF_OPEN`; `HALF_OPEN` admits while `half_open_in_flight < half_open_max_probes` and counts the probe; the call returns the probe `epoch`. `amw_breaker_record` (a) frees the probe slot of every finished `HALF_OPEN` probe, an uncounted failure included; (b) ignores the result of a call admitted while `CLOSED` (`probe = false`) for slots and closing; (c) ignores a probe result whose epoch is older than the row's; (d) resets the window and the in-flight count on every open and close. Probes unreported after `half_open_probe_timeout_ms` are reclaimed (epoch + 1).
 While `OPEN`, the adapter rejects calls without network I/O (`INFRASTRUCTURE.CIRCUIT_OPEN`, no attempt consumed). If configuration names a fallback adapter for the operation and the stage's quality gate permits it, the adapter uses the fallback inside the same attempt and records the provider used in `cost_ledger` (§3.3 AI providers). An `OPEN` state lasting longer than `open_ms_max` in total escalates to L2. Breaker transitions are logged and audited (platform owner org's chain for platform credentials; the tenant's chain for tenant credentials).
 
 ## 5. Dead-letter queue and controlled manual replay
@@ -209,6 +211,7 @@ L3 routing: security (`CROSS_TENANT_REF`, `TENANT_MISMATCH`, `PERMISSION_DENIED`
 | `limits.max_replays_per_item` | 3 | T17 guard | replay refused; L3 |
 | `resource_budget.max_llm_calls` | per task type (agent blueprint) | adapter | FAIL `AGENT.LOOP_CAP_EXCEEDED` |
 | `resource_budget.max_cost_micros` | per task type | adapter + S4 reservation | SUSPEND `AWAITING_BUDGET` |
+| `PER_VIDEO` / `PER_JOB` budget cap (CCR-107) | owner-set `limit_minor` (09 §3.1) | S4 E1/E2, per job | that job's new paid tasks wait `AWAITING_BUDGET` and its over-cap calls are refused; the budget row stays `ACTIVE`; audit `budget.job_cap_reached` |
 | `limits.max_job_active_ms` (excludes `CHECKPOINTED` time) | 86,400,000 | reaper | L2, then L3 |
 | `caps.lock_conflict_reevaluations` | 5 per transition | state machine | FAIL `PERMANENT.INVALID_TRANSITION` |
 | LLM self-repair | 1 retry with the validation error | `agent_parse` policy | DLQ |

@@ -92,13 +92,15 @@ Some platform processes must find work before they know its tenant. They use `SE
 
 | Function | Caller | Returns |
 |---|---|---|
-| `amw_queue_claim(worker_id, capabilities[], resource_classes[], n)` | worker | up to *n* `(queue item id, org_id, task_id, envelope)`, claimed with `FOR UPDATE SKIP LOCKED` (§1), ordered by the fair-share rule of 05 |
+| `amw_queue_claim(worker_id, capabilities[], resource_classes[], n, queue_names[], lease_ms)` (CCR-117: as built) | worker | up to *n* `(queue item id, org_id, task_id, envelope)`, claimed with `FOR UPDATE SKIP LOCKED` (§1), ordered by the fair-share rule of 05, each with a lease of `lease_ms` |
+| `amw_queue_heartbeat(queue_item_id, worker_id, lease_ms)` (CCR-117) | worker | new `lease_expires_at` of an item the worker still holds (`status = CLAIMED`, `claimed_by` = worker, lease not expired); NULL = the lease is lost |
 | `amw_due_retries(limit)` | scheduler | `(org_id, task_id)` in `RETRY_WAIT` with `next_attempt_at ≤ now()` |
 | `amw_due_resumes(limit)` | scheduler | `(org_id, task_id, wait_reason)` in `CHECKPOINTED` whose condition may have cleared |
 | `amw_expired_leases(limit)` | reaper | `(org_id, task_id, queue item id)` with `lease_expires_at < now()` |
-| `amw_stuck_tasks(limit)` | reaper | `(org_id, task_id, state)` past the dwell limits of 07 §6 |
+| `amw_stuck_tasks(limit, validating_ms, failed_without_dlq_ms)` (CCR-117) | reaper | `(org_id, task_id, state)` past the dwell limits of 07 §6 |
 | `amw_quota_reserve(gcp_project_id, bucket, units)` / `amw_quota_release(…)` | publish worker | `ok` / `exhausted` for the PT day (§5.20) |
-| `amw_breaker_record(provider, operation_class, credential_scope, outcome)` | adapters | new breaker state (§5.8) |
+| `amw_breaker_admit(provider, operation_class, credential_scope, half_open_max_probes, probe_timeout_ms)` (CCR-108) | adapters | `(admitted, state, open_until, epoch)` under a row lock (§5.8, 07 §4.3); EXECUTE `amw_app`, `amw_publisher` |
+| `amw_breaker_record(provider, operation_class, credential_scope, succeeded, counted, error_code, window_ms, min_calls, failure_ratio, consecutive_failures, open_ms, open_ms_max, half_open_successes_to_close, probe DEFAULT NULL, probe_epoch DEFAULT NULL)` (CCR-108/117: the 07 §4.2 configuration is passed by the caller, the function holds none) | adapters | new breaker state `(state, open_until)` (§5.8, 07 §4.3) |
 | `amw_platform_ops_summary()` (T1) | S8 platform-owner view | per-org aggregates only: queue depth, job counts by state, cost totals, DLQ counts — no content |
 
 Every call is logged with the caller's actor; `amw_platform_ops_summary` calls are audited.
@@ -110,7 +112,7 @@ Every call is logged with the caller's actor; `amw_platform_ops_summary` calls a
 | `amw_evidence_mark_confirmed(evidence_id, confirmation_event_uuid, confirmation_quote, confirmation_message_at, verifier_result)` | `amw_verifier` | requires `session_user = 'amw_verifier'`, `state = 'VERIFIED'` and a valid MAC; sets `CONFIRMED`, the confirmation fields and a new `evidence_mac` over the fields incl. the confirmation |
 | `amw_evidence_refuse(evidence_id, reason, verifier_result)` | `amw_verifier` | `PENDING_VERIFICATION`/`VERIFIED` → `REFUSED` |
 | `amw_evidence_mac_valid(evidence_id) → boolean` | `amw_app`, `amw_operator`, `amw_verifier` (read-only check) | recomputes the HMAC with the stored key version and compares; never returns the key |
-| `amw_human_record_apply(evidence_id)` | `amw_operator` | requires `session_user = 'amw_operator'`, a `CONFIRMED` evidence with a valid MAC; writes exactly the one human row the evidence names (step decision; contribution; HUMAN score rows from `claimed_scores`; for a `SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT` step also the human `compliance_verdicts` row, §5.17) with `approval_channel = 'OWNER_CHAT_OPERATOR'`, `recorded_by = 'sys_operator'`, `evidence_id` |
+| `amw_human_record_apply(evidence_id, contribution_type DEFAULT NULL, description DEFAULT NULL, rubric_version DEFAULT NULL)` (CCR-104: the three optional arguments carry what the evidence row does not hold; `description` must be a verbatim substring of the quote) | `amw_operator` | requires `session_user = 'amw_operator'`, a `CONFIRMED` evidence with a valid MAC and, for a step decision, `approvals.state = 'PENDING'`; writes exactly the one human row the evidence names (step decision; contribution; HUMAN score rows from `claimed_scores`; for a `SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT` step also the human `compliance_verdicts` row, §5.17; for an `APPROVED` final step of a `NEW_CHANNEL` approval also `channels.audience_kind` from its subject document, §5.1, CCR-114) with `approval_channel = 'OWNER_CHAT_OPERATOR'`, `recorded_by = 'sys_operator'`, `evidence_id` |
 `evidence_mac_keys` (`version int`, `key bytea`, `created_at`, `retired_at`): no grant to any role; the key is loaded from the environment's secret mechanism by the migrator at setup and rotated by adding a version. HMAC uses PostgreSQL's `pgcrypto` `hmac()` — **REQUIRES REVIEW (Phase 1): record the `pgcrypto` documentation for the pinned PostgreSQL version in RESEARCH_LOG**. Tests (blocking, `tests/tenancy` and `tests/security`): `amw_app` and `amw_operator` cannot update evidence, cannot insert evidence in `VERIFIED`/`CONFIRMED`, cannot insert any human row directly, cannot read `evidence_mac_keys`; a row with a forged `evidence_mac` fails `amw_evidence_mac_valid`.
 
 ### 3.7 Cross-tenant test requirement (blocking CI gate)
@@ -251,7 +253,7 @@ Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, name)`.
 | gcp_project_id | uuid | yes | FK → gcp_projects |
 | status | enum(channel_status) | no | |
 | production_window | jsonb | yes | T1+ per-tenant window on a dedicated server (06) |
-| audience_kind | enum(audience_kind) | yes | CCR-081: the channel-setup decision of 13 §3.7 (YTG-R7), set only by a human; NULL = not decided ⇒ YTG-R7 is `NEEDS_HUMAN_REVIEW` |
+| audience_kind | enum(audience_kind) | yes | CCR-081: the channel-setup decision of 13 §3.7 (YTG-R7), set only by a human; NULL = not decided ⇒ YTG-R7 is `NEEDS_HUMAN_REVIEW`. Write path (CCR-114, human-row rule of §5.16): a `NEW_CHANNEL` approval with `subject_kind = 'channel'`, `subject_id` = the channel and `subject_ref` / `subject_sha256` = the canonical JSON `{"channel_id": …, "audience_kind": …}`; when its final step is decided `APPROVED` (`DECISION` evidence, `CONFIRMED`, valid MAC), `amw_human_record_apply` sets the column from that document in the same transaction; a trigger refuses any other change of the column (`current_user` must be `amw_verifier_fn`) |
 | connected_at | timestamptz | yes | |
 Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, platform, external_channel_id)`. Index `(org_id, workspace_id)`.
 
@@ -577,8 +579,10 @@ Index `(org_id, recovery_status, created_at)`.
 | opened_at / open_until | timestamptz | yes | |
 | open_count | int | no | consecutive openings (for back-off of the open duration) |
 | half_open_in_flight | int | no | |
+| half_open_probe_until | timestamptz | yes | CCR-108: lease end of the admitted probes; once passed, unreported probes are reclaimed |
+| half_open_epoch | bigint | no | CCR-108: probe generation, default 0; +1 on every open, close, `OPEN` → `HALF_OPEN` and probe reclaim; a probe result of an older epoch changes nothing |
 | last_error_code | text | yes | |
-Keys: `UNIQUE (provider, operation_class, credential_scope)`. Updated only via `amw_breaker_record` (§3.6). Rules: 07 §4.
+Keys: `UNIQUE (provider, operation_class, credential_scope)`. Updated only via `amw_breaker_admit` and `amw_breaker_record` (§3.6). Rules: 07 §4. `org_id` (CCR-118): NULL exactly when `credential_scope = 'platform'`; a `gcp_<wire id>` scope (3C) sets the owning tenant's `org_id` (CHECK added with the first tenant credential, 3C); in 3A every row is a platform row.
 
 ### 5.9 Idempotency
 
@@ -809,7 +813,7 @@ Rules: `amw_app` has `INSERT` only; a trigger rejects `UPDATE`/`DELETE` for ever
 | chars_in / language | int / text | yes | CCR-037: input characters and BCP 47 language of an LLM/TTS call, for the measured Devanagari token ratio (ADR-007 §2.9) |
 | amount_micros | bigint | no | ≥ 0 |
 | currency | char(3) | no | |
-| fx_rate / fx_source | numeric(18,8) / text | yes | |
+| fx_rate / fx_source | numeric(18,8) / text | yes | CCR-111: `fx_rate` = units of the budget currency per unit of the row's `currency`; applied only for a pair listed in config `finance.fx_pairs` (09 §3.3) |
 | figure_kind | enum(cost_figure_kind) | no | |
 | price_ref | text | yes | pricing config version used for an ESTIMATE |
 | estimate_entry_id | uuid | yes | TFK → cost_ledger; a VERIFIED row points to the ESTIMATE it confirms; estimates are never overwritten |
@@ -910,10 +914,10 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | current_step | int | no | |
 | managed_service | boolean | no | true only when the client contracted managed service (rule 10) |
 | requested_by | text | no | actor ref |
-| decided_at / expires_at | timestamptz | yes | |
+| decided_at / expires_at | timestamptz | yes | CCR-124: `expires_at` applies only while `PENDING`: `svc_s07` moves a `PENDING` approval past it to `EXPIRED` and no decision is recorded after it; a final state never changes, so consumers (Agent 16 guards, publish guard) rely on `state` and the steps |
 | review_code | text | no | CCR-010/090: code shown to the owner for this approval: 4 characters (config `approvals.review_code.length`, default 4, owner to confirm) from the alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0/O, 1/I/L), with at least one letter and one digit, generated from the approval ID, `subject_sha256` and a random nonce and regenerated on collision; CHECK `review_code ~ '^(?=.*[A-Z])(?=.*[2-9])[2-9A-HJ-KMNP-Z]{4,8}$'` in code; `UNIQUE (org_id, review_code)`; the owner's message must contain it; matched case-insensitively after normalisation |
 Index `(org_id, state, kind)`. The decision record (who, channel, evidence) is on `approval_steps`; the approval's final `state` is derived from its steps (03 §11.6).
-Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in one of two forms. (a) `subject_kind = 'knowledge_source'`, `subject_id` = the source: the whole source (3A default). (b) `subject_kind = 'knowledge_release'`, `subject_id` = the `knowledge_collections` row, `subject_sha256` = SHA-256 of the canonical JSON `{"topic_title": …, "collection_key": …, "chunk_ids": [sorted kch wire IDs]}`: the listed chunks for that topic only. A chunk is covered when the approval is `APPROVED` and the chunk is the subject source's or is listed and the recomputed hash matches. `subject_kind = 'asset'` releases one asset (e.g. a chart case) with `subject_sha256` = the asset's content hash.
+Release rule (CCR-012, `KNOWLEDGE_RELEASE`; CCR-119: for form (b) the authoritative chunk list is the `subject_ref` document of CCR-070, whose SHA-256 must equal `subject_sha256`; `knowledge_chunks.release_approval_id` is a denormalised index for lookup only and never decides coverage on its own): an approval releases material in one of two forms. (a) `subject_kind = 'knowledge_source'`, `subject_id` = the source: the whole source (3A default). (b) `subject_kind = 'knowledge_release'`, `subject_id` = the `knowledge_collections` row, `subject_sha256` = SHA-256 of the canonical JSON `{"topic_title": …, "collection_key": …, "chunk_ids": [sorted kch wire IDs]}`: the listed chunks for that topic only. A chunk is covered when the approval is `APPROVED` and the chunk is the subject source's or is listed and the recomputed hash matches. `subject_kind = 'asset'` releases one asset (e.g. a chart case) with `subject_sha256` = the asset's content hash.
 
 **approval_steps** — TENANT · T0 · Std + Mut
 | Column | Type | Null | Constraint / note |
@@ -953,7 +957,7 @@ One row per owner instruction that the operator tool was asked to record, includ
 | approval_id / step_no | uuid / int | yes | TFK → approvals; the step the instruction decides |
 | record_kind | enum(evidence_record_kind) | no | what the instruction creates (GLOSSARY §6.44) |
 | subject_kind / subject_id | text / uuid | no | what the instruction is about (vocabulary of `approvals.subject_kind`) |
-| review_code | text | yes | the approval's `review_code` (§5.16 `approvals`); required for `STEP_DECISION`, `CONTRIBUTION`, `HUMAN_SCORE` of an approval subject |
+| review_code | text | yes | the approval's `review_code` (§5.16 `approvals`); required for `STEP_DECISION`, `CONTRIBUTION`, `HUMAN_SCORE` of an approval subject. CCR-116: an evidence with no approval (`OWNER_TOPIC`, `DATASET_INTAKE`, and any `CONTENT` / `SCORE` row without `approval_id`) gets its **own** review code, generated by the evidence store at recording with the format and alphabet of `approvals.review_code` and unique per org across approval and evidence codes; it is shown in the echo and is the code the confirmation must name (03 §11.6 rule 7) |
 | parsed_decision | enum(approval_step_state) | yes | for `DECISION` kinds (03 §11.6 rule 7): the decision the operator read; must match the code check; NULL for other kinds (CHECK) |
 | parsed_target_stage_id | text | yes | CCR-089: for `CHANGES_REQUESTED` only, the stage mapped by code from the message's stage word (03 §11.6 rule 7) |
 | claimed_scores | jsonb | yes | CCR-060: for `HUMAN_SCORE` only (CHECK): object `{"<quality_dimension>": <integer points>, …}` exactly as stated in the owner's message; non-empty; each value `0 ≤ points ≤ max_points` of the dimension |
@@ -978,7 +982,7 @@ Keys (CCR-101: one message = one subject = one step): `UNIQUE (org_id, event_uui
 
 ### 5.17 Quality, QC and compliance
 
-**quality_scores** — TENANT · T0 · Std: `job_id` TFK, `subject_kind text`, `subject_id uuid`, `subject_sha256 bytea`, `rubric_version text`, `dimension enum(quality_dimension)`, `max_points smallint` (CHECK equals the dimension's points, GLOSSARY §6.45), `points numeric(5,2)` (CHECK `0 ≤ points ≤ max_points`), `scorer_kind enum(check_kind)`, `scorer_ref text`, `evidence_ref text NULL`; for `scorer_kind = 'HUMAN'` rows also `approval_channel enum(approval_channel)`, `recorded_by text` and `evidence_id uuid` TFK → owner_instruction_evidence (nullable columns, CHECK required for HUMAN rows; human-row rule of `approval_steps`; `scorer_ref` = the owner's `usr_` ID, never the operator; CCR-010). Index `(org_id, job_id, subject_id)`. The total per subject is a view; per dimension the `HUMAN` row wins over `LLM_JUDGE` (§1A.7). Publish threshold (85) is config `quality.publish_min_score`.
+**quality_scores** — TENANT · T0 · Std: `job_id` TFK, `subject_kind text`, `subject_id uuid`, `subject_sha256 bytea`, `rubric_version text`, `dimension enum(quality_dimension)`, `max_points smallint` (CHECK equals the dimension's points, GLOSSARY §6.45; CCR-104: rubric 1.0.0 maxima in dimension order 20 / 15 / 15 / 15 / 10 / 10 / 10 / 5 = 100, 18 §9.2, CCR-058; they live in `amw_human_record_apply` and the CHECK, so a rubric change is a migration, not configuration), `points numeric(5,2)` (CHECK `0 ≤ points ≤ max_points`), `scorer_kind enum(check_kind)`, `scorer_ref text`, `evidence_ref text NULL`; for `scorer_kind = 'HUMAN'` rows also `approval_channel enum(approval_channel)`, `recorded_by text` and `evidence_id uuid` TFK → owner_instruction_evidence (nullable columns, CHECK required for HUMAN rows; human-row rule of `approval_steps`; `scorer_ref` = the owner's `usr_` ID, never the operator; CCR-010). Index `(org_id, job_id, subject_id)`. The total per subject is a view; per dimension the `HUMAN` row wins over `LLM_JUDGE` (§1A.7). Publish threshold (85) is config `quality.publish_min_score`.
 
 **qc_results** — TENANT · T0 · Std (persisted `validation_results`): `job_id` TFK, `task_id` TFK, `render_id` TFK NULL, `check_id text`, `kind enum(check_kind)`, `verdict enum(check_verdict)`, `blocking boolean`, `rule_id text NULL`, `measured_num numeric NULL`, `measured_text text NULL`, `threshold_num numeric NULL`, `threshold_text text NULL`, `unit text NULL`, `message text`, `evidence_ref text NULL`. Index `(org_id, job_id, check_id)`.
 
@@ -1202,6 +1206,7 @@ Declarative range partitioning; partitions created ahead by a maintenance task (
 2. Every migration that adds a table adds its RLS policy in the same file; the CI catalogue check (§3.7.6) fails otherwise.
 3. Seed data (`state_transition_rules`, platform `rule_packs`, `production_types`) is versioned with the migrations.
 4. The same migrations build a dedicated single-tenant stack (§1C.1 premium option): no fork.
+5. Numbering (CCR-120): four-digit prefixes applied in ascending order; gaps are allowed; a merged number is never reused or renumbered; a new migration takes a number above every merged one (as built: L1a 0001–0010, L1b 0050–0051). Migrations run from one runner per database cluster at a time, because role statements are cluster-global.
 
 ## 9. MVP (Tier 0) summary
 - Built in the first build: all `T0` tables in §4, with full RLS and the cross-tenant test suite, even though only one tenant (platform owner) and one channel exist.
