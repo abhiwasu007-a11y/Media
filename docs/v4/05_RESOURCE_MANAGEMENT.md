@@ -353,7 +353,7 @@ Sampling interval `s5.sample_interval_ms` and retention `s5.sample_retention_ms`
 The pressure gate never kills a process and never touches an existing app. It changes only what the factory chooses to start.
 
 ### 9.4 Persistence and execution of S5 samples
-S5 sampling is a scheduled system job (02 registry open item 3). Its canonical task type and any table that stores samples do not exist in the Wave A contracts. Until a request is applied, S5 keeps samples only in its own metrics endpoint (ephemeral; allowed by 00b §2.1 "own metrics endpoint") and writes only **threshold events** to existing structures (`audit_log` and notifications as defined by 08/06). Contract requests are in §12 (pending CCR).
+S5 sampling is a scheduled system job (02 registry open item 3). Its canonical task type and any table that stores samples do not exist in the Wave A contracts. Until a request is applied, S5 keeps samples only in its own metrics endpoint (ephemeral; allowed by 00b §2.1 "own metrics endpoint") and writes only **threshold events** to existing structures (`audit_log` and notifications as defined by 08/06). Contract requests are in §12 (CCR-135, CCR-137).
 
 ### 9.5 Monitoring tool
 The tool (Beszel-class agent vs a heavier stack) is ADR-006, not started. This document is tool-neutral: the thresholds of §9.2 read cgroup files and `/proc/pressure` directly, which any tool can expose. Footprint is **REQUIRES REVIEW (Phase 1): VPS measurement** (INF-07: no official figure; INF-08: no official total). Tier 0 default: lightweight.
@@ -383,9 +383,9 @@ Limits and the stop timeout interact: a container `mem_limit` must leave room fo
 | §8 headroom formula | evaluate when A1 audit arrives | re-evaluate with pilot | continuous (S5) | yes | mandatory on new host | - | per stack |
 | §9 S5 thresholds | no | no | yes | yes | yes | yes | yes |
 
-## 12. Contract requests (pending CCR; not edited into Wave A here)
-The requests are listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md); this document is written against the proposed names where marked:
-1. **S5 sampling job and its storage** (pending CCR): a canonical task type or an equivalent mechanism for scheduled system jobs (same gap as 02 registry item 3), and a table for resource samples/threshold events (proposed name `resource_samples`, `GLOBAL`, T3C, non-tenant). Until applied, §9.4 applies (ephemeral metrics + audit entries).
+## 12. Contract requests (filed: CCR-135, CCR-137)
+The requests are filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5); this document is written against the proposed names where marked:
+1. **S5 sampling job and its storage** (CCR-135 mechanism, CCR-137 storage; both Proposed, deferred to 3C, trigger: the S5 pressure gate): a canonical task type or an equivalent mechanism for scheduled system jobs (same gap as 02 registry item 3), and a table for resource samples/threshold events (proposed name `resource_samples`, `GLOBAL`, T3C, non-tenant). Until applied, §9.4 applies (ephemeral metrics + audit entries).
 2. No new enum, error code, task type or envelope field is needed for 3A: `resource_class`, `queue_name`, `workers.max_concurrency`, `fair_share_key`, `plans.limits`, `RESOURCE.*`, `resource_usage.peak_rss_bytes` and `resource_usage.render_ms` already exist.
 
 ## 13. Acceptance and verification list

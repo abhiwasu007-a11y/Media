@@ -14,7 +14,7 @@
 > 1. Documentation only. No backup script, schedule, Compose file, tool or destination is written or chosen here (10 §1 rule 1). 
 > 2. No number in this document was measured. Where a value is needed it is a **design proposal marked ESTIMATE** for the owner to set, or **REQUIRES REVIEW (Phase 1)**. No RTO or RPO is promised to anyone by this document (§12).
 > 3. The repository is PUBLIC: no host names, addresses, paths other than the directive's root, credentials, provider account details, book titles or private method appear here (08 §11).
-> 4. No Wave A contract is redefined. Needs that do not fit are in §16 **(pending CCR)** and used under the proposed name only where marked.
+> 4. No Wave A contract is redefined. Needs that do not fit are in §16 **(CCR-143, Proposed, deferred to the R10 backup set-up before 3B)** and used under the proposed name only where marked.
 > 5. Documentation status is separate from software status (rule 6). Everything here is **Planned**.
 
 ---
@@ -97,7 +97,7 @@ The owner receives the MP4 (16:9, plus 9:16 where applicable), thumbnail options
 2. **Copy triggered by completion, not by the calendar.** Because blobs are write-once (a new version has a new path, 03 §8 rule 2), the blob backup is **incremental by listing**: after a job reaches a terminal state the next backup run copies every blob not yet in the destination manifest and verifies its SHA-256 there. The blob RPO is therefore the time from job completion to the end of that run, not the DB interval.
 3. **Report it.** The job's delivery report states each deliverable's durability level (D1 or D2). A deliverable stays "D1 only" until the verified copy exists. How this is shown (a field in the existing report vs. a new column) is a build decision; a new column or table would need a CCR (§16, item 4 proposes the one table this document needs).
 4. **Disk pressure never deletes deliverables.** Retention never removes final media (04 §7); disk admission (05 §6.4) pauses heavy work before a write fails; `RESOURCE.DISK_FULL` suspends with `OPERATOR_PAUSE` and escalates L3 (07 §2). Intermediate (non-final) blobs follow configured retention and may be removed only after the job's final blobs are D2 **(proposal; owner confirms)**.
-5. **The backup staging area is capped** and lives on its own volume so a backup can never fill the storage volume (10 §4); a failed or stalled backup raises `INFRASTRUCTURE.BACKUP_FAILED` (pending CCR) and never blocks job execution by itself, but **backup age beyond the configured limit pauses admission of new jobs for tenants with kept-output obligations** (Tier 1+; Tier 0 raises an L3 notice only) **(proposal)**.
+5. **The backup staging area is capped** and lives on its own volume so a backup can never fill the storage volume (10 §4); a failed or stalled backup raises `INFRASTRUCTURE.BACKUP_FAILED` (CCR-143, Proposed, deferred to the R10 backup set-up before 3B) and never blocks job execution by itself, but **backup age beyond the configured limit pauses admission of new jobs for tenants with kept-output obligations** (Tier 1+; Tier 0 raises an L3 notice only) **(proposal)**.
 
 ---
 
@@ -109,20 +109,20 @@ The owner receives the MP4 (16:9, plus 9:16 where applicable), thumbnail options
 3. **Tenant prefixes preserved** so one tenant can be restored or exported alone (§1C.11; ADR-005 §3.4).
 4. **The backup job is a factory service** in the factory's own Compose project and slice, class `LIGHT`, limited by its own cgroup caps and a low `IOWeight` (INF-03; 05 §9), never touching other applications' volumes (§1 Deployment isolation; 10 §5.1 `backup` job).
 5. **It runs inside the night window** on the shared VPS (06 owns the schedule; 05 notes backups are scheduled in the window by this document and 06). Verification passes that hash large numbers of blobs are I/O and CPU heavy; they are treated like heavy work and are **never run during market hours** (conservative design choice for the shared host; owner confirms).
-6. **The audit trail covers it.** Backup and restore actions are audited by the backup job's `SYSTEM` identity `sys_backup` **(pending CCR: GLOSSARY §2.3 lists only five `sys_` names)** with audit actions `backup.completed`, `backup.failed`, `restore_test.completed`, `restore_test.failed`, `restore.performed` (names proposed for the S6 audit list, 08 §9.2).
+6. **The audit trail covers it.** Backup and restore actions are audited by the backup job's `SYSTEM` identity `sys_backup` **(CCR-143, Proposed, deferred to the R10 backup set-up before 3B; GLOSSARY §2.3 lists six `sys_` names today, `backup` is not among them)** with audit actions `backup.completed`, `backup.failed`, `restore_test.completed`, `restore_test.failed`, `restore.performed` (names proposed for the S6 audit list, 08 §9.2).
 7. **A backup is `UNVERIFIED` until a restore test has succeeded** (§11). Nothing in an RTO/RPO statement relies on an unverified backup.
 
 ### 6.2 Database backup [3A design / 3B live]
 | Aspect | Design |
 |---|---|
 | Method | **Logical dump** of the factory database (ADR-005 §3.4; 10 §14.2 step 2), consistent as of a single point in time, plus the schema/migration version recorded beside it. Physical or continuous methods are REQUIRES REVIEW (Phase 1) (§3 rule 3) |
-| Role | RLS applies to table owners and is bypassed only by superusers and `BYPASSRLS` roles (INF-11). A dump taken by `amw_app` or `amw_readonly` would therefore contain **no rows**. The dump needs a dedicated **read-only role with `BYPASSRLS`** used by the backup job only: **`amw_backup` (pending CCR)**. Alternative (no new role): the dump runs under the administrative database credential held by the deploy mechanism, never by a running service. The choice is a Phase 1 decision between the two; neither is used by agents or API |
+| Role | RLS applies to table owners and is bypassed only by superusers and `BYPASSRLS` roles (INF-11). A dump taken by `amw_app` or `amw_readonly` would therefore contain **no rows**. The dump needs a dedicated **read-only role with `BYPASSRLS`** used by the backup job only: **`amw_backup` (CCR-143, Proposed, deferred to the R10 backup set-up before 3B)**. Alternative (no new role): the dump runs under the administrative database credential held by the deploy mechanism, never by a running service. The choice is a Phase 1 decision between the two; neither is used by agents or API |
 | Content | Every table, including the platform-scope and catalogue tables. Seed data is also recreated by migrations (04 §8.3), but is dumped anyway so the restored state equals the dumped state |
 | Frequency | Interval is the DB RPO (§3). **Design proposal (ESTIMATE): Tier 0 once per night window**; Tier 1 and above shorter, set from the measured dump duration and growth. Owner sets (REQUIRES REVIEW (Phase 1)) |
 | Extra dumps | Before every migration or upgrade (10 §14.2 step 2), before a host move (10 §14.3 step 4), and on the owner's command |
 | Queue rows | Included. After a restore the queue is reconciled (§7.5, §7.6); `DONE`/`CANCELLED` queue rows older than `retention.queue_done_ms` are already deleted (04 §7) |
 | Size/time | Unknown (§2). Measured in DR-T2 / DR-T5 |
-| Failure | `INFRASTRUCTURE.BACKUP_FAILED` (pending CCR); next window retries; stale beyond the limit → L3 to Platform Owner (07 §7 operations routing) |
+| Failure | `INFRASTRUCTURE.BACKUP_FAILED` (CCR-143, Proposed, deferred to the R10 backup set-up before 3B); next window retries; stale beyond the limit → L3 to Platform Owner (07 §7 operations routing) |
 
 ### 6.3 Blob backup [3A design / 3B live]
 | Aspect | Design |
@@ -197,7 +197,7 @@ Goal: restore **one tenant** without touching others (rule 9).
 2. Verify inside the scratch copy as that tenant: row counts per table, SHA-256 of the tenant's blobs, tenant audit chain (head copy for that org).
 3. Produce the tenant-scoped export of the repaired state (§10, the same exporter as per-tenant export: every `TENANT`-scope table filtered by `org_id`, under the tenant context).
 4. With admission paused **for that tenant only**, import into the live system in a single transaction per table family, in foreign-key order, with the tenant context set; existing live rows that the owner chooses to keep are never overwritten silently: conflicts are listed for a human decision (L3). The `exports/<dtr>/` area holds the bundle (03 §8 areas).
-5. Re-run the tenancy suite subset (04 §3.7) and the audit-chain check for that org. Write an audit entry in that org's chain (`restore.performed`, pending CCR for the name list).
+5. Re-run the tenancy suite subset (04 §3.7) and the audit-chain check for that org. Write an audit entry in that org's chain (`restore.performed`, CCR-143, Proposed, deferred to the R10 backup set-up before 3B).
 6. Full-database tools must not be used as "tenant restore": a whole-DB restore over a live database would roll back every tenant (10 §14.4: never a whole-database copy into another tenant's stack).
 
 ### 7.4 Single-blob restore (S4 partial)
@@ -265,7 +265,7 @@ Use the stop order of 10 §9.2: stop admission, drain to checkpoint, stop worker
 | Secret class | Used by | If lost or exposed | Impact if unrecoverable | Scope |
 |---|---|---|---|---|
 | LLM / TTS / stock / image provider keys | adapters | Revoke at the provider first, issue a new key, update the secret mechanism, restart the one adapter service (08 §3.3, §12.3). The **provider-side spend limit** stays in force (08 §3.4) | Provider paused until a key exists | 3A |
-| DB credentials (`amw_app`, `amw_readonly`, later `amw_publisher`, `amw_auth`, and `amw_backup` pending CCR) | services | Set new passwords inside the database through the migration/admin path, update the secret mechanism, restart services in 10 §9.1 order | Platform down until set | 3A |
+| DB credentials (`amw_app`, `amw_readonly`, later `amw_publisher`, `amw_auth`, and `amw_backup`, CCR-143, Proposed, deferred to the R10 backup set-up before 3B) | services | Set new passwords inside the database through the migration/admin path, update the secret mechanism, restart services in 10 §9.1 order | Platform down until set | 3A |
 | `amw_migrator` credential | deploy only (04 §3.1) | Same; it is never present in a running service | Cannot migrate; platform keeps running | 3A |
 | **Backup credential** (destination access) | backup job | Create a new credential at the destination; update the mechanism. Backups already stored stay readable with the backup key | No new backups; L3 | 3B |
 | **Backup encryption key** | backup job, restore | **No recovery without the owner's offline copy** (§6.6). If both are lost, every existing backup is unreadable; take a new full backup under a new key immediately and record the incident | Total loss of backup history | 3B |
@@ -449,17 +449,17 @@ The DR drill is DR-T5 plus one tabletop (S5 and S11) before the first paid call 
 
 ---
 
-## 16. Contract requests (pending CCR; not edited into Wave A or B-1 here)
+## 16. Contract requests (filed as CCR-143, deferred; not edited into Wave A or B-1 here)
 
 | # | Needed | Reason | Proposed change | Target |
 |---|---|---|---|---|
-| 1 | `sys_backup` SYSTEM actor name | Backup, restore-test and head-copy actions need an `actor_ref` that is not an agent, service or human; GLOSSARY §2.3 allows only `scheduler`, `reaper`, `dlq_handler`, `migrator`, `api` | Add `backup` to the `sys_<name>` set and to the actor_ref regex note | GLOSSARY_AND_IDS.md |
+| 1 | `sys_backup` SYSTEM actor name | Backup, restore-test and head-copy actions need an `actor_ref` that is not an agent, service or human; GLOSSARY §2.3 allows only `scheduler`, `reaper`, `dlq_handler`, `migrator`, `api`, `operator` | Add `backup` to the `sys_<name>` set and to the actor_ref regex note | GLOSSARY_AND_IDS.md |
 | 2 | `amw_backup` database role | A dump by `amw_app`/`amw_readonly` returns no rows because RLS applies (INF-11); a backup needs a read-only role with `BYPASSRLS`, used only by the backup job | Add to 04 §3.1: login, no owned objects, `SELECT` on all tables, `BYPASSRLS`, never granted to services | 04_DATABASE_ARCHITECTURE.md |
 | 3 | Error codes `INFRASTRUCTURE.BACKUP_FAILED`, `INFRASTRUCTURE.BACKUP_STALE`, `INFRASTRUCTURE.RESTORE_TEST_FAILED` | The 07 catalogue has no code for a failed or stale backup or a failed restore test; they are operations signals routed to the Platform Owner | Add to 07 §2 with disposition RETRY next window for `BACKUP_FAILED`, L3 (operations) for the other two; no job-state effect except the Tier 1+ admission rule of §5.3 item 5 | 07_FAILURE_MANAGEMENT.md |
 | 4 | `backup_runs` table (GLOBAL scope, ID prefix `bkr`) with enums `backup_kind` (`DB`, `BLOB`, `CONFIG`, `AUDIT_HEADS`, `RESTORE_TEST`) and `backup_run_status` (`RUNNING`, `SUCCEEDED`, `FAILED`) | S5 and the dashboard need last-success time, size and verification state without reading the off-server destination; per-tenant exports use the existing `data_requests` | One table: `kind`, `status`, `started_at`, `finished_at`, `size_bytes`, `manifest_sha256`, `verified_at NULL`, `error_code NULL`, `schema_version`; no tenant content; append-only | 04 and GLOSSARY |
 | 5 | Audit action names `backup.completed`, `backup.failed`, `restore_test.completed`, `restore_test.failed`, `restore.performed` | 08 §9.2 (S6) owns the list of audited events | Add to the list | 08_SECURITY.md (Wave B-1) |
 
-Use of these names in this document is marked **(pending CCR)** and is conditional on their approval; if rejected, the matching design item (§6.1 item 6, §6.2, §6.8, §5.3) is re-expressed with existing names.
+Use of these names in this document is marked **(CCR-143)** and is conditional on their approval; if rejected, the matching design item (§6.1 item 6, §6.2, §6.8, §5.3) is re-expressed with existing names.
 
 ---
 

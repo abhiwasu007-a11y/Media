@@ -92,7 +92,7 @@ YouTube API data and OAuth tokens are governed by Google's own terms as well as 
 
 ## 4. DPA template outline (Data Processing Agreement) — T1 gate, 3C
 
-A template for the platform (processor) and a client (fiduciary). **Outline only; ⚖ for every clause.** It is attached to the client agreement; version-controlled; the accepted version and date are recorded per org (pending CCR-A in §14).
+A template for the platform (processor) and a client (fiduciary). **Outline only; ⚖ for every clause.** It is attached to the client agreement; version-controlled; the accepted version and date are recorded per org (CCR-158, Proposed, deferred to 3C; §14).
 
 | § | Clause | Content to settle with the lawyer ⚖ |
 |---|---|---|
@@ -129,7 +129,7 @@ Rule 3 content (IN-07, official text): plain language; understandable on its own
 7. Your rights and how to use them (§5.3) and how to withdraw consent.
 8. How to complain: first to us, then to the Data Protection Board (Rule 3(c)(iii)).
 9. Children: the platform is not for children; handling of "made for kids" channels follows the YouTube compliance profile (13) and the lawyer's view on children's data (Rules 10, 12) ⚖.
-10. Changes: version, effective date, notice of change. The accepted version is stored per user (pending CCR-A).
+10. Changes: version, effective date, notice of change. The accepted version is stored per user (CCR-158, Proposed, deferred to 3C).
 
 ### 5.2 Consent
 Consent is requested per purpose, withdrawable as easily as given (Rule 3(c)(i)). Records of consent (what text, which version, when) are kept as an audit event. Whether a given purpose rests on consent or another lawful ground under the Act is ⚖.
@@ -204,7 +204,7 @@ Working definition for triage: any unauthorised processing or accidental disclos
 | 3 | Encryption check | Were the data in ciphertext (token columns, 08 §6) or plain? A leaked token ciphertext without the KEK/DEK is a lower impact than leaked plain comments; record the reasoning |
 | 4 | Classify | Notifiable or not (⚖ decides in doubt; **default when unsure: treat as notifiable and ask the lawyer the same day**) |
 | 5 | Draft the notices | From the templates in 8.4; one consolidated message per recipient group (Board, client, data principals) |
-| 6 | Notify | Client first (platform-as-processor), then the Board and data principals as the fiduciary decides; record **who, when, how, what** in the notification record (pending CCR-B for a structured `breach_incidents` record) |
+| 6 | Notify | Client first (platform-as-processor), then the Board and data principals as the fiduciary decides; record **who, when, how, what** in the notification record (CCR-158, Proposed, deferred to 3C, for a structured `breach_incidents` record) |
 | 7 | Within 72 h | Send the detailed report to the Board including the report on intimations (Rule 7(2)(b)) |
 | 8 | Recover | As 08 §12.2 step 5; verify audit chain and tenancy tests; confirm no unapproved video was published |
 | 9 | Review | Blameless review; new control or CI test; update this document and the DPA annex if needed; record in `CHANGE_REQUESTS.md` if a contract changes |
@@ -243,7 +243,7 @@ Drilled once on the walking skeleton with synthetic data before the first paid c
 Built on 08 §4 (database roles), §5 (roles and matrix), §5.3 (agent identities), §9 (audit).
 
 1. **Humans.** Roles are the eight in 08 §5.1. Only `PLATFORM_OWNER` and `ORG_OWNER` may raise `data.export` / `data.erase` (08 §5.2). `CLIENT_GUEST` is approve/comment only and limited to assigned items.
-2. **Platform staff see no tenant content by default.** The platform-owner cross-tenant view is a summary (`amw_platform_ops_summary()`; 08 §8.1: functions return identifiers and envelopes, never content columns). Opening tenant content as the platform owner is **break-glass**: a recorded reason, time-limited, and an audit entry visible to the tenant. Needs a permission key not yet in 08: see pending CCR-C.
+2. **Platform staff see no tenant content by default.** The platform-owner cross-tenant view is a summary (`amw_platform_ops_summary()`; 08 §8.1: functions return identifiers and envelopes, never content columns). Opening tenant content as the platform owner is **break-glass**: a recorded reason, time-limited, and an audit entry visible to the tenant. Needs a permission key not yet in 08: CCR-151, needs owner (Q-O18).
 3. **Agents** act under their own identities with only the tables and storage areas they need (08 §5.3). Only the publish worker reads token ciphertext.
 4. **Database.** Roles per 04 §3 (`amw_app`, `amw_publisher`, `amw_auth`, `amw_sysfn`, migrator); RLS with `FORCE` as second line (08 §8).
 5. **Access logging.** Reads of personal-data classes P1, P4–P6, P11 by a human other than the data's own tenant members are audited (08 §9.2); the audit list lives in 08. IN-07 Rule 6 expects visibility on access to personal data "through appropriate logs, monitoring and review".
@@ -255,7 +255,7 @@ Built on 08 §4 (database roles), §5 (roles and matrix), §5.3 (agent identitie
 
 ## 11. Retention schedule
 
-**Principle.** Durations are **not decided in this document**. 04 §7 says each value is REQUIRES REVIEW and points here. What this document does is (a) give the classes, (b) give the fixed legal anchors that are VERIFIED, (c) give a **proposal column** the lawyer and accountant confirm. No proposal is to be implemented until approved. Retention is **configuration** (`retention.*` keys, pending CCR-D), not code constants (27 §3 principle: no hard-coded policy).
+**Principle.** Durations are **not decided in this document**. 04 §7 says each value is REQUIRES REVIEW and points here. What this document does is (a) give the classes, (b) give the fixed legal anchors that are VERIFIED, (c) give a **proposal column** the lawyer and accountant confirm. No proposal is to be implemented until approved. Retention is **configuration** (`retention.*` keys, CCR-159, needs owner Q-O19), not code constants (27 §3 principle: no hard-coded policy).
 
 ### 11.1 Table
 | Data class (04 §7 row) | Trigger / rule | Fixed anchor (VERIFIED) | Proposal until approved | Decided by |
@@ -284,7 +284,7 @@ List of records that may have to be retained despite a request: accounting recor
 Per 12 §6.7 and §10.5: erasure deletes live data and destroys the DEKs; copies in older backups **age out** with backup retention; a restore re-applies completed erasures from the off-database ledger. The statement that goes into the privacy notice ("erased from live systems at once, from backups within N days") is a lawyer item ⚖. N equals the backup retention, so the retention value drives the statement.
 
 ### 11.4 Mechanics
-Scheduled maintenance task (system role) applies `retention.*`: row deletes in batches, partition detach for large tables, prefix cleanup for exports. Each run writes an audit entry with counts, never content. Dry-run mode first. The task never deletes final media or anything held for an open `data_requests` or open incident (**legal hold flag**: pending CCR-D).
+Scheduled maintenance task (system role) applies `retention.*`: row deletes in batches, partition detach for large tables, prefix cleanup for exports. Each run writes an audit entry with counts, never content. Dry-run mode first. The task never deletes final media or anything held for an open `data_requests` or open incident (**legal hold flag**: CCR-159, needs owner Q-O19).
 
 ---
 
@@ -331,13 +331,13 @@ Per §1C.14 client data moves to its own server before the first external client
 
 ## 14. Contract requests and open items
 
-### 14.1 Pending contract change requests (not edited into other docs; listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md); CCR-A…D are local labels, not register IDs)
+### 14.1 Contract change requests (filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5); CCR-A…D are local labels, mapped to register IDs below)
 | Ref | Needed | Target doc |
 |---|---|---|
-| CCR-A (pending CCR) | `dpa_acceptances` / `notice_acceptances` (TENANT): which DPA/notice version a org or user accepted and when | 04 |
-| CCR-B (pending CCR) | `breach_incidents` (TENANT or PLATFORM): incident ID, time aware, classes, counts, notification records | 04, 08 §12 |
-| CCR-C (pending CCR) | permission key `data.break_glass` (reason-bound, time-limited tenant-content access) and its audit event | 08 §5.2, §9.2 |
-| CCR-D (pending CCR) | `retention.*` configuration keys per data class and a `legal_hold` flag on orgs/jobs/data requests | 04 §7 |
+| CCR-A → CCR-158 (Proposed, deferred to 3C) | `dpa_acceptances` / `notice_acceptances` (TENANT): which DPA/notice version a org or user accepted and when | 04 |
+| CCR-B → CCR-158 (Proposed, deferred to 3C) | `breach_incidents` (TENANT or PLATFORM): incident ID, time aware, classes, counts, notification records | 04, 08 §12 |
+| CCR-C → CCR-151 (needs owner, Q-O18) | permission key `data.break_glass` (reason-bound, time-limited tenant-content access) and its audit event | 08 §5.2, §9.2 |
+| CCR-D → CCR-159 (needs owner, Q-O19) | `retention.*` configuration keys per data class and a `legal_hold` flag on orgs/jobs/data requests | 04 §7 |
 
 ### 14.2 Open items for the owner's lawyer ⚖
 1. Fiduciary vs processor split per data class (§1 item 3, §3).
