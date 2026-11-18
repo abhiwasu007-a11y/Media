@@ -34,7 +34,7 @@ def test_records_are_frozen() -> None:
     for name in interfaces.__all__:
         obj = getattr(interfaces, name)
         if dataclasses.is_dataclass(obj):
-            assert obj.__dataclass_params__.frozen, name  # type: ignore[attr-defined]
+            assert vars(obj)["__dataclass_params__"].frozen, name
 
 
 def test_structural_match() -> None:
