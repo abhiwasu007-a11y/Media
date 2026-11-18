@@ -45,11 +45,15 @@ name = "agent-06-fact-checker"
 version = "0.0.0"
 source = { editable = "packages/agents/agent_06_fact_checker" }
 dependencies = [
+    { name = "amw-adapters" },
     { name = "amw-core" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+requires-dist = [
+    { name = "amw-adapters", editable = "packages/amw_adapters" },
+    { name = "amw-core", editable = "packages/amw_core" },
+]
 
 [[package]]
 name = "agent-07-voice-production"
