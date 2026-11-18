@@ -99,6 +99,7 @@ from amw_core.errors import (
 )
 from amw_core.ids import ActorRef
 from amw_core.interfaces.tenancy_context import TenantContext
+from amw_core.text_normalise import normalise_for_matching, tokenize
 
 QC_SCHEMAS = (
     "agent_10.render.output",
@@ -1098,7 +1099,8 @@ def _timeline(data: bytes) -> Timeline:
 
 
 def _words(text: str) -> list[str]:
-    return text.casefold().split()
+    """Whole words through the shared core normaliser (CCR-105), the same on both sides."""
+    return [t.text for t in tokenize(normalise_for_matching(text))]
 
 
 def _word_overlap_permille(cues: list[Any], segment_ids: list[str], script: ScriptStrings) -> int:

@@ -8,12 +8,12 @@ The lexicons are rule content owned by 13 and are injected (never literals here)
 """
 
 import hashlib
-import re
 from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
 from amw_core.errors import InputInvalidError
+from amw_core.text_normalise import normalise_for_matching, tokenize
 
 CONSTRAINTS = (
     "Constraints: no people's faces, no readable text, no logos, no real persons, "
@@ -42,9 +42,20 @@ class ComposedPrompt:
     rejection: PromptRejection | None = None
 
 
+def _words(text: str) -> list[str]:
+    """Whole-word tokens of the shared core normaliser (CCR-105); the same function folds the
+    lexicon entries, so zero-width, look-alike and case variants of a term still match."""
+    return [t.text for t in tokenize(normalise_for_matching(text))]
+
+
 def _has_term(text: str, terms: Collection[str]) -> bool:
-    lowered = text.lower()
-    return any(re.search(rf"\b{re.escape(t.lower())}\b", lowered) for t in terms)
+    words = _words(text)
+    for term in terms:
+        needle = _words(term)
+        n = len(needle)
+        if n and any(words[i : i + n] == needle for i in range(len(words) - n + 1)):
+            return True
+    return False
 
 
 class AiPromptComposer:
