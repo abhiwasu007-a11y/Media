@@ -108,6 +108,17 @@ class AmwModel(BaseModel):
         serialize_by_alias=True,
     )
     omit_if_none: ClassVar[frozenset[str]] = frozenset()
+    """Optional, non-nullable schema properties (by wire name): omitted when ``None`` on output,
+    and an explicit ``null`` on input is refused, as the JSON Schema does."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_null_for_optional(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key in cls.omit_if_none:
+                if key in data and data[key] is None:
+                    raise ValueError(f"{key} may be omitted but must not be null")
+        return data
 
     @model_serializer(mode="wrap")
     def _omit_optional_nones(self, handler: SerializerFunctionWrapHandler) -> Any:

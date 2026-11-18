@@ -24,6 +24,8 @@ CONTRACT_SCHEMAS = (
     "amw.envelope",
     "amw.error",
     "amw.control",
+    "amw.owner_topic",
+    "amw.production_type",
 )
 
 

@@ -27,6 +27,7 @@ from amw_core.enums import (
 )
 
 MeasuredValue = bool | int | float | str | None
+StageId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_]{2,32}$")]
 
 
 class OutputRef(AmwModel):
@@ -51,6 +52,20 @@ class ValidationResult(AmwModel):
     unit: Annotated[str, StringConstraints(max_length=16)] | None = None
     message: Annotated[str, StringConstraints(max_length=2000)]
     evidence_ref: StorageUri | None = None
+    gate: StrictBool = False
+    """True only for a registered blocking gate stage's domain result (03 section 5.3 rule 4)."""
+    remedy_stage_id: StageId | None = None
+    """Stage the failing gate result names for the REVISE route (24 section 3.3, CCR-002)."""
+
+    @model_validator(mode="after")
+    def _result_rules(self) -> Self:
+        # Schema allOf (03 section 5.2 / 5.3 rule 5): WARN/SKIPPED never block; a remedy stage
+        # is only named by a gate result.
+        if self.verdict in (CheckVerdict.WARN, CheckVerdict.SKIPPED) and self.blocking:
+            raise ValueError("a WARN or SKIPPED result must have blocking false")
+        if self.remedy_stage_id is not None and not self.gate:
+            raise ValueError("remedy_stage_id requires gate true")
+        return self
 
 
 class ResourceUsage(AmwModel):
@@ -106,9 +121,43 @@ class TaskOutput(AmwModel):
         ):
             raise ValueError("SUSPENDED requires next_action.type WAIT and a wait_reason")
         if status is OutputStatus.REJECTED:
-            # 03 section 7.2 structured rejection; section 6 rule 4 (attempt_no 0 at validation).
+            # Schema allOf (CCR-057): 03 section 7.2 rejection, section 6 rule 4 (attempt_no 0).
             if self.payload is not None or self.output_refs:
                 raise ValueError("REJECTED requires a null payload and empty output_refs")
             if self.error is not None and self.error.attempt_no != 0:
                 raise ValueError("REJECTED at validation requires error.attempt_no 0")
         return self
+
+
+def integrity_failures(output: TaskOutput) -> tuple[ValidationResult, ...]:
+    """03 section 5.3 rule 2(b): blocking process-integrity results (``gate`` false) not ``PASS``.
+
+    Any such result makes a reported ``SUCCEEDED`` an ``AGENT.INCOMPLETE_OUTPUT``. Rules 2(a)
+    (payload schema) and 2(c) (stored output refs) need the payload registry and storage; the
+    orchestrator checks them.
+    """
+    return tuple(
+        r
+        for r in output.validation_results
+        if r.blocking and not r.gate and r.verdict is not CheckVerdict.PASS
+    )
+
+
+def gate_failures(output: TaskOutput) -> tuple[ValidationResult, ...]:
+    """03 section 5.3 rule 4: the gate failed iff a result has gate, blocking and FAIL."""
+    return tuple(
+        r
+        for r in output.validation_results
+        if r.gate and r.blocking and r.verdict is CheckVerdict.FAIL
+    )
+
+
+def meets_success_rule_2b(output: TaskOutput) -> bool:
+    """``SUCCEEDED`` and no integrity failure; a failed gate still counts as a succeeded task."""
+    return output.status is OutputStatus.SUCCEEDED and not integrity_failures(output)
+
+
+def has_gate_results(output: TaskOutput) -> bool:
+    """True if any result claims ``gate``; the orchestrator accepts that only from a stage the
+    production type registers as a blocking gate (else rule 2 fails, ``INCOMPLETE_OUTPUT``)."""
+    return any(r.gate for r in output.validation_results)

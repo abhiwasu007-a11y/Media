@@ -25,6 +25,9 @@ from amw_core import contracts
 from amw_core.contracts.common import storage_uri_owner
 from amw_core.errors import CATALOGUE, AmwError
 from tests.contract import examples as ex
+from tests.docs_tables import stage_table
+
+LONG_FORM_V2 = stage_table(r"7\.1a ")
 
 pytestmark = pytest.mark.contract
 
@@ -35,6 +38,9 @@ POOL: list[Any] = [
     None, True, False, 0, 1, -1, 7, 101, 2.5, -0.5, "", "1", "0", "true", "x", "PASS",
     "SUCCEEDED", "FAILED", "REJECTED", "SUSPENDED", "WAIT", "CONTINUE", "AWAITING_BUDGET",
     "TEMPORARY", "PERMANENT", "TEMPORARY.TIMEOUT", "PERMANENT.SCHEMA_INVALID", "TEMPORARY.NOPE",
+    "s05_script", "s10_render", "s13_deliver", "REVISE", "STOP", "YOUTUBE", "FILE_DELIVERY",
+    "rp.youtube_general", "MUSIC", "OWNER_VOICE", "EXTERNAL_URL", "KNOWLEDGE_SOURCE",
+    "https://example.org/x", "http://x", "WARN", "SKIPPED", "FAIL",
     "agent_05", "agent_18", "sys_reaper", "usr_x", "1.0.0", "2.0.0", "1.x",
     1767225600, "1767225600", "2026-01-01", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00.5Z",
     "2026-01-01T05:30:00+05:30", "2026-02-30T00:00:00Z", "2026-01-01T00:00:00",
@@ -42,6 +48,17 @@ POOL: list[Any] = [
     ex.blob(ex.OTHER_ORG), "amw-blob://platform/t/a.json", "INR", "usd",
     [], [1], {}, {"a": 1}, "application/json",
 ]  # fmt: skip
+
+
+def _gated_output() -> dict[str, Any]:
+    doc = ex.task_output()
+    doc["validation_results"].append(ex.gate_result("FAIL"))
+    return doc
+
+
+def _long_form_v2() -> dict[str, Any]:
+    return ex.production_type(copy.deepcopy(LONG_FORM_V2))
+
 
 DOCS: list[tuple[str, Callable[[], dict[str, Any]], type[BaseModel], str]] = [
     ("amw.task_input", ex.task_input, contracts.TaskInput, "1.0.0"),
@@ -53,6 +70,9 @@ DOCS: list[tuple[str, Callable[[], dict[str, Any]], type[BaseModel], str]] = [
     ("amw.task_output", lambda: ex.task_output("FAILED"), contracts.TaskOutput, "1.0.0"),
     ("amw.task_output", lambda: ex.task_output("REJECTED"), contracts.TaskOutput, "1.0.0"),
     ("amw.task_output", lambda: ex.task_output("SUSPENDED"), contracts.TaskOutput, "1.0.0"),
+    ("amw.task_output", _gated_output, contracts.TaskOutput, "1.0.0"),
+    ("amw.owner_topic", ex.owner_topic, contracts.OwnerTopic, "1.0.0"),
+    ("amw.production_type", _long_form_v2, contracts.ProductionType, "1.0.0"),
 ]
 
 
@@ -114,10 +134,44 @@ def model_only_violation(name: str, doc: dict[str, Any]) -> bool:
         err = doc.get("error")
         if _error_rule_broken(err):
             return True
-        if doc.get("status") == "REJECTED":
-            attempt = err.get("attempt_no") if isinstance(err, dict) else 0
-            return doc.get("payload") is not None or bool(doc.get("output_refs")) or attempt != 0
+    if name == "amw.production_type":
+        return _graph_rule_broken(doc)
     return False
+
+
+def _graph_rule_broken(doc: dict[str, Any]) -> bool:
+    """24 section 2 load rules the model adds (unique IDs, known deps, DAG, ancestor targets,
+    rp.youtube_general with a YOUTUBE destination)."""
+    stages = [s for s in doc.get("stages", []) if isinstance(s, dict)]
+    ids = [s.get("stage_id") for s in stages]
+    if len(set(map(str, ids))) != len(ids):
+        return True
+    deps = {str(s.get("stage_id")): list(s.get("depends_on") or []) for s in stages}
+    if any(d not in deps for ds in deps.values() for d in ds):
+        return True
+    try:
+        ancestors = {k: _ancestors(k, deps, ()) for k in deps}
+    except RecursionError:
+        return True
+    for stage in stages:
+        gate = stage.get("gate")
+        on_fail = gate.get("on_fail") if isinstance(gate, dict) else None
+        if isinstance(on_fail, dict) and on_fail.get("action") == "REVISE":
+            targets = [on_fail.get("target_stage_id"), *(on_fail.get("alt_target_stage_ids") or [])]
+            if any(t not in ancestors[str(stage.get("stage_id"))] for t in targets):
+                return True
+    packs = doc.get("rule_packs", {})
+    mandatory = packs.get("mandatory", []) if isinstance(packs, dict) else []
+    return "YOUTUBE" in (doc.get("destinations") or []) and "rp.youtube_general" not in mandatory
+
+
+def _ancestors(stage: str, deps: dict[str, list[Any]], path: tuple[str, ...]) -> set[str]:
+    if stage in path:
+        raise RecursionError(stage)
+    found: set[str] = set()
+    for dep in deps[stage]:
+        found |= {dep} | _ancestors(dep, deps, (*path, stage))
+    return found
 
 
 def model_accepts(model: type[BaseModel], doc: dict[str, Any]) -> bool:

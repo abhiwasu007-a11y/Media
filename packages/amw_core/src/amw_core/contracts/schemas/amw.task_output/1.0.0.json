@@ -195,8 +195,66 @@
                 "type": "null"
               }
             ]
+          },
+          "gate": {
+            "type": "boolean",
+            "default": false
+          },
+          "remedy_stage_id": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{2,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "verdict": {
+                  "enum": [
+                    "WARN",
+                    "SKIPPED"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "blocking": {
+                  "const": false
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "remedy_stage_id"
+              ],
+              "properties": {
+                "remedy_stage_id": {
+                  "type": "string"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "gate"
+              ],
+              "properties": {
+                "gate": {
+                  "const": true
+                }
+              }
+            }
+          }
+        ]
       }
     },
     "duration": {
@@ -390,6 +448,32 @@
               },
               "wait_reason": {
                 "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "REJECTED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "null"
+          },
+          "output_refs": {
+            "maxItems": 0
+          },
+          "error": {
+            "properties": {
+              "attempt_no": {
+                "const": 0
               }
             }
           }

@@ -19,6 +19,8 @@ from amw_core.contracts import registry
 from amw_core.contracts.control import ControlCommand
 from amw_core.contracts.envelope import Envelope
 from amw_core.contracts.error import ErrorObject
+from amw_core.contracts.owner_topic import OwnerTopic
+from amw_core.contracts.production_type import ProductionType
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.errors import SchemaInvalidError, SchemaVersionUnsupportedError
@@ -102,3 +104,13 @@ def validate_control(doc: Any, *, version: str | None = None) -> ControlCommand:
 
 def validate_error(doc: Any, *, version: str | None = None) -> ErrorObject:
     return _validate("amw.error", ErrorObject, doc, version)
+
+
+def validate_owner_topic(doc: Any, *, version: str | None = None) -> OwnerTopic:
+    """``amw.owner_topic`` has no ``schema_version`` field: pass the registered version."""
+    return _validate("amw.owner_topic", OwnerTopic, doc, version)
+
+
+def validate_production_type(doc: Any, *, version: str | None = None) -> ProductionType:
+    """Schema plus the graph rules of 24 section 2 (see ``ProductionType``)."""
+    return _validate("amw.production_type", ProductionType, doc, version)

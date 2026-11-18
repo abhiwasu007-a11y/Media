@@ -180,3 +180,70 @@ def task_output(status: str = "SUCCEEDED") -> dict[str, Any]:
             "reason": "approval gate",
         }
     return doc
+
+
+def owner_topic() -> dict[str, Any]:
+    return {
+        "title": "RSI divergence on a weekly chart",
+        "brief": None,
+        "angle": "history only",
+        "language": "mr",
+        "video_kind": "METHOD_TOPIC",
+        "course_chapter_pointer": {"label": "Chapter 4"},
+        "owner_references": [
+            {"kind": "EXTERNAL_URL", "url": "https://example.org/a", "knowledge_source_id": None,
+             "note": None},
+            {"kind": "KNOWLEDGE_SOURCE", "url": None,
+             "knowledge_source_id": "ksr_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e97", "note": "ch. 4"},
+        ],
+        "target_duration_ms": 600000,
+        "shorts_wanted": True,
+    }  # fmt: skip
+
+
+def gate_result(verdict: str = "FAIL", remedy: str | None = "s07_voice") -> dict[str, Any]:
+    return {
+        "check_id": "qc.audio.integrated_lufs",
+        "kind": "DETERMINISTIC",
+        "verdict": verdict,
+        "blocking": verdict in ("PASS", "FAIL"),
+        "rule_id": None,
+        "measured": -17.2,
+        "threshold": -14,
+        "unit": "LUFS",
+        "message": "loudness off target",
+        "evidence_ref": None,
+        "gate": True,
+        "remedy_stage_id": remedy,
+    }
+
+
+def production_type(stages: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "key": "CHANNEL_LONG_FORM",
+        "version": 2,
+        "display_name": "Channel long-form (3A)",
+        "status": "IN_DEVELOPMENT",
+        "first_tier": "TIER_0",
+        "destinations": ["FILE_DELIVERY"],
+        "requires_channel": True,
+        "parent_input": "NONE",
+        "duration_targets_ms": {"min": None, "max": None},
+        "aspect_ratios": ["16:9"],
+        "languages": "SINGLE",
+        "stages": stages,
+        "required_inputs": [
+            {"key": "owner_topic", "description": "owner topic", "input_schema": "amw.owner_topic",
+             "provided_by": "OWNER"}
+        ],
+        "approvals": [{"approval_kind": "FINAL_VIDEO", "workflow_key": "owner_one_tap",
+                       "mandatory": True}],
+        "templates": ["title_card.v1"],
+        "qc_profile": "qc.long_form",
+        "rule_packs": {"mandatory": ["rp.youtube_general"],
+                       "by_category": {"finance": ["rp.finance_sebi_in"]}},
+        "deliverables": ["yt_master_1080p", "delivery_manifest"],
+        "cost_model": [{"component": "llm_tokens", "unit": "tokens"}],
+        "default_price": None,
+        "limits": {"max_revision_loops": 3},
+    }  # fmt: skip

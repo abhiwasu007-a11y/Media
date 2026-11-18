@@ -168,6 +168,11 @@ BOTH_LAYERS: list[tuple[str, str, type[BaseModel], dict[str, Any]]] = [
      _mut(ex.error, _set("code", "TEMPORARY.x"))),
     ("error-upstream-status", "amw.error", contracts.ErrorObject,
      _mut(ex.error, _set("upstream_status", 99))),
+    ("rejected-with-output-refs", "amw.task_output", contracts.TaskOutput,
+     _mut(lambda: ex.task_output("REJECTED"),
+          _set("output_refs", ex.task_output()["output_refs"]))),
+    ("rejected-attempt-not-zero", "amw.task_output", contracts.TaskOutput,
+     _mut(lambda: ex.task_output("REJECTED"), _set("error.attempt_no", 2))),
 ]  # fmt: skip
 
 
@@ -187,11 +192,6 @@ MODEL_ONLY: list[tuple[str, str, Validator, dict[str, Any]]] = [
      _mut(ex.error, _set("error_class", "PERMANENT"))),
     ("error-code-not-in-catalogue", "amw.error", contracts.validate_error,
      _mut(ex.error, lambda d: d.update(code="TEMPORARY.SOLAR_FLARE"))),
-    ("rejected-with-output-refs", "amw.task_output", contracts.validate_task_output,
-     _mut(lambda: ex.task_output("REJECTED"),
-          _set("output_refs", ex.task_output()["output_refs"]))),
-    ("rejected-attempt-not-zero", "amw.task_output", contracts.validate_task_output,
-     _mut(lambda: ex.task_output("REJECTED"), _set("error.attempt_no", 2))),
 ]  # fmt: skip
 
 
