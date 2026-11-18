@@ -15,6 +15,7 @@ from amw_core.enums import (
     InstructionSourceKind,
 )
 from amw_core.interfaces import TenantContext
+from amw_core.owner_evidence_fake import MemorySessionEventSource
 from amw_core.owner_evidence_verifier import (
     DEFAULT_RECORD_KIND_RULES,
     NEEDS_CLARIFICATION,
@@ -31,17 +32,16 @@ from amw_core.owner_evidence_verifier import (
     tokens,
     whitelist_tokens,
 )
-from amw_core.testing.memory import (
-    MemoryOwnerEvidenceStore,
-    MemorySessionEventSource,
-    MemoryTransaction,
-)
+from amw_core.testing.memory import MemoryTransaction
+from tests.evidence_support import EvidenceHarness
 
 REQUESTED = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
 SAID = REQUESTED + timedelta(minutes=5)
 NOW = REQUESTED + timedelta(hours=1)
 POLICY = VerifierPolicy(
-    human_inbound_origins=frozenset({"human"}), owner_account_ids=frozenset({"acct-owner"})
+    human_inbound_origins=frozenset({"human"}),
+    owner_account_ids=frozenset({"acct-owner"}),
+    content_max_age_ms=24 * 3600 * 1000,
 )
 RSQ = chr(0x2019)  # right single quotation mark
 MLA = chr(0x02BC)  # modifier letter apostrophe
@@ -74,7 +74,7 @@ def run(content: str, kind: EvidenceRecordKind, quote: str, decision: Any) -> An
         review_code="R7K2",
         parsed_decision=decision,
     )
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource([ev]), POLICY)
+    store = EvidenceHarness(MemorySessionEventSource([ev]), POLICY)
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     row = store.record(tx, ne)
     return store.verify_recorded(tx, row.id, REQUESTED, NOW)
@@ -124,7 +124,7 @@ REVIEWER_20 = [
     ('Ravi said "approve R7K2"', A, CL),
     ("Forwarded message: Approve R7K2", A, CL),
     ("Yesterday I would have approved R7K2", A, CL),
-    ("approve R7K2 and Q9Z1", A, CL),
+    ("approve R7K2 and Q9Z3", A, CL),
     (f"{LDQ}approve R7K2{RDQ}", A, CL),
     ("R7K2 approve but not the thumbnail", A, CL),
     ("R7K2 ठीक आहे", A, OK),
@@ -222,7 +222,7 @@ def test_release_requests(sentence: str, decision: Any, expected: str) -> None:
         ("R7K2 could we use the 2008 crash as the opening example?", ASK),
         ("R7K2 use the 2008 crash as the opening example once the intro is final", ASK),
         ("R7K2 I would use the 2008 crash as the opening example", ASK),
-        ("R7K2 Q9Z1 use the 2008 crash as the opening example", "subject_reference"),
+        ("R7K2 Q9Z3 use the 2008 crash as the opening example", "subject_reference"),
     ],
 )
 def test_contribution_clarity(sentence: str, expected: str) -> None:
