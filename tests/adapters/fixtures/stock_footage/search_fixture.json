@@ -1,0 +1,5 @@
+{
+  "operation": "stock.search",
+  "match": {"query": "fixture query"},
+  "response": {"items": [{"vendor_item_id": "vendor-123", "title": "Recorded clip", "duration_ms": 12000, "width_px": 1920, "height_px": 1080}]}
+}

@@ -1,0 +1,5 @@
+{
+  "operation": "llm.completion",
+  "match": {"system": "fixture-system"},
+  "response": {"text": "recorded reply", "tokens_in": 40, "tokens_out": 3, "tokens_cached_in": 8, "stop_reason": "end_turn"}
+}
