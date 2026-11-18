@@ -1,0 +1,95 @@
+# Implementation Progress (live ledger)
+
+Resume from this file after any context reset (directive §6). Finished work is not redone.
+
+| Track | Status |
+|---|---|
+| **Documentation** | Phase 0 complete. Phase 1 in progress (VPS audit and feasibility waiting on owner data). Architecture waves A/B/C started 2026-11-18 on the owner's instruction (in parallel with Phase 1). |
+| **Software** | **Planned.** Nothing implemented. Code starts only after written approval of the V4.0 baseline (rule 1). |
+
+## Task ledger
+
+| ID | Description | Status | Files | Checks done | Open dependencies | Risks |
+|---|---|---|---|---|---|---|
+| P0.1 | Commit directive unchanged | Done (2026-11-18) | MASTER_DIRECTIVE.md | `cmp` byte-identical; SHA-256 recorded | — | — |
+| P0.2 | Execution plan | Done; **owner approved, all defaults accepted** (2026-11-18) | 00_EXECUTION_PLAN.md | self-review | — | — |
+| P1.0 | Read-only VPS audit script | Done | audit/vps_readonly_audit.sh | `bash -n`; trial run in dev container: 11 sections, no errors | Owner runs it on the VPS | — |
+| P1.1 | `.gitignore`, README, docs index, source layout | Done (2026-11-18) | .gitignore, README.md, docs/v4/README.md, SOURCE_LAYOUT.md | self-review | — | — |
+| P1.2 | Progress ledger | Done | IMPLEMENTATION_PROGRESS.md | — | — | — |
+| P1.3 | Change-request register | Done | CHANGE_REQUESTS.md | — | — | — |
+| P1.4 | Repo & server audit | **Partial**: Parts A, B, D done; Part C blocked | 00_REPO_AND_SERVER_AUDIT.md | private repos inventoried read-only (counts only) | **VPS script output (A1)** | R3 |
+| P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
+| P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | Done (2026-11-18) | RESEARCH_LOG.md | official pricing/licence pages read | Blocked: openai.com, artlist.io, pond5, pexels, pixabay, shutterstock, help.elevenlabs.io, support.storyblocks.com | R7 |
+| P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
+| W-A | Architecture Wave A (foundation docs) | **Done** (2026-11-18); PR abhiwasu007-a11y/Media#2 | GLOSSARY_AND_IDS, 03, 04, 07, 24, 27, prompts/, evals/, CONTRACT_CHANGE_REQUESTS | schemas validated by script (2020-12 metaschema); 75 tables consistent; lead review: lag=30 d (IN-02), FIN-R13 (IN-03) + 2 cases, skeleton per D1 | — | R6 |
+| W-B1 | 3A slice (D2): ADR-001/005/007/008/009/012/013, docs 18, 13, 09, 08, 3A_SLICE_SPEC, blueprints 04–11 + 16, integrator, independent check | In progress | branch `claude/v4-wave-b1` | — | — | R6 |
+| W-B2 | Remaining blueprints 01–03, 12–15, 17 + other shared/enterprise/business docs | Not started (starts after B-1) | — | — | W-B1 | R6 |
+| W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
+| P1.6 | Technical feasibility | **Partial** (capabilities verdict done; server verdict + per-video totals REQUIRES REVIEW) | 00b_TECHNICAL_FEASIBILITY.md | every capability cites a research ID | P1.4 Part C (VPS), skeleton measurements, business plan | R3, R7 |
+
+## Owner decisions (binding; they amend the directive where stated)
+
+### D1 (2026-11-18): Phase 3 build order. Applies to BUILD_BACKLOG.md, the completion report, and every blueprint's MVP marking.
+Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skeleton included a private upload to a test channel; **no upload in 3A**).
+
+- **3A — Video production line first.** Build only the minimum shared core needed to run it: contracts, state machine, job store, cost ledger, audit, adapters with fakes. Then Agents **04, 05, 06, 07, 08, 09, 10, 11** and the **Agent 16 QC/compliance gates**.
+  - The owner supplies the topic directly; Agents 02/03 come later.
+  - Output per run, delivered as downloadable files: final MP4 (16:9, plus a 9:16 cut where applicable), thumbnail options, SRT, the QC report with the 100-point score, and the cost per stage.
+  - **No YouTube upload and no Google OAuth in 3A.**
+- **3B — Golden samples.** Three videos on owner-given trading-education topics. The owner scores them; prompts/templates are tuned until all three reach the threshold.
+- **3C — Everything else.** Orchestrator hardening, scheduler/night window, Agent 13 publishing, 14 analytics, 02/03 strategy, tenancy UI, client portal, billing.
+- **Spend controls.** Paid API calls start only after the owner has set spending limits at each provider. The cost ledger enforces a **per-video budget and a total pilot budget, and stops on breach**.
+- **Secrets.** Keys come only through the environment's secret mechanism: never in git, logs or shared environment variables.
+- **Rendering.** In the development environment, or in the VPS night window under the §1 limits. **Never during market hours.**
+
+### D2 (2026-11-18): fast-track without lowering quality
+- **Critical path:** Wave A foundation → full 26-section blueprints **only** for the 3A agents (04, 05, 06, 07, 08, 09, 10, 11, 16), plus the minimal shared core (`3A_SLICE_SPEC.md`, 18, 13, 09, 08 and the ADRs 3A needs) → independent slice check → **STOP for owner approval of this slice** → 3A code starts immediately after approval.
+- **In parallel (Wave B-2):** blueprints 01–03, 12–15, 17 and the enterprise/business docs. Each one is approved before its own build begins.
+- "REQUIRES REVIEW (Phase 1)" items do not block 3A unless they change a 3A design decision. Those that do are listed in `3A_SLICE_SPEC.md`.
+- Token discipline applies: at most 4 sub-agents in parallel. A 3-line Marathi progress update (done / next / blocked-on-owner) after each work block.
+
+## Owner inputs: status
+
+| ID | Input | Status |
+|---|---|---|
+| A1 | VPS read-only output | **Waiting.** Script delivered; one consolidated command given. |
+| A2 | `trade-data` + `atp-private` read access | **Received** (2026-11-18, read-only clones) |
+| A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
+| A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
+| A5 | Channel Google account / Brand Account decision | Waiting (same as A4) |
+| A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status, GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
+| A7 | API keys | Not needed in this phase |
+
+## Open questions (new since the plan; provisional default applies until the owner answers, per owner rule A.9)
+
+| # | Question | Provisional default |
+|---|---|---|
+| Q21 | The Media repo is **public**. The detailed private-repo inventory, the knowledge index and the raw VPS output cannot live in it. Should the Media repo become private, or should the sensitive detail live elsewhere? | Keep Media public for now. Public docs carry only aggregates. Raw VPS output is shared privately in chat. Private knowledge is read at runtime from factory private storage. **Recommendation:** make the repo private before any client work. Owner decides. |
+| Q22 | Which `trade-data` windows may the channel's charts use? Trade research seals data from 2024-04-01 ("never used"), but the course spec says the owner allowed **all** data for the course. | Channel charts use **the course `data_pack` under the same allowance as the course**, and only rows older than the SEBI price-data lag at publish time (lag per research log). The factory never reads the Trade research folders (IS/VAL/HOLDOUT tooling) and never writes to `trade-data`. |
+| Q23 | `trade-data` README says the BANKNIFTY daily file is cut at 2024-03-31, but its manifest shows data to 2026-10. Is this intended? | Recorded as a fact only; no action in Media. Owner to confirm whether the README is stale. |
+| Q24 | Use `research/course/` (25 chapters, Marathi, speaker notes) as the course map for the video funnel and as a first script source? | Yes, read-only. Each video's end pointer maps to a course chapter (§1B.2a). Speaker notes are treated as **owner-authored source material**, still passing all gates. |
+| Q25 | Book licences: are the 13 PDF / 1 EPUB / 4 PPTX owned or licensed copies? Are the 1,349 extracted page images to be ingested? | The books are used **only as concept sources for original-words teaching** (directive §1B.2a). Extracted images are **excluded** from ingestion and never shown. Licence status goes into the compliance doc as an owner item. |
+| Q26 | The channel must not reveal the owner's private method beyond what the owner chooses. Which parts of `atp-private/knowledge` may appear in public videos? | Nothing from `atp-private` appears in videos by default. "Our method" topics are written only from material the owner explicitly releases per topic (S7 approval). |
+
+## Wave A open questions (provisional defaults accepted per owner rule A.9; the owner may override)
+| # | Question | Default applied |
+|---|---|---|
+| Q27 | Publish guard strictness | Strict: approval + editorial contribution + Agent 16 authorisation even for private upload (and for 3A delivery) |
+| Q28 | `FAILED` semantics | Non-terminal hand-off; exits only to DEAD_LETTER (auto) or CANCELLED (human) |
+| Q29 | Approval waits | CHECKPOINTED + `wait_reason=AWAITING_APPROVAL`, no timeout (reminders only) |
+| Q30 | Backtest success-rate / unstated sponsor status | NEEDS_HUMAN_REVIEW; doc 13 may tighten to BLOCKED via CCR |
+| Q31 | Audit chain throughput | Serialised per tenant; measure in pilot |
+| Q32 | Comment triage `UNCLASSIFIED` class | Kept (undecided comments go to a human, never dropped) |
+| Q33 | Blocked hosts for Python/UUIDv7/PostgreSQL facts | Please allow devguide.python.org, docs.python.org, www.rfc-editor.org; until then REQUIRES REVIEW |
+
+## Session log
+| Date | Session | Work |
+|---|---|---|
+| 2026-11-18 | 1 | Phase 0 done; Phase 1: audit script (+ sudo usage fix), skeleton, ledger, CR register, audit Parts A/B/D, research wave 1 complete, Knowledge Library plan; architecture Wave A launched |
+
+## Token usage per wave (sub-agent tokens as reported by the harness; main-session usage via /cost by the owner)
+| Wave / step | Agents | Sub-agent tokens | Note |
+|---|---|---|---|
+| Phase 1 research (wave 1 + re-runs + wave 2) | 4 (Sonnet), 2 re-runs | ≈ 680k | 73.5k + 125.7k (YouTube), 154.4k (India), 97.5k + 121.3k (infra), 107.8k (prices) |
+| Wave A | 1 (Opus) | 348k | 49 min |
+| Wave B-1 | 16 (Opus: ADRs, slice spec, integrator, check; Sonnet: docs + blueprints), max 4 parallel | pending | |
