@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:agent_04.deterministic_core.input:1.0.0",
+  "title": "Agent 04 deterministic core case input (function argument object)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["component", "fixture"],
+  "properties": {
+    "component": {
+      "enum": ["ReliabilityScorer", "RestrictedCollectionGate", "LibraryRetriever", "TenantGuard", "CopyGuard", "NoteValidator",
+               "PackAssembler", "PackValidator", "IdempotencyKeys", "ResearchPackStep", "ExternalReferenceFetcher", "PlanValidator", "PromptLoader"]
+    },
+    "fixture": { "type": "object", "minProperties": 1, "description": "test data for the function; keys are per component and described in README section 2; values are test values, not product defaults" }
+  }
+}
