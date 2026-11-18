@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.envelope:1.0.0",
+  "title": "AMW Message Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "org_id",
+    "message_id",
+    "sender",
+    "receiver",
+    "job_id",
+    "task_id",
+    "payload_ref",
+    "priority",
+    "timestamp",
+    "correlation_id",
+    "schema_version"
+  ],
+  "properties": {
+    "org_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/org_id"
+    },
+    "message_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/message_id"
+    },
+    "sender": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/actor_ref"
+    },
+    "receiver": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/actor_ref"
+    },
+    "job_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/job_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "task_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/task_id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "payload_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri",
+        "schema",
+        "schema_version",
+        "sha256",
+        "size_bytes",
+        "media_type"
+      ],
+      "properties": {
+        "uri": {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri"
+        },
+        "schema": {
+          "enum": [
+            "amw.task_input",
+            "amw.task_output",
+            "amw.control"
+          ]
+        },
+        "schema_version": {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/semver"
+        },
+        "sha256": {
+          "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/sha256_hex"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "media_type": {
+          "const": "application/json"
+        }
+      }
+    },
+    "priority": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/priority"
+    },
+    "timestamp": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/utc_timestamp"
+    },
+    "correlation_id": {
+      "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/correlation_id"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "payload_ref": {
+            "properties": {
+              "schema": {
+                "enum": [
+                  "amw.task_input",
+                  "amw.task_output"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

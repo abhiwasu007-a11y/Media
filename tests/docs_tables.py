@@ -1,4 +1,4 @@
-"""Parsers for the binding design documents (tests compare code against these, never the reverse)."""
+"""Parsers for the binding design documents (tests compare code against these, not the reverse)."""
 
 import re
 from pathlib import Path
@@ -12,7 +12,7 @@ def doc_text(name: str) -> str:
 
 
 def section(text: str, heading_re: str, level: int) -> str:
-    """Body of the first heading of ``level`` matching ``heading_re`` up to the next same-level one."""
+    """Body of the first ``level`` heading matching ``heading_re``, up to the next one."""
     marks = "#" * level
     lines = text.splitlines()
     out: list[str] = []
@@ -57,7 +57,7 @@ def ticks(text: str) -> list[str]:
 
 def _expand_ranges(text: str) -> list[str]:
     values: list[str] = []
-    for letter, lo, hi in re.findall(r"`([A-Z])(\d+)`\s*[–-]\s*`[A-Z](\d+)`", text):
+    for letter, lo, hi in re.findall(r"`([A-Z])(\d+)`\s*[\u2013-]\s*`[A-Z](\d+)`", text):
         width = len(lo)
         values += [f"{letter}{n:0{width}d}" for n in range(int(lo), int(hi) + 1)]
     return values
@@ -81,7 +81,7 @@ def glossary_enums() -> dict[str, list[str]]:
                     groups = [result[ticks(cell)[0]]]
                 elif cell.startswith("same as "):
                     groups = [ticks(cell.split(":", 1)[1])]
-                elif "–" in cell:
+                elif "\u2013" in cell:  # en dash range
                     groups = [_expand_ranges(cell)]
                 elif " / " in cell and len(row_names) > 1:
                     groups = [ticks(part) for part in cell.split(" / ")]

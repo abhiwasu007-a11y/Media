@@ -118,9 +118,7 @@ def test_idempotency_key_known_vector() -> None:
     # sha256 of {"natural_key":["brief-1"],"org_id":"org_0192...","scope":"job.create"}
     import hashlib
 
-    material = (
-        '{"natural_key":["brief-1"],"org_id":"' + org + '","scope":"job.create"}'
-    ).encode()
+    material = ('{"natural_key":["brief-1"],"org_id":"' + org + '","scope":"job.create"}').encode()
     assert key == "idk_" + hashlib.sha256(material).hexdigest()
 
 

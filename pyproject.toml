@@ -17,6 +17,7 @@ dev = [
   "ruff>=0.8",
   "jsonschema>=4.23",
   "psycopg[binary]>=3.2",
+  "types-jsonschema>=4.26.0.20261006",
 ]
 
 [tool.uv]

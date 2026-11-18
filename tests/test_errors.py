@@ -1,4 +1,4 @@
-"""07 section 2 catalogue: every code exists exactly once, with its class, disposition and policy."""
+"""07 section 2 catalogue: every code exists once, with its class, disposition and policy."""
 
 import re
 
