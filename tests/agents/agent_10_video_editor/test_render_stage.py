@@ -190,3 +190,61 @@ def test_drain_mid_render_checkpoints_and_resume_reuses_finished_segments(tmp_pa
     assert segs["encoded"] == 1
     # the finished segment was not redone
     assert [c.kind for c in world.runner.calls].count("segment") == 2
+
+
+@pytest.mark.unit
+def test_audit_entries_idempotency_rows_and_metrics_of_a_render(tmp_path: Path) -> None:
+    world = World(tmp_path, shots=4)
+    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert world.audit.actions == ["render.started", "render.completed"]
+    entry = world.audit.entries[1][1]
+    assert set(entry.details) == {"content_sha256", "duration_ms"}  # IDs, hashes, numbers only
+    rows = list(world.idempotency._rows.values())
+    scopes = sorted(r.scope for r in rows)
+    assert scopes == ["render.master", "render.segment", "render.segment"]
+    assert all(r.status == "COMPLETED" for r in rows)
+
+
+@pytest.mark.unit
+def test_guard_refusal_is_audited(tmp_path: Path) -> None:
+    world = World(tmp_path, now=LocalTime.parse("TUE", "10:00"))
+    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert "render.guard_refused" in world.audit.actions
+
+
+@pytest.mark.failure_injection
+def test_same_master_key_with_other_content_is_an_idempotency_conflict(tmp_path: Path) -> None:
+    from amw_core.errors import IdempotencyConflictError
+
+    world = World(tmp_path)
+    real_begin = world.idempotency.begin
+    seen: list[str] = []
+
+    def begin(tx, key, scope, request_sha256, task_id, now, lock_ms):  # type: ignore[no-untyped-def]
+        if scope == "render.master" and not seen:
+            seen.append(scope)
+            real_begin(tx, key, scope, "0" * 64, task_id, now, lock_ms)  # an earlier, other request
+        return real_begin(tx, key, scope, request_sha256, task_id, now, lock_ms)
+
+    world.idempotency.begin = begin  # type: ignore[method-assign]
+    with pytest.raises(IdempotencyConflictError):
+        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert world.renders.rows == {}
+
+
+@pytest.mark.failure_injection
+def test_a_segment_held_by_another_attempt_is_a_lock_conflict(tmp_path: Path) -> None:
+    from amw_core.errors import LockConflictError
+
+    world = World(tmp_path)
+    real_begin = world.idempotency.begin
+
+    def begin(tx, key, scope, request_sha256, task_id, now, lock_ms):  # type: ignore[no-untyped-def]
+        if scope == "render.segment":  # another attempt began the same effect and still holds it
+            real_begin(tx, key, scope, request_sha256, task_id, now, lock_ms)
+        return real_begin(tx, key, scope, request_sha256, task_id, now, lock_ms)
+
+    world.idempotency.begin = begin  # type: ignore[method-assign]
+    with pytest.raises(LockConflictError):
+        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert not [u for u in world.storage.blobs if "/segments/" in u]

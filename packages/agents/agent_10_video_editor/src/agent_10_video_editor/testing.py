@@ -270,6 +270,29 @@ class MemoryCostLedger:
         return CostTotals(0, 0, 0, len(self.rows), 0, "INR")
 
 
+class MemoryAuditLog:
+    """Append-only list of ``NewAuditEntry`` per tenant (no hash chain; not for production)."""
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, Any]] = []
+
+    def append(self, tx: TenantTransaction, entry: Any) -> Any:
+        self.entries.append((tx.context.org_id, entry))
+        return entry
+
+    def verify_chain(self, tx: TenantTransaction) -> Any:
+        raise NotImplementedError
+
+    def export(
+        self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None
+    ) -> Any:
+        raise NotImplementedError
+
+    @property
+    def actions(self) -> list[str]:
+        return [e.action for _, e in self.entries]
+
+
 class MemoryRenderRepository:
     def __init__(self) -> None:
         self.rows: dict[tuple[str, str], RenderRow] = {}
@@ -412,6 +435,13 @@ class FakeFfmpegRunner:
         self.crash_on_encode: set[int] = set()
         self.bad_idr = False
         self.faststart = True
+        self.filters_text = "".join(
+            f" T.. {name:<14} V->V       fake\n"
+            for name in (
+                "blackdetect", "freezedetect", "silencedetect", "ebur128", "select", "showinfo",
+                "tile", "drawtext", "concat", "overlay", "scale", "apad",
+            )
+        )  # fmt: skip
         self.unreadable_inputs: set[str] = set()
         self._encodes = 0
         self._lock = threading.Lock()
@@ -436,11 +466,16 @@ class FakeFfmpegRunner:
     def _run(self, argv: list[str], cwd: Path, stop: Callable[[], bool] | None) -> ProcessResult:
         tool = Path(argv[0]).name
         joined = " ".join(argv)
+        if tool == "ffprobe" and argv[1:] == ["-version"]:
+            return ProcessResult(0, stdout="ffprobe version fake-1.0\n")
         if tool == "ffprobe":
             return self._ffprobe(argv, cwd)
         if "-version" in argv:
             self.calls.append(FakeCall("version", tuple(argv)))
             return ProcessResult(0, stdout="ffmpeg version fake-1.0 (in-memory)\n")
+        if "-filters" in argv:
+            self.calls.append(FakeCall("filters", tuple(argv)))
+            return ProcessResult(0, stdout=self.filters_text)
         if "-filter_complex" in argv:
             return self._encode("segment", argv, cwd, stop)
         if "concat" in argv and "-movflags" in argv:

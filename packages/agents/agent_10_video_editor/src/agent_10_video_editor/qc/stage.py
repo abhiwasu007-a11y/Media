@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
+from agent_10_video_editor.audit import record as audit_record
 from agent_10_video_editor.canonical import canonical_json, sha256_hex
 from agent_10_video_editor.checkpointing import CheckpointIO
 from agent_10_video_editor.contracts import (
@@ -48,6 +49,7 @@ from agent_10_video_editor.inputs import (
     ShotPlan,
 )
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
+from agent_10_video_editor.observability import LogContext, emit, labels
 from agent_10_video_editor.ports import LicenceSnapshot, QcRow
 from agent_10_video_editor.probe import (
     AtomOrderChecker,
@@ -169,6 +171,7 @@ class _QcRun:
         self.scratch = ScratchDir(deps.scratch_root, ti.org_id, ti.task_id)
         self.argv = ArgvBuilder(deps.cfg.render, deps.ffmpeg_bin, deps.ffprobe_bin)
         self.started = deps.clock.monotonic_ms()
+        self.log = LogContext(ti.org_id, ti.job_id, ti.task_id, attempt_id, ti.correlation_id)
         self.ckpt = CheckpointIO(
             scope=self.scope,
             tenancy=deps.tenancy,
@@ -217,6 +220,7 @@ class _QcRun:
 
     def execute(self) -> TaskOutput:
         d, ti, qcfg = self.d, self.ti, self.d.cfg.qc
+        emit("qc.start", self.log)
         TenantScope.assert_consistent(ti.org_id, ti)
         validate_budget(ti)
         if ti.payload.data is None:
@@ -270,6 +274,7 @@ class _QcRun:
         version = d.runner.run(self.argv.version(), cwd=work, limits=RunLimits())
         build_id = ffmpeg_build_id(version.stdout)
         selftest = self.selftests.record_for(build_id)
+        emit("selftest.result", self.log, passed=selftest.passed)
         if not selftest.passed:
             raise config_invalid("SELFTEST_FAILED")
         self.scope.read_to(row.storage_ref, row.content_sha256, work / "final.mp4")
@@ -292,6 +297,7 @@ class _QcRun:
                 except MeasurementUnavailable as exc:
                     raise map_measurement_error(exc, process_died=False) from exc
                 self.ckpt.write(group, _QcState(group=group))
+                emit("qc.group_done", self.log, group=group)
             results = self._evaluate(
                 payload, plan, manifest, audio, narration, script, timeline, row, m, subs_out, work
             )
@@ -300,6 +306,7 @@ class _QcRun:
             if not verdict.allowed:
                 return self._suspend(verdict.reason, "qc.evidence")
             evidence = self._evidence(payload, row, timeline, timeline_sha, results, probe, work)
+            emit("qc.evidence", self.log, frames=len(evidence.frames))
         except StopRequested:
             return self._suspend(GuardReason.MARKET_HOURS, "qc.interrupted")
 
@@ -307,6 +314,26 @@ class _QcRun:
             [r for r in results if r.gate], profile_check_ids(payload.qc_profile)
         )
         counts = _counts(results)
+        emit(
+            "qc.gate", self.log, gate_verdict=str(gate.gate_verdict), failed=len(gate.failed_checks)
+        )
+        for r in results:
+            emit("qc.check", self.log, check_id=r.check_id, verdict=str(r.verdict))
+            if d.metrics is not None:
+                d.metrics.count(
+                    "a10_check_results_total",
+                    labels(ti.org_id, check_id=r.check_id, verdict=str(r.verdict)),
+                )
+        if d.metrics is not None:
+            d.metrics.count(
+                "a10_gate_total",
+                labels(
+                    ti.org_id,
+                    profile=payload.qc_profile,
+                    gate_verdict=str(gate.gate_verdict),
+                    remedy_stage_id=",".join(gate.remedy_stage_ids),
+                ),
+            )
         process = [
             passed("a10.q.schema", gate=False),
             passed("a10.q.tenant", gate=False),
@@ -314,6 +341,7 @@ class _QcRun:
             passed("a10.q.no_provider_call", gate=False, measured=0, threshold=0),
         ]
         self._persist(payload, row, results, evidence)
+        emit("qc.persisted", self.log, rows=len(results))
         self._cost(row.duration_ms)
         output = TechnicalQcOutput(
             gate_verdict=gate.gate_verdict.value,
@@ -946,6 +974,13 @@ class _QcRun:
         peak = next((r.measured for r in results if r.check_id == "qc.audio.true_peak"), None)
         with self.d.tenancy.transaction(self.ctx) as tx:
             self.d.qc_results.insert_many(tx, rows)
+            audit_record(
+                self.d.audit, tx, self.d.clock,
+                action="qc.gate_failed" if gate_failed else "qc.completed",
+                target_kind="render", target_id=payload.render_id, job_id=self.ti.job_id,
+                correlation_id=self.ti.correlation_id,
+                details={"profile": payload.qc_profile, "checks": len(rows)},
+            )  # fmt: skip
             self.d.renders.set_qc(
                 tx,
                 payload.render_id,

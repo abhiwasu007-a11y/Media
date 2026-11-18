@@ -229,3 +229,20 @@ def test_self_drain_timer_stops_a_running_detector_pass(tmp_path: Path) -> None:
     assert out.status is OutputStatus.SUSPENDED
     assert out.next_action.wait_reason is not None
     assert not world.qc_results.rows  # nothing persisted from a half-finished QC
+
+
+@pytest.mark.unit
+def test_qc_and_subtitle_audit_actions(tmp_path: Path) -> None:
+    world = World(tmp_path)
+    world.licences.snapshot_value = licensed_snapshot(world)
+    chain = run_chain(world)
+    _qc(world, chain)
+    assert (
+        world.audit.actions[-2:] == ["subtitles.completed", "qc.completed"]
+        or "qc.completed" in world.audit.actions
+    )
+    assert "subtitles.completed" in world.audit.actions
+    failing = World(tmp_path / "f")
+    chain2 = run_chain(failing)
+    _qc(failing, chain2)
+    assert "qc.gate_failed" in failing.audit.actions

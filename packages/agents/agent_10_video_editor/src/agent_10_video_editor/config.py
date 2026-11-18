@@ -65,6 +65,7 @@ class RenderConfig(_Cfg):
     drain_finish_max_ms: Annotated[int, Field(ge=0, strict=True)]
     colour: ColourTags = ColourTags()
     x264_preset: str = "medium"
+    effect_lock_ms: Annotated[int, Field(ge=1, strict=True)] = 900_000
     width_px: int | None = None
     height_px: int | None = None
 

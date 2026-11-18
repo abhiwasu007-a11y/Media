@@ -98,6 +98,7 @@ from agent_10_video_editor.testing import (  # noqa: E402
     FakeFfmpegRunner,
     ManualTimerFactory,
     MemoryAssetCatalog,
+    MemoryAuditLog,
     MemoryBlobStorage,
     MemoryCostLedger,
     MemoryLicenceReader,
@@ -108,7 +109,7 @@ from agent_10_video_editor.testing import (  # noqa: E402
 from amw_core.contracts.task_input import TaskInput  # noqa: E402
 from amw_core.ids import ASSET, ATTEMPT, JOB, ORG, TASK, ActorRef  # noqa: E402
 from amw_core.interfaces.tenancy_context import TenantContext  # noqa: E402
-from amw_core.testing.memory import MemoryCheckpointStore  # noqa: E402
+from amw_core.testing.memory import MemoryCheckpointStore, MemoryIdempotencyStore  # noqa: E402
 
 IDK = "idk_" + "ab" * 32
 COR = "cor_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e94"
@@ -153,6 +154,8 @@ class World:
         self.tenancy = MemoryTenancy()
         self.checkpoints = MemoryCheckpointStore()
         self.cost = MemoryCostLedger()
+        self.idempotency = MemoryIdempotencyStore()
+        self.audit = MemoryAuditLog()
         self.runner = FakeFfmpegRunner()
         self.probe = FakeAdmissionProbe(now, placement)
         self.timers = ManualTimerFactory()
@@ -389,6 +392,8 @@ class World:
             tenancy=self.tenancy,
             checkpoints=self.checkpoints,
             cost_ledger=self.cost,
+            idempotency=self.idempotency,
+            audit=self.audit,
             runner=self.runner,
             admission=self.probe,
             timers=self.timers,
@@ -428,6 +433,7 @@ def run_chain(world: World) -> dict[str, Any]:
         rdata["timeline_ref"]["uri"],
         rdata["timeline_ref"]["sha256"],
     )
+    world.task, world.attempt = str(TASK.new()), str(ATTEMPT.new())  # each stage is its own task
     subs_in = world.task_input(
         "subtitles",
         {
@@ -450,6 +456,7 @@ def run_chain(world: World) -> dict[str, Any]:
         "subs.output.json", json.dumps(subs_out.payload.data, sort_keys=True).encode()
     )
     world.refs["agent_10.subtitles.output"] = (s_uri, s_sha)
+    world.task, world.attempt = str(TASK.new()), str(ATTEMPT.new())
     qc_in = world.task_input(
         "technical_qc",
         {

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
+from agent_10_video_editor.audit import record as audit_record
 from agent_10_video_editor.canonical import sha256_hex
 from agent_10_video_editor.checkpointing import CheckpointIO
 from agent_10_video_editor.contracts import SrtEntry, SubtitlesInput, SubtitlesOutput
@@ -12,6 +13,7 @@ from agent_10_video_editor.deps import StageDeps
 from agent_10_video_editor.errors import input_invalid, missing_dependency
 from agent_10_video_editor.guard import DrainSignal, HeavyTaskGuard
 from agent_10_video_editor.inputs import NarrationTimeline, ScriptStrings
+from agent_10_video_editor.observability import LogContext, emit
 from agent_10_video_editor.ports import SubtitleAsset
 from agent_10_video_editor.qc.result import CheckResult, passed
 from agent_10_video_editor.scope import TenantScope, one_ref_per_schema
@@ -59,6 +61,13 @@ class SubtitleStage:
     def run(self, task_input: TaskInput, attempt_id: str) -> TaskOutput:
         d = self._d
         started = d.clock.monotonic_ms()
+        log = LogContext(
+            task_input.org_id,
+            task_input.job_id,
+            task_input.task_id,
+            attempt_id,
+            task_input.correlation_id,
+        )
         ctx = TenantContext(org_id=task_input.org_id, actor=ActorRef(ACTOR))  # type: ignore[arg-type]
         scope = TenantScope(ctx, d.storage)
         TenantScope.assert_consistent(task_input.org_id, task_input)
@@ -109,6 +118,7 @@ class SubtitleStage:
         built = SubtitleStageCore.build(
             timeline, script.segments, d.cfg.sub.max_chars_per_cue, row.duration_ms
         )
+        emit("subs.cues", log, cues=len(built.cues), errors=len(built.errors))
         results = self._checks(built.srt, built.errors, timeline, script, built.cues)
         failing = [r for r in results if r.verdict is CheckVerdict.FAIL]
         if failing:
@@ -116,6 +126,7 @@ class SubtitleStage:
                 "subtitle checks failed",
                 details={"checks": [r.check_id for r in failing], "errors": list(built.errors)},
             )
+        emit("subs.validated", log, cues=len(built.cues))
         sha = sha256_hex(built.srt)
         info = scope.put_bytes(
             scope.uri("jobs", f"{task_input.job_id}/subtitles/{payload.language}-{sha[:16]}.srt"),
@@ -126,6 +137,13 @@ class SubtitleStage:
                 tx,
                 SubtitleAsset(str(ASSET.new()), info.uri, sha, info.size_bytes, payload.language),
             )
+        with d.tenancy.transaction(ctx) as tx:
+            audit_record(
+                d.audit, tx, d.clock, action="subtitles.completed", target_kind="asset",
+                target_id=asset.asset_id, job_id=task_input.job_id,
+                correlation_id=task_input.correlation_id,
+                details={"srt_sha256": sha, "cues": len(built.cues)},
+            )  # fmt: skip
         CheckpointIO(
             scope=scope,
             tenancy=d.tenancy,

@@ -67,10 +67,11 @@ class CheckpointIO:
                 self._clock.now(),
             )
 
-    def latest(self, model: type[S]) -> tuple[S, tuple[str, ...]] | None:
+    def latest(self, model: type[S], step_prefix: str) -> tuple[S, tuple[str, ...]] | None:
+        """The latest checkpoint of THIS task, only if its step belongs to ``step_prefix``."""
         with self._tenancy.transaction(self._context) as tx:
             record = self._store.latest(tx, TaskId(self._task))
-        if record is None:
+        if record is None or not record.checkpoint.step_key.startswith(step_prefix):
             return None
         raw = self._scope.read_bytes(record.checkpoint.state_ref, record.checkpoint.state_sha256)
         return model.model_validate_json(raw), tuple(record.checkpoint.completed_effects)

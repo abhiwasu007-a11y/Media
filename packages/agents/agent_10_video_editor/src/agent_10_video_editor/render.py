@@ -17,6 +17,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agent_10_video_editor.audit import record as audit_record
 from agent_10_video_editor.canonical import canonical_json, sha256_hex
 from agent_10_video_editor.checkpointing import CheckpointIO
 from agent_10_video_editor.config import Placement
@@ -57,6 +58,7 @@ from agent_10_video_editor.inputs import (
     ShotPlan,
 )
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
+from agent_10_video_editor.observability import LogContext, emit, labels
 from agent_10_video_editor.ports import RenderRow
 from agent_10_video_editor.probe import PacketParser, ProbeResult
 from agent_10_video_editor.qc.checks import a10_q_colour_tags, a10_q_gop_settings
@@ -109,11 +111,20 @@ from amw_core.errors import (
     CorruptedOutputError,
     DeadlineExceededError,
     IdempotencyConflictError,
+    LockConflictError,
     RenderCrashError,
     SchemaInvalidError,
 )
-from amw_core.ids import RENDER, ActorRef, IdempotencyScope, make_idempotency_key
+from amw_core.ids import (
+    RENDER,
+    ActorRef,
+    IdempotencyKey,
+    IdempotencyScope,
+    TaskId,
+    make_idempotency_key,
+)
 from amw_core.interfaces.cost_ledger import NewCostEntry
+from amw_core.interfaces.idempotency_store import BeginAction
 from amw_core.interfaces.tenancy_context import TenantContext
 
 RENDER_SCHEMAS = (
@@ -226,7 +237,15 @@ class _RenderRun:
             task_id=task_input.task_id,
             attempt_id=attempt_id,
         )
+        self.log = LogContext(
+            task_input.org_id,
+            task_input.job_id,
+            task_input.task_id,
+            attempt_id,
+            task_input.correlation_id,
+        )
         self.warnings: list[str] = []
+        self._scopes: dict[str, str] = {}
         self.encoded = 0
         self.reused = 0
         self.resumed = False
@@ -240,7 +259,15 @@ class _RenderRun:
 
     def execute(self) -> TaskOutput:
         d, ti = self.d, self.ti
+        self._note("render.start")
+        with d.tenancy.transaction(self.ctx) as tx:
+            audit_record(
+                d.audit, tx, d.clock, action="render.started", target_kind="task",
+                target_id=ti.task_id, job_id=ti.job_id, correlation_id=ti.correlation_id,
+                details={"attempt_id": self.attempt_id},
+            )  # fmt: skip
         TenantScope.assert_consistent(ti.org_id, ti)
+        self._note("render.tenant_ok")
         payload = parse_render_input(ti)
         loaded = load_inputs(ti, self.scope)
         UpstreamGate.check_models(
@@ -252,6 +279,7 @@ class _RenderRun:
             verified_script_sha256=payload.verified_script_sha256,
             aspect_ratio=payload.aspect_ratio,
         )
+        self._note("render.upstream_ok")
         if loaded.plan.language != payload.language or (
             loaded.narration.language not in (None, payload.language)
         ):
@@ -267,7 +295,7 @@ class _RenderRun:
         version = d.runner.run(self.argv.version(), cwd=work, limits=RunLimits())
         build_id = ffmpeg_build_id(version.stdout)
 
-        restored = self.ckpt.latest(RenderState)
+        restored = self.ckpt.latest(RenderState, "render.")
         state = restored[0] if restored else None
         self.resumed = state is not None
         if state is None:
@@ -293,6 +321,9 @@ class _RenderRun:
         state = state.model_copy(
             update={"timeline_sha256": timeline_sha, "timeline_uri": timeline_blob.uri}
         )
+        self._note(
+            "render.timeline", timeline_sha256=timeline_sha, total_frames=timeline.total_frames
+        )
         existing = self._existing_render(timeline_sha, payload.preset_key)
         if existing is not None:
             return self._replay_output(state, existing, timeline, timeline_sha, build_id, probe)
@@ -312,6 +343,7 @@ class _RenderRun:
                     ),
                 }
             )
+        self._note("render.segment_plan", segments=len(segments), target_frames=target)
         resume = ResumeVerifier.verify(
             [(s, p.key, p.uri) for s, p in zip(segments, plans, strict=True)],
             state,
@@ -328,11 +360,16 @@ class _RenderRun:
                 _progress(adopted.frames, timeline.total_frames),
             )
         self.reused = len(resume.reusable)
+        if self.resumed:
+            self._note("render.resume", reused=self.reused, to_encode=len(resume.to_encode))
+        for _ in resume.reusable:
+            self._count("a10_segments_total", outcome="reused")
         state = state.model_copy(update={"segments": {**state.segments, **records}})
         for ordinal in resume.to_encode:
             segment, plan = segments[ordinal], plans[ordinal]
             est = self._estimate_ms(segment.frames, timeline)
             verdict = self.guard.check(est)
+            self._guard_note(verdict.allowed, verdict.reason)
             if not verdict.allowed:
                 return self._suspended(state, verdict.reason, timeline, records, plans)
             try:
@@ -354,9 +391,12 @@ class _RenderRun:
                 _progress(done, timeline.total_frames),
             )
             self.encoded += 1
+            self._count("a10_segments_total", outcome="encoded")
+            self._note("render.segment_done", ordinal=ordinal, key=plan.key)
 
         mux_est = self._estimate_ms(min(timeline.total_frames, target), timeline)
         verdict = self.guard.check(mux_est)
+        self._guard_note(verdict.allowed, verdict.reason)
         if not verdict.allowed:
             return self._suspended(state, verdict.reason, timeline, records, plans)
         try:
@@ -365,10 +405,12 @@ class _RenderRun:
             )
         except StopRequested:
             return self._suspended(state, GuardReason.MARKET_HOURS, timeline, records, plans)
+        self._note("render.mux", size_bytes=final_info.size_bytes)
         self.ckpt.write("render.mux", state)
         row = self._register(state, timeline, timeline_sha, payload, final_info, final_probe)
         state = state.model_copy(update={"registered": True})
         self.ckpt.write("render.registered", state, [self._master_key(timeline_sha)])
+        self._note("render.registered", render_id=row.render_id, content_sha256=row.content_sha256)
         return self._output(
             row,
             timeline,
@@ -383,6 +425,30 @@ class _RenderRun:
         )
 
     # -- helpers -----------------------------------------------------------------------------
+
+    def _note(self, event: str, **fields: int | bool | str | None) -> None:
+        emit(event, self.log, **fields)
+
+    def _count(self, name: str, **extra: str) -> None:
+        if self.d.metrics is not None:
+            self.d.metrics.count(name, labels(self.ti.org_id, **extra))
+
+    def _guard_note(self, allowed: bool, reason: GuardReason | None) -> None:
+        if not allowed:
+            with self.d.tenancy.transaction(self.ctx) as tx:
+                audit_record(
+                    self.d.audit, tx, self.d.clock, action="render.guard_refused",
+                    target_kind="task", target_id=self.ti.task_id, job_id=self.ti.job_id,
+                    correlation_id=self.ti.correlation_id,
+                    details={"reason": str(reason) if reason else "SELF_DRAIN"},
+                )  # fmt: skip
+        self._note("render.guard", allowed=allowed, reason=str(reason) if reason else None)
+        self._count(
+            "a10_guard_checks_total",
+            task="render",
+            result="allowed" if allowed else "denied",
+            reason=str(reason) if reason else "",
+        )
 
     def _asset_records(self, loaded: LoadedInputs) -> dict[str, AssetRecord]:
         ids = {o.template_asset_id for o in loaded.manifest.overlays}
@@ -411,20 +477,44 @@ class _RenderRun:
             return self.d.renders.find_master(tx, self.ti.job_id, timeline_sha, preset_key)
 
     def _effect_key(self, segment_key: str) -> str:
-        return str(
+        key = str(
             make_idempotency_key(
                 self.ti.org_id, IdempotencyScope.RENDER_SEGMENT, [self.ti.job_id, segment_key]
             )
         )
+        self._scopes[key] = IdempotencyScope.RENDER_SEGMENT.value
+        return key
+
+    def _idem_begin(self, key: str, request_sha256: str) -> BeginAction:
+        """03 section 9.1 rule 3: ``begin`` in its own committed transaction before the effect."""
+        with self.d.tenancy.transaction(self.ctx) as tx:
+            decision = self.d.idempotency.begin(
+                tx, IdempotencyKey(key), self._scope_of(key), request_sha256,
+                TaskId(self.ti.task_id), self.d.clock.now(), self.d.cfg.render.effect_lock_ms,
+            )  # fmt: skip
+        return decision.action
+
+    def _idem_complete(self, key: str, result_ref: str) -> None:
+        with self.d.tenancy.transaction(self.ctx) as tx:
+            self.d.idempotency.complete(tx, IdempotencyKey(key), result_ref, self.d.clock.now())
+
+    def _idem_fail(self, key: str) -> None:
+        with self.d.tenancy.transaction(self.ctx) as tx:
+            self.d.idempotency.fail(tx, IdempotencyKey(key), self.d.clock.now())
+
+    def _scope_of(self, key: str) -> str:
+        return self._scopes[key]
 
     def _master_key(self, timeline_sha: str) -> str:
-        return str(
+        key = str(
             make_idempotency_key(
                 self.ti.org_id,
                 IdempotencyScope.RENDER_MASTER,
                 [self.ti.job_id, timeline_sha, self.d.cfg.render.preset_key],
             )
         )
+        self._scopes[key] = IdempotencyScope.RENDER_MASTER.value
+        return key
 
     def _estimate_ms(self, frames: int, timeline: Timeline) -> int:
         output_ms = FrameQuantiser.frames_to_ms(frames, timeline.fps.num, timeline.fps.den)
@@ -486,6 +576,29 @@ class _RenderRun:
         return uri
 
     def _encode_segment(
+        self,
+        segment: Segment,
+        plan: _RenderRun._Plan,
+        work: Path,
+        probe: ProbeService,
+        est_ms: int,
+    ) -> SegmentRecord:
+        """Scope ``render.segment``: the effect key is begun before and completed after the put."""
+        key = self._effect_key(plan.key)
+        action = self._idem_begin(key, plan.key)
+        if action is BeginAction.IN_FLIGHT:
+            raise LockConflictError("another attempt holds this segment")
+        try:
+            record = self._encode_segment_inner(segment, plan, work, probe, est_ms)
+        except BaseException:
+            if action is not BeginAction.RETURN_STORED:
+                self._idem_fail(key)
+            raise
+        if action is not BeginAction.RETURN_STORED:
+            self._idem_complete(key, record.uri)
+        return record
+
+    def _encode_segment_inner(
         self,
         segment: Segment,
         plan: _RenderRun._Plan,
@@ -637,50 +750,72 @@ class _RenderRun:
         result: ProbeResult,
     ) -> RenderRow:
         width, height = self.d.cfg.render.geometry
+        master_key = self._master_key(timeline_sha)
+        action = self._idem_begin(master_key, info.sha256)  # same key, other content: conflict
         with self.d.tenancy.transaction(self.ctx) as tx:
             existing = self.d.renders.find_by_content(tx, info.sha256)
             if existing is not None:
                 if existing.timeline_sha256 != timeline_sha:
                     raise IdempotencyConflictError("same content, different timeline")
-                return existing
-            row = RenderRow(
-                render_id=state.render_id,
-                job_id=self.ti.job_id,
-                kind=str(RenderKind.MASTER),
-                preset_key=payload.preset_key,
-                version=1,
-                timeline_sha256=timeline_sha,
-                width_px=result.video.width or width,
-                height_px=result.video.height or height,
-                fps_num=timeline.fps.num,
-                fps_den=timeline.fps.den,
-                video_codec=result.video.codec_name,
-                audio_codec=result.audio.codec_name if result.audio else "",
-                video_bitrate_bps=result.video_bitrate_bps,
-                audio_bitrate_bps=self._audio_bps,
-                audio_sample_rate_hz=result.audio.sample_rate if result.audio else 0,
-                duration_ms=result.duration_ms,
-                size_bytes=info.size_bytes,
-                storage_ref=info.uri,
-                content_sha256=info.sha256,
-                status=RenderStatus.COMPLETE,
-                worker_id=self.d.worker_id,
-            )
-            stored = self.d.renders.insert(tx, row)
-            self.d.cost_ledger.record(
-                tx,
-                NewCostEntry(
-                    provider="ffmpeg",
-                    operation=CostOperation.RENDER_FFMPEG,
-                    amount_micros=0,
-                    currency=self.ti.resource_budget.currency,
-                    figure_kind=CostFigureKind.ESTIMATE,
-                    occurred_at=self.d.clock.now(),
-                    units=Decimal(self._render_ms()),
-                    unit_kind=CostUnitKind.RENDER_MS,
-                ),
-            )
+                stored = existing  # replay: no second row and no second cost row
+            else:
+                stored = self.d.renders.insert(
+                    tx,
+                    self._row(state, timeline, timeline_sha, payload, info, result, width, height),
+                )
+                audit_record(
+                    self.d.audit, tx, self.d.clock, action="render.completed",
+                    target_kind="render", target_id=stored.render_id, job_id=self.ti.job_id,
+                    correlation_id=self.ti.correlation_id,
+                    details={
+                        "content_sha256": stored.content_sha256,
+                        "duration_ms": stored.duration_ms,
+                    },
+                )  # fmt: skip
+                self.d.cost_ledger.record(
+                    tx,
+                    NewCostEntry(
+                        provider="ffmpeg",
+                        operation=CostOperation.RENDER_FFMPEG,
+                        amount_micros=0,
+                        currency=self.ti.resource_budget.currency,
+                        figure_kind=CostFigureKind.ESTIMATE,
+                        occurred_at=self.d.clock.now(),
+                        units=Decimal(self._render_ms()),
+                        unit_kind=CostUnitKind.RENDER_MS,
+                    ),
+                )
+        if action is not BeginAction.RETURN_STORED:
+            self._idem_complete(master_key, stored.storage_ref)
         return stored
+
+    def _row(
+        self, state: RenderState, timeline: Timeline, timeline_sha: str, payload: RenderInput,
+        info: Any, result: ProbeResult, width: int, height: int,
+    ) -> RenderRow:  # fmt: skip
+        return RenderRow(
+            render_id=state.render_id,
+            job_id=self.ti.job_id,
+            kind=str(RenderKind.MASTER),
+            preset_key=payload.preset_key,
+            version=1,
+            timeline_sha256=timeline_sha,
+            width_px=result.video.width or width,
+            height_px=result.video.height or height,
+            fps_num=timeline.fps.num,
+            fps_den=timeline.fps.den,
+            video_codec=result.video.codec_name,
+            audio_codec=result.audio.codec_name if result.audio else "",
+            video_bitrate_bps=result.video_bitrate_bps,
+            audio_bitrate_bps=self._audio_bps,
+            audio_sample_rate_hz=result.audio.sample_rate if result.audio else 0,
+            duration_ms=result.duration_ms,
+            size_bytes=info.size_bytes,
+            storage_ref=info.uri,
+            content_sha256=info.sha256,
+            status=RenderStatus.COMPLETE,
+            worker_id=self.d.worker_id,
+        )
 
     def _render_ms(self) -> int:
         return max(self.d.clock.monotonic_ms() - self.started_ms, 0)
@@ -704,6 +839,9 @@ class _RenderRun:
         )
         done = sum(r.frames for r in records.values())
         self.ckpt.write("render.drain", state, progress=_progress(done, timeline.total_frames))
+        self._note(
+            "render.self_drain" if self.signal.self_drained else "render.drain", done_frames=done
+        )
         text = f"CHECKPOINTED / DRAIN ({reason or 'SELF_DRAIN'})"
         return build_output(
             status=OutputStatus.SUSPENDED,
@@ -880,6 +1018,23 @@ class _RenderRun:
         self.scope.read_to(row.storage_ref, row.content_sha256, final)
         result = probe_service.full(final.name)
         count = probe_service.packet_count(final.name)
+        target = target_frames_of(
+            self.d.cfg.render.segment_target_ms, timeline.fps.num, timeline.fps.den
+        )
+        segments = plan_segments(timeline, target)
+        plans = [self._plan_segment(timeline, seg, build_id) for seg in segments]
+        planned = len(segments)
+        self.reused, self.encoded = planned, 0  # nothing is encoded again
+        self._audio_bps = self._audio_bps or row.audio_bitrate_bps
+        if state.args_sha256 is None:
+            state = state.model_copy(
+                update={
+                    "gop": dict(plans[0].command.gop),
+                    "args_sha256": sha256_hex(
+                        canonical_json([p.command.args_sha256 for p in plans])
+                    ),
+                }
+            )
         return self._output(
             row,
             timeline,
@@ -889,8 +1044,8 @@ class _RenderRun:
             result,
             count,
             drained=False,
-            plans=[],
-            segments_total=len(state.segments),
+            plans=plans,
+            segments_total=planned,
         )
 
 
