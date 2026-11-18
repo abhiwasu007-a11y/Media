@@ -1,5 +1,7 @@
 """CCR-105 / P4-16: Agent 11 matches through ``amw_core.text_normalise``, not a local seam."""
 
+# ruff: noqa: RUF001  -- look-alike letters are the test data of this module.
+
 import pytest
 
 from agent_11_thumbnail_design.fallback import _tokens
