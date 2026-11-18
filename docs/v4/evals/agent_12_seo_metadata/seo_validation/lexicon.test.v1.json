@@ -1,0 +1,136 @@
+{
+ "fixture_id": "lexicon.test.v1",
+ "purpose": "TEST FIXTURE ONLY. Not rule-pack content and not legal text. The production lexicon is rule-pack data owned by 13_COMPLIANCE_YOUTUBE_POLICY (REQUIRES REVIEW (Phase 1), counsel).",
+ "matching": "text is NFC-normalised, case-folded, zero-width characters removed, whitespace collapsed. Latin phrases match on word boundaries; phrases containing Devanagari match as substrings (Marathi and Hindi words take suffixes). `regex` patterns run on the normalised text.",
+ "entries": [
+  {
+   "id": "L01",
+   "rule_id": "FIN-R1",
+   "verdict": "BLOCKED",
+   "kind": "phrase",
+   "patterns": [
+    "buy now",
+    "sell now",
+    "sure-shot",
+    "sureshot",
+    "खरेदी करा",
+    "विका",
+    "हमी नफा"
+   ]
+  },
+  {
+   "id": "L02",
+   "rule_id": "FIN-R1",
+   "verdict": "BLOCKED",
+   "kind": "regex",
+   "patterns": [
+    "\\b(stock|share|market|trading|intraday|option)s?\\s+tips?\\b",
+    "\\btips?\\s+(and|&)\\s+calls?\\b",
+    "(शेअर|मार्केट|इंट्राडे)\\s*टिप्स"
+   ]
+  },
+  {
+   "id": "L03",
+   "rule_id": "FIN-R3",
+   "verdict": "BLOCKED",
+   "kind": "phrase",
+   "patterns": [
+    "tomorrow",
+    "next week",
+    "this week",
+    "उद्या",
+    "पुढील आठवड्यात",
+    "या आठवड्यात"
+   ]
+  },
+  {
+   "id": "L04",
+   "rule_id": "FIN-R2",
+   "verdict": "BLOCKED",
+   "kind": "regex",
+   "patterns": [
+    "\\btarget\\b\\s*[:=]?\\s*(price|level)?\\s*\\d",
+    "टार्गेट\\s*[:=]?\\s*\\d",
+    "stop[- ]?loss\\s*(at|@|:)\\s*\\d",
+    "\\d[\\d,]*\\s*(call|put|कॉल|पुट)\\b"
+   ]
+  },
+  {
+   "id": "L05",
+   "rule_id": "FIN-R6",
+   "verdict": "BLOCKED",
+   "kind": "regex",
+   "patterns": [
+    "\\d+\\s*%\\s*(profit|returns?|win rate|नफा)",
+    "\\bguaranteed\\b",
+    "गॅरंटी",
+    "\\bwin rate\\b"
+   ]
+  },
+  {
+   "id": "L06",
+   "rule_id": "FIN-R4",
+   "verdict": "BLOCKED",
+   "kind": "phrase",
+   "patterns": [
+    "live trading",
+    "live session",
+    "लाईव्ह ट्रेडिंग",
+    "लाइव्ह ट्रेडिंग"
+   ]
+  },
+  {
+   "id": "L07",
+   "rule_id": "FIN-R5",
+   "verdict": "BLOCKED",
+   "kind": "phrase",
+   "patterns": [
+    "paid group",
+    "signal group",
+    "पेड ग्रुप",
+    "telegram"
+   ]
+  },
+  {
+   "id": "L08",
+   "rule_id": "FIN-R8",
+   "verdict": "BLOCKED",
+   "kind": "phrase",
+   "patterns": [
+    "open demat",
+    "referral link",
+    "broker referral",
+    "डिमॅट अकाउंट उघडा"
+   ]
+  },
+  {
+   "id": "L09",
+   "rule_id": "FIN-R13",
+   "verdict": "BLOCKED",
+   "kind": "composite_instrument_future",
+   "patterns": [
+    "will go",
+    "will rise",
+    "will fall",
+    "will move",
+    "next move",
+    "going to",
+    "breakout soon",
+    "पुढे",
+    "कुठे जाईल",
+    "जाणार"
+   ]
+  },
+  {
+   "id": "L10",
+   "rule_id": "FIN-R12",
+   "verdict": "NEEDS_HUMAN_REVIEW",
+   "kind": "phrase",
+   "patterns": [
+    "our method",
+    "आमची पद्धत"
+   ],
+   "unless": "our_method_release_approved"
+  }
+ ]
+}
