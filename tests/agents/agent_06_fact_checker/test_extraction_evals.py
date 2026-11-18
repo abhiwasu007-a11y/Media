@@ -1,5 +1,7 @@
 """Extraction eval pack (docs/v4/evals/.../claim_extraction) through amw_evals, recorded fixtures."""
 
+# ruff: noqa: E501
+
 import json
 from pathlib import Path
 
@@ -20,11 +22,7 @@ def test_all_35_cases_pass_through_the_real_step() -> None:
     cases = load_cases("claim_extraction")
     adapter = ExtractionStepAdapter(cases)
     records, summary = run_eval(ROOT, EVALS / "claim_extraction", adapter, {})
-    failed = {
-        r["case_id"]: {k: v for k, v in r["assertions"].items() if not v["passed"]}  # type: ignore[union-attr]
-        for r in records
-        if not r["passed"]
-    }
+    failed = {str(r["case_id"]): r["assertions"] for r in records if not r["passed"]}
     assert failed == {}, json.dumps(failed, indent=1)
     assert summary.total == 35 == len(adapter.calls)
     assert (summary.answer_key_passed, summary.answer_key_total) == (4, 4)

@@ -270,13 +270,22 @@ class ClaimVerificationStep:
         done = saved.load()
         model_conflicts: list[BatchConflict] = []
         leaks = 0
+        paid_calls = 0  # calls over every attempt: a replay yields the same provenance
         for batch in batches:
             key = f"V4_batch_{batch.index}"
             if key in done:
-                out = VerificationBatchOutput.model_validate(done[key])
+                out = VerificationBatchOutput.model_validate(done[key]["out"])
+                paid_calls += int(done[key]["calls"])
             else:
+                before = state.usage.llm_calls
                 out = self._verify_batch(task, ctx, state, inp, prompt, batch, verifiable, pairs)
-                saved.save(key, out.to_doc(), (batch.index + 1) / max(len(batches), 1))
+                made = state.usage.llm_calls - before
+                paid_calls += made
+                saved.save(
+                    key,
+                    {"out": out.to_doc(), "calls": made},
+                    (batch.index + 1) / max(len(batches), 1),
+                )
             flags = {f.evidence_id for f in out.passage_flags}
             self._reconcile(batch, out, evidence, outcomes, flags)
             leaks += sum(1 for lid in batch.local_ids if set(outcomes[lid].used_ids) & flags)
@@ -310,7 +319,7 @@ class ClaimVerificationStep:
             provenance=Provenance(
                 prompt_id=PROMPT_ID,
                 prompt_sha256=doc.sha256,
-                llm_calls=state.usage.llm_calls,
+                llm_calls=paid_calls,
                 batches=len(batches),
                 config_version=s.config_version,
                 evidence_scope=EvidenceScope(channel_scoped=True, restricted_used=restricted_used),

@@ -18,13 +18,12 @@ from amw_adapters.common import CallUsage
 from amw_adapters.llm.protocol import LlmRequest, LlmResponse
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import CostOperation
-
 from tests.agents.agent_06_fact_checker.support import (
     MemoryKnowledge,
     World,
+    make_settings,
     run_context,
     task_input,
-    test_settings,
     verification_step,
 )
 
@@ -158,7 +157,12 @@ def synthesize(case: dict[str, Any], view: dict[str, Any]) -> dict[str, Any]:
         for f in exp.get("flagged_passages", [])
         if f in ids
     ]
-    return {"results": results, "claim_conflicts": conflicts, "passage_flags": flags, "refusal": None}
+    return {
+        "results": results,
+        "claim_conflicts": conflicts,
+        "passage_flags": flags,
+        "refusal": None,
+    }
 
 
 def knowledge_for(case: dict[str, Any]) -> MemoryKnowledge:
@@ -187,7 +191,7 @@ class CaseRun:
 
 def run_case(case: dict[str, Any], *, script_sha: str | None = None) -> CaseRun:
     cfg = case["fixture"]["step_config"]
-    settings = test_settings(
+    settings = make_settings(
         min_tier_for_verified=cfg["min_tier_for_verified"],
         tier_order=cfg["tier_order"],
         max_span_chars=cfg["max_span_chars"],

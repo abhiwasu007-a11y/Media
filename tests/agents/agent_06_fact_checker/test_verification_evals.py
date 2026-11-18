@@ -1,5 +1,7 @@
 """Verification eval pack (docs/v4/evals/.../claim_verification), all 41 cases, real step."""
 
+# ruff: noqa: PT018
+
 from typing import Any
 
 import pytest
@@ -72,17 +74,26 @@ def _check(run: CaseRun) -> list[str]:
     return bad
 
 
-def _check_claim(lid: str, spec: dict[str, Any], got: Any, fix_ref: dict[str, str], bad: list[str]) -> None:
+def _check_claim(
+    lid: str, spec: dict[str, Any], got: Any, fix_ref: dict[str, str], bad: list[str]
+) -> None:
     status = {spec["status"]} if "status" in spec else set(spec["status_any"])
     if got.status.value not in status:
         bad.append(f"A5 {lid}: {got.status.value} not in {status}")
     verdict = spec.get("verdict")
-    if verdict is not None and got.verification_verdict is not None:
-        if got.verification_verdict.value != verdict:
-            bad.append(f"A6 {lid}: {got.verification_verdict}")
-    if "assessment_any" in spec and got.assessment is not None:
-        if got.assessment.value not in spec["assessment_any"] and got.status.value == "VERIFIED":
-            bad.append(f"A5 {lid}: assessment {got.assessment}")
+    if (
+        verdict is not None
+        and got.verification_verdict is not None
+        and got.verification_verdict.value != verdict
+    ):
+        bad.append(f"A6 {lid}: {got.verification_verdict}")
+    if (
+        "assessment_any" in spec
+        and got.assessment is not None
+        and got.assessment.value not in spec["assessment_any"]
+        and got.status.value == "VERIFIED"
+    ):
+        bad.append(f"A5 {lid}: assessment {got.assessment}")
     refs = {e.source_ref for e in got.evidence}
     want = [fix_ref[i] for i in spec.get("evidence_any", [])]
     if "evidence_any" in spec:
@@ -90,7 +101,9 @@ def _check_claim(lid: str, spec: dict[str, Any], got: Any, fix_ref: dict[str, st
             bad.append(f"A8 {lid}: evidence {refs}")
         if not want and refs:
             bad.append(f"A8 {lid}: evidence must be empty, got {refs}")
-    if "relation_any" in spec and not ({e.relation.value for e in got.evidence} & set(spec["relation_any"])):
+    if "relation_any" in spec and not (
+        {e.relation.value for e in got.evidence} & set(spec["relation_any"])
+    ):
         bad.append(f"A8 {lid}: relation")
     if "discrepancy_kinds_any" in spec and not (
         {d.kind.value for d in got.discrepancies} & set(spec["discrepancy_kinds_any"])
@@ -101,7 +114,9 @@ def _check_claim(lid: str, spec: dict[str, Any], got: Any, fix_ref: dict[str, st
         bad.append(f"A10 {lid}: correction must be null")
     if corr == "present" and not got.suggested_correction:
         bad.append(f"A10 {lid}: correction missing")
-    if "reason_codes_any" in spec and not ({r.value for r in got.reason_codes} & set(spec["reason_codes_any"])):
+    if "reason_codes_any" in spec and not (
+        {r.value for r in got.reason_codes} & set(spec["reason_codes_any"])
+    ):
         bad.append(f"A14 {lid}: reasons {got.reason_codes}")
     if spec.get("suggested_citation") and not got.suggested_citation_refs:
         bad.append(f"A14 {lid}: suggested citation")

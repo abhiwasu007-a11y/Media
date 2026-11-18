@@ -9,12 +9,11 @@ from agent_06_fact_checker.models import ChartFacts
 from amw_core.enums import OutputStatus
 from amw_evals.adapter import LlmRequest as EvalRequest
 from amw_evals.adapter import LlmResponse as EvalResponse
-
 from tests.agents.agent_06_fact_checker.recorded_extraction import recorded_response
 from tests.agents.agent_06_fact_checker.support import (
     SCRIPT_SHA,
-    World,
     RecordedLlm,
+    World,
     extraction_step,
     run_context,
     task_input,
@@ -56,7 +55,7 @@ class ExtractionStepAdapter:
             return EvalResponse(out.payload.data, 100, 50, 0, 300, "USD", 5)
         assert out.error is not None
         refusal = (out.error.details.model_extra or {}).get("refusal")
-        shaped = {
+        shaped: dict[str, Any] = {
             "claims": [],
             "overall": {
                 "proposed_verdict": "NEEDS_HUMAN_REVIEW",

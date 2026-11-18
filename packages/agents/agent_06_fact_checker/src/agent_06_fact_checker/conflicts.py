@@ -47,7 +47,7 @@ def find_pairs(
             direction = any((a in wa and b in wb) or (b in wa and a in wb) for a, b in opposites)
             negation = bool(wa & negations) != bool(wb & negations)
             if number_diff or direction or negation:
-                pairs.append((ca.local_id, cb.local_id))
                 if len(pairs) >= settings.conflict_max_pairs:
                     return pairs
+                pairs.append((ca.local_id, cb.local_id))
     return pairs

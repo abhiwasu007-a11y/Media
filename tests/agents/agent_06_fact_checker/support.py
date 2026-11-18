@@ -33,7 +33,7 @@ from amw_core.errors import (
     MissingDependencyError,
     TenantMismatchError,
 )
-from amw_core.ids import CostEntryId, Prefix, TaskId, new_id
+from amw_core.ids import AuditEntryId, CostEntryId, Prefix, TaskId, new_id
 from amw_core.interfaces import (
     AuditEntry,
     BlobHead,
@@ -72,7 +72,7 @@ NOW = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)
 TEST_MARKERS = {"en": ("will", "should", "likely to", "target", "next move", "again", "repeat")}
 
 
-def test_settings(**over: Any) -> FactCheckSettings:
+def make_settings(**over: Any) -> FactCheckSettings:
     llm = LlmStepSettings(
         model="test-model",
         temperature=0.0,
@@ -227,12 +227,21 @@ class MemoryAudit:
     def append(self, tx: TenantTransaction, entry: NewAuditEntry) -> AuditEntry:
         self.entries.append(entry)
         raise_if_secret(entry)
-        return AuditEntry(new_id(Prefix.AUDIT_ENTRY), tx.context.org_id, len(self.entries), entry, b"", b"")  # type: ignore[arg-type]
+        return AuditEntry(
+            AuditEntryId(new_id(Prefix.AUDIT_ENTRY)),
+            tx.context.org_id,
+            len(self.entries),
+            entry,
+            b"",
+            b"",
+        )
 
     def verify_chain(self, tx: TenantTransaction) -> Any:
         raise NotImplementedError
 
-    def export(self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None) -> Any:
+    def export(
+        self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None
+    ) -> Any:
         raise NotImplementedError
 
 
@@ -251,12 +260,17 @@ class MemoryClaims:
         self.owned_override: frozenset[str] | None = None
 
     def insert_claims(
-        self, tx: TenantTransaction, *, script_id: str, task_id: TaskId, claims: Sequence[ExtractedClaim]
+        self,
+        tx: TenantTransaction,
+        *,
+        script_id: str,
+        task_id: TaskId,
+        claims: Sequence[ExtractedClaim],
     ) -> Mapping[str, str]:
         key = (script_id, task_id)
         if key not in self.rows:
             self.rows[key] = {c.local_id: new_id(Prefix.CLAIM) for c in claims}
-            self.ids.update({cid: script_id for cid in self.rows[key].values()})
+            self.ids.update(dict.fromkeys(self.rows[key].values(), script_id))
         return self.rows[key]
 
     def owned_claim_ids(
@@ -298,7 +312,9 @@ class MemoryKnowledge:
         self.foreign = set(foreign)
         self.searches = 0
 
-    def get_source(self, tx: TenantTransaction, channel_id: str, citation_ref: str) -> SourceText | None:
+    def get_source(
+        self, tx: TenantTransaction, channel_id: str, citation_ref: str
+    ) -> SourceText | None:
         if citation_ref in self.foreign:
             raise CrossTenantRefError("foreign")
         return self.sources.get(citation_ref)
@@ -313,9 +329,7 @@ class MemoryKnowledge:
 def source(
     ref: str, text: str, *, tier: str | None = "B_PUBLISHED", restricted: bool = False
 ) -> SourceText:
-    return SourceText(
-        ref, CitationKind.KNOWLEDGE_CHUNK, text, sha256_hex(text), tier, restricted
-    )
+    return SourceText(ref, CitationKind.KNOWLEDGE_CHUNK, text, sha256_hex(text), tier, restricted)
 
 
 class StaticPacks:
@@ -474,9 +488,14 @@ def extraction_step(world: World, packs: StaticPacks | None = None, **kw: Any) -
         scripts=kw.pop("scripts", MemoryScripts(SCRIPT_SHA)),
         rule_packs=packs or StaticPacks(),
         prompts=DocPrompts(),
-        settings=kw.pop("settings", test_settings()),
+        settings=kw.pop("settings", make_settings()),
         **kw,
     )
+
+
+def _scripts(kw: dict[str, Any]) -> Any:
+    sha = kw.pop("script_sha", SCRIPT_SHA)
+    return kw.pop("scripts", None) or MemoryScripts(sha)
 
 
 def verification_step(world: World, knowledge: MemoryKnowledge, **kw: Any) -> Any:
@@ -492,10 +511,10 @@ def verification_step(world: World, knowledge: MemoryKnowledge, **kw: Any) -> An
         checkpoints=world.checkpoints,
         audit=world.audit,
         claims=world.claims,
-        scripts=kw.pop("scripts", None) or MemoryScripts(kw.pop("script_sha", SCRIPT_SHA)),
+        scripts=_scripts(kw),
         knowledge=knowledge,
         prompts=DocPrompts(),
-        settings=kw.pop("settings", test_settings()),
+        settings=kw.pop("settings", make_settings()),
         **kw,
     )
 
