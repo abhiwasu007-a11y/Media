@@ -800,10 +800,10 @@ Prompts, rubric, lexicons, packs and thresholds are versioned; any change runs t
 ### 26.2 Golden datasets
 | Dataset | Path | Cases | Kind | Key thresholds (README of each) |
 |---|---|---|---|---|
-| Policy judge + verdict algebra | `evals/agent_16_compliance_qa/compliance_gate/` | 96 (A1–A4, S1–S7, the IN-03 order wording as a hard negative, 10 per judged rule incl. ≥ 1 near-miss ALLOWED for R1, R2, R3, R13, Marathi and English sets, injection, refusal) | LLM + deterministic post-check | answer-key + IN-03 100 %; false ALLOWED 0; overall ≥ 0.90; false BLOCKED on hard negatives ≤ 10 % |
+| Policy judge + verdict algebra | `evals/agent_16_compliance_qa/compliance_gate/` | 103 (A1–A4, S1–S7, the IN-03 order wording as a hard negative, 10 per judged rule incl. ≥ 1 near-miss ALLOWED for R1, R2, R3, R13, Marathi and English sets, injection, refusal) | LLM + deterministic post-check | answer-key + IN-03 100 %; false ALLOWED 0; overall ≥ 0.90; false BLOCKED on hard negatives ≤ 10 % |
 | Close paraphrase | `evals/agent_16_compliance_qa/compliance_gate_paraphrase/` | 24 (synthetic passages only; no book text) | LLM + deterministic | false ALLOWED on copy/paraphrase cases 0; overall ≥ 0.90 |
 | Quality judge | `evals/agent_16_compliance_qa/quality_score/` | 24 | LLM, score bands | ≥ 0.85 of cases inside their band; anchors 100 %; injection cases 100 % |
-| Publication authorisation (deterministic) | `evals/agent_16_compliance_qa/publication_authorisation/` | 26 incl. R14 negatives | deterministic | 100 % |
+| Publication authorisation (deterministic) | `evals/agent_16_compliance_qa/publication_authorisation/` | 28 incl. R14 negatives | deterministic | 100 % |
 | Uniqueness check (deterministic) | `evals/agent_16_compliance_qa/uniqueness_check/` | 20 | deterministic | 100 % |
 
 ### 26.3 Deterministic checks wrapped around every LLM step
