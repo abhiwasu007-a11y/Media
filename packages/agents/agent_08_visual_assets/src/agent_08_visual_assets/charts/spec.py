@@ -38,5 +38,9 @@ def canonical_json(value: object) -> str:
 class ChartSpecHasher:
     @staticmethod
     def hash(spec: BaseModel | Mapping[str, Any]) -> str:
-        data = spec.model_dump(mode="json", exclude_none=False) if isinstance(spec, BaseModel) else spec
+        data = (
+            spec.model_dump(mode="json", exclude_none=False)
+            if isinstance(spec, BaseModel)
+            else spec
+        )
         return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()

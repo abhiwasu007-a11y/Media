@@ -52,9 +52,9 @@ class FingerprintDHash:
         try:
             with Image.open(io.BytesIO(image_bytes)) as img:
                 small = img.convert("L").resize((GRID_W, GRID_H), Image.Resampling.LANCZOS)
-        except (OSError, Image.DecompressionBombError, ValueError):
+        except OSError, Image.DecompressionBombError, ValueError:
             raise InputInvalidError("media cannot be decoded as an image") from None
-        pixels = list(small.getdata())
+        pixels = list(small.tobytes())
         return [pixels[r * GRID_W : (r + 1) * GRID_W] for r in range(GRID_H)]
 
 

@@ -1,4 +1,4 @@
-"""``TenantGuard``: agreement of organisation ids, URI ownership, path safety (blueprint 10.1, 19.1).
+"""``TenantGuard``: agreement of organisation ids, URI ownership, path safety (blueprint 10.1, 19
 
 Pure. ``evaluate`` returns a decision (used by the golden dataset and by the security event
 emitter); ``check_task`` raises the matching ``amw_core`` error. A foreign id and a missing id
@@ -49,9 +49,7 @@ class TenantGuard:
             if not _org_ok(org):
                 return GuardDecision(False, InputInvalidError.code, False, "bad organisation id")
         if not (context_org == envelope_org == input_org):
-            return GuardDecision(
-                False, TenantMismatchError.code, True, "organisation ids disagree"
-            )
+            return GuardDecision(False, TenantMismatchError.code, True, "organisation ids disagree")
         for uri in uris:
             match = _URI_RE.match(uri)
             if match is None:

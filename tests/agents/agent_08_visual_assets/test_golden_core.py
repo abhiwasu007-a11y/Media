@@ -8,7 +8,10 @@ import pytest
 
 from tests.agents.agent_08_visual_assets import golden
 
-CASES = Path(__file__).resolve().parents[3] / "docs/v4/evals/agent_08_visual_assets/deterministic_core/cases.jsonl"
+CASES = (
+    Path(__file__).resolve().parents[3]
+    / "docs/v4/evals/agent_08_visual_assets/deterministic_core/cases.jsonl"
+)
 ALL = [json.loads(line) for line in CASES.read_text().splitlines() if line.strip()]
 
 

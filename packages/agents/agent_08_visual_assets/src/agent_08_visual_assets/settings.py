@@ -92,13 +92,17 @@ class AssetSettings(BaseModel):
                     "near_duplicate_max_distance": raw.get(
                         "assets.reuse.near_duplicate_max_distance"
                     ),
-                    "stock_max_uses_per_channel": raw.get("assets.reuse.stock_max_uses_per_channel"),
+                    "stock_max_uses_per_channel": raw.get(
+                        "assets.reuse.stock_max_uses_per_channel"
+                    ),
                     "min_gap_shots": raw.get("assets.reuse.min_gap_shots", 0),
                     "ai_video_max_ms_per_video": raw.get("assets.ai_video.max_ms_per_video", 0),
                     "ai_video_max_cost_micros_per_video": raw.get(
                         "assets.ai_video.max_cost_micros_per_video", 0
                     ),
-                    "ai_video_max_clips_per_video": raw.get("assets.ai_video.max_clips_per_video", 0),
+                    "ai_video_max_clips_per_video": raw.get(
+                        "assets.ai_video.max_clips_per_video", 0
+                    ),
                     "ai_video_max_clip_ms": raw.get("assets.ai_video.max_clip_ms", 0),
                     "ai_video_model": raw.get("assets.ai_video.model"),
                     "ai_video_estimate_micros_per_clip": raw.get(

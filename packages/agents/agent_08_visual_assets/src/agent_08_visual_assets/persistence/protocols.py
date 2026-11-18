@@ -10,9 +10,6 @@ grant on ``licences``, S-15).
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
-from amw_core.enums import AssetKind, LicenceSourceType
-from amw_core.interfaces.tenancy_context import TenantTransaction
-
 from agent_08_visual_assets.persistence.records import (
     AssetRecord,
     FingerprintRow,
@@ -21,6 +18,8 @@ from agent_08_visual_assets.persistence.records import (
     NewAsset,
     NewLedgerEntry,
 )
+from amw_core.enums import AssetKind, LicenceSourceType
+from amw_core.interfaces.tenancy_context import TenantTransaction
 
 
 @runtime_checkable
@@ -77,9 +76,7 @@ class FingerprintRepository(Protocol):
 
     def for_asset(self, tx: TenantTransaction, asset_id: str) -> Sequence[FingerprintRow]: ...
 
-    def perceptual_library(
-        self, tx: TenantTransaction
-    ) -> Sequence[tuple[str, str]]:
+    def perceptual_library(self, tx: TenantTransaction) -> Sequence[tuple[str, str]]:
         """``(asset_id, hash_hex)`` of the first perceptual frame of every tenant asset."""
         ...
 

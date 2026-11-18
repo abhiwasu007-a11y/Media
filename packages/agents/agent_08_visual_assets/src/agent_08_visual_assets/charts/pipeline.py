@@ -8,12 +8,14 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from amw_core.enums import ChartDataKind, DataAgeVsLag, ShotUnresolvedReason
-from amw_core.errors import InputInvalidError
-
 from agent_08_visual_assets.cascade.tier_cascade import ChartAttempt, chart_preconditions
 from agent_08_visual_assets.charts.annotations import AnnotationValidator
-from agent_08_visual_assets.charts.cases import ChartCase, ChartCaseLibrary, ChartRequest, StoredCase
+from agent_08_visual_assets.charts.cases import (
+    ChartCase,
+    ChartCaseLibrary,
+    ChartRequest,
+    StoredCase,
+)
 from agent_08_visual_assets.charts.dataset import BarSeries
 from agent_08_visual_assets.charts.facts import ChartFacts, ChartFactsBuilder, FactBar
 from agent_08_visual_assets.charts.lag import ChartLagGuard, LagResult
@@ -25,6 +27,8 @@ from agent_08_visual_assets.charts.render import (
     parse_indicator,
 )
 from agent_08_visual_assets.charts.spec import ChartSpec, ChartSpecHasher
+from amw_core.enums import ChartDataKind, DataAgeVsLag, ShotUnresolvedReason
+from amw_core.errors import InputInvalidError
 
 TEMPLATE_ID = "chart_base"
 TEMPLATE_VERSION = 1
@@ -136,9 +140,16 @@ class ChartPath:
             palette_sha256=ctx.palette.sha256(),
         )
         return BuiltChart(
-            stored, spec, ChartSpecHasher.hash(spec), (image,), None,
-            ChartFacts((), False), len(points), None, None,
-        )  # fmt: skip
+            stored,
+            spec,
+            ChartSpecHasher.hash(spec),
+            (image,),
+            None,
+            ChartFacts((), False),
+            len(points),
+            None,
+            None,
+        )
 
     @staticmethod
     def _real(ctx: ChartContext, stored: StoredCase, lag: LagResult | None) -> BuiltChart:
@@ -199,9 +210,16 @@ class ChartPath:
             [FactBar(b.date, b.open, b.high, b.low, b.close) for b in window_bars],
         )
         return BuiltChart(
-            stored, spec, ChartSpecHasher.hash(spec), tuple(stills), lag, facts,
-            len(window_bars), window_bars[0].date, window_bars[-1].date,
-        )  # fmt: skip
+            stored,
+            spec,
+            ChartSpecHasher.hash(spec),
+            tuple(stills),
+            lag,
+            facts,
+            len(window_bars),
+            window_bars[0].date,
+            window_bars[-1].date,
+        )
 
 
 def attempt_of(outcome: ChartOutcome) -> ChartAttempt[BuiltChart]:

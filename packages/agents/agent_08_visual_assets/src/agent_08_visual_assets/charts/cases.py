@@ -12,9 +12,8 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from amw_core.enums import ChartDataKind
-
 from agent_08_visual_assets.charts.annotations import Annotation
+from amw_core.enums import ChartDataKind
 
 OUTCOMES = ("WORKED", "FAILED", "BOTH", "NOT_APPLICABLE")
 CaseId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")]
@@ -54,7 +53,9 @@ class ChartCase(BaseModel):
     @model_validator(mode="after")
     def _shape(self) -> Self:
         real = self.data_kind is ChartDataKind.REAL_HISTORICAL
-        if real and (self.instrument is None or self.dataset_asset_id is None or self.window is None):
+        if real and (
+            self.instrument is None or self.dataset_asset_id is None or self.window is None
+        ):
             raise ValueError("a real historical case needs instrument, dataset and window")
         if not real and (self.instrument is not None or self.dataset_asset_id is not None):
             raise ValueError("a schematic case has no instrument and no dataset")

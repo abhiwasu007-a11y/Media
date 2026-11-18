@@ -1,11 +1,8 @@
-"""``agent_08.asset_sourcing.input`` 1.0.0 (blueprint 7.1): the ``payload.data`` of the task input."""
+"""``agent_08.asset_sourcing.input`` 1.0.0 (blueprint 7.1), payload of the task input."""
 
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, StringConstraints, model_validator
-
-from amw_core.contracts.common import AmwModel
-from amw_core.enums import LicenceDestination
 
 from agent_08_visual_assets.models.common import (
     ScriptIdStr,
@@ -14,6 +11,8 @@ from agent_08_visual_assets.models.common import (
     StageIdStr,
     StorageUri,
 )
+from amw_core.contracts.common import AmwModel
+from amw_core.enums import LicenceDestination
 
 Aspect = Literal["16:9", "9:16", "1:1", "4:5"]
 

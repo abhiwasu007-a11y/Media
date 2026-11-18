@@ -23,11 +23,10 @@ from matplotlib.figure import Figure
 from matplotlib.font_manager import FontProperties
 from matplotlib.patches import Rectangle
 
-from amw_core.errors import InputInvalidError
-
 from agent_08_visual_assets.charts.annotations import Annotation, AnnotationKind
 from agent_08_visual_assets.charts.dataset import Bar
 from agent_08_visual_assets.charts.spec import canonical_json
+from amw_core.errors import InputInvalidError
 
 DPI = 100
 RENDERER_ID = "matplotlib-agg"
@@ -164,7 +163,7 @@ class ChartRenderer:
         return [ChartRenderer.render(spec, shown_bars=n) for n in counts]
 
     @staticmethod
-    def _draw(spec: ChartRenderInput, shown_bars: int | None) -> RenderedImage:  # noqa: PLR0914
+    def _draw(spec: ChartRenderInput, shown_bars: int | None) -> RenderedImage:
         window = list(spec.series[spec.first_bar_index : spec.last_bar_index + 1])
         if not window:
             raise InputInvalidError("empty chart window")
@@ -259,7 +258,7 @@ class ChartRenderer:
 
     @staticmethod
     def _annotations(
-        ax: "mpl.axes.Axes",
+        ax: mpl.axes.Axes,
         spec: ChartRenderInput,
         window: Sequence[Bar],
         shown: int,
@@ -281,7 +280,11 @@ class ChartRenderer:
                         color=palette.accent,
                         markersize=14 * scale,
                     )
-            elif kind is AnnotationKind.SHADE_RANGE and a.from_bar is not None and a.to_bar is not None:
+            elif (
+                kind is AnnotationKind.SHADE_RANGE
+                and a.from_bar is not None
+                and a.to_bar is not None
+            ):
                 lo, hi = a.from_bar - first, min(a.to_bar - first, shown - 1)
                 if lo <= hi:
                     ax.axvspan(lo - 0.5, hi + 0.5, color=palette.shade, alpha=0.25, linewidth=0)
@@ -290,9 +293,13 @@ class ChartRenderer:
                 x1 = min((a.to_bar if a.to_bar is not None else first) - first, shown - 1)
                 if x0 <= x1:
                     ax.hlines(
-                        float(Decimal(a.price)), x0, x1, color=palette.accent,
-                        linewidth=2.0 * scale, linestyles="dashed",
-                    )  # fmt: skip
+                        float(Decimal(a.price)),
+                        x0,
+                        x1,
+                        color=palette.accent,
+                        linewidth=2.0 * scale,
+                        linestyles="dashed",
+                    )
             elif kind is AnnotationKind.LABEL and a.bar is not None and a.text is not None:
                 i = a.bar - first
                 if i < shown:
@@ -309,7 +316,7 @@ class ChartRenderer:
     @staticmethod
     def _rsi_panel(
         fig: Figure,
-        grid: "mpl.gridspec.GridSpec",
+        grid: mpl.gridspec.GridSpec,
         spec: ChartRenderInput,
         parsed: Sequence[tuple[str, int]],
         closes: Sequence[float],
@@ -333,7 +340,10 @@ class ChartRenderer:
             pts = [(i, v) for i, v in enumerate(line[:shown]) if v is not None]
             if pts:
                 ax.plot(
-                    [p[0] for p in pts], [p[1] for p in pts], color=palette.accent, linewidth=2 * scale
+                    [p[0] for p in pts],
+                    [p[1] for p in pts],
+                    color=palette.accent,
+                    linewidth=2 * scale,
                 )
         window = spec.series[spec.first_bar_index : spec.last_bar_index + 1]
         font = font_props(palette, 20 * scale)
@@ -368,25 +378,35 @@ class ChartRenderer:
         with mpl.rc_context({"axes.unicode_minus": False, "text.hinting": "none"}):
             fig = new_figure(width_px, height_px, palette)
             ax = fig.add_axes((0.08, 0.12, 0.88, 0.74), facecolor=palette.background)
-            ax.plot(range(len(points)), [float(p) for p in points], color=palette.accent, linewidth=4 * scale)
+            ax.plot(
+                range(len(points)),
+                [float(p) for p in points],
+                color=palette.accent,
+                linewidth=4 * scale,
+            )
             ax.grid(True, color=palette.grid, linewidth=0.6 * max(scale, 0.5))
             ax.set_xticks([])
             ax.set_yticks([])
             for spine in ax.spines.values():
                 spine.set_color(palette.grid)
             fig.text(
-                0.5, 0.94, label, ha="center", va="center", color=palette.foreground,
+                0.5,
+                0.94,
+                label,
+                ha="center",
+                va="center",
+                color=palette.foreground,
                 fontproperties=font_props(palette, 30 * scale),
-            )  # fmt: skip
+            )
             return RenderedImage(figure_png(fig), width_px, height_px)
 
 
-def _edge_align(ax: "mpl.axes.Axes", vertical: bool) -> None:
+def _edge_align(ax: mpl.axes.Axes, vertical: bool) -> None:
     """Keep the outer date labels inside the canvas."""
     labels = ax.get_xticklabels()
     if labels and not vertical:
-        labels[-1].set_ha("right")
-        labels[0].set_ha("left")
+        labels[-1].set_horizontalalignment("right")
+        labels[0].set_horizontalalignment("left")
 
 
 def _tick_positions(n: int, count: int) -> list[int]:

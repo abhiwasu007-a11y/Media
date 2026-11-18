@@ -155,7 +155,7 @@ class TierCascade:
     # -- chart and graphic: tier C only ----------------------------------------------------------
 
     @staticmethod
-    def _not_applicable(run: _Run[object]) -> None:
+    def _not_applicable[T](run: _Run[T]) -> None:
         for tier in (A, B, D, E):
             run.skips.append(Skip(tier, VisualSkipReason.NOT_APPLICABLE_INTENT))
 
@@ -198,7 +198,9 @@ class TierCascade:
         def planned(tier: VisualSourceTier) -> bool:
             return allowed is None or tier in allowed
 
-        def done(tier: VisualSourceTier, payload: T, warnings: tuple[SourcingWarning, ...] = ()) -> CascadeResult[T]:
+        def done(
+            tier: VisualSourceTier, payload: T, warnings: tuple[SourcingWarning, ...] = ()
+        ) -> CascadeResult[T]:
             return CascadeResult(True, tier, tuple(run.skips), warnings, None, payload)
 
         def try_tier(

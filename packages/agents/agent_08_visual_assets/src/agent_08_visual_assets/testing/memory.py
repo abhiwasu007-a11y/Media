@@ -10,19 +10,6 @@ from collections.abc import Iterable, Iterator, Sequence
 from datetime import UTC, datetime
 from itertools import count
 
-from amw_core.enums import ActorKind, AssetKind, AssetStatus, LicenceSourceType
-from amw_core.errors import (
-    CorruptedOutputError,
-    CrossTenantRefError,
-    InputInvalidError,
-    MissingDependencyError,
-    PermissionDeniedError,
-)
-from amw_core.ids import ASSET, Prefix, new_id
-from amw_core.interfaces.audit_log import AuditEntry, ChainVerification, NewAuditEntry
-from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri, ReadableStream
-from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
-
 from agent_08_visual_assets.persistence.records import (
     AssetRecord,
     FingerprintRow,
@@ -31,6 +18,18 @@ from agent_08_visual_assets.persistence.records import (
     NewAsset,
     NewLedgerEntry,
 )
+from amw_core.enums import ActorKind, AssetKind, AssetStatus, LicenceSourceType
+from amw_core.errors import (
+    CorruptedOutputError,
+    CrossTenantRefError,
+    InputInvalidError,
+    MissingDependencyError,
+    PermissionDeniedError,
+)
+from amw_core.ids import ASSET, AUDIT_ENTRY, Prefix, new_id
+from amw_core.interfaces.audit_log import AuditEntry, ChainVerification, NewAuditEntry
+from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri, ReadableStream
+from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
 
 _EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
 
@@ -87,9 +86,7 @@ class MemoryBlobStorage:
             return BlobHead(False, None, None)
         return BlobHead(True, hashlib.sha256(data).hexdigest(), len(data))
 
-    def list_prefix(
-        self, context: TenantContext, org_id: object, area: str
-    ) -> Iterable[BlobInfo]:
+    def list_prefix(self, context: TenantContext, org_id: object, area: str) -> Iterable[BlobInfo]:
         prefix = f"amw-blob://{context.org_id}/{area}/"
         return [
             BlobInfo(BlobUri(u), hashlib.sha256(d).hexdigest(), len(d))
@@ -180,9 +177,12 @@ class MemoryLicenceRepository:
         self, tx: TenantTransaction, source_type: LicenceSourceType
     ) -> LicenceRecord | None:
         for rec in self._rows.values():
-            if rec.org_id in (None, _org(tx)) and rec.source_type is source_type:
-                if not rec.licence_key.startswith("self_grant."):
-                    return rec
+            if (
+                rec.org_id in (None, _org(tx))
+                and rec.source_type is source_type
+                and not rec.licence_key.startswith("self_grant.")
+            ):
+                return rec
         return None
 
 
@@ -255,7 +255,7 @@ class MemoryAuditLog:
         seq = len(self.entries[org])
         digest = hashlib.sha256(f"{org}:{seq}".encode()).digest()
         return AuditEntry(
-            id=new_id(Prefix.AUDIT_ENTRY),  # type: ignore[arg-type]  # wire id of the right prefix
+            id=AUDIT_ENTRY.new(),
             org_id=tx.context.org_id,
             seq=seq,
             entry=entry,

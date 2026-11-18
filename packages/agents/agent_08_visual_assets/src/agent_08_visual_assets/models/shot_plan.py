@@ -9,10 +9,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from agent_08_visual_assets.cascade.tier_cascade import IntentKind
 from amw_core.enums import AspectRatio, ShotIntentKind, SubjectAnchor, VisualSourceTier
 from amw_core.errors import InputInvalidError
-
-from agent_08_visual_assets.cascade.tier_cascade import IntentKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,13 +112,15 @@ class IntentClassifier:
 
 class ShotPlanReader:
     @staticmethod
-    def read(plan_json: bytes | Mapping[str, Any]) -> tuple[list[ShotRequirement], list[OverlayRequirement]]:
+    def read(
+        plan_json: bytes | Mapping[str, Any],
+    ) -> tuple[list[ShotRequirement], list[OverlayRequirement]]:
         doc = json.loads(plan_json) if isinstance(plan_json, bytes) else dict(plan_json)
         payload = doc.get("data", doc)
         try:
             views = [_ShotView.model_validate(v) for v in payload["views"]["agent_08_shots"]]
             overlays = [_OverlayView.model_validate(o) for o in payload.get("overlays", [])]
-        except (KeyError, TypeError, ValidationError):
+        except KeyError, TypeError, ValidationError:
             raise InputInvalidError("shot plan is not a valid agent_09 plan") from None
         shots = [
             ShotRequirement(

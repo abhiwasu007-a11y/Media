@@ -1,4 +1,4 @@
-"""``agent_08.asset_sourcing.output`` 1.0.0 (blueprint 8.2) and ``agent_08.chart_facts`` 1.0.0 (8.5).
+"""``agent_08.asset_sourcing.output`` 1.0.0 (blueprint 8.2) and ``agent_08.chart_facts`` 1.0.0 (8
 
 Pydantic models equal to the JSON Schemas of the blueprint (contract tests assert it both ways,
 27 section 4.4). Every field is required; nullable ones carry ``None`` explicitly.
@@ -7,21 +7,6 @@ Pydantic models equal to the JSON Schemas of the blueprint (contract tests asser
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
-
-from amw_core.contracts.common import AmwModel
-from amw_core.enums import (
-    ChartDataKind,
-    CropMode,
-    DataAgeVsLag,
-    ReuseKind,
-    ShotIntentKind,
-    ShotSourcingStatus,
-    ShotUnresolvedReason,
-    SourcingWarning,
-    SubjectAnchor,
-    VisualSkipReason,
-    VisualSourceTier,
-)
 
 from agent_08_visual_assets.models.common import (
     AssetIdStr,
@@ -40,10 +25,30 @@ from agent_08_visual_assets.models.common import (
     StorageUri,
 )
 from agent_08_visual_assets.models.task_input import Aspect
+from amw_core.contracts.common import AmwModel
+from amw_core.enums import (
+    ChartDataKind,
+    CropMode,
+    DataAgeVsLag,
+    ReuseKind,
+    ShotIntentKind,
+    ShotSourcingStatus,
+    ShotUnresolvedReason,
+    SourcingWarning,
+    SubjectAnchor,
+    VisualSkipReason,
+    VisualSourceTier,
+)
 
 ShotUsage = Literal["SHOT", "IMAGE", "AI_OUTPUT", "TEMPLATE"]
 ShotSourceType = Literal[
-    "OWNER_MADE", "CLIENT_SUPPLIED", "PAID_STOCK", "FREE_STOCK", "CODE_GENERATED", "AI_GENERATED", "FONT"
+    "OWNER_MADE",
+    "CLIENT_SUPPLIED",
+    "PAID_STOCK",
+    "FREE_STOCK",
+    "CODE_GENERATED",
+    "AI_GENERATED",
+    "FONT",
 ]
 LedgerIds = tuple[LedgerIdStr, ...]
 
@@ -103,6 +108,19 @@ class ChartInfo(AmwModel):
     method_content: bool
 
 
+class RevealStill(AmwModel):
+    """One step of a chart reveal sequence: an ``IMAGE`` asset with exactly one ledger row."""
+
+    k: NonNegInt
+    asset_id: AssetIdStr
+    asset_uri: StorageUri
+    sha256: Sha256Hex
+    start_ms: NonNegInt
+    end_ms: PosInt
+    licence_id: LicenceIdStr
+    ledger_entry_ids: Annotated[LedgerIds, Field(min_length=1, max_length=1)]
+
+
 class Disclosure(AmwModel):
     is_realistic_synthetic: bool
     depicts_real_person: bool
@@ -136,6 +154,7 @@ class ShotResult(AmwModel):
     unresolved_reason: ShotUnresolvedReason | None
     reuse: ReuseInfo | None
     chart: ChartInfo | None
+    reveal_stills: Annotated[tuple[RevealStill, ...], Field(max_length=64)]
     disclosure: Disclosure
     cost_micros: NonNegInt
     selection: Selection | None
@@ -144,7 +163,12 @@ class ShotResult(AmwModel):
 class OverlayResult(AmwModel):
     overlay_id: OverlayIdStr
     kind: Literal[
-        "BRAND_STING", "LOWER_THIRD", "CAPTION_CARD", "CHAPTER_CARD", "DISCLAIMER_CARD", "END_SCREEN"
+        "BRAND_STING",
+        "LOWER_THIRD",
+        "CAPTION_CARD",
+        "CHAPTER_CARD",
+        "DISCLAIMER_CARD",
+        "END_SCREEN",
     ]
     start_ms: NonNegInt
     end_ms: PosInt
@@ -263,7 +287,9 @@ class Provenance(AmwModel):
 class RefusalEntry(AmwModel):
     step: Literal["query_plan", "candidate_rank"]
     batch_id: str
-    reason: Literal["INSUFFICIENT_INPUT", "OUT_OF_SCOPE", "CONFLICTING_INSTRUCTIONS", "UNSAFE_CONTENT"]
+    reason: Literal[
+        "INSUFFICIENT_INPUT", "OUT_OF_SCOPE", "CONFLICTING_INSTRUCTIONS", "UNSAFE_CONTENT"
+    ]
 
 
 class SourcingOutput(AmwModel):

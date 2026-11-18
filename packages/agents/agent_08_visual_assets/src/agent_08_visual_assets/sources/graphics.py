@@ -2,7 +2,7 @@
 abstract brand motion template, drawn by code with the same deterministic rasteriser as the charts.
 
 All visible text must equal an entry of the script's ``on_screen_text`` (or a versioned template
-label): anything else is ``InputInvalid`` (no invented text). The abstract template carries no words.
+label): anything else is ``InputInvalid`` (no invented text). The abstract template has no words.
 """
 
 import textwrap
@@ -13,15 +13,14 @@ from enum import StrEnum
 import matplotlib as mpl
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle
 
-from amw_core.errors import InputInvalidError
-
 from agent_08_visual_assets.charts.render import (
     BrandPalette,
     RenderedImage,
+    figure_png,
     font_props,
     new_figure,
-    figure_png,
 )
+from amw_core.errors import InputInvalidError
 
 TEMPLATE_VERSION = 1
 
@@ -86,7 +85,7 @@ class GraphicTemplateRenderer:
 
 
 def _text_card(
-    ax: "mpl.axes.Axes",
+    ax: mpl.axes.Axes,
     lines: Sequence[str],
     palette: BrandPalette,
     scale: float,
@@ -109,7 +108,7 @@ def _text_card(
 
 
 def _diagram(
-    ax: "mpl.axes.Axes", spec: DiagramSpec, palette: BrandPalette, scale: float, vertical: bool
+    ax: mpl.axes.Axes, spec: DiagramSpec, palette: BrandPalette, scale: float, vertical: bool
 ) -> None:
     n = len(spec.nodes)
     centres: list[tuple[float, float]] = []
@@ -123,28 +122,46 @@ def _diagram(
         centres.append((cx, cy))
         ax.add_patch(
             FancyBboxPatch(
-                (cx - w / 2, cy - h / 2), w, h, boxstyle="round,pad=0.01",
-                facecolor=palette.shade, edgecolor=palette.accent, linewidth=3 * scale,
+                (cx - w / 2, cy - h / 2),
+                w,
+                h,
+                boxstyle="round,pad=0.01",
+                facecolor=palette.shade,
+                edgecolor=palette.accent,
+                linewidth=3 * scale,
             )
-        )  # fmt: skip
+        )
         ax.text(
-            cx, cy, textwrap.fill(text, 12 if not vertical else 26), ha="center", va="center",
-            color=palette.foreground, fontproperties=font_props(palette, 34 * scale),
-        )  # fmt: skip
+            cx,
+            cy,
+            textwrap.fill(text, 12 if not vertical else 26),
+            ha="center",
+            va="center",
+            color=palette.foreground,
+            fontproperties=font_props(palette, 34 * scale),
+        )
     for a, b in spec.edges:
         if not (0 <= a < n and 0 <= b < n):
             raise InputInvalidError("diagram edge refers to a missing node")
         ax.add_patch(
             FancyArrowPatch(
-                centres[a], centres[b], arrowstyle="-|>", mutation_scale=30 * scale,
-                color=palette.foreground, linewidth=3 * scale, shrinkA=70 * scale, shrinkB=70 * scale,
+                centres[a],
+                centres[b],
+                arrowstyle="-|>",
+                mutation_scale=30 * scale,
+                color=palette.foreground,
+                linewidth=3 * scale,
+                shrinkA=70 * scale,
+                shrinkB=70 * scale,
             )
-        )  # fmt: skip
+        )
 
 
-def _abstract(ax: "mpl.axes.Axes", palette: BrandPalette) -> None:
+def _abstract(ax: mpl.axes.Axes, palette: BrandPalette) -> None:
     for i, y in enumerate((0.25, 0.45, 0.65)):
         ax.add_patch(
-            Rectangle((0.0, y), 1.0, 0.08, facecolor=palette.shade, alpha=0.18 + 0.1 * i, linewidth=0)
+            Rectangle(
+                (0.0, y), 1.0, 0.08, facecolor=palette.shade, alpha=0.18 + 0.1 * i, linewidth=0
+            )
         )
     ax.add_patch(Rectangle((0.0, 0.0), 1.0, 0.02, facecolor=palette.accent, linewidth=0))

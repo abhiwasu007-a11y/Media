@@ -51,7 +51,8 @@ class TimelineLedgerPlanner:
                 )
             if ov.start_ms < 0 or ov.end_ms <= ov.start_ms or ov.end_ms > timeline_end_ms:
                 raise InputInvalidError(
-                    "overlay interval is outside the timeline", details={"overlay_id": ov.overlay_id}
+                    "overlay interval is outside the timeline",
+                    details={"overlay_id": ov.overlay_id},
                 )
         rows = [
             PlannedRow(

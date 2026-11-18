@@ -32,9 +32,7 @@ class FlagsResult:
 
 class DisclosureFlags:
     @staticmethod
-    def compute(
-        *, tier: VisualSourceTier, style: str, depicts_real_person: bool
-    ) -> FlagsResult:
+    def compute(*, tier: VisualSourceTier, style: str, depicts_real_person: bool) -> FlagsResult:
         if tier not in _AI_TIERS:
             return FlagsResult(Flags(False, False, None))
         if depicts_real_person:
