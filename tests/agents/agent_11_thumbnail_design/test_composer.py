@@ -98,6 +98,7 @@ def test_a_long_single_option_wraps_to_two_balanced_lines() -> None:
             tpl="tpl_centered_statement",
             lines=("trend from price structure basics",),
             emphasis="PLAIN",
+            min_font_px=100,
         )
     )
     assert len(r.lines) == 2
