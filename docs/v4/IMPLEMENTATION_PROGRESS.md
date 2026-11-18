@@ -59,11 +59,16 @@ The owner found the work too slow and authorised running the maximum number of a
 - The dev machine has 4 CPUs, which limits agents per workflow, so several workflows run side by side: Wave B-1 (3A slice, pool of 16) and three Wave B-2 groups (blueprints 01–03/12–15/17; shared docs and ADRs; business documents).
 - Contract needs from B-2 agents are returned as requests, not applied, so the Wave A/B-1 documents are not edited in parallel. A B-2 integrator applies them after B-1 is merged.
 
+### Owner answers (2026-11-18, later in the session)
+- **Books:** no new books are needed; the books already provided are enough. K9 is withdrawn; the 3 stub PDFs stay excluded (Q37). K10 (branch pin `6dd8bf4`), K11 (public-domain check ⚖) and K12 (longer quotes) keep their conservative defaults (Q35/Q36).
+- **VPS output (A1):** the owner will provide it on 2026-11-19. The server verdict in `00b` and the audit Part C stay open until then.
+- **A6:** the owner asked for the A6 list to be repeated; it was re-sent (see the progress update of 2026-11-18). Answers are awaited.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
 |---|---|---|
-| A1 | VPS read-only output | **Waiting.** Script delivered; one consolidated command given. |
+| A1 | VPS read-only output | **Waiting; owner will provide on 2026-11-19.** Script delivered. |
 | A2 | `trade-data` + `atp-private` read access | **Received** (2026-11-18, read-only clones) |
 | A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
 | A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
