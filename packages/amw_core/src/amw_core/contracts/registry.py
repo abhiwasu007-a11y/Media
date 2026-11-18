@@ -15,6 +15,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry
 from referencing.jsonschema import DRAFT202012
 
+from amw_core.contracts.common import is_rfc3339_utc
+
 CONTRACT_SCHEMAS = (
     "amw.common",
     "amw.task_input",
@@ -68,9 +70,21 @@ def _registry() -> Registry[Any]:
     return registry
 
 
+def _date_time(instance: object) -> bool:
+    # Non-strings are the "type" keyword's concern; strings must be strict RFC 3339 UTC.
+    return not isinstance(instance, str) or is_rfc3339_utc(instance)
+
+
+def format_checker() -> FormatChecker:
+    """Enforces ``format: date-time`` (implemented here; no optional jsonschema extra needed)."""
+    checker = FormatChecker(formats=())
+    checker.checks("date-time")(_date_time)
+    return checker
+
+
 @cache
 def validator(name: str, version: str) -> Draft202012Validator:
     """Validator for one exact schema version (03 section 2.3 rule 1)."""
     return Draft202012Validator(
-        dict(get_schema(name, version)), registry=_registry(), format_checker=FormatChecker()
+        dict(get_schema(name, version)), registry=_registry(), format_checker=format_checker()
     )

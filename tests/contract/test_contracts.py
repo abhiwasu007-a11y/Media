@@ -271,23 +271,68 @@ def test_non_object_document() -> None:
         contracts.validate_control(["DRAIN"])
 
 
-def test_timestamps_normalised_to_utc() -> None:
-    ist = timezone(timedelta(hours=5, minutes=30))
-    cmd = contracts.ControlCommand(
-        command="PAUSE",
-        reason="r",
-        act_by=datetime(2026, 1, 1, 5, 30, tzinfo=ist),
-        schema_version="1.0.0",
+def test_timestamps_accept_only_utc() -> None:
+    utc = contracts.ControlCommand(
+        command="PAUSE", reason="r", act_by=datetime(2026, 1, 1, tzinfo=UTC), schema_version="1.0.0"
     )
-    assert cmd.act_by == datetime(2026, 1, 1, tzinfo=UTC)
-    assert cmd.to_doc()["act_by"].endswith("Z")
+    assert utc.to_doc()["act_by"] == "2026-01-01T00:00:00Z"
+    ist = timezone(timedelta(hours=5, minutes=30))
+    for bad in (datetime(2026, 1, 1, 5, 30, tzinfo=ist), datetime(2026, 1, 1)):
+        with pytest.raises(PydanticError):
+            contracts.ControlCommand(
+                command="PAUSE", reason="r", act_by=bad, schema_version="1.0.0"
+            )
+
+
+@pytest.mark.parametrize(
+    "act_by",
+    [
+        1767225600,
+        1767225600.5,
+        "1767225600",
+        "2026-01-01",
+        "2026-01-01T00:00:00",
+        "2026-01-01T05:30:00+05:30",
+        "2026-01-01T00:00:00+00:00",
+        "2026-13-01T00:00:00Z",
+        "2026-01-01 00:00:00Z",
+        True,
+    ],
+)
+def test_strict_timestamps(act_by: object) -> None:
+    doc = {**ex.control(), "act_by": act_by}
+    assert _schema_rejects("amw.control", doc)
+    assert _model_rejects(contracts.ControlCommand, doc)
     with pytest.raises(PydanticError):
-        contracts.ControlCommand(
-            command="PAUSE",
-            reason="r",
-            act_by=datetime(2026, 1, 1),
-            schema_version="1.0.0",
-        )
+        contracts.ControlCommand.model_validate_json(json.dumps(doc))
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        ("validation_results.0.blocking", 1),
+        ("validation_results.0.blocking", 0),
+        ("validation_results.0.blocking", "true"),
+        ("quality_score", "80"),
+        ("quality_score", True),
+        ("duration", "1500"),
+        ("duration", 1500.0),
+        ("resource_usage.tokens_in", False),
+    ],
+)
+def test_strict_scalars(path: str, value: object) -> None:
+    doc = _mut(ex.task_output, _set(path, value))
+    assert _model_rejects(contracts.TaskOutput, doc)
+    with pytest.raises(PydanticError):
+        contracts.TaskOutput.model_validate_json(json.dumps(doc))
+    if value != 1500.0:  # JSON Schema treats 1500.0 as an integer; the model is stricter.
+        assert _schema_rejects("amw.task_output", doc)
+
+
+def test_model_validate_json_accepts_documented_strings() -> None:
+    doc = ex.task_output()
+    model = contracts.TaskOutput.model_validate_json(json.dumps(doc))
+    assert model == contracts.validate_task_output(doc, version="1.0.0")
 
 
 def test_models_are_frozen() -> None:

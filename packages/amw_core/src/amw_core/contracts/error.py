@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Any, ClassVar, Self
 
-from pydantic import ConfigDict, Field, StringConstraints, model_validator
+from pydantic import ConfigDict, Field, StrictBool, StringConstraints, model_validator
 
 from amw_core.contracts.common import ActorRefStr, AmwModel, CorrelationIdStr, UtcTimestamp
 from amw_core.enums import FailureClass
@@ -37,7 +37,7 @@ class ErrorObject(AmwModel):
     code: ErrorCode
     error_class: FailureClass
     message: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
-    retryable: bool
+    retryable: StrictBool
     retry_after_ms: Annotated[int, Field(ge=0, strict=True)] | None
     details: ErrorDetails
     actor: ActorRefStr

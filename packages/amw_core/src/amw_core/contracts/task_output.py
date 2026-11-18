@@ -2,7 +2,7 @@
 
 from typing import Annotated, ClassVar, Self
 
-from pydantic import Field, StringConstraints, model_validator
+from pydantic import Field, StrictBool, StringConstraints, model_validator
 
 from amw_core.contracts.common import (
     AmwModel,
@@ -44,7 +44,7 @@ class ValidationResult(AmwModel):
     check_id: Annotated[str, StringConstraints(pattern=r"^[a-z0-9_.-]{3,96}$")]
     kind: CheckKind
     verdict: CheckVerdict
-    blocking: bool
+    blocking: StrictBool
     rule_id: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2,8}-R[0-9]{1,3}$")] | None = None
     measured: MeasuredValue = None
     threshold: MeasuredValue = None
@@ -84,8 +84,8 @@ class TaskOutput(AmwModel):
     status: OutputStatus
     payload: PayloadObject | None
     output_refs: Annotated[tuple[OutputRef, ...], Field(max_length=512)]
-    quality_score: Annotated[float, Field(ge=0, le=100)] | None
-    confidence: Annotated[float, Field(ge=0, le=1)] | None
+    quality_score: Annotated[float, Field(strict=True, ge=0, le=100)] | None
+    confidence: Annotated[float, Field(strict=True, ge=0, le=1)] | None
     validation_results: Annotated[tuple[ValidationResult, ...], Field(max_length=1024)]
     duration: NonNegInt
     resource_usage: ResourceUsage

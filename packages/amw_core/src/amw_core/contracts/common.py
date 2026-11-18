@@ -8,15 +8,15 @@ integer milliseconds, timestamps are aware ``datetime`` normalised to UTC and se
 Optional schema properties that are not nullable are omitted from ``to_doc()`` output when ``None``.
 """
 
-from datetime import UTC, datetime
 import re
+from datetime import UTC, datetime
 from typing import Annotated, Any, ClassVar, Self
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
-    PlainValidator,
     SerializerFunctionWrapHandler,
     StringConstraints,
     model_serializer,
@@ -57,9 +57,7 @@ StorageUri = Annotated[str, StringConstraints(pattern=STORAGE_URI_PATTERN, max_l
 NonNegInt = Annotated[int, Field(ge=0, strict=True)]
 
 
-RFC3339_UTC_PATTERN = (
-    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$"
-)
+RFC3339_UTC_PATTERN = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$"
 _RFC3339_UTC = re.compile(RFC3339_UTC_PATTERN)
 
 
@@ -68,7 +66,7 @@ def is_rfc3339_utc(value: str) -> bool:
     if _RFC3339_UTC.fullmatch(value) is None:
         return False
     try:
-        datetime.fromisoformat(value[:26].rstrip("Z") if "." in value else value[:-1])
+        datetime.fromisoformat(value)
     except ValueError:
         return False
     return True
@@ -83,11 +81,11 @@ def _strict_utc(value: object) -> datetime:
             raise ValueError("timestamp must be timezone-aware UTC")
         return value.astimezone(UTC)
     if isinstance(value, str) and is_rfc3339_utc(value):
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+        return datetime.fromisoformat(value).astimezone(UTC)
     raise ValueError("timestamp must be an RFC 3339 UTC string ending in Z")
 
 
-UtcTimestamp = Annotated[datetime, PlainValidator(_strict_utc)]
+UtcTimestamp = Annotated[datetime, BeforeValidator(_strict_utc)]
 """Aware UTC datetime (``utc_timestamp``); see ``_strict_utc`` for what is refused."""
 StrictNumber = Annotated[float, Field(strict=True)]
 """JSON number: int or float, never a bool or a numeric string."""
