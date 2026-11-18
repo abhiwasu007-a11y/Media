@@ -897,7 +897,7 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | managed_service | boolean | no | true only when the client contracted managed service (rule 10) |
 | requested_by | text | no | actor ref |
 | decided_at / expires_at | timestamptz | yes | |
-| review_code | text | no | CCR-010: short code shown to the owner for this approval, derived from the approval ID, `subject_sha256` and a random nonce; `UNIQUE (org_id, review_code)`; the owner's message must contain it |
+| review_code | text | no | CCR-010/090: code shown to the owner for this approval: 4 characters (config `approvals.review_code.length`, default 4, owner to confirm) from the alphabet `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (no 0/O, 1/I/L), with at least one letter and one digit, generated from the approval ID, `subject_sha256` and a random nonce and regenerated on collision; CHECK `review_code ~ '^(?=.*[A-Z])(?=.*[2-9])[2-9A-HJ-KMNP-Z]{4,8}$'` in code; `UNIQUE (org_id, review_code)`; the owner's message must contain it; matched case-insensitively after normalisation |
 Index `(org_id, state, kind)`. The decision record (who, channel, evidence) is on `approval_steps`; the approval's final `state` is derived from its steps (03 §11.6).
 Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in one of two forms. (a) `subject_kind = 'knowledge_source'`, `subject_id` = the source: the whole source (3A default). (b) `subject_kind = 'knowledge_release'`, `subject_id` = the `knowledge_collections` row, `subject_sha256` = SHA-256 of the canonical JSON `{"topic_title": …, "collection_key": …, "chunk_ids": [sorted kch wire IDs]}`: the listed chunks for that topic only. A chunk is covered when the approval is `APPROVED` and the chunk is the subject source's or is listed and the recomputed hash matches. `subject_kind = 'asset'` releases one asset (e.g. a chart case) with `subject_sha256` = the asset's content hash.
 
@@ -941,6 +941,7 @@ One row per owner instruction that the operator tool was asked to record, includ
 | subject_kind / subject_id | text / uuid | no | what the instruction is about (vocabulary of `approvals.subject_kind`) |
 | review_code | text | yes | the approval's `review_code` (§5.16 `approvals`); required for `STEP_DECISION`, `CONTRIBUTION`, `HUMAN_SCORE` of an approval subject |
 | parsed_decision | enum(approval_step_state) | yes | for `DECISION` kinds (03 §11.6 rule 7): the decision the operator read; must match the code check; NULL for other kinds (CHECK) |
+| parsed_target_stage_id | text | yes | CCR-089: for `CHANGES_REQUESTED` only, the stage mapped by code from the message's stage word (03 §11.6 rule 7) |
 | claimed_scores | jsonb | yes | CCR-060: for `HUMAN_SCORE` only (CHECK): object `{"<quality_dimension>": <integer points>, …}` exactly as stated in the owner's message; non-empty; each value `0 ≤ points ≤ max_points` of the dimension |
 | source_kind | enum(instruction_source_kind) | no | only `OWNER_CHAT_MESSAGE` may reach `VERIFIED`; other values are stored only on `REFUSED` rows |
 | session_id / event_uuid | text / text | no | the session and the transcript event of the owner's message, as the platform's session event store names them |
@@ -952,7 +953,7 @@ One row per owner instruction that the operator tool was asked to record, includ
 | confirmation_event_uuid / confirmation_quote / confirmation_message_at | text / text / timestamptz | yes | the owner's reply to the echo: a **second** human event, verified the same way, with `confirmation_message_at > message_at` |
 | recorded_by | text | no | actor ref (`sys_operator`) |
 | on_behalf_of | uuid | no | FK → users: the owner |
-| evidence_sha256 | bytea | no | SHA-256 of the canonical `{session_id, event_uuid, quote, message_at, record_kind, subject_kind, subject_id, review_code, parsed_decision, claimed_scores}` (CCR-060) |
+| evidence_sha256 | bytea | no | SHA-256 of the canonical `{session_id, event_uuid, quote, message_at, record_kind, subject_kind, subject_id, review_code, parsed_decision, parsed_target_stage_id, claimed_scores}` (CCR-060, CCR-089) |
 | refused_reason | text | yes | set with `state = REFUSED` (ambiguous message, not owner-authored, event not found, check failed); a refused row backs nothing |
 | supersedes_id | uuid | yes | TFK → owner_instruction_evidence (a correction never edits a row) |
 Keys: `UNIQUE (org_id, event_uuid, record_kind, subject_kind, subject_id) WHERE state <> 'REFUSED'` (one owner message backs one record of each kind per subject: replay check). Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
