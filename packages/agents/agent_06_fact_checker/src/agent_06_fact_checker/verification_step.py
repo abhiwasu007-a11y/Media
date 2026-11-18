@@ -4,8 +4,8 @@
 Evidence only, never the model's knowledge. The model compares; code selects the evidence,
 guards every assessment and derives status, verdict, gate result and revision requests."""
 
-import json
-from collections.abc import Mapping, Sequence
+import logging
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,7 +22,6 @@ from agent_06_fact_checker.models import (
     EvidenceScope,
     Provenance,
     RefusalReason,
-    Verdict,
     VerificationBatchOutput,
     VerificationClaim,
     VerificationInput,
@@ -89,10 +88,11 @@ from amw_core.interfaces import (
     TenancyContext,
 )
 
+log = logging.getLogger(__name__)
 INPUT_SCHEMA = "agent_06.claim_verification.input"
 OUTPUT_SCHEMA = "agent_06.claim_verification.output"
 PROMPT_ID = "agent_06/claim_verification.v1"
-_CITED_KINDS = ("KNOWLEDGE_CHUNK", "EXTERNAL_REFERENCE")
+ConflictFinder = Callable[[Sequence[VerificationClaim], FactCheckSettings], list[tuple[str, str]]]
 
 
 @dataclass(slots=True)
@@ -118,7 +118,9 @@ class ClaimVerificationStep:
         knowledge: KnowledgeReader,
         prompts: PromptSource,
         settings: FactCheckSettings,
+        conflict_finder: ConflictFinder = find_pairs,
     ) -> None:
+        self._finder = conflict_finder
         self._tenancy = tenancy
         self._clock = clock
         self._blobs = blobs
@@ -188,10 +190,12 @@ class ClaimVerificationStep:
         self,
         task: TaskInput,
         ctx: RunContext,
+        inp: VerificationInput,
+        doc: Mapping[str, Any],
         resolver: EvidenceResolver,
-    ) -> tuple[VerificationInput, int]:
-        """V0-V2 (blueprint 7.2): order of the semantic checks is part of the contract."""
-        inp, doc = self._parse(task)
+    ) -> int:
+        """V0-V2 (blueprint 7.2): order of the semantic checks is part of the contract.
+        Returns the number of knowledge reads (audit count)."""
         if task.channel_id is None:
             raise InputInvalidError("channel_id is required (the library is channel scoped)")
         channel = ChannelId(task.channel_id)
@@ -220,21 +224,17 @@ class ClaimVerificationStep:
             raise InputInvalidError("duplicate local_id")
         if inp.iteration != ctx.iteration:
             raise InputInvalidError("iteration differs from the task's revision counter")
-        return inp, reads
+        return reads
 
     # ------------------------------------------------------------------ the run
     def _run(self, task: TaskInput, ctx: RunContext, state: _State, started: int) -> TaskOutput:
         s = self._settings
         tenant = ctx.tenant(task)
-        resolver_holder: list[EvidenceResolver] = []
-
-        # the resolver needs ``our_method_release_approved``; parse first, then build it
-        inp0, _ = self._parse(task)
+        inp, raw = self._parse(task)
         resolver = EvidenceResolver(
-            self._knowledge, s, release_approved=inp0.our_method_release_approved
+            self._knowledge, s, release_approved=inp.our_method_release_approved
         )
-        resolver_holder.append(resolver)
-        inp, reads = self._validate(task, ctx, resolver)
+        reads = self._validate(task, ctx, inp, raw, resolver)
         state.validated = True
         channel = ChannelId(task.channel_id or "")
         doc = self._prompts.load(PROMPT_ID)
@@ -245,7 +245,7 @@ class ClaimVerificationStep:
         with self._tenancy.transaction(tenant) as tx:
             evidence = resolver.resolve(tx, channel, plans, inp.available_citations, facts)
         verifiable = [p for p in plans if p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)]
-        pairs = find_pairs([p.claim for p in verifiable], s)
+        pairs = self._finder([p.claim for p in verifiable], s)
         in_pair = {i for pair in pairs for i in pair}
         sendable = [
             (p, evidence[p.claim.local_id])
@@ -269,7 +269,7 @@ class ClaimVerificationStep:
         )
         done = saved.load()
         model_conflicts: list[BatchConflict] = []
-        flagged_all: set[str] = set()
+        leaks = 0
         for batch in batches:
             key = f"V4_batch_{batch.index}"
             if key in done:
@@ -278,8 +278,8 @@ class ClaimVerificationStep:
                 out = self._verify_batch(task, ctx, state, inp, prompt, batch, verifiable, pairs)
                 saved.save(key, out.to_doc(), (batch.index + 1) / max(len(batches), 1))
             flags = {f.evidence_id for f in out.passage_flags}
-            flagged_all |= {f"{batch.index}:{i}" for i in flags}
             self._reconcile(batch, out, evidence, outcomes, flags)
+            leaks += sum(1 for lid in batch.local_ids if set(outcomes[lid].used_ids) & flags)
             model_conflicts.extend(out.claim_conflicts)
 
         ordered = [outcomes[c.local_id] for c in inp.claims]
@@ -317,10 +317,8 @@ class ClaimVerificationStep:
             ),
         )
         if result.claims:
-            self._persist(task, ctx, inp, ordered, result, reads)
-        return self._assemble(
-            task, ctx, state, started, inp, output, ordered, evidence, flagged_all
-        )
+            self._persist(task, ctx, inp, result, reads)
+        return self._assemble(task, ctx, state, started, inp, output, ordered, evidence, leaks)
 
     # ------------------------------------------------------------------ V-S4
     def _verify_batch(
@@ -406,7 +404,6 @@ class ClaimVerificationStep:
         task: TaskInput,
         ctx: RunContext,
         inp: VerificationInput,
-        outcomes: Sequence[Outcome],
         result: StageResult,
         reads: int,
     ) -> None:
@@ -444,7 +441,6 @@ class ClaimVerificationStep:
                     },
                 ),
             )
-        del outcomes
 
     # ------------------------------------------------------------------ V-S7
     def _assemble(
@@ -457,13 +453,23 @@ class ClaimVerificationStep:
         output: VerificationOutput,
         outcomes: Sequence[Outcome],
         evidence: Mapping[str, ClaimEvidence],
-        flagged: set[str],
+        leaks: int,
     ) -> TaskOutput:
         tenant = ctx.tenant(task)
         doc = output.to_doc()
         ref = write_blob(self._blobs, tenant, task, ctx, "claim_verification_output.json", doc)
-        results = self._results(inp, output, outcomes, evidence, flagged)
+        results = self._results(inp, output, outcomes, evidence, leaks)
         failed = [r.check_id for r in results if r.gate and r.verdict.value == "FAIL"]
+        log.info(  # ids, counts and codes only (NFR-6): never claim text or evidence
+            "fact.completed",
+            extra={
+                "task_id": task.task_id,
+                "verify_mode": inp.verify_mode.value,
+                "claims": len(output.claims),
+                "verdict": output.overall.proposed_verdict.value,
+                "llm_calls": state.usage.llm_calls,
+            },
+        )
         return success_output(
             clock=self._clock,
             started_ms=started,
@@ -481,7 +487,7 @@ class ClaimVerificationStep:
         output: VerificationOutput,
         outcomes: Sequence[Outcome],
         evidence: Mapping[str, ClaimEvidence],
-        flagged: set[str],
+        leaks: int,
     ) -> list[ValidationResult]:
         s = self._settings
         by_local = {o.claim.local_id: o for o in outcomes}
@@ -539,7 +545,7 @@ class ClaimVerificationStep:
             ),
             check(
                 "fact.injected_excluded",
-                not any(set(o.used_ids) & _bare(flagged) for o in outcomes if False),
+                leaks == 0,
                 "no evidence item from a flagged passage",
             ),
             check(
@@ -576,10 +582,6 @@ class ClaimVerificationStep:
         ]
 
 
-def _bare(flagged: set[str]) -> set[str]:
-    return {f.split(":", 1)[1] for f in flagged}
-
-
 def _verified_violations(
     claims: Sequence[VerifiedClaim], by_local: Mapping[str, Outcome], s: FactCheckSettings
 ) -> dict[str, str]:
@@ -605,4 +607,4 @@ def _verified_violations(
     return bad
 
 
-__all__ = ["ClaimVerificationStep", "Verdict", "VerificationClaim", "json"]
+__all__ = ["ClaimVerificationStep"]

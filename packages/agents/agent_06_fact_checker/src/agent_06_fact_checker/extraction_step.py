@@ -2,6 +2,7 @@
 persist, assemble the Task Output. One checkpoint after every paid call."""
 
 import json
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -74,6 +75,7 @@ from amw_core.interfaces import (
     TenancyContext,
 )
 
+log = logging.getLogger(__name__)
 INPUT_SCHEMA = "agent_06.claim_extraction.input"
 OUTPUT_SCHEMA = "agent_06.claim_extraction.output"
 PROMPT_ID = "agent_06/claim_extraction.v1"
@@ -410,6 +412,16 @@ class ClaimExtractionStep:
             )
         results = self._results(inp, final, ids, ages, finance, report, doc)
         failed_gate = [r.check_id for r in results if r.gate and r.verdict.value == "FAIL"]
+        log.info(  # ids, counts and codes only (NFR-6): never quotes or script text
+            "claims.completed",
+            extra={
+                "task_id": task.task_id,
+                "script_id": inp.script_id,
+                "claims": len(final.claims),
+                "verdict": final.overall.proposed_verdict.value,
+                "batches": report.batches,
+            },
+        )
         return success_output(
             clock=self._clock,
             started_ms=started,
