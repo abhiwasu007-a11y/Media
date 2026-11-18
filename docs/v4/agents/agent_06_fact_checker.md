@@ -7,11 +7,11 @@
 | Package | `agent_06_fact_checker` (27 §7.2); prompts `prompts/agent_06_fact_checker/`; evals `evals/agent_06_fact_checker/` |
 | Directive sections covered | §3.1 row 06 (claim extraction, independent verification, contradiction detection, approval), §1 (SEBI and platform rules as they reach claims), §1B.2 (answer key), §1A.7 (RESEARCH_ACCURACY), §3.3 (contracts, failures, quality, observability, AI providers), §3.5 (prompt, eval, code standards), §4 (26 sections) |
 | Owner decisions applied | D1 (3A production line with Agents 04–11 and the Agent 16 gates; topic owner-given; outputs are files; no upload, no OAuth; spend limits enforced by the cost ledger; keys only through the environment's secret mechanism; render never in market hours), D2 (full blueprint for 3A agents; REQUIRES REVIEW does not block 3A unless it changes a 3A design decision) |
-| Binding contracts | GLOSSARY_AND_IDS.md (§6.29, 6.38–6.41, 6.51), 03_COMMUNICATION_STANDARD.md (§3–§7, §9, §11), 04_DATABASE_ARCHITECTURE.md §5.11 (`claims`, `citations`) and §5.10, 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md §3.2 (`agent_06.claim_extraction`, `agent_06.claim_verification`), 27_ENGINEERING_STANDARDS.md |
+| Binding contracts | GLOSSARY_AND_IDS.md (§2.4, §6.29, 6.38–6.41, 6.45, 6.51, 6.52), 03_COMMUNICATION_STANDARD.md (§3–§7, §9, §11), 04_DATABASE_ARCHITECTURE.md §5.11 (`claims`, `citations`) and §5.10, 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md §3.1–§3.3, §3.2 (`agent_06.claim_extraction`, `agent_06.claim_verification`), §7.1a, §7.2a (3A graphs `CHANNEL_LONG_FORM` v2 and `SHORTS` v2), 27_ENGINEERING_STANDARDS.md; CONTRACT_CHANGE_REQUESTS.md §4 and §5 "Resolved for blueprint 06" (CCR-001…CCR-005, 009, 011, 013, 015…019, 022…024, 029, 042, 045…047, 049, 053) |
 | Shared docs referenced by name/§ only | 18_PRODUCTION_QUALITY_STANDARD.md §9.2–§9.3, 13_COMPLIANCE_YOUTUBE_POLICY.md §1.2, §5 (finance rules, §5.12 answer key, §5.13 IN-03 cases), 09_COST_AND_BUDGET.md, 08_SECURITY.md §5.3, §8, 3A_SLICE_SPEC.md §3 (job flow), ADR-007 (LLM routing), ADR-013 (knowledge library), agent_04_research_knowledge.md (pack, citations, tiers) |
 | Facts cited | RESEARCH_LOG IN-02 (30-day price-data lag), IN-03 (direction ban on named securities), IN-01 (association with regulated entities), PR-01 / PR-02 / PR-03 (models, batch and caching, API vs subscription), INF-03 / INF-04 (resource caps), INF-11 (RLS) |
 | Marking | Every section states its **MVP** in the first line: 3A / 3B / 3C (owner build stages of D1) and Tier 0–3 (GLOSSARY §6.47) |
-| Conventions | `(pending CCR)` = a contract item that does not exist in Wave A and is listed in the structured return for the integrator; this blueprint is written against the proposed name. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. Config key names are proposals until the registry (18 §13) exists. No book text, private method or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config. |
+| Conventions | Every contract item this blueprint uses now exists in Wave A: the former "pending CCR" names were decided in integrator pass 1 (CONTRACT_CHANGE_REQUESTS.md §4, §5) and are used as decided; no pending marker remains. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. Config key names follow 27 §4.2 and CCR-019 (`llm.<task_type>.<step>.*`); the registry (18 §13) rejects duplicates. No book text, private method or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config. |
 
 ---
 
@@ -27,7 +27,7 @@ Agent 06 is the factual and claim-level checkpoint between the script (Agent 05)
 It produces a **proposed** verdict. The final compliance verdict is Agent 16's (plan Q5; 13 §1.1).
 
 ### 1.2 Where it sits
-Stages `s06_claims` then `s06_verify` of every production type that has a script (24 §3.1, §7; both `AI_IO`, both blocking, `on_fail REVISE → s05_script`). In 3A both run after `s05_script` and before `a_script` (optional approval), `s07_voice` and `s09_plan` (3A_SLICE_SPEC §3). Other production types reuse the stages unchanged: Shorts (`agent_06.claim_extraction` on the child script), localisation (extraction on the translation: meaning must not change into a rule violation), advertising (both tasks; every ad claim needs substantiation, 3C). Downstream: Agent 05 (revision), the orchestrator (routing, approvals), Agent 16 (`compliance_gate`, `quality_score` RESEARCH_ACCURACY).
+Stages `s06_claims` then `s06_verify` of every production type that has a script (24 §3.1, §7; both `AI_IO`, both blocking gates, `on_fail REVISE → s05_script`; `s06_verify` also lists alt target `s04_research`). In 3A (`CHANNEL_LONG_FORM` v2, 24 §7.1a, CCR-003) both run after `s05_script` and before `a_script` (optional approval), `s07_voice` and `s09_plan` (`s09_plan` depends on `s06_verify` and `s07_voice`). A third stage, **`s06_chart`** (`agent_06.claim_verification` with stage parameter `verify_mode = CHART_FACTS`, CCR-004), runs after `s08_assets` and before `s10_render` (blocking gate, `on_fail REVISE → s05_script`, alt `s08_assets`): chart claims cannot be checked before the chart exists, so at `s06_verify` they stay `EXTRACTED` with reason `CHART_PENDING` and are verified at `s06_chart` against the facts Agent 08 computed from the sourced dataset (`agent_08.chart_facts`). `SHORTS` v2 (24 §7.2a) runs `s06_claims`, `s06_verify` and `s06_chart` on the child script (revision target `s05_shorts`). Other production types reuse the stages unchanged: localisation (extraction on the translation: meaning must not change into a rule violation), advertising (both tasks; every ad claim needs substantiation, 3C). Downstream: Agent 05 (revision feedback, 24 §3.3 rule 7), Agents 07, 09, 10 (they run only after the gate stages complete; 07 and 09 read the verified-script hash, §15.2), the orchestrator (routing, approvals), Agent 16 (`compliance_gate`, `quality_score` RESEARCH_ACCURACY).
 
 ### 1.3 Authority boundaries
 | Agent 06 **decides** | Agent 06 **does not decide** (owner of the decision) |
@@ -45,7 +45,7 @@ It never creates tasks, never approves, never changes a budget, never calls the 
 |---|---|---|
 | SC-1 | No advice, return claim, referral or forward view passes extraction | Answer-key cases 4/4 and 0 false `ALLOWED` on any BLOCKED-expected case in the extraction dataset (mandatory CI threshold) |
 | SC-2 | No unsupported or contradicted claim is marked `VERIFIED` | 0 false `VERIFIED` in the verification dataset (mandatory CI threshold); 0 in the golden-sample audit by the owner (3B) |
-| SC-3 | Every claim of type FACTUAL, STATISTICAL or HISTORICAL_MARKET that leaves the stage is `VERIFIED` and has a citation or chart reference, or the stage verdict is not `ALLOWED` | 100 % (deterministic; this is the RESEARCH_ACCURACY deterministic criterion of 18 §9.2) |
+| SC-3 | Every claim of type FACTUAL, STATISTICAL or HISTORICAL_MARKET that leaves the stage is `VERIFIED` and has a citation or chart reference, or the stage verdict is not `ALLOWED`. A chart claim is `EXTRACTED` (`CHART_PENDING`) when it leaves `s06_verify`; the measure applies to it when it leaves `s06_chart`, which `s10_render` depends on | 100 % (deterministic; this is the RESEARCH_ACCURACY deterministic criterion of 18 §9.2, where `UNVERIFIABLE` / `NEEDS_SUBSTANTIATION` count as resolved only through an `APPROVED` `SENSITIVE_CLAIM` approval that names the `claim_id`, and `CONTRADICTED` never, CCR-045) |
 | SC-4 | Every quote is an exact substring at the stated offsets; every evidence span lies inside its passage | 100 % (deterministic, blocking) |
 | SC-5 | No cross-tenant, cross-channel or restricted-collection read | 0 occurrences in the tenancy suite and in production logs |
 | SC-6 | Verdicts are code-derived, never copied from the model | 100 % (check `claims.verdict_recomputed`, `fact.verdict_recomputed`) |
@@ -63,8 +63,8 @@ It never creates tasks, never approves, never changes a budget, never calls the 
 | Task type | Status | Purpose | Trigger | MVP |
 |---|---|---|---|---|
 | `agent_06.claim_extraction` | canonical (24 §3.2), prompt `agent_06/claim_extraction.v1` exists | claims + rule-pack flags + proposed verdicts for one script version | orchestrator creates it when `s06_claims` becomes ready (script `SUCCEEDED`) | 3A |
-| `agent_06.claim_verification` | canonical (24 §3.2), prompt `agent_06/claim_verification.v1` | independent verification, contradiction detection, claim status | orchestrator creates it when `s06_claims` is `ALLOWED` or `NEEDS_HUMAN_REVIEW` and the job continues | 3A |
-Agent 06 files no other task type. Capability use: `llm` for both. The two tasks are separate stages so that a human approval or a revision can sit between them, and so that a blocked script never pays for verification.
+| `agent_06.claim_verification` | canonical (24 §3.2), prompt `agent_06/claim_verification.v1` | independent verification, contradiction detection, claim status; stage parameter `verify_mode` (`EVIDENCE` at `s06_verify`, `CHART_FACTS` at `s06_chart`; `factcheck_verify_mode` of GLOSSARY §6.52 names the per-claim mode, the stage parameter is the two-value subset `EVIDENCE` / `CHART_FACTS`) | orchestrator creates it when `s06_claims` is `ALLOWED` or `NEEDS_HUMAN_REVIEW` and the job continues (`s06_verify`), and when `s08_assets` is `COMPLETED` (`s06_chart`) | 3A |
+Agent 06 files no other task type; one task type serves two stages, and the task idempotency key therefore includes `stage_id` (03 §9.2, CCR-005). Capability use: `llm` for both. The two tasks are separate stages so that a human approval or a revision can sit between them, and so that a blocked script never pays for verification.
 
 ### 2.2 Requirements
 | ID | Requirement | Why | When / trigger | Inputs | Outputs | Dependants | MVP |
@@ -103,7 +103,7 @@ Web search or any browsing for evidence (no search provider has a research-log e
 | NFR-5 | Cost | Every call has a reservation and a ledger row; a breach suspends (`AWAITING_BUDGET`); no automatic increase (rule 8, D1, ADR-007 §8) | breach test F-11 | 3A |
 | NFR-6 | Confidentiality | Script text, claim quotes, passage text, evidence values and corrections never appear in logs, metrics, error messages, audit rows or eval run records (IDs, offsets, hashes and counts only); library text reaches only the tenant's own LLM calls | log-leak test S-05 | 3A |
 | NFR-7 | Latency | End-to-end and per-step latency: **MEASURED in 3B**; no target before. The stages are blocking, so they sit on the job's critical path | performance tests P-01…P-04 | 3B |
-| NFR-8 | Capacity | Script size supported on the shared VPS within the factory caps (INF-03, INF-04): segments ≤ 400 and 5,000 characters each (extraction input schema); claims ≤ 500 per script | boundary tests U-31 | 3A (schema), 3B (measured) |
+| NFR-8 | Capacity | Script size supported by the input schemas: segments ≤ 400 and 5,000 characters each (extraction input schema); claims ≤ 500 per script. These caps are design values of the schemas, not provider or host limits; the host's capacity limits are INF-03 / INF-04 and the fit is **MEASURED in 3B** | boundary tests U-31 | 3A (schema), 3B (measured) |
 | NFR-9 | Availability | Stateless between steps; all state in DB and storage; restart resumes from the latest checkpoint (07 §10); AI_IO tasks may run at any time but obey `DRAIN` | failure injection F-06 | 3A |
 | NFR-10 | Languages | English, Marathi, Hindi, mixed Hinglish, with Devanagari preserved byte for byte in quotes; quote offsets are in Unicode code points of the stored text; evidence in a different language than the claim is allowed; per-language token cost MEASURED (ADR-007 §2.9) | eval cases POS-07, POS-08, EDGE-23…25 | 3A |
 | NFR-11 | Auditability | Every claim set, status change, restricted-gate decision, knowledge read count and cross-tenant rejection is audited by ID | audit test S-06 | 3A |
@@ -136,10 +136,10 @@ flowchart TD
     V5 --> V6["V-S6 persist claims.status + citations + audit"]
     V6 --> V7["V-S7 assemble output, verdicts, revision requests"]
   end
-  E6 -->|"claims, citation_refs"| V0
+  E6 -->|"claims, citation_refs (input built by amw_orchestrator/input_builders)"| V0
   KR[("KnowledgeRepository tenant+channel scoped")] --> V2
   GATE["RestrictedCollectionGate"] --> V2
-  CF["chart facts (pending CCR)"] --> V2
+  CF["chart facts (agent_08.chart_facts, s06_chart only)"] --> V2
   RP["rule packs by reference"] --> E2
   LLM["LlmAdapter Protocol"] -.-> E3
   LLM -.-> V4
@@ -162,12 +162,13 @@ sequenceDiagram
   X->>L: segments batch (paid, reserved, ledgered)
   X->>DB: INSERT claims (EXTRACTED)
   X-->>O: Task Output (claims, proposed verdicts)
-  O->>V: Task Input (claims, citations, chart facts)
+  O->>V: Task Input (claims, citations; chart facts only at s06_chart)
   V->>DB: SELECT knowledge_chunks (org, channel, collection, gate)
   V->>L: claims + evidence windows (paid, reserved, ledgered)
   V->>DB: UPDATE claims.status, INSERT citations
   V-->>O: Task Output (statuses, verdicts, revision requests)
   O->>O: route: continue / SENSITIVE_CLAIM approval / REVISE to s05_script
+  Note over O,V: s06_chart repeats the verification task with verify_mode CHART_FACTS after s08_assets
 ```
 
 Components are detailed in §9 and §10. The model sits in exactly two places (E3 and V-S4). Everything else is code.
@@ -180,7 +181,7 @@ Components are detailed in §9 and §10. The model sits in exactly two places (E
 | Prompt | File | Role of the model | Rule packs injected | Output schema |
 |---|---|---|---|---|
 | `agent_06/claim_extraction.v1` | [`prompts/agent_06_fact_checker/claim_extraction.v1.md`](../prompts/agent_06_fact_checker/claim_extraction.v1.md) (exists; not rewritten here) | lists every checkable claim with exact quotes and offsets, classifies it, flags rule violations; never verifies facts or decides publication | `rp.youtube_general`, `rp.finance_sebi_in` (when active) by reference | `agent_06.claim_extraction.output` 1.0.0 |
-| `agent_06/claim_verification.v1` | [`prompts/agent_06_fact_checker/claim_verification.v1.md`](../prompts/agent_06_fact_checker/claim_verification.v1.md) | compares each claim only with the evidence code selected; reports support, partial support, contradiction or absence with evidence spans; reports claim-vs-claim contradictions; flags injected passages | none (verification is not a policy step) | `agent_06.claim_verification_batch.output` 1.0.0 |
+| `agent_06/claim_verification.v1` | [`prompts/agent_06_fact_checker/claim_verification.v1.md`](../prompts/agent_06_fact_checker/claim_verification.v1.md) | compares each claim only with the evidence code selected; reports support, partial support, contradiction or absence with evidence spans; reports claim-vs-claim contradictions; flags injected passages | none (verification is not a policy step) | `agent_06.claim_verification.batch.output` 1.0.0 (step schema `<task_type>.<step>.output`, GLOSSARY §2.4, CCR-018) |
 
 Design principles shared by both prompts (they implement 27 §4.2 and 08 §5.3):
 1. **Template conformance.** Both files have the nine mandatory sections in order (header, Role, Objective, Inputs, Rules, Output JSON Schema, Worked examples including a refusal path, Refusal and escalation, Self-check). Model, tier, temperature, token and cost limits are configuration keys `llm.agent_06.<task>.*`, never in the file.
@@ -201,18 +202,18 @@ Design principles shared by both prompts (they implement 27 §4.2 and 08 §5.3):
 | # | Decision | Made by | Why this split | Test |
 |---|---|---|---|---|
 | 1 | What the claims are (segmentation, atomicity, type, time reference, instrument, chart link) | LLM (extraction), validated by code (D1, D2, D5) | meaning must be read; offsets and links are checked by code | extraction eval; U-01…U-06 |
-| 2 | Whether a claim breaks a rule of an active pack | LLM proposes, code adds a deterministic net (D3 chart age, D4 URL/referral) and recomputes (D7) | "is this sentence a call?" needs meaning (13 §1.4: `LLM_JUDGE` is always paired with a deterministic pre-filter); known patterns are code | extraction eval; U-03, U-04 |
-| 3 | Price-data age of a chart (`OLDER_THAN_LAG`, `WITHIN_LAG`, `UNKNOWN`) | code (D0) | date arithmetic is never the model's job; value never more permissive than the recomputed one; `UNKNOWN` is treated as within the lag (GLOSSARY §6.52) | U-01 |
+| 2 | Whether a claim breaks a rule of an active pack | LLM proposes, code adds a deterministic net (D3 chart age, D4 URL/referral, D11 future-marker pre-filter) and recomputes (D7) | "is this sentence a call?" needs meaning (13 §1.4: `LLM_JUDGE` is always paired with a deterministic pre-filter); known patterns are code | extraction eval; U-03, U-04 |
+| 3 | Price-data age of a chart (`OLDER_THAN_LAG`, `WITHIN_LAG`, `UNKNOWN`; `null` for a schematic chart, CCR-042) | code (D0) | date arithmetic is never the model's job; value never more permissive than the recomputed one; `UNKNOWN` is treated as within the lag (GLOSSARY §6.52); a `CONSTRAINT` basis (chart not yet sourced, CCR-004) keeps its value and is enforced by Agent 08 and re-checked by `qc.visual.chart_data_age` and `s16_comp` | U-01 |
 | 4 | Per-claim and overall extraction verdict | code (D7) | BLOCKING flag ⇒ `BLOCKED`; else WARNING flag or citation-needed-but-missing (D6) ⇒ `NEEDS_HUMAN_REVIEW`; else `ALLOWED`; doubt never resolves to `ALLOWED` | U-05, U-06 |
-| 5 | Verification mode per claim (evidence, chart facts, skip, code only) | code (policy table §6.3) | cost and safety: types that cannot be true or false (advice, forecast) or are not checkable by design are never sent | U-20 |
+| 5 | Verification mode per claim (evidence, chart facts, skip, code only) and, at `s06_verify`, deferral of chart claims to `s06_chart` | code (policy table §6.3) | cost and safety: types that cannot be true or false (advice, forecast) or are not checkable by design are never sent | U-20 |
 | 6 | Which evidence a claim is checked against | code (citation resolution, restricted gate, library search with tenant/channel/collection predicates, windowing) | the model must not choose sources or see other tenants' data (08 §5.3) | U-21…U-25, S-01…S-04 |
 | 7 | Whether the evidence supports, partly supports, contradicts or does not address a claim | LLM (verification) | reading meaning across languages, rounding, scope and qualifiers | verification eval |
 | 8 | Whether the model's assessment is acceptable | code (P1–P10): ids, spans, verbatim values, number guard, injected passages | the model's output is data, not authority | U-26…U-29 |
 | 9 | Claim status and reason codes | code (§6.4) | `VERIFIED` must rest on evidence spans, a number guard, a tier floor and a script citation, none of which is a model score | U-30…U-36 |
 | 10 | Whether two claims contradict each other | code finds candidate pairs (V8), LLM adjudicates, code validates the ids | candidates by code keep the digest small and the recall measurable; meaning is the model's | U-37, verification eval |
-| 11 | Verification verdict, combined verdict, stage verdict, revision requests | code (§6.4, config `factcheck.verdict_map`) | routing must be reproducible; Agent 16 keeps final authority | U-38 |
+| 11 | Verification verdict, combined verdict, stage verdict (`overall.proposed_verdict`, the value consumers read), gate results, revision requests | code (§6.4, config `factcheck.verdict_map`) | routing must be reproducible; Agent 16 keeps final authority | U-38 |
 | 12 | Whether a restricted ("our method") chunk may be loaded | code (RestrictedCollectionGate) | FIN-R12, Q26: release is the owner's decision, checked in code, same rule as Agent 04 | U-24 |
-| 13 | Whether a model refusal fails the task, blocks, or goes to a human | code (27 §4.3 mapping) | the mapping is a contract | F-03 |
+| 13 | Whether a model refusal fails the task, blocks, or goes to a human | code (27 §4.3 declared item-level mapping, §18; CCR-023) | the mapping is a contract | F-09 |
 
 ### 6.2 Why the split
 - Truth and rule meaning are language problems; offsets, hashes, numbers, tiers, policy, IDs and arithmetic are not. Mixing them is how unsupported claims pass.
@@ -223,7 +224,7 @@ Design principles shared by both prompts (they implement 27 §4.2 and 08 §5.3):
 | Claim type (GLOSSARY §6.39) | Mode | What is required for `VERIFIED` | Notes |
 |---|---|---|---|
 | `FACTUAL`, `STATISTICAL`, `DEFINITION`, `COMPARATIVE`, `PRODUCT_CLAIM` | `EVIDENCE` | supporting evidence span + number guard + source tier at or above the floor + a script citation that points to the supporting source | 18 §9.2: every FACTUAL/STATISTICAL claim carries a citation |
-| `HISTORICAL_MARKET` with `chart_data_ref` | `CHART_FACTS` | a chart fact that supports the claim for the same chart and instrument; the chart reference is the citation | needs the chart-facts provider (§13.1); without chart facts: `UNVERIFIABLE` (`NO_CHART_FACTS`), no model call |
+| `HISTORICAL_MARKET` with `chart_data_ref` | stage parameter `EVIDENCE` (`s06_verify`): `SKIPPED`, status `EXTRACTED`, reason `CHART_PENDING`; stage parameter `CHART_FACTS` (`s06_chart`): `CHART_FACTS` | a chart fact that supports the claim for the same chart and instrument; the chart reference is the citation | chart facts are `agent_08.chart_facts` documents (CCR-004); at `s06_chart` without facts for the claim's chart: `UNVERIFIABLE` (`NO_CHART_FACTS`), no model call |
 | `HISTORICAL_MARKET` without a chart | `EVIDENCE` | as above | e.g. a described past event |
 | `OPINION` with `requires_citation = true` | `EVIDENCE` | as above | opinion stated as a general fact |
 | `OPINION` with `requires_citation = false` | `SKIPPED` | — | status stays `EXTRACTED` |
@@ -231,7 +232,7 @@ Design principles shared by both prompts (they implement 27 §4.2 and 08 §5.3):
 | `QUOTED_THIRD_PARTY` | `EVIDENCE` if the claim has `citation_refs`, else `CODE_ONLY` | with a citation as above; without one: `NEEDS_SUBSTANTIATION` (`QUOTE_NOT_ATTRIBUTABLE`) | an unattributed quotation is a misleading-claim risk (18 §9.3) |
 | `RECOMMENDATION`, `FORWARD_VIEW`, `PRICE_LEVEL` | `SKIPPED` | — | cannot be true or false now; rule packs and Agent 16 decide; extraction flags them |
 | `HYPOTHETICAL_EXAMPLE`, `PROMOTION` | `SKIPPED` | — | invented numbers and pointers to the channel's own course are not facts about the world |
-A skipped claim keeps status `EXTRACTED` and keeps its extraction verdict. Claims that are members of a conflict candidate pair are sent to the model even when they have no evidence (the pair is the point; §10.4).
+A skipped claim keeps status `EXTRACTED` and keeps its extraction verdict. At `s06_chart` every claim of type `HISTORICAL_MARKET` with a chart reference is in scope and no other claim is sent (an input claim without `chart_data_ref` is `PERMANENT.INPUT_INVALID`); a `s06_chart` task with no chart claim succeeds at once with no model call (24 §7.1a). Claims that are members of a conflict candidate pair are sent to the model even when they have no evidence (the pair is the point; §10.4).
 
 ### 6.4 Status derivation, verdicts and revision requests (deterministic; `ResultReconciler`, `VerdictEngine`)
 **Step 1 — clean the model result (P1–P10).** Drop evidence items from passages listed in `passage_flags` (reason `INJECTED_EVIDENCE_DISCARDED`); drop items whose id is not a candidate of the claim, or whose span is invalid (`SPAN_INVALID`); a result whose assessment relied on dropped evidence is re-read with what remains (a `SUPPORTED` or `CONTRADICTED` assessment with no valid matching evidence is treated as `UNCLEAR`).
@@ -239,9 +240,9 @@ A skipped claim keeps status `EXTRACTED` and keeps its extraction verdict. Claim
 **Step 2 — derive the status, first match wins.**
 | # | Condition on the cleaned result | Status | Reason code(s) |
 |---|---|---|---|
-| 1 | mode `SKIPPED` | `EXTRACTED` | `SKIPPED_BY_POLICY` |
+| 1 | mode `SKIPPED` | `EXTRACTED` | `SKIPPED_BY_POLICY`, or `CHART_PENDING` for a chart claim at `s06_verify` |
 | 2 | mode `CODE_ONLY`: no candidates | `UNVERIFIABLE` | `NO_EVIDENCE_CANDIDATES` |
-| 3 | `CODE_ONLY`: chart claim, no chart facts | `UNVERIFIABLE` | `NO_CHART_FACTS` |
+| 3 | `CODE_ONLY` (stage `CHART_FACTS` only): chart claim, no chart facts for its chart | `UNVERIFIABLE` | `NO_CHART_FACTS` |
 | 4 | `CODE_ONLY`: the only candidates are restricted and not released | `UNVERIFIABLE` | `RESTRICTED_NOT_RELEASED` |
 | 5 | `CODE_ONLY`: quotation without citation | `NEEDS_SUBSTANTIATION` | `QUOTE_NOT_ATTRIBUTABLE` |
 | 6 | valid `SUPPORTS` and valid `CONTRADICTS` evidence both present | `UNVERIFIABLE` | `EVIDENCE_CONFLICT` |
@@ -249,11 +250,11 @@ A skipped claim keeps status `EXTRACTED` and keeps its extraction verdict. Claim
 | 8 | `PARTIALLY_SUPPORTED` | `NEEDS_SUBSTANTIATION` | `OVERREACH` |
 | 9 | `NOT_FOUND`, or `UNCLEAR`, or `certainty = LOW` | `UNVERIFIABLE` | `NOT_FOUND_IN_EVIDENCE` or `MODEL_UNCERTAIN` |
 | 10 | `SUPPORTED`, number guard fails (§6.5) | `NEEDS_SUBSTANTIATION` | `NUMBER_NOT_IN_EVIDENCE` |
-| 11 | `SUPPORTED`, best supporting source tier below the floor `factcheck.min_tier_for_verified` | `NEEDS_SUBSTANTIATION` | `LOW_RELIABILITY_ONLY` |
+| 11 | `SUPPORTED`, best supporting source tier below the floor `factcheck.min_tier_for_verified` (a supporting source without a tier in the Agent 04 pack, such as a library-search hit, counts as `D_UNVERIFIED`, CCR-053, so it can never verify alone) | `NEEDS_SUBSTANTIATION` | `LOW_RELIABILITY_ONLY` |
 | 12 | `SUPPORTED`, mode `EVIDENCE`, none of the claim's `citation_refs` is among the supporting sources | `NEEDS_SUBSTANTIATION` | `NO_SCRIPT_CITATION`; `suggested_citation_refs` = supporting sources |
 | 13 | `SUPPORTED`, mode `CHART_FACTS`, supporting fact belongs to the claim's `chart_data_ref` | `VERIFIED` | — |
 | 14 | `SUPPORTED`, all above pass | `VERIFIED` | — |
-A cited reference that no longer resolves (chunk re-ingested, hash changed) removes that source and adds `CITATION_UNRESOLVABLE`; the claim then follows the rows above with the remaining evidence.
+A cited reference that no longer resolves (chunk re-ingested, hash different from the `content_sha256` carried in `available_citations`) removes that source and adds `CITATION_UNRESOLVABLE`; the claim then follows the rows above with the remaining evidence.
 
 **Step 3 — claim conflicts.** A reported pair is kept only if both claims exist, differ and are in the verified set. Both claims get `CLAIM_CONFLICT`. If both are `VERIFIED` (evidence contradicts itself), both become `UNVERIFIABLE`. A conflict never changes a `CONTRADICTED` claim; it forces the stage verdict to at least `NEEDS_HUMAN_REVIEW`.
 
@@ -267,7 +268,9 @@ A cited reference that no longer resolves (chunk re-ingested, hash changed) remo
 | `EXTRACTED` (skipped) | the extraction verdict | not examined here |
 Combined verdict per claim = the more severe of the extraction verdict and the verification verdict (`ALLOWED` < `NEEDS_HUMAN_REVIEW` < `BLOCKED`); a verified claim never erases an extraction WARNING. Stage verdict = the most severe combined verdict, and at least `NEEDS_HUMAN_REVIEW` when any conflict is reported. `NEEDS_HUMAN_REVIEW` is not a failure: the orchestrator inserts a `SENSITIVE_CLAIM` approval (24 §3.3.2); `BLOCKED` routes to `s05_script` (24 §3.1) up to `limits.max_revision_loops`.
 
-**Step 5 — revision requests (advisory; `RevisionAdvisor`).** `CONTRADICTED` or `OVERREACH` → `CORRECT_CLAIM` (detail = the validated `suggested_correction`, else the discrepancy list); `NO_SCRIPT_CITATION` → `ADD_CITATION` with `suggested_citation_refs`; `LOW_RELIABILITY_ONLY`, `NOT_FOUND_IN_EVIDENCE`, `NO_CHART_FACTS` → `PROVIDE_EVIDENCE`; `CLAIM_CONFLICT` → `RESOLVE_CONFLICT`; `QUOTE_NOT_ATTRIBUTABLE` → `REMOVE_OR_REWORD`. The orchestrator turns them into the revision input of Agent 05 (the exact field is Agent 05's blueprint: REQUIRES REVIEW (Phase 1)). They never change the script by themselves.
+**Step 5 — revision requests (advisory; `RevisionAdvisor`).** `CONTRADICTED` or `OVERREACH` → `CORRECT_CLAIM` (detail = the validated `suggested_correction`, else the discrepancy list); `NO_SCRIPT_CITATION` → `ADD_CITATION` with `suggested_citation_refs`; `LOW_RELIABILITY_ONLY`, `NOT_FOUND_IN_EVIDENCE`, `NO_CHART_FACTS` → `PROVIDE_EVIDENCE`; `CLAIM_CONFLICT` → `RESOLVE_CONFLICT`; `QUOTE_NOT_ATTRIBUTABLE` → `REMOVE_OR_REWORD`. Each request carries the claim's `segment_id`. The orchestrator maps them to `revision.feedback[]` of Agent 05 by the table of 24 §3.3 rule 7 (source `CLAIM_VERIFICATION`, `segment_ref = segment_id`, `rule_ids` from the claim's extraction flags (may be empty), `instruction = "<revision_action>: " + detail`, `suggested_citation_refs` of the request), grouped per segment and capped at 60 items by the orchestrator (CCR-009). `PROVIDE_EVIDENCE` may send the revision to `s04_research` first (24 §3.3 rule 1 and rule 7 note). They never change the script by themselves.
+
+**Step 5b — gate results.** `s06_claims`, `s06_verify` and `s06_chart` are registered blocking gates (24 §3.1), so the stage reports its domain outcome as validation results with `gate: true` (03 §5.3 rule 4, CCR-001; §8.4): the gate has failed exactly when the stage verdict is `BLOCKED` (a blocking rule flag at extraction; a `CONTRADICTED` claim at verification). The task is still `SUCCEEDED`; `remedy_stage_id` is `null`, so the orchestrator uses the stage's `target_stage_id` (`s05_script`, or `s05_shorts` for Shorts). `NEEDS_HUMAN_REVIEW` is never a gate failure: it inserts the `SENSITIVE_CLAIM` approval (24 §3.3 rule 2). Process-integrity checks (schema, tenant scope, hashes, persistence) keep `gate: false`.
 
 **Step 6 — accuracy counters** for 18 §9.2: over claims of type FACTUAL, STATISTICAL, HISTORICAL_MARKET: total, with a citation or chart reference, and counts by status. Agent 16 turns them into the 12-point deterministic RESEARCH_ACCURACY criterion; Agent 06 computes no score.
 
@@ -287,7 +290,7 @@ Combined verdict per claim = the more severe of the extraction verdict and the v
 Two verifiable claims form a candidate pair when they share at least `factcheck.conflict.min_shared_tokens` content tokens (stop-words per language removed; Devanagari tokenised by whitespace and the Unicode word-break rules) and differ in a numeral, in an opposite-direction word pair from a per-language list, or in a negation marker. The finder is deliberately recall-oriented; the model decides, and a candidate pair is not reported unless the model reports it. Language word lists for Marathi and Hindi: **REQUIRES REVIEW (3B): written and tested with the owner's material; until then candidates for Devanagari claims rely on numerals only.**
 
 ### 6.8 Extraction determinism (D0–D7, specified in the prompt file header)
-D0 price-data age; D1 schema; D2 exact quote at offsets (a claim failing D2 is dropped and the batch repaired once; a second failure is `AGENT.OUTPUT_SCHEMA_INVALID`); D3 FIN-R9 flag from `data_age_vs_lag` (`WITHIN_LAG` and `UNKNOWN` are BLOCKING); D4 URL, referral and coupon detector (at least WARNING `FIN-R8` in a finance script); D5 every `citation_refs` value exists in `available_citations`; D6 `requires_citation` without citation ⇒ at least `NEEDS_HUMAN_REVIEW`; D7 verdict recomputation. Added by this blueprint, still deterministic: **D8** (segments batched by `factcheck.extract.max_chars_per_call`; claims renumbered globally in segment order; no claim spans a segment), **D9** (the rule packs resolved for the call are exactly the `active_rule_packs` of the input; a missing pack is `PERMANENT.MISSING_DEPENDENCY`), **D10** (when `rp.finance_sebi_in` is not active, any `FIN-*` flag is dropped and logged: eval assertion A10).
+D0 price-data age; D1 schema; D2 exact quote at offsets (a claim failing D2 is dropped and the batch repaired once; a second failure is `AGENT.OUTPUT_SCHEMA_INVALID`); D3 FIN-R9 flag from `data_age_vs_lag` (`WITHIN_LAG` and `UNKNOWN` are BLOCKING; `OLDER_THAN_LAG` and `null` (schematic chart) add none); D4 URL, referral and coupon detector (at least WARNING `FIN-R8` in a finance script); D5 every `citation_refs` value exists in `available_citations`; D6 `requires_citation` without citation ⇒ at least `NEEDS_HUMAN_REVIEW`; D7 verdict recomputation. Added by this blueprint, still deterministic: **D8** (segments batched by `factcheck.extract.max_chars_per_call`; claims renumbered globally in segment order; no claim spans a segment), **D9** (the rule packs resolved for the call are exactly the `active_rule_packs` of the input; a missing pack is `PERMANENT.MISSING_DEPENDENCY`), **D10** (when `rp.finance_sebi_in` is not active, any `FIN-*` flag is dropped and logged: eval assertion A10), **D11** (future-marker pre-filter, CCR-046 and 13 §5.4: for a finance pack, a claim that names an instrument and contains a marker of the lists in config `compliance.finance_sebi_in.markers.*` (one list per language, shared with Agent 11 text checks; contents are 13's and S2's, **REQUIRES REVIEW (Phase 1): lists written with the owner's lawyer ⚖**) gets at least a WARNING `FIN-R13` flag, so it is `NEEDS_HUMAN_REVIEW` at minimum and never `ALLOWED` on the model's verdict alone; eval assertion A12). D11 runs before D7. D0 reads the data range and the lag in calendar days; whether the lag counts calendar or trading days is open in 13 §5.5 (**REQUIRES REVIEW ⚖**) and the function takes the unit from config.
 
 ---
 
@@ -296,20 +299,20 @@ D0 price-data age; D1 schema; D2 exact quote at offsets (a claim failing D2 is d
 
 Envelope: Task Input `amw.task_input` 1.0.0 (03 §3.3). `agent_id = agent_06`; `channel_id` required for finance and library use; `context_refs` as below; `resource_budget` set by the orchestrator from the production type; payload as named. Large payloads travel as `data_ref` + `data_sha256` (03 §3.2 payload object).
 
-### 7.1 `agent_06.claim_extraction.input` 1.0.0
-Defined in the worked-example prompt file (Appendix A of [`claim_extraction.v1.md`](../prompts/agent_06_fact_checker/claim_extraction.v1.md)) and used here unchanged; changes only through CONTRACT_CHANGE_REQUESTS.md. Fields: `script_id`, `script_version`, `language`, `channel_category`, `owner_sebi_registration` (const `UNREGISTERED`), `active_rule_packs` (contains `rp.youtube_general`), `segments[]` (≤ 400, each ≤ 5,000 characters, with `visual_refs`), `chart_data_refs[]` (with `data_age_vs_lag`), `available_citations[]`, `our_method_release_approved`.
+### 7.1 `agent_06.claim_extraction.input` 1.1.0
+Defined in the worked-example prompt file (Appendix A of [`claim_extraction.v1.md`](../prompts/agent_06_fact_checker/claim_extraction.v1.md)) and used here unchanged; changes only through CONTRACT_CHANGE_REQUESTS.md. Version 1.1.0 is the additive minor bump of CCR-053 and CCR-004. Fields: `script_id`, `script_version`, `language`, `channel_category`, `owner_sebi_registration` (const `UNREGISTERED`), `active_rule_packs` (contains `rp.youtube_general`), `segments[]` (≤ 400, each ≤ 5,000 characters, with `visual_refs` and optional `citation_refs`), `chart_data_refs[]` (`ref_id`, `instrument`, `data_age_vs_lag` (`null` for a schematic chart), optional `data_age_basis` `MEASURED` (default) or `CONSTRAINT`), `available_citations[]` (optional `content_sha256`), `our_method_release_approved`.
 Where each field comes from (built by the orchestrator, 03 §3):
 | Field | Source |
 |---|---|
 | `segments` | the script blob of Agent 05 (context ref `PRIOR_OUTPUT`, `scripts.body_ref`); the SHA-256 of the blob must equal `scripts.content_sha256` (E0) |
-| `chart_data_refs` | the chart requests of the script (`chart_id`, instrument) joined with the chart dataset records of the render path; `data_age_vs_lag` is recomputed by D0 whenever the dataset's range end is known; the stricter value wins |
-| `available_citations` | `citations_available` of the Agent 04 pack, unchanged (shape equal by design, agent_04 §8) |
+| `chart_data_refs` | the chart requests of the script (`chart_requests[]` of `agent_05.script_draft.output`). A `REAL_HISTORICAL` request enters as `{ref_id = chart_id, data_age_vs_lag = OLDER_THAN_LAG, data_age_basis = CONSTRAINT}` (CCR-004: no chart is sourced yet at `s06_claims`; Agent 08 must meet the constraint, else the shot is unresolved `DATA_WITHIN_LAG`); a `SCHEMATIC` request enters with `data_age_vs_lag = null`; a request with a dataset range already known (owner-made dataset) enters `MEASURED` and D0 recomputes it, the stricter value winning |
+| `available_citations` | `citations_available` of the Agent 04 pack, unchanged (shape equal by design, agent_04 §8; `content_sha256` is the chunk `body_sha256` or the reference snapshot hash, CCR-053); `segments[].citation_refs` is the per-segment citation list of the script (CCR-053) |
 | `active_rule_packs` | the channel's compliance profile (context ref `COMPLIANCE_PROFILE`); the pack texts come by `RULE_PACK` refs |
 | `our_method_release_approved` | derived from `method.release_approval_ids` of the pack (agent_04 §8 rule), never from a free flag |
 | `owner_sebi_registration` | channel/owner profile; anything other than `UNREGISTERED` is `OUT_OF_SCOPE` in v1 (13 §15 open item) |
 
 ### 7.2 `agent_06.claim_verification.input` 1.0.0
-JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`):
+JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`). The schema is unreleased, so the CCR-049 and CCR-053 changes (`script_sha256`, `verify_mode`, `content_sha256`) are made at 1.0.0 (03 §2.1):
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -320,6 +323,8 @@ JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`):
   "required": [
     "script_id",
     "script_version",
+    "script_sha256",
+    "verify_mode",
     "iteration",
     "language",
     "channel_category",
@@ -334,6 +339,8 @@ JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`):
   "properties": {
     "script_id": {"type": "string", "pattern": "^scr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
     "script_version": {"type": "integer", "minimum": 1},
+    "script_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "verify_mode": {"enum": ["EVIDENCE", "CHART_FACTS"]},
     "iteration": {"type": "integer", "minimum": 0},
     "language": {"type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$"},
     "channel_category": {"type": "string", "pattern": "^[a-z_]{3,32}$"},
@@ -347,7 +354,7 @@ JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`):
     "extraction_overall_verdict": {"enum": ["ALLOWED", "NEEDS_HUMAN_REVIEW", "BLOCKED"]},
     "claims": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 0,
       "maxItems": 500,
       "items": {
         "type": "object",
@@ -408,11 +415,12 @@ JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`):
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["citation_ref", "kind", "title"],
+        "required": ["citation_ref", "kind", "title", "content_sha256"],
         "properties": {
           "citation_ref": {"type": "string", "maxLength": 64},
           "kind": {"enum": ["KNOWLEDGE_CHUNK", "EXTERNAL_REFERENCE"]},
-          "title": {"type": "string", "maxLength": 300}
+          "title": {"type": "string", "maxLength": 300},
+          "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
         }
       }
     },
@@ -446,13 +454,15 @@ JSON Schema 2020-12 (identical to the Pydantic model `VerificationInput`):
 }
 ```
 Notes:
-- `claims[]` is the extraction output after D7, with the database IDs: built by the pure function `build_verification_input(extraction_output, claim_ids)` of the package, which the orchestrator calls (**REQUIRES REVIEW (Phase 1): confirm in SOURCE_LAYOUT / 27 §7.1 that the orchestrator may call a stage's input builder from its public module; otherwise the same mapping is a template of the production type**). The `local_id → claim_id` map is the `claim_ids` blob in the extraction task's `output_refs`.
+- `claims[]` is the extraction output after D7, with the database IDs, built by the pure mapping `amw_orchestrator/input_builders/` for this task type (SOURCE_LAYOUT rule 2: agents never import each other, and the orchestrator does not call agent code; CCR-047). The package ships the mapping's contract test (C-03), not the builder. The `local_id → claim_id` map is the `claim_ids` blob in the extraction task's `output_refs`.
+- Field mapping (extraction output → verification input): `claims[].{local_id, segment_id, quote, normalized_claim, claim_type, time_reference_kind, instrument, chart_data_ref, requires_citation, citation_refs}` copied; `claim_id` from the `claim_ids` blob; `claims[].extraction_verdict` = the claim's `proposed_verdict` after D7; `extraction_overall_verdict` = `overall.proposed_verdict`; `script_id`, `script_version`, `language`, `channel_category`, `active_rule_packs`, `our_method_release_approved` copied from the extraction input; `script_sha256` = `scripts.content_sha256` (the hash E0 verified); `iteration` = the stage's revision counter; `verify_mode` = the stage parameter `verify_mode` (24 §3.1 `params`; default `EVIDENCE`). `evaluated_at` of D0 is not in the extraction output payload: it is kept in the `E1_aged` checkpoint and the audit row.
+- `verify_mode = CHART_FACTS` (`s06_chart`): `claims[]` holds only the claims of type `HISTORICAL_MARKET` with a `chart_data_ref`, taken from the extraction output of the same script version; `claims_sha256` is taken over exactly these claims; the claims carry the statuses written by `s06_verify` (`EXTRACTED`, `CHART_PENDING`). With no chart claim the list is empty and the task succeeds at once with no model call.
 - `claims_sha256` = SHA-256 of the canonical JSON of `claims` (UTF-8, keys sorted, separators `,` and `:`); V1 recomputes it. A mismatch is `PERMANENT.INPUT_INVALID`.
-- `available_citations` = the same list the extraction task received. `chart_facts[]` is produced by code from the chart datasets (provider **(pending CCR)**, §13.1); an empty list is valid, and every chart claim is then `UNVERIFIABLE` (`NO_CHART_FACTS`).
-- Context refs: `PRIOR_OUTPUT` (extraction output), `PRIOR_OUTPUT` (research pack, for `sources` and tiers), `KNOWLEDGE` (library scope of the channel), `APPROVAL` (release approvals for the gate).
+- `available_citations` = the same list the extraction task received (`content_sha256` is required here: it is the hash the evidence is compared with, §6.6). `chart_facts[]` is empty at `s06_verify`; at `s06_chart` it holds one entry per chart of the agent document `agent_08.chart_facts` 1.0.0 (CCR-004; Agent 08 computes the facts by code from the sourced dataset): `ref_id` = the document's `chart_id`, `instrument`, `facts[{fact_id, statement}]` (the document's dataset hash and date range stay in the document and in `qc.visual.chart_data_age`). The evidence reference of a fact is `<chart_id>#<fact_id>` (CCR-004). An empty list is valid, and every chart claim is then `UNVERIFIABLE` (`NO_CHART_FACTS`) at `s06_chart`.
+- Context refs: `PRIOR_OUTPUT` (extraction output; at iteration > 0 also the previous iteration of this stage, 24 §3.3 rule 6), `PRIOR_OUTPUT` (research pack, for `sources` and tiers), `PRIOR_OUTPUT` (the `agent_08.chart_facts` documents, `s06_chart` only), `KNOWLEDGE` (library scope of the channel), `APPROVAL` (release approvals for the gate).
 - Passage text is **not** in the payload; it is loaded by code inside the worker.
 
-Semantic validation (V0–V2, after the schema, before any read of the library). Order: (1) `org_id` equal across envelope, input and context; (2) `script_id`, every `claim_id` and every `citation_ref` belong to the org (and the library refs to the channel); (3) `claims_sha256`; (4) `extraction_overall_verdict ≠ BLOCKED` and no claim has `extraction_verdict = BLOCKED` (`PERMANENT.INPUT_INVALID`, nothing is read, nothing is paid); (5) every `local_id` is unique and every `chart_data_ref` has a `chart_facts` entry or is reported by V3 as `NO_CHART_FACTS`; (6) `iteration` equals the task's revision counter. Failures: §18.
+Semantic validation (V0–V2, after the schema, before any read of the library). Order: (1) `org_id` equal across envelope, input and context; (2) `script_id`, every `claim_id` and every `citation_ref` belong to the org (and the library refs to the channel); (3) `claims_sha256`, and `script_sha256` equals `scripts.content_sha256` of `script_id` / `script_version`; (4) `extraction_overall_verdict ≠ BLOCKED` and no claim has `extraction_verdict = BLOCKED` (`PERMANENT.INPUT_INVALID`, nothing is read, nothing is paid); (5) every `local_id` is unique; with `verify_mode = EVIDENCE` at least one claim, with `verify_mode = CHART_FACTS` every claim has a `chart_data_ref` and a `chart_data_ref` without a `chart_facts` entry is reported by V1 as `NO_CHART_FACTS`; (6) `iteration` equals the task's revision counter. Failures: §18.
 
 ---
 
@@ -463,11 +473,11 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
 | Field | Extraction | Verification |
 |---|---|---|
 | `status` | `SUCCEEDED` (also when verdict is `BLOCKED` or `NEEDS_HUMAN_REVIEW`, 03 §5.3.3); `FAILED` / `REJECTED` per §18 | same |
-| `payload` | `agent_06.claim_extraction.output` 1.0.0 = the Output JSON Schema of the prompt file, with the verdict fields overwritten by D7; inline if ≤ `contracts.inline_payload_max_bytes`, else `data_ref` + `data_sha256` | `agent_06.claim_verification.output` 1.0.0 (§8.2) |
+| `payload` | `agent_06.claim_extraction.output` 1.0.0 = the Output JSON Schema of the prompt file, with the verdict fields overwritten by D7; inline if ≤ `contracts.inline_payload_max_bytes`, else `data_ref` + `data_sha256` | `agent_06.claim_verification.output` 1.0.0 (§8.2); `gate_verdict` (`PASSED` / `FAILED`, GLOSSARY §6.52) echoes the gate result |
 | `output_refs` | the output blob (`kind: DATA`) and `claim_ids.json` (`local_id → claim_id`, `kind: DATA`) | the output blob (`kind: DATA`) |
 | `quality_score` | `null` (Agent 16 scores) | `null` |
 | `confidence` | `null` (a model score is never a gate) | `null` |
-| `next_action` / `downstream_agent` | verdict `ALLOWED` → `CONTINUE`; `NEEDS_HUMAN_REVIEW` → `ESCALATE`; `BLOCKED` → `STOP`; `downstream_agent` null (several consumers). Advisory only (03 §5.3) | same |
+| `next_action` / `downstream_agent` | verdict `ALLOWED` → `CONTINUE`; `NEEDS_HUMAN_REVIEW` → `ESCALATE`; a failed gate (`BLOCKED`) → `CONTINUE` with `reason: "gate FAILED: <check_ids>"` (03 §5.3 rule 4: the orchestrator routes by `on_fail`, never by this hint); `downstream_agent` null (several consumers). Advisory only (03 §5.3) | same |
 | `resource_usage` | tokens, calls, cost estimate, `cost_ledger` ids of every call | same |
 
 ### 8.2 `agent_06.claim_verification.output` 1.0.0
@@ -481,7 +491,10 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
   "required": [
     "script_id",
     "script_version",
+    "script_sha256",
+    "verify_mode",
     "iteration",
+    "gate_verdict",
     "claims",
     "claim_conflicts",
     "revision_requests",
@@ -492,7 +505,10 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
   "properties": {
     "script_id": {"type": "string", "pattern": "^scr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
     "script_version": {"type": "integer", "minimum": 1},
+    "script_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "verify_mode": {"enum": ["EVIDENCE", "CHART_FACTS"]},
     "iteration": {"type": "integer", "minimum": 0},
+    "gate_verdict": {"enum": ["PASSED", "FAILED"]},
     "claims": {
       "type": "array",
       "maxItems": 500,
@@ -531,6 +547,7 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
                 "SKIPPED_BY_POLICY",
                 "QUOTE_NOT_ATTRIBUTABLE",
                 "NO_CHART_FACTS",
+                "CHART_PENDING",
                 "RESTRICTED_NOT_RELEASED",
                 "CITATION_UNRESOLVABLE",
                 "LOW_RELIABILITY_ONLY",
@@ -541,6 +558,7 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
                 "CONTRADICTED_BY_EVIDENCE",
                 "NOT_FOUND_IN_EVIDENCE",
                 "MODEL_UNCERTAIN",
+                "MODEL_REFUSED",
                 "INJECTED_EVIDENCE_DISCARDED",
                 "SPAN_INVALID",
                 "CLAIM_CONFLICT"
@@ -582,7 +600,9 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
               "additionalProperties": false,
               "required": ["kind", "claim_value", "evidence_value"],
               "properties": {
-                "kind": {"type": "string", "maxLength": 16},
+                "kind": {
+                  "enum": ["NUMBER", "UNIT", "ENTITY", "DIRECTION", "TIME_SCOPE", "NEGATION", "QUANTIFIER", "CAUSATION", "SCOPE", "DEFINITION"]
+                },
                 "claim_value": {"type": "string", "maxLength": 80},
                 "evidence_value": {"type": "string", "maxLength": 80}
               }
@@ -625,12 +645,13 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["claim_id", "action", "detail", "suggested_citation_refs"],
+        "required": ["claim_id", "segment_id", "action", "detail", "suggested_citation_refs"],
         "properties": {
           "claim_id": {
             "type": "string",
             "pattern": "^clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           },
+          "segment_id": {"type": "string", "pattern": "^s[0-9]{1,4}$"},
           "action": {
             "enum": ["ADD_CITATION", "CORRECT_CLAIM", "PROVIDE_EVIDENCE", "RESOLVE_CONFLICT", "REMOVE_OR_REWORD"]
           },
@@ -683,7 +704,8 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
         "verified",
         "contradicted",
         "unverifiable",
-        "needs_substantiation"
+        "needs_substantiation",
+        "chart_pending"
       ],
       "properties": {
         "checkable_total": {"type": "integer", "minimum": 0},
@@ -691,7 +713,8 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
         "verified": {"type": "integer", "minimum": 0},
         "contradicted": {"type": "integer", "minimum": 0},
         "unverifiable": {"type": "integer", "minimum": 0},
-        "needs_substantiation": {"type": "integer", "minimum": 0}
+        "needs_substantiation": {"type": "integer", "minimum": 0},
+        "chart_pending": {"type": "integer", "minimum": 0}
       }
     },
     "provenance": {
@@ -715,10 +738,10 @@ Semantic validation (V0–V2, after the schema, before any read of the library).
   }
 }
 ```
-Notes: `evidence[].char_start` and `char_end` are offsets into the stored source text (chunk body, snapshot text or chart-fact statement), already mapped back from the window; `content_sha256` is the hash of that source text, so a later reader can detect a changed source. No passage text and no claim text is in the payload except `suggested_correction` (≤ 300 characters, derived from the evidence, scanned by P10) and the discrepancy values (≤ 80 characters each, verbatim); both belong to the tenant's confidential data and never go to logs.
+Notes: `script_sha256` is the hash of the script blob the stage verified (equal to `scripts.content_sha256`, checked at V0); Agents 07 and 09 compare it with the blob they receive (07 FR-2, 09 F-03). `overall.proposed_verdict` is the stage verdict consumers read; `overall.verification_verdict` is the verification part before it is combined with the extraction verdict. `evidence[].source_ref` is the `citation_ref` (chunk or reference) or, for `CHART_FACT`, `<chart_id>#<fact_id>` (≤ 64 characters: a chart id is at most 38 characters, a fact id at most 4). `evidence[].char_start` and `char_end` are offsets into the stored source text (chunk body, snapshot text or chart-fact statement), already mapped back from the window; `content_sha256` is the hash of that source text, so a later reader can detect a changed source. `revision_requests[]` are ordered by segment; the orchestrator groups them per segment into at most 60 feedback items (24 §3.3 rule 7). `accuracy_summary.chart_pending` counts chart claims still `EXTRACTED` with `CHART_PENDING` (always 0 at `s06_chart`). No passage text and no claim text is in the payload except `suggested_correction` (≤ 300 characters, derived from the evidence, scanned by P10) and the discrepancy values (≤ 80 characters each, verbatim); both belong to the tenant's confidential data and never go to logs.
 
-### 8.3 Reason codes (payload-local enum `verification_reason_code`, not a Wave A enum)
-`NO_EVIDENCE_CANDIDATES` · `SKIPPED_BY_POLICY` · `QUOTE_NOT_ATTRIBUTABLE` · `NO_CHART_FACTS` · `RESTRICTED_NOT_RELEASED` · `CITATION_UNRESOLVABLE` · `LOW_RELIABILITY_ONLY` · `NUMBER_NOT_IN_EVIDENCE` · `EVIDENCE_CONFLICT` · `NO_SCRIPT_CITATION` · `OVERREACH` · `CONTRADICTED_BY_EVIDENCE` · `NOT_FOUND_IN_EVIDENCE` · `MODEL_UNCERTAIN` · `INJECTED_EVIDENCE_DISCARDED` · `SPAN_INVALID` · `CLAIM_CONFLICT`.
+### 8.3 Value sets (contract enums of GLOSSARY §6.52, CCR-042; none is payload-local)
+`verification_reason_code` (stored in `claims.status_reasons`): `NO_EVIDENCE_CANDIDATES` · `SKIPPED_BY_POLICY` · `QUOTE_NOT_ATTRIBUTABLE` · `NO_CHART_FACTS` · `CHART_PENDING` · `RESTRICTED_NOT_RELEASED` · `CITATION_UNRESOLVABLE` · `LOW_RELIABILITY_ONLY` · `NUMBER_NOT_IN_EVIDENCE` · `EVIDENCE_CONFLICT` · `NO_SCRIPT_CITATION` · `OVERREACH` · `CONTRADICTED_BY_EVIDENCE` · `NOT_FOUND_IN_EVIDENCE` · `MODEL_UNCERTAIN` · `MODEL_REFUSED` · `INJECTED_EVIDENCE_DISCARDED` · `SPAN_INVALID` · `CLAIM_CONFLICT`. Other sets used in §8.2 and the prompt file: `factcheck_verify_mode`, `factcheck_assessment`, `factcheck_certainty`, `discrepancy_kind`, `claim_conflict_kind`, `revision_action`, `evidence_source_kind`, `passage_flag`, `citation_support` (§6.45), `gate_verdict`. The stage parameter `verify_mode` (`EVIDENCE` / `CHART_FACTS`) is a two-value subset of `factcheck_verify_mode`.
 
 ### 8.4 `validation_results` (check ids match `^[a-z0-9_.-]{3,96}$`)
 | check_id | kind | blocking | Pass condition |
@@ -732,9 +755,11 @@ Notes: `evidence[].char_start` and `char_end` are offsets into the stored source
 | `claims.citation_required` | DETERMINISTIC | no (WARN) | each `requires_citation` claim has a citation or is at least `NEEDS_HUMAN_REVIEW` (D6) |
 | `claims.verdict_recomputed` | DETERMINISTIC | yes | every verdict equals the D7 recomputation |
 | `claims.persisted` | DETERMINISTIC | yes | `claims` rows exist for every claim (count and hashes) |
+| `claims.gate.rule_flags` | DETERMINISTIC | yes, `gate: true` | `FAIL` when the overall extraction verdict is `BLOCKED` (a BLOCKING rule flag, D3 or D7), `PASS` otherwise; `remedy_stage_id` null (target stage) |
 | `fact.schema` | DETERMINISTIC | yes | verification payload validates |
+| `fact.script_hash` | DETERMINISTIC | yes | `script_sha256` equals `scripts.content_sha256` and the value of the input |
 | `fact.tenant_scope` | DETERMINISTIC | yes | as `claims.tenant_scope` |
-| `fact.claims_complete` | DETERMINISTIC | yes | one entry per input claim, no extra |
+| `fact.claims_complete` | DETERMINISTIC | yes | one entry per input claim, no extra (also for a model refusal: `MODEL_REFUSED` entries, §18) |
 | `fact.evidence_resolvable` | DETERMINISTIC | yes | every evidence item points to a source of the task's org and channel whose hash equals `content_sha256` |
 | `fact.span_valid` | DETERMINISTIC | yes | every span lies inside its source text (P4) |
 | `fact.number_guard` | DETERMINISTIC | yes | no `VERIFIED` claim has a numeral absent from its evidence (P7) |
@@ -745,6 +770,7 @@ Notes: `evidence[].char_start` and `char_end` are offsets into the stored source
 | `fact.verdict_recomputed` | DETERMINISTIC | yes | every status, verdict and the stage verdict equals the code derivation of §6.4 |
 | `fact.accuracy_counters` | DETERMINISTIC | no (WARN) | counters equal a recount from `claims` |
 | `fact.unresolved_claims` | DETERMINISTIC | no (WARN) | WARN if any claim is not `VERIFIED` or skipped, with the count |
+| `fact.gate.no_contradicted_claim` | DETERMINISTIC | yes, `gate: true` | `FAIL` when any claim is `CONTRADICTED` (stage verdict `BLOCKED`, also `s06_chart`), `PASS` otherwise; `remedy_stage_id` null (target stage `s05_script` / `s05_shorts`); `rule_id` null |
 
 ---
 
@@ -756,10 +782,10 @@ Package `agent_06_fact_checker` under `packages/agents/` (SOURCE_LAYOUT). It imp
 ```text
 agent_06_fact_checker/
 ├── __init__.py
-├── protocol.py              # FactCheckStage Protocol (stage interface), build_verification_input()
+├── protocol.py              # FactCheckStage Protocol (stage interface); no input builder (it is amw_orchestrator/input_builders/, CCR-047)
 ├── models/                  # Pydantic models = the JSON Schemas of §7, §8 and both prompt files
 │   ├── extraction_input.py  extraction_output.py  verification_input.py  verification_batch.py
-│   ├── verification_output.py  enums.py (payload-local enums: reason codes, assessment, discrepancy kind)
+│   ├── verification_output.py  enums.py (the GLOSSARY §6.52 value sets of §8.3, generated from amw_core.contracts, not redefined)
 ├── extraction/
 │   ├── step.py              # ClaimExtractionStep (orchestrates E0…E6, checkpoints)
 │   ├── price_age.py         # PriceDataAge (D0), pure function
@@ -767,9 +793,9 @@ agent_06_fact_checker/
 │   ├── validator.py         # ExtractionValidator (D1-D6, D9, D10), UrlReferralDetector (D4)
 │   └── verdicts.py          # ExtractionVerdictEngine (D7)
 ├── verification/
-│   ├── step.py              # ClaimVerificationStep (orchestrates V-S0…V-S7, checkpoints)
+│   ├── step.py              # ClaimVerificationStep (orchestrates V-S0…V-S7, checkpoints; stage parameter verify_mode)
 │   ├── planner.py           # VerificationPlanner (policy table, modes, blocked-input rejection)
-│   ├── evidence.py          # EvidenceResolver, PassageWindower, ChartFactIndex
+│   ├── evidence.py          # EvidenceResolver, PassageWindower, ChartFactIndex (agent_08.chart_facts documents)
 │   ├── numbers.py           # NumberNormaliser, NumberGuard
 │   ├── conflicts.py         # ConflictCandidateFinder
 │   ├── verifier.py          # ClaimVerifier (LLM step 2), BatchPlanner
@@ -797,9 +823,9 @@ agent_06_fact_checker/
 | `BlobStore` (`amw_core.storage`) | output blob, checkpoints, reference snapshots | tenant-scoped URIs only (03 §8) |
 | `CostGuard` (`amw_core.cost`, S4) | both LLM steps | reservation before every call; refusal ⇒ `BudgetExhausted` |
 | `Audit` (`amw_core.audit`) | all steps | ids and counts only |
-| `Checkpointer` (`amw_core.checkpoints`) | both steps | `checkpoints` rows (04 §5.7) |
-| `RulePackResolver` (S2 / `amw_core.rulepacks`) | `PromptLoader` | returns text and version for `{{rule_pack:<key>}}` |
-| `ControlFlags` (`amw_core.control`) | both steps | `DRAIN` / pause between batches |
+| `Checkpointer` (`amw_core.state_machine`) | both steps | `checkpoints` rows (04 §5.7); module mapping per CCR-047 |
+| `RulePackResolver` (S2 / `amw_core.rulepacks`) | `PromptLoader` | returns text and version for `{{rule_pack:<key>}}`; reads `amw-blob://platform/…` read-only (03 §8) |
+| `ControlFlags` (`amw_core.queue`) | both steps | `DRAIN` / pause between batches; module mapping per CCR-047 |
 | `Clock` | `PriceDataAge`, logs | UTC only, injected so tests are deterministic |
 
 ### 9.2 Class responsibilities
@@ -809,7 +835,7 @@ agent_06_fact_checker/
 | `PriceDataAge` | classify a chart's data range against the lag config | yes |
 | `SegmentBatcher` | split segments into calls under `factcheck.extract.max_chars_per_call`; renumber claims globally | yes |
 | `ClaimExtractor` | render the prompt, call the adapter, parse to the Pydantic model, one repair | no (calls the adapter) |
-| `ExtractionValidator` | D1, D2, D4, D5, D6, D9, D10 and the FIN-R9 flag of D3 | yes |
+| `ExtractionValidator` | D1, D2, D4, D5, D6, D9, D10, D11 and the FIN-R9 flag of D3 | yes |
 | `ExtractionVerdictEngine` | D7 | yes |
 | `ClaimVerificationStep` | runs V-S0…V-S7; owns checkpoint keys; builds the Task Output | no |
 | `VerificationPlanner` | policy table → mode per claim; blocked-input rejection | yes |
@@ -820,7 +846,7 @@ agent_06_fact_checker/
 | `BatchPlanner` | claims per call, digest, token-safe sizing | yes |
 | `ClaimVerifier` | render, call, parse, one repair | no |
 | `ResultReconciler` / `StatusDeriver` | P1–P10 and the status table of §6.4 | yes |
-| `VerdictEngine`, `RevisionAdvisor`, `AccuracyCounter` | verdict map, revision requests, counters | yes |
+| `VerdictEngine`, `RevisionAdvisor`, `AccuracyCounter` | verdict map, gate results, revision requests, counters | yes |
 | `CorrectionScanner` | P10 patterns (URL, referral, price/level for a current instrument, recommendation wording) | yes |
 | `TenantGuard` | check org equality and ownership of every id; build `TenantContext` | yes (reads DB for ownership) |
 | `RestrictedCollectionGate` | decide whether a restricted chunk may be loaded | yes |
@@ -845,25 +871,25 @@ agent_06_fact_checker/
 - V: V0–V2 (§7.2).
 - X: as above plus `InputInvalid` for blocked input and `claims_sha256` mismatch.
 - L: `fact.started`, `fact.plan` (counts per mode), `fact.batch_done`, `fact.completed` (counts per status and verdict).
-- T: U-20…U-38, I-03…I-07, F-01…F-12.
+- T: U-20…U-38, U-42…U-45, I-03…I-07, I-09, I-10, F-01…F-12.
 
 ### 10.2 Extraction
-**`PriceDataAge.classify(range_end: date | None, today: date, lag_days: int) -> DataAge`** (D0) — pure; `None` ⇒ `UNKNOWN`; `today − range_end ≥ lag_days` ⇒ `OLDER_THAN_LAG`, else `WITHIN_LAG`. V: `lag_days` from config `compliance.finance_sebi_in.price_data_lag_days` (30, IN-02), must be ≥ 0, else `ConfigInvalid`. The result used is the **stricter** of the input value and the recomputed one (`UNKNOWN` < `WITHIN_LAG` < `OLDER_THAN_LAG` in permissiveness). Note: FIN-R9 is applied at publish time (GLOSSARY §6.38); this value is a snapshot at extraction time, recorded with its `evaluated_at` in the output blob; Agent 16 re-evaluates at delivery. T: U-01. **REQUIRES REVIEW (Phase 1): whether this function lives here or in a shared `amw_core` module used by Agent 16 too, to avoid two implementations.**
+**`PriceDataAge.classify(range_end: date | None, today: date, lag_days: int, basis, supplied) -> DataAge | None`** (D0) — pure; only for `data_age_basis = MEASURED` with a known range end: `today − range_end ≥ lag_days` ⇒ `OLDER_THAN_LAG`, else `WITHIN_LAG`; `None` range end ⇒ `UNKNOWN`. A `CONSTRAINT` reference keeps its supplied value (`OLDER_THAN_LAG`) and a schematic reference keeps `null` (no flag). V: `lag_days` from config `compliance.finance_sebi_in.price_data_lag_days` (30, IN-02), must be ≥ 0, else `ConfigInvalid`. The result used is the **stricter** of the supplied and the recomputed value (`UNKNOWN` and `WITHIN_LAG` are stricter than `OLDER_THAN_LAG`). Note: FIN-R9 is applied at publish time (GLOSSARY §6.38); this value is a snapshot at extraction time, kept with its `evaluated_at` in the `E1_aged` checkpoint and the audit row (not in the output payload); the measured end date is re-checked by `qc.visual.chart_data_age` and `s16_comp` after the chart exists (CCR-004), and the stricter result wins. T: U-01. **REQUIRES REVIEW (Phase 1): whether this function lives here or in a shared `amw_core` module used by Agent 16 too, to avoid two implementations (a code-layout decision for the first build ticket).**
 
 **`SegmentBatcher.batch(segments, max_chars) -> list[SegmentBatch]`** (D8) — pure; never splits a segment; a single segment above the cap is a `InputInvalid` (the input schema already caps it at 5,000 characters). T: U-02.
 
 **`ClaimExtractor.extract(ctx, batch: SegmentBatch, input: ExtractionInput) -> ExtractionModelOutput`** — S: one paid call (idempotency key `llm.call` over `task_id`, `step_key = E3_batch_<n>`, `call_seq`), reservation before, ledger after. V: output parsed into the Pydantic model (27 §7.3.2); on `InvalidJson` or `OutputSchemaInvalid` one repair call with the error appended; second failure raises. X: `InvalidJson`, `OutputSchemaInvalid`, `ProviderRefusal`, `RateLimited`, `Upstream5xx`, `TemporaryTimeout`, `TemporaryNetwork`, `AuthInvalid`, `BudgetExhausted`, `CircuitOpen`. L: `claims.llm_call` (tokens, cached tokens, latency, attempt). T: F-03…F-06.
 
-**`ExtractionValidator.validate(model_out, input) -> ValidationReport`** — pure. D2: for each claim `segment.text[char_start:char_end] == quote` (code points) and `segment_id` exists; failing claims are listed, the batch gets one repair with the failing local ids; a claim failing after the repair is an `OutputSchemaInvalid`. D3: for each claim with a `chart_data_ref` whose recomputed age is `WITHIN_LAG` or `UNKNOWN`, add BLOCKING `FIN-R9` (evidence = the `ref_id`). D4: `UrlReferralDetector` over every claim quote and every segment text: URL, domain-with-path, referral/coupon code patterns (pattern list in config `factcheck.detect.referral_patterns`), adds at least WARNING `FIN-R8` to the claim containing it (finance packs only). D5, D6, D9, D10 as §6.8. T: U-03…U-07.
+**`ExtractionValidator.validate(model_out, input) -> ValidationReport`** — pure. D2: for each claim `segment.text[char_start:char_end] == quote` (code points) and `segment_id` exists; failing claims are listed, the batch gets one repair with the failing local ids; a claim failing after the repair is an `OutputSchemaInvalid`. D3: for each claim with a `chart_data_ref` whose resulting age is `WITHIN_LAG` or `UNKNOWN`, add BLOCKING `FIN-R9` (evidence = the `ref_id`); `OLDER_THAN_LAG` and `null` add nothing. D4: `UrlReferralDetector` over every claim quote and every segment text: URL, domain-with-path, referral/coupon code patterns (pattern list in config `factcheck.detect.referral_patterns`), adds at least WARNING `FIN-R8` to the claim containing it (finance packs only). D5, D6, D9, D10 as §6.8. D11: `FutureMarkerFilter` (pure; marker lists from config `compliance.finance_sebi_in.markers.*`, per language) adds at least a WARNING `FIN-R13` flag to a claim with a named instrument and a marker (finance pack only). T: U-03…U-07, U-41.
 
 **`ExtractionVerdictEngine.recompute(claims) -> (per_claim, overall)`** (D7) — pure; BLOCKING flag ⇒ `BLOCKED`; else WARNING flag or (`requires_citation` and no `citation_refs`) ⇒ `NEEDS_HUMAN_REVIEW`; else `ALLOWED`; overall = most severe; `blocking_rule_ids` sorted unique; `needs_human_review_reasons` from fixed strings per reason (no free model text). T: U-05.
 
-**`ClaimRepository.insert_claims(ctx, script_id, task_id, claims) -> list[ClaimId]`** — S: INSERT into `claims` (04 §5.11) status `EXTRACTED`, `final_verdict` null, `extracted_by_task_id`, `rule_flags` jsonb. Idempotent: within the transaction, rows with the same (`org_id`, `script_id`, `extracted_by_task_id`) are read first; a replay returns the same ids (a unique index is proposed, §13.1). V: `char_end > char_start`; `quote` equals the segment slice. X: `TransientDb`, `DbUnavailable`. T: I-01, I-02.
+**`ClaimRepository.insert_claims(ctx, script_id, task_id, claims) -> list[ClaimId]`** — S: INSERT into `claims` (04 §5.11) status `EXTRACTED`, `final_verdict` null, `extracted_by_task_id`, `rule_flags` jsonb. Idempotent: the table carries `UNIQUE (org_id, script_id, extracted_by_task_id, segment_id, char_start, char_end)` (CCR-029, 04 §5.11); within the transaction, rows with the same (`org_id`, `script_id`, `extracted_by_task_id`) are read first and a replay returns the same ids. V: `char_end > char_start`; `quote` equals the segment slice. X: `TransientDb`, `DbUnavailable`. T: I-01, I-02.
 
 ### 10.3 Verification planning and evidence
-**`VerificationPlanner.plan(claims, policy, chart_facts) -> list[ClaimPlan]`** — pure; one entry per claim with `mode` ∈ {`EVIDENCE`, `CHART_FACTS`, `SKIPPED`, `CODE_ONLY`}, `code_only_reason`, per §6.3. Rejects blocked input (V2). T: U-20.
+**`VerificationPlanner.plan(claims, policy, chart_facts, verify_mode) -> list[ClaimPlan]`** — pure; one entry per claim with `mode` ∈ {`EVIDENCE`, `CHART_FACTS`, `SKIPPED`, `CODE_ONLY`}, `code_only_reason`, per §6.3 (a chart claim at `verify_mode = EVIDENCE` is `SKIPPED` with `CHART_PENDING`). Rejects blocked input (V2) and, at `CHART_FACTS`, a claim without `chart_data_ref`. T: U-20, U-42.
 
-**`EvidenceResolver.resolve(ctx, plans, available_citations, release) -> EvidenceSet`** — S: reads `knowledge_chunks` / `knowledge_sources` (and the reference snapshots) through `KnowledgeReader`; writes one audit row per read batch (counts). V: every ref belongs to org and channel; hash equality; restricted gate per chunk (`RestrictedCollectionGate.allows(chunk, release, cited=True)`); library search only for claims without a usable citation, never into restricted collections; snapshots only of the task's org. X: `CrossTenantRef`, `MissingDependency` (a ref that never existed), `TransientDb`. L: `fact.retrieve` (claim count, candidates, gate-blocked count). T: U-21…U-25, S-01…S-04.
+**`EvidenceResolver.resolve(ctx, plans, available_citations, release) -> EvidenceSet`** — S: reads `knowledge_chunks` / `knowledge_sources` (and the reference snapshots) through `KnowledgeReader`; writes one audit row per read batch (counts). V: every ref belongs to org and channel; hash equality with the `content_sha256` of `available_citations` (chunk `body_sha256` or snapshot hash); restricted gate per chunk (`RestrictedCollectionGate.allows(chunk, release, cited=True)`); library search only for claims without a usable citation, never into restricted collections; snapshots only of the task's org. X: `CrossTenantRef`, `MissingDependency` (a ref that never existed), `TransientDb`. L: `fact.retrieve` (claim count, candidates, gate-blocked count). T: U-21…U-25, S-01…S-04.
 
 **`PassageWindower.window(text: str, claim_tokens: set[str], max_chars: int, k: int) -> list[Window]`** — pure; windows are code-point ranges on sentence boundaries when possible; each `Window(offset, text)`; a text shorter than `max_chars` is one window. T: U-23.
 
@@ -883,14 +909,14 @@ agent_06_fact_checker/
 **`CorrectionScanner.scan(text: str) -> list[Finding]`** (P10) — pure; URL/domain, referral and coupon patterns, price/level next to a currency or instrument name, imperative recommendation verbs (config `factcheck.detect.advice_words` per language). A flagged correction is set to `null` and the event `fact.correction_dropped` is logged (not a status change). T: U-29.
 
 ### 10.5 Persistence and memory
-**`ClaimRepository.update_status(ctx, task_id, results) -> None`** — S: UPDATE `claims` SET `status` (and, once the pending columns exist, `verified_by_task_id` and `status_reasons`) with the guard `status IN ('EXTRACTED', <same task's previous result>)`; a claim whose status was changed by a different verification task is a `PERMANENT.IDEMPOTENCY_CONFLICT` (data-integrity L3). V: only the five statuses of §8.2; never `SUBSTANTIATED` or `REMOVED` (§13.1). T: I-03, I-05.
+**`ClaimRepository.update_status(ctx, task_id, results) -> None`** — S: UPDATE `claims` SET `status`, `verified_by_task_id` and `status_reasons` (CCR-029) with the guard `status = 'EXTRACTED' OR verified_by_task_id = <this task>`; a claim whose status was changed by a different verification task is a `PERMANENT.IDEMPOTENCY_CONFLICT` (data-integrity L3), with one exception: the `s06_chart` task may set a claim that `s06_verify` left `EXTRACTED` with `CHART_PENDING`. V: only the five statuses of §8.2; never `SUBSTANTIATED` or `REMOVED` (§13.1). T: I-03, I-05, I-09.
 
-**`CitationRepository.insert_for_claims(ctx, results) -> None`** — S: INSERT one `citations` row per (claim, cited or supporting source) with `support` (`SUPPORTS` / `PARTIAL` / `CONTRADICTS`, GLOSSARY §6.52 `citation_support`); `knowledge_chunk_id` for chunks, `external_url` + `accessed_at` for references (the CHECK of 04 §5.11: exactly one of the two); chart facts are not citations. Idempotent by (claim, source). T: I-03.
+**`CitationRepository.insert_for_claims(ctx, results) -> None`** — S: INSERT one `citations` row per (claim, cited or supporting source) with `support` (`SUPPORTS` / `PARTIAL` / `CONTRADICTS`, GLOSSARY §6.45 `citation_support`); `knowledge_chunk_id` for chunks, `external_url` + `accessed_at` for references (the CHECK of 04 §5.11: exactly one of the two); chart facts are not citations. Idempotent by `UNIQUE NULLS NOT DISTINCT (org_id, claim_id, knowledge_chunk_id, external_url)` (CCR-029; PostgreSQL ≥ 15, the build uses 16/18). T: I-03.
 
-**`FactCheckMemory.write_project_pointer(ctx, job_id, iteration, output_ref, summary) -> None`** — S: one `memory_items` row (`scope = PROJECT`, key `factcheck.verification.<job_id>.<iteration>`, `value_ref`, `provenance_ref` = task id). T: I-06.
+**`FactCheckMemory.write_project_pointer(ctx, job_id, iteration, output_ref, summary) -> None`** — S: one `memory_items` row (`scope = PROJECT`, key `factcheck.verification.<job_id>.<stage_id>.<iteration>`, `value_ref`, `provenance_ref` = task id, `workspace_id` from the job, `created_by` = actor `agent_06`, `expires_at` = project archive + `memory.project_ttl_ms`, 04 §5.10). T: I-06.
 
 ### 10.6 Cross-cutting
-- **Idempotency keys** (03 §9): task `task.agent_06.claim_extraction` and `task.agent_06.claim_verification` over (`job_id`, task type, `iteration`); each paid call `llm.call` over (`task_id`, `step_key`, `call_seq`); persistence `db.output` over (`task_id`, `claims` | `claims_status` | `citations`).
+- **Idempotency keys** (03 §9, CCR-005): task `task.agent_06.claim_extraction` and `task.agent_06.claim_verification` over (`job_id`, task type, `stage_id`, `iteration`), so `s06_verify` and `s06_chart` never collide; each paid call `llm.call` over (`task_id`, `step_key`, `call_seq`); persistence `db.output` over (`task_id`, `claims` | `claims_status` | `citations`). Audit writes carry no effect key (an audit write is not an external effect, CCR-015).
 - **Time**: UTC only; `Clock` injected.
 - **Logging**: never the claim quote, passage text, evidence value or correction; always ids, counts, step keys, codes (NFR-6, test S-05).
 
@@ -901,6 +927,7 @@ agent_06_fact_checker/
 
 | Item | Design (ADR-007; PR-01, PR-02, PR-03) |
 |---|---|
+| Config keys | `llm.agent_06.claim_extraction.*` and `llm.agent_06.claim_verification.*` (each task type has one LLM step, so the family is `llm.<task_type>.*`, 27 §4.2, CCR-019), each with optional `.fallback_tier`; tiers resolve through `llm.tiers.<tier>.provider/.model`, `llm_model_tier` = `SMALL` · `MID` · `TOP` |
 | Adapter | `LlmAdapter` Protocol only; first provider Anthropic API; key from the environment's secret mechanism (D1). A Claude subscription is not API access (PR-03). No provider or model name in code or prompts |
 | Calls per task | extraction: ⌈segment characters ÷ `factcheck.extract.max_chars_per_call`⌉ (+1 repair per failing call). Verification: ⌈claims sent ÷ `factcheck.verify.max_claims_per_call`⌉ (+1 repair per failing batch). Upper bound `resource_budget.max_llm_calls`; exceeding it ⇒ `AGENT.LOOP_CAP_EXCEEDED`. Cap values are config, **REQUIRES REVIEW (3B)** |
 | Tier | both steps start `MID` (ADR-007 §2.4, 09 tier table). 3B runs each golden dataset one tier cheaper (extraction first: 09 lists it as a classification-like step) and moves down only if every threshold passes; verification stays `MID` unless measured otherwise ("gates must not be weakened for cost", 09) |
@@ -909,9 +936,9 @@ agent_06_fact_checker/
 | Caching | stable prefix = system prompt + rule-pack text (no tenant data); claims, passages and script text follow it; `.cache_system_prompt` per step; TTL class is config (PR-02). Batch **off** in 3A; 3C may enable it for scheduled night work |
 | Budget | reservation before every call from `resource_budget.max_cost_micros` and the per-video and pilot budgets (D1, 09); breach ⇒ `RESOURCE.BUDGET_EXHAUSTED` ⇒ `CHECKPOINTED` / `AWAITING_BUDGET`; each call writes one `cost_ledger` row (`llm.call`, `step_key` in the reference so cost per stage is a query). Prices come from 09 and PR-01; none is written here |
 | Language cost | tokens recorded per call; Marathi and Hindi scripts and passages are measured against an English control in 3B (ADR-007 §2.9); label `MEASURED` |
-| Fallback | none in 3A (`llm.<step>.fallback_tier` unset); a provider outage retries per 07 §3, then waits (`AWAITING_EXTERNAL`); a gate never degrades to "no check" |
+| Fallback | none in 3A (`llm.<task_type>.<step>.fallback_tier` unset, and the deterministic in-stage fallback of 07 §3.5 stays off: `agent_06.llm.fallback_on_unavailable = false`, owner question Q-O4); a provider outage retries per 07 §3, then waits (`RETRY_WAIT`); a gate never degrades to "no check" |
 | Independence of verification | verification is a separate call with a separate prompt, no script prose beyond the claim, original evidence windows, and (by config) its own tier key. Using a second model family would add independence but needs an ADR-007 amendment and a research-log entry first; **question Q-F3 (§23.2): measure in 3B whether verification at `MID` catches the errors the writer's tier makes** |
-| Data governance | the verification step sends passages of the owner's library to the provider, as Agent 04's notes step does. **3A-BLOCKING — REQUIRES REVIEW (Phase 1): the provider's data-retention and training terms for API inputs are not in RESEARCH_LOG (PR-03 covers billing separation only). One owner decision covers both agents (agent_04 §11, H-3): until it is recorded, only fixture and owner-approved material may be sent.** Script text is the tenant's own content and is sent in extraction |
+| Data governance | the verification step sends passages of the owner's library to the provider, as Agent 04's notes step does. **3A-BLOCKING — REQUIRES REVIEW (Phase 1): the provider's data-retention and training terms for API inputs are not in RESEARCH_LOG (PR-03 covers billing separation only). One owner decision covers both agents (agent_04 §11, H-3; 3A_SLICE_SPEC R19; owner question Q-O5, provisional default: fixtures and owner-approved material only): until it is recorded, only those may be sent.** Script text is the tenant's own content and is sent in extraction |
 | No tool use | the model cannot call tools, browse or write; permission checks are in code (08 §5.3) |
 
 ---
@@ -926,40 +953,44 @@ agent_06_fact_checker/
 | 3 | Blob storage via `amw_core.storage` (ADR-005) | internal | — | `INFRASTRUCTURE.STORAGE_UNAVAILABLE` | — | — | 3A |
 | 4 | Web fetch for evidence | **not used.** Agent 06 reads reference snapshots Agent 04 stored (§13.1); it does not fetch pages itself, so it has no outbound HTTP and no SSRF surface | — | — | — | — | — |
 | 5 | Third-party fact-check or search API | **none selected.** No such provider has a RESEARCH_LOG entry | — | — | evidence stays the owner's library and recorded references | **REQUIRES REVIEW (Phase 1): not researched; considered only if the 3B golden samples show the library cannot cover the claims** | 3C |
-| 6 | Market data source for chart facts | not Agent 06's: chart datasets and their facts come from the chart path (§13.1) | — | — | `UNVERIFIABLE` (`NO_CHART_FACTS`) | **REQUIRES REVIEW (Phase 1): provider and licence of historical price data are not in RESEARCH_LOG (Agent 08/09)** | 3A (consumer only) |
+| 6 | Market data source for chart facts | not Agent 06's: chart datasets and their facts come from Agent 08 (`agent_08.chart_facts`, CCR-004) | — | — | `UNVERIFIABLE` (`NO_CHART_FACTS`) | **REQUIRES REVIEW (Phase 1): provider and licence of historical price data are not in RESEARCH_LOG (Agent 08/09)** | 3A (consumer only) |
 | 7 | YouTube APIs | not used | 0 quota units | — | — | — | — |
 
 ---
 
 ## 13 Database tables
-**MVP: 3A (existing tables) · pending items 3A unless marked. Tier 0; every row carries `org_id`, RLS forced (04 §3).**
+**MVP: 3A (Wave A tables and the CCR-029 columns and indexes). Tier 0; every row carries `org_id`, RLS forced (04 §3).**
 
 Agent 06 owns `claims` (04 §5.11, owner 06) and co-owns `citations` (04 / 06; Agent 04 does not write citations, agent_04 §13). It only reads the others.
 
 | Table | Columns used by Agent 06 (as in 04) | Agent 06 access | Notes |
 |---|---|---|---|
-| `claims` | `script_id, job_id, segment_id, char_start, char_end, quote, normalized_claim, claim_type, time_reference_kind, status, rule_flags, proposed_verdict, requires_citation, extracted_by_task_id` (`final_verdict` is Agent 16's; `substantiation_ref` is the ad-claim field, 3C) | SELECT; INSERT (extraction); UPDATE of `status` (verification) | `char_end > char_start`; index `(org_id, script_id)`; `quote` is the tenant's script text, confidential |
-| `citations` | `claim_id, knowledge_chunk_id, external_url, research_log_id, support, accessed_at` | INSERT, SELECT | CHECK exactly one of `knowledge_chunk_id`, `external_url`; `accessed_at` required with `external_url` |
+| `claims` | `script_id, job_id, segment_id, char_start, char_end, quote, normalized_claim, claim_type, time_reference_kind, status, rule_flags, proposed_verdict, requires_citation, extracted_by_task_id, verified_by_task_id, status_reasons` (`final_verdict` is Agent 16's; `substantiation_ref` is the ad-claim field, 3C) | SELECT; INSERT (extraction); UPDATE of `status`, `verified_by_task_id`, `status_reasons` (verification) | `char_end > char_start`; `UNIQUE (org_id, script_id, extracted_by_task_id, segment_id, char_start, char_end)`; index `(org_id, script_id)`; `quote` is the tenant's script text, confidential |
+| `citations` | `claim_id, knowledge_chunk_id, external_url, research_log_id, support, accessed_at` | INSERT, SELECT | CHECK exactly one of `knowledge_chunk_id`, `external_url`; `accessed_at` required with `external_url`; `UNIQUE NULLS NOT DISTINCT (org_id, claim_id, knowledge_chunk_id, external_url)` (CCR-029) |
 | `scripts` | `id, job_id, language, version, body_ref, content_sha256, segment_count` | SELECT | segments blob hash check (E0) |
-| `knowledge_sources`, `knowledge_chunks` | `channel_id, source_id, language, body, body_sha256, status, ownership, reliability_score` | SELECT only | the library is Agent 04's; `body` confidential; `ownership = UNKNOWN` or status not `INDEXED` is never read |
-| `knowledge_collections` (pending CCR, Agent 04) | `restricted` | SELECT | input of the gate |
-| `approvals` | `kind, state, org_id` | SELECT only | release lookup for the gate (`KNOWLEDGE_RELEASE`); the release also arrives as `our_method_release_approved` |
-| `memory_items` | `scope, channel_id, project_id, job_id, task_id, key, value_ref, provenance_ref, expires_at` | INSERT, SELECT | §14 |
+| `knowledge_sources`, `knowledge_chunks` | `channel_id, collection_id, source_id, language, body, body_sha256, ingest_version, ownership, reliability_score, release_approval_id`; `knowledge_sources.status` (`knowledge_source_status`) | SELECT only | the library is Agent 04's; `body` confidential; only the current `ingest_version` is read (CCR-013); `ownership = UNKNOWN` or a source whose status is not `INDEXED` is never read; `status` exists on `knowledge_sources` only |
+| `knowledge_collections` (CCR-011) | `id, channel_id, collection_key, restricted` | SELECT | input of the gate; `collection_id` is a NOT NULL column of `knowledge_sources` and `knowledge_chunks` |
+| `approvals` | `kind, state, org_id, subject_kind, subject_id, subject_sha256` | SELECT only | release lookup for the gate (`KNOWLEDGE_RELEASE`, `subject_kind = knowledge_release`, CCR-012; the chunk's `release_approval_id` links it); the release also arrives as `our_method_release_approved` |
+| `memory_items` | `workspace_id, created_by, scope, channel_id, project_id, job_id, task_id, key, value_ref, provenance_ref, expires_at` | INSERT, SELECT | §14; `workspace_id` from the job, `created_by` = `agent_06` |
 | `compliance_verdicts` | — | none | written by Agent 16 only; Agent 06's verdicts are payload and `claims.proposed_verdict` |
 | `checkpoints`, `cost_ledger`, `audit_log` | through `amw_core` | via the library only | no direct DML on `audit_log` |
 Agent 06 uses the shared `amw_app` DML grants of these tables and none other: no `approvals` writes, `budgets`, `oauth_tokens`, `rule_packs` writes, `compliance_verdicts`, `knowledge_*` writes.
 
-### 13.1 Pending contract items (filed in the structured return; this blueprint is written against the proposed names)
-| Item | Needed because | Proposed |
+### 13.1 Contract items used (all decided in integrator pass 1; none is pending)
+| Item | Decision | What this blueprint does with it |
 |---|---|---|
-| Idempotent persistence of claims and citations **(pending CCR, 04 §5.11)** | 04 has no unique key on `claims` or `citations`; a replayed task must not duplicate rows (NFR-3, SC-8) | additive `UNIQUE (org_id, script_id, extracted_by_task_id, segment_id, char_start, char_end)` on `claims`; `UNIQUE (org_id, claim_id, knowledge_chunk_id, external_url)` (NULLS NOT DISTINCT) on `citations` |
-| Verification provenance on `claims` **(pending CCR, 04 §5.11)** | the table records `status` but not which verification set it or why; audit and the owner's review need it | nullable `verified_by_task_id uuid` (TFK → tasks) and `status_reasons text[]` (values of §8.3) |
-| Chart facts provider **(pending CCR, 24 / Agent 08–09 blueprints)** | `HISTORICAL_MARKET` claims about a shown chart can be verified only against facts computed by code from the chart's dataset (price series and indicator values); the model must not read raw series | a deterministic function in the chart path emitting, per chart, `facts[]` of `{fact_id, statement}` (e.g. which swing was lower or higher, direction of the move after a point) plus the dataset range and hash; no new task type. **3A-BLOCKING for an automatic chart video: without it every chart claim is `UNVERIFIABLE` and needs a human (case CH-32)** |
-| Reference snapshot for every external reference that backs a usable note **(pending CCR, agent_04 §10.4)** | Agent 04 stores a snapshot only for tier A; Agent 06 cannot verify against a reference whose text it cannot read, and must not fetch pages itself | write-once snapshot (`evidence/<job>/…`, extracted text, `content_sha256`, `external_url`, `accessed_at`) for every external reference cited by a usable note |
-| `knowledge_collections`, chunk-level release **(pending CCR filed by Agent 04)** | the restricted gate needs `restricted` and the release link | as proposed in agent_04 §13.1; this blueprint only reads them |
-| `llm_model_tier` value set and `llm.tiers.*` config **(pending CCR filed by ADR-007)** | tier routing | as in ADR-007 §2.3 |
-| Who sets `SUBSTANTIATED` and `REMOVED` | GLOSSARY §6.40 lists both; no component is assigned | **REQUIRES REVIEW (Phase 1):** proposal: `SUBSTANTIATED` by `agent_06.claim_verification` for ad claims with a client substantiation document (3C, directive §1D.3 / 25); `REMOVED` by the orchestrator when a script version supersedes the claim's script. Agent 06 sets neither in 3A |
-| Agent 05 revision input for `revision_requests` | the revision block of Agent 05 is not yet written | **REQUIRES REVIEW (Phase 1): Agent 05 blueprint** |
+| Idempotent persistence of claims and citations | CCR-029 (APPLIED, 04 §5.11) | relies on the `claims` UNIQUE key and the `citations` `UNIQUE NULLS NOT DISTINCT` index (PostgreSQL ≥ 15; the build uses 16/18) |
+| Verification provenance on `claims` | CCR-029 | writes `verified_by_task_id` and `status_reasons` (values of §8.3) |
+| Chart facts | CCR-004 (APPLIED): `agent_08.chart_facts` 1.0.0, stage `s06_chart` (`params.verify_mode = CHART_FACTS`), `source_ref = <chart_id>#<fact_id>`, reason `CHART_PENDING` at `s06_verify` | §1.2, §6.3, §7.2, §8; `fact_id` format and statement length are Agent 08's to align with §7.2 (`^f[0-9]{2,3}$`, ≤ 300 characters) |
+| Reference snapshot for every external reference cited by a usable note | CCR-016 (APPLIED): write-once `evidence/<job>/<ext_ref>.json` | reads it by the `content_sha256` of `available_citations` |
+| `knowledge_collections`, chunk-level release, chunk versions | CCR-011, CCR-012, CCR-013 (APPLIED) | read-only use (§13) |
+| Tiers, config keys | CCR-019 (APPLIED): `llm_model_tier` `SMALL`·`MID`·`TOP`, `llm.<task_type>.<step>.*` | §11 |
+| Value sets | CCR-042 (APPLIED) | §8.3 |
+| `script_sha256`, stage verdict | CCR-049 (APPLIED) | §7.2, §8.2, §15.2 |
+| Citation hash, non-pack tier | CCR-053 (APPLIED) | `content_sha256` in both inputs; a source without a pack tier is `D_UNVERIFIED` (§6.4 row 11) |
+| Revision mapping | CCR-009 (APPLIED, 24 §3.3 rule 7) | `revision_requests[].segment_id` (§6.4 step 5) |
+| Future-marker pre-filter, RESEARCH_ACCURACY rule | CCR-046, CCR-045 (APPLIED) | D11 (§6.8); SC-3 and Q-1 (§1.4, §20.1) |
+| Who sets `SUBSTANTIATED` and `REMOVED` | not decided by a CCR | **REQUIRES REVIEW (Phase 1):** proposal: `SUBSTANTIATED` by `agent_06.claim_verification` for ad claims with a client substantiation document (3C, directive §1D.3 / 25); `REMOVED` by the orchestrator when a script version supersedes the claim's script. Agent 06 sets neither in 3A |
 No table is created for verification results: they are the output blob (write-once) plus `claims.status` and `citations` rows.
 
 ---
@@ -970,8 +1001,8 @@ No table is created for verification results: they are the output blob (write-on
 | Scope (GLOSSARY §6.30) | What Agent 06 keeps there | Expiry / retention | Retrieval rule | MVP |
 |---|---|---|---|---|
 | `WORKING` | script segments, passage windows, prompts in flight; **memory only, never persisted** | end of the attempt | same attempt only | 3A |
-| `TASK` | checkpoint state: policy plan, evidence ids with hashes and offsets (no text), validated batch results, completed effect keys | job retention | same task; resume | 3A |
-| `PROJECT` | pointer to the output blob (`factcheck.verification.<job>.<iteration>`), status counts, unresolved claim list (ids and reason codes) | project archived + `memory.project_ttl_ms` | Agent 05 revision, Agent 16, later iterations of the same project via context ref | 3A |
+| `TASK` | checkpoint state: policy plan, evidence ids with hashes and offsets (no text), validated batch results, completed effect keys. `TASK` memory is same-task only (04 §5.10 rule 1): the previous iteration of the stage travels as a `PRIOR_OUTPUT` context ref set by the orchestrator (24 §3.3 rule 6, CCR-008) | job retention | same task; resume | 3A |
+| `PROJECT` | pointer to the output blob (`factcheck.verification.<job>.<stage_id>.<iteration>`), status counts, unresolved claim list (ids and reason codes) | project archived + `memory.project_ttl_ms` | Agent 05 revision, Agent 16, later iterations of the same project via context ref | 3A |
 | `CHANNEL` | channel terminology preferences from the shared glossary (e.g. a term's preferred wording) | `review_after` set | same channel only | 3B (**REQUIRES REVIEW: after owner item K7**) |
 | `LONG_TERM` | verified-fact cache: (claim fingerprint, evidence source ids and hashes, status, `review_after`) so an unchanged claim in a later video is not paid for again; each entry has provenance and expires; an entry is used only if the evidence hash still equals the source | `review_after` (config) | same org and channel, never across | 3C (FR-16) |
 - Never stored in memory: another tenant's data, restricted chunk text outside a gated job, text of a blocked script, anything from a failed gate; critical policy (rule packs, thresholds, the policy table) never comes from memory (§3.3 Learning loop).
@@ -980,34 +1011,35 @@ No table is created for verification results: they are the output blob (write-on
 ---
 
 ## 15 Upstream and downstream contracts
-**MVP: 3A (owner-topic job, Agents 04, 05, 16, orchestrator, S7) · 3C (ads, localisation, metadata text, client documents). Tier 0. All hand-offs are contracts of 03 §3–§5; Agent 06 defines none of its own.**
+**MVP: 3A (owner-topic job, Agents 04, 05, 07, 08, 09, 16, orchestrator, S7) · 3C (ads, localisation, metadata text, client documents). Tier 0. All hand-offs are contracts of 03 §3–§5; Agent 06 defines none of its own.**
 
 ### 15.1 Upstream (who feeds Agent 06)
 | Producer | What it gives | Contract | Agent 06 requires | If violated | MVP |
 |---|---|---|---|---|---|
 | Agent 01 (orchestrator) | Task Input for `agent_06.claim_extraction` when `s06_claims` is ready (24 §3.1) | 03 §3.3; payload `agent_06.claim_extraction.input` 1.0.0 (§7.1) | schema valid, `org_id` equal everywhere, segments hash equals `scripts.content_sha256`, active packs resolvable | `REJECTED` with `PERMANENT.SCHEMA_INVALID` / `INPUT_INVALID` / `TENANT_MISMATCH` / `CROSS_TENANT_REF` / `MISSING_DEPENDENCY`; nothing read beyond the check | 3A |
-| Agent 01 (orchestrator) | Task Input for `agent_06.claim_verification` after extraction | payload `agent_06.claim_verification.input` 1.0.0 (§7.2) | `claims_sha256` equal; extraction verdict not `BLOCKED`; `iteration` consistent | `REJECTED` / `FAILED` as above; a blocked input is never verified | 3A |
-| Agent 05 | the script: `segments[]` with `visual_refs`, the chart requests, per-segment `citation_refs` | script blob (`scripts.body_ref`, 04 §5.11) | `segment_id` pattern `^s[0-9]{1,4}$`; text ≤ 5,000 characters; chart ids `^chart_[0-9a-z_]{1,32}$`; the language tag of the script | `INPUT_INVALID`; segments are never re-written | 3A |
+| Agent 01 (orchestrator) | Task Input for `agent_06.claim_verification` at `s06_verify` (after extraction) and at `s06_chart` (after `s08_assets`, `verify_mode = CHART_FACTS`), built by `amw_orchestrator/input_builders/` | payload `agent_06.claim_verification.input` 1.0.0 (§7.2); 24 §3.1 `params` | `claims_sha256` and `script_sha256` equal; extraction verdict not `BLOCKED`; `iteration` consistent | `REJECTED` / `FAILED` as above; a blocked input is never verified | 3A |
+| Agent 05 (and `agent_05.shorts_adaptation` for `SHORTS` v2) | the script: `segments[]` with `visual_refs`, the chart requests (a `REAL_HISTORICAL` request with `must_be_historical` becomes a `CONSTRAINT` chart ref, CCR-004), per-segment `citation_refs` | script blob (`artifacts/`, `scripts.body_ref`, 04 §5.11, CCR-017) | `segment_id` pattern `^s[0-9]{1,4}$`; text ≤ 5,000 characters; chart ids `^chart_[0-9a-z_]{1,32}$`; the language tag of the script | `INPUT_INVALID`; segments are never re-written | 3A |
 | Agent 04 | `citations_available` (unchanged as `available_citations`), `sources` with reliability tiers, `method.release_approval_ids`, the library | research pack blob; `knowledge_*` tables | refs resolve to chunks or recorded references of the same org and channel; `citation_ref ≤ 64` characters | a ref of another org ⇒ `CROSS_TENANT_REF`; an unresolvable ref ⇒ `CITATION_UNRESOLVABLE` for that claim | 3A |
-| Chart path (Agent 08 / 09) | chart dataset records (range end, hash) and `chart_facts[]` | **(pending CCR, §13.1)** | facts computed by code from the dataset; dataset hash | no facts ⇒ chart claims `UNVERIFIABLE` | 3A (consumer) |
+| Agent 08 (`s08_assets`) | the agent document `agent_08.chart_facts` 1.0.0 per chart (CCR-004): `chart_id`, `instrument`, dataset hash, date range, `facts[{fact_id, statement}]`, computed by code from the sourced dataset | output ref of `s08_assets`, passed as a `PRIOR_OUTPUT` context ref to `s06_chart` | facts exist for every chart claim's chart; `fact_id` and statement lengths as §7.2 | no facts for a chart ⇒ that chart's claims `UNVERIFIABLE` (`NO_CHART_FACTS`) at `s06_chart`; Agent 08 also fails a shot `DATA_WITHIN_LAG` when the constraint is not met | 3A (consumer) |
 | Rule-pack service (S2 / 13) | rule-pack text and version by key | `context_refs` purpose `RULE_PACK` | pack key present, version recorded in `provenance` | `PERMANENT.MISSING_DEPENDENCY` | 3A |
 | Owner (through S7) | `KNOWLEDGE_RELEASE` approval for method topics | `approvals` row (read) | approval of the same org, kind and state `APPROVED`, covering the chunk | restricted chunk excluded | 3A |
 
 ### 15.2 Downstream (who consumes Agent 06)
 | Consumer | What it takes | How | Guarantee given by Agent 06 | MVP |
 |---|---|---|---|---|
-| Agent 01 (orchestrator) | stage verdict, advisory `next_action`, `revision_requests`, claim ids | Task Output payload | verdict is code-derived; `BLOCKED` and `NEEDS_HUMAN_REVIEW` are `SUCCEEDED` tasks (03 §5.3.3); routing is the orchestrator's (24 §3.3) | 3A |
+| Agent 01 (orchestrator) | stage verdict (`overall.proposed_verdict`), `gate: true` validation results (`claims.gate.rule_flags`, `fact.gate.no_contradicted_claim`), advisory `next_action`, `revision_requests` (with `segment_id`), claim ids | Task Output payload | verdict is code-derived; `BLOCKED` and `NEEDS_HUMAN_REVIEW` are `SUCCEEDED` tasks (03 §5.3 rules 3 and 4); a failed gate takes the stage's `on_fail` route, revision feedback per 24 §3.3 rule 7; routing is the orchestrator's | 3A |
 | S7 / the owner | the claims that need a human with reason codes | orchestrator inserts a `SENSITIVE_CLAIM` approval (`owner_sensitive`, 24 §3.3.2) | each listed claim has an id, reason codes and the evidence references (no text in the approval subject; the operator tool reads the text under the owner's rights) | 3A |
-| Agent 05 (revision) | `revision_requests` (add citation, correct claim, provide evidence, resolve conflict, remove or rework) | via the orchestrator's revision input | requests are advisory; corrections restate only evidence and pass P10 | 3A (field mapping REQUIRES REVIEW: Agent 05 blueprint) |
-| Agent 16 (`agent_16.compliance_gate`, `agent_16.quality_score`) | `claims` rows (`claim_type`, `time_reference_kind`, `rule_flags`, `proposed_verdict`, `status`), `citations` rows, `accuracy_summary` | DB read and output blob | rule flags with evidence; statuses derived by code; counters equal a recount; Agent 16 keeps the final verdict (plan Q5) | 3A |
-| Agents 07, 09 | nothing directly; they depend on `s06_verify` completing with a continuing verdict (24 §3.1 graph) | orchestrator | — | 3A |
-| Shorts child job | extraction on the child script (24 §7.2); verification of cut statements **REQUIRES REVIEW (Phase 1): 24 §7.2 runs extraction only; a cut can change a statement's meaning, so claims not matching a verified parent claim need verification (3C proposal)** | orchestrator | the child's claims are new rows with their own script id | 3A (extraction), 3C (verification of non-inherited claims) |
+| Agent 05 (revision) | `revision_requests` (add citation, correct claim, provide evidence, resolve conflict, remove or rework) | the orchestrator builds `revision.feedback[]` (24 §3.3 rule 7: source `CLAIM_VERIFICATION`, `segment_ref = segment_id`, `instruction = "<action>: <detail>"`, `suggested_citation_refs`; ≤ 60 items grouped per segment) | requests are advisory; corrections restate only evidence and pass P10; every request names its `segment_id` | 3A |
+| Agent 16 (`agent_16.compliance_gate`, `agent_16.quality_score`) | `claims` rows (`claim_type`, `time_reference_kind`, `rule_flags`, `proposed_verdict`, `status`, `status_reasons`), `citations` rows, `accuracy_summary` (of `s06_verify` and `s06_chart`) | DB read and output blob | rule flags with evidence; statuses derived by code; counters equal a recount; Agent 16 keeps the final verdict (plan Q5) | 3A |
+| Agents 07, 09 | `script_id`, `script_version`, `script_sha256` and `overall.proposed_verdict` of the `s06_verify` output (07 FR-2 / F-02 read the stage verdict and the hash the verification saw; 09 F-03 `ScriptGate` checks `sha256(script blob) == script_sha256`); `s07_voice` and `s09_plan` start only after `s06_verify` is `COMPLETED` (24 §7.1a) | the Task Output of `s06_verify`, passed as a `PRIOR_OUTPUT` context ref | the hash is the one `scripts.content_sha256` carried when the claims were checked; a changed script is a new version and a new verification | 3A |
+| Agent 10 (render) | none directly; `s10_render` depends on `s06_chart`, so no chart claim is unverified at render | orchestrator graph | `s06_chart` is `COMPLETED` with a continuing verdict (or a recorded `SENSITIVE_CLAIM` approval) | 3A |
+| Shorts child job (`SHORTS` v2, 24 §7.2a, CCR-003) | `s06_claims`, `s06_verify` and `s06_chart` on the child script (the cut is verified like the long form); revision target `s05_shorts`; section items `SKIPPED` | orchestrator | the child's claims are new rows with their own script id; the child job is created after the parent's `s06_verify` | 3A |
 | Agent 12 (3C) | none in 3A: title and description claims are checked by Agent 16 | — | **REQUIRES REVIEW (3C): reuse of `claim_extraction` on metadata text** | 3C |
 | Operator tool (Agent 16 / dashboard) | claim list with status and evidence references; the owner's 3–5 fact spot check (18 §9.2) | DB read, owner role | spans make a spot check a direct look at one sentence | 3A |
 
 ### 15.3 Contract rules
 1. The orchestrator is the only creator of tasks; Agent 06 returns `next_action` and `downstream_agent = null` (§8.1) and never addresses a task to another agent.
-2. Schema versions: all four schemas are 1.0.0; an additive change bumps the minor version; consumers accept the major they were built against (03 §3.3). A breaking change needs a CCR.
+2. Schema versions: the extraction input is 1.1.0 (CCR-053, CCR-004) and the other schemas are 1.0.0 (verification input and output unreleased, changed in place per CCR-049); an additive change bumps the minor version; consumers accept the major they were built against (03 §3.3). A breaking change needs a CCR.
 3. `available_citations` is the same list Agent 04 produced and Agent 05 used, passed unchanged to both Agent 06 tasks; a citation outside it is not accepted (D5).
 4. Passage text never travels in a payload; a consumer that needs it reads it through its own tenant-scoped repository call.
 5. A `BLOCKED` or `NEEDS_HUMAN_REVIEW` stage verdict is a successful task. A task never returns partial claims as success (03 §5.3).
@@ -1036,7 +1068,7 @@ Agent 06 is stateless between attempts: a new attempt reads the latest checkpoin
 | `E6_output` | output blob written | blob URI and SHA-256 | `db.output` (`output`) | assembly (write-once) |
 | `V0_validated` | V-S0 | tenant context, `claims_sha256` | — | nothing |
 | `V1_planned` | V-S1 | `ClaimPlan` list (modes, reasons) | — | planning (deterministic) |
-| `V2_evidence` | V-S2 | evidence ids, source refs, content hashes, offsets, gate decisions, candidate pairs (no text) | `db.audit` retrieval row key | retrieval (hashes are re-checked on reload; a changed hash drops the source) |
+| `V2_evidence` | V-S2 | evidence ids, source refs, content hashes, offsets, gate decisions, candidate pairs (no text) | — (the retrieval audit row needs no effect key, CCR-015) | retrieval (hashes are re-checked on reload; a changed hash drops the source) |
 | `V4_batch_<n>` | each batch validated (including the repair) | validated batch output | `llm.call` key of that batch | the paid call of that batch |
 | `V5_reconciled` | statuses derived | `ClaimResult` list | — | reconciliation (deterministic) |
 | `V6_persisted` | `claims.status` and `citations` written | row counts | `db.output` (`claims_status`, `citations`) | persistence (guarded UPDATE; citations unique) |
@@ -1044,7 +1076,7 @@ Agent 06 is stateless between attempts: a new attempt reads the latest checkpoin
 `state_ref` is a storage URI of the tenant (03 §8); the blob holds IDs, hashes, offsets and validated results, never passage or script text and never a secret.
 
 ### 16.3 Resume and replay rules
-1. Task idempotency keys `task.agent_06.claim_extraction` and `task.agent_06.claim_verification` over (`job_id`, task type, `iteration`) (03 §9.1). A `COMPLETED` same-hash key returns the stored output (T04). Same key with a different request hash ⇒ `PERMANENT.IDEMPOTENCY_CONFLICT`.
+1. Task idempotency keys `task.agent_06.claim_extraction` and `task.agent_06.claim_verification` over (`job_id`, task type, `stage_id`, `iteration`) (03 §9.2, CCR-005). A `COMPLETED` same-hash key returns the stored output (T04). Same key with a different request hash ⇒ `PERMANENT.IDEMPOTENCY_CONFLICT`.
 2. Each paid call has an effect key in scope `llm.call` with `step_key` (§10.6); a replay of a finished call returns the stored response, no second spend (03 §9.2).
 3. After a crash mid-batch, only the unfinished batch is called again; validated batches come from the checkpoint.
 4. `CHECKPOINTED` is used for `AWAITING_BUDGET` (S4 refusal; no automatic increase, rule 8). On resume the reservation is re-checked before the next call. Waiting for a human approval is not a state of these tasks: the orchestrator inserts the approval after the task ends.
@@ -1066,7 +1098,7 @@ Agent 06 is stateless between attempts: a new attempt reads the latest checkpoin
 | GPU | none | none | — |
 | DB | short writes (claims insert) | filtered reads of chunks (`org_id`, `channel_id`, collection), FTS for uncited claims, status updates | **REQUIRES REVIEW (3B): query time measured on the real library** |
 | Concurrency | one extraction per tenant at a time in 3A; the stage is on the critical path | same | 3A single tenant; per-tenant caps at Tier 1 (08 §8.1.2) |
-| Window | any time (`AI_IO`, no render); obeys `DRAIN` | any time; obeys `DRAIN` | 24 §3.1; 06 defines whether `AI_IO` is drained at 06:30 |
+| Window | any time (`AI_IO`, no render); obeys `DRAIN` | any time; obeys `DRAIN` | 24 §3.1; whether `AI_IO` is drained at the window end is the scheduler's rule (07 §8 item 2), not decided here: the stage obeys the control flag whatever it says |
 
 ### 17.1 Cost model (formulas; prices come from 09 and PR-01, none is written here)
 - Extraction cost = Σ over calls `(tokens_in × price_in + tokens_out × price_out)`; the cached prefix is priced as cache reads (PR-02); repair calls are separate ledger rows. Calls ≈ ⌈script characters ÷ `factcheck.extract.max_chars_per_call`⌉ + repairs.
@@ -1086,24 +1118,26 @@ Agent 06 is stateless between attempts: a new attempt reads the latest checkpoin
 | Situation | Typed exception | 07 code | Disposition (07) | Agent 06 action | Test |
 |---|---|---|---|---|---|
 | input fails schema | `InputInvalid` | `PERMANENT.SCHEMA_INVALID` | FAIL | `REJECTED`, `details.violations[]` | F-01 |
-| bad ID prefix, `claims_sha256` mismatch, blocked extraction verdict, unknown `chart_data_ref`, unsupported `owner_sebi_registration` | `InputInvalid` | `PERMANENT.INPUT_INVALID` | FAIL | `REJECTED`; nothing read, nothing paid | F-02 |
+| bad ID prefix, `claims_sha256` or `script_sha256` mismatch, blocked extraction verdict, unknown `chart_data_ref`, a claim without `chart_data_ref` at `verify_mode = CHART_FACTS`, unsupported `owner_sebi_registration` | `InputInvalid` | `PERMANENT.INPUT_INVALID` | FAIL | `REJECTED`; nothing read, nothing paid | F-02 |
 | org mismatch among envelope, input, refs | `TenantMismatch` | `PERMANENT.TENANT_MISMATCH` | FAIL, L3 | reject before any read | S-01 |
 | id or ref of another tenant (script, claim, chunk, snapshot, approval) | `CrossTenantRef` | `PERMANENT.CROSS_TENANT_REF` | FAIL + security event | reject; event `security.cross_tenant_ref` with the caller's org only; generic message (no existence oracle) | S-02, S-03 |
 | tenant not active | `TenantInactive` | `PERMANENT.TENANT_INACTIVE` | FAIL | reject | F-02 |
 | channel profile, rule pack or script blob missing | `MissingDependency` | `PERMANENT.MISSING_DEPENDENCY` | FAIL | reject | F-02 |
 | config missing, tier order not decreasing, policy table incomplete (a claim type without a mode), prompt hash mismatch, undeclared prompt variable | `ConfigInvalid` | `PERMANENT.CONFIG_INVALID` | FAIL, L3 | fail at the start of the attempt | U-09, U-20 |
 | provider key rejected | `AuthInvalid` | `PERMANENT.AUTH_INVALID` | FAIL, L3 | no retry | F-04 |
-| provider 429 / 5xx / timeout / network | `RateLimited`, `Upstream5xx`, `TemporaryTimeout`, `TemporaryNetwork` | `TEMPORARY.*` | RETRY (policy) | honour `retry_after_ms`; checkpoint kept | F-05 |
+| provider 429 / 5xx / timeout / network | `RateLimited`, `Upstream5xx`, `TemporaryTimeout`, `TemporaryNetwork` | `TEMPORARY.*` | RETRY (policy), then `RETRY_WAIT` (never `AWAITING_EXTERNAL`) | honour `retry_after_ms`; checkpoint kept | F-05 |
 | breaker open | `CircuitOpen` | `INFRASTRUCTURE.CIRCUIT_OPEN` | no attempt consumed | return to `RETRY_WAIT` | F-10 |
 | DB serialization or blip; DB down; storage down | `TransientDb`, `DbUnavailable`, `StorageUnavailable` | `TEMPORARY.DB_TRANSIENT`, `INFRASTRUCTURE.DB_UNAVAILABLE`, `INFRASTRUCTURE.STORAGE_UNAVAILABLE` | RETRY | re-run the step in a new transaction; stop claiming | F-07 |
 | model JSON unparseable | `InvalidJson` | `AGENT.INVALID_JSON` | RETRY once with the parse error | one repair, then DLQ | F-03 |
 | parsed output fails schema, missing or duplicate result, bad quote after repair | `OutputSchemaInvalid` | `AGENT.OUTPUT_SCHEMA_INVALID` | RETRY once | same | F-03 |
 | provider safety refusal | `ProviderRefusal` | `PERMANENT.PROVIDER_REFUSAL` | FAIL | no fallback provider in 3A | F-13 |
-| model refusal `INSUFFICIENT_INPUT` | `RefusalInsufficientInput` | `PERMANENT.INSUFFICIENT_INPUT` | FAIL | orchestrator re-plans upstream (27 §4.3); case REF-35 | F-09 |
+| model refusal `INSUFFICIENT_INPUT` | `RefusalInsufficientInput` | `PERMANENT.INSUFFICIENT_INPUT` | FAIL | orchestrator re-plans upstream (27 §4.3); case REF-35 (a placeholder claim that does have a candidate passage, so the model is called) | F-09 |
 | model refusal `OUT_OF_SCOPE`, `CONFLICTING_INSTRUCTIONS` | `RefusalOutOfScope` | `PERMANENT.INPUT_INVALID` | FAIL | as above | F-09 |
-| model refusal `UNSAFE_CONTENT` | `RefusalUnsafe` | none (success) | `SUCCEEDED` with verdict `NEEDS_HUMAN_REVIEW`, `claims = []` | L3 via S7 | F-09 |
+| model refusal `UNSAFE_CONTENT`, extraction | `RefusalUnsafe` | none (success) | `SUCCEEDED` with verdict `NEEDS_HUMAN_REVIEW`, `claims = []` (extraction output allows an empty list on refusal) | L3 via S7 | F-09 |
+| model refusal `UNSAFE_CONTENT`, verification (declared item-level mapping, 27 §4.3, CCR-023) | `RefusalUnsafe` | none (success) | `SUCCEEDED`; **one entry per input claim** (so `fact.claims_complete` holds) with `status = UNVERIFIABLE`, `reason_codes = [MODEL_REFUSED]`, `assessment = null`; stage verdict `NEEDS_HUMAN_REVIEW`; never `PASS`-like | surfaced to Agent 16 and the owner via the `SENSITIVE_CLAIM` approval | F-09 |
 | model refusal `RULE_WOULD_BE_BROKEN` (extraction) | `RefusalRuleBroken` | none (success) | `SUCCEEDED` with verdict `BLOCKED` | rule IDs from `violated_rule_ids` | F-09 |
-| a blocking check of §8.4 fails after the allowed attempts | `QualityRepeatedFailure` | `AGENT.QUALITY_REPEATED_FAILURE` | FAIL, L3 | return failing check ids | F-08 |
+| model refusal `RULE_WOULD_BE_BROKEN` (verification; the prompt does not use it) | `RefusalOutOfScope` | `PERMANENT.INPUT_INVALID` | FAIL | as `OUT_OF_SCOPE` | F-09 |
+| a blocking process-integrity check (`gate: false`) of §8.4 fails after the allowed attempts (a failed `gate: true` result is not an error: the task `SUCCEEDED`, 03 §5.3 rule 4) | `QualityRepeatedFailure` | `AGENT.QUALITY_REPEATED_FAILURE` | FAIL, L3 | return failing check ids | F-08 |
 | call cap or repair cap reached | `LoopCapExceeded` | `AGENT.LOOP_CAP_EXCEEDED` | FAIL, L3 | stop; no further call | F-12 |
 | S4 refuses spend | `BudgetExhausted` | `RESOURCE.BUDGET_EXHAUSTED` | SUSPEND `AWAITING_BUDGET` | checkpoint; no override (rule 8) | F-11 |
 | a cited source cannot be resolved or its hash changed | recorded, not raised | — | none | `CITATION_UNRESOLVABLE` on the claim; the claim follows §6.4 with the remaining evidence | U-22 |
@@ -1121,14 +1155,14 @@ Agent 06 handles three kinds of tenant content: the script and its claims (`clai
 
 | 08 §8 layer | Enforcement in Agent 06 | Test |
 |---|---|---|
-| 1 App filter | The package has **three** database modules: `ClaimRepository`, `CitationRepository`, `KnowledgeReader`. Every method takes a `TenantContext` produced by `TenantGuard` and runs inside `amw_core.tenancy` (`SET LOCAL app.org_id`); every SQL statement carries an explicit `org_id = :org` predicate, and every library read also `channel_id = :channel` and `collection_id ∈ :allowed`. Every `script_id`, `claim_id`, `citation_ref` and approval id in the input is checked to belong to the task's org **before** any other read (`TenantGuard.check_*`); a lint rule forbids raw cursors and string-built SQL | U-25, S-02, S-03 |
-| 2 RLS | `claims`, `citations`, `scripts`, `knowledge_sources`, `knowledge_chunks`, `memory_items` (and the pending `knowledge_collections`) are `FORCE ROW LEVEL SECURITY`; the agent role is `amw_app` (`NOBYPASSRLS`). An unset context returns zero rows. The library read and claims tests run twice: RLS on, and RLS bypassed in a test role so that the explicit predicates alone are shown sufficient (first line of defence) | S-10, INF-11 |
-| 3 Storage URIs | Output blobs, checkpoints and reference snapshots are written and read under `amw-blob://<org>/…` through `amw_core.storage`; the reader compares the URI's org to the context before resolving; `..` and absolute segments are rejected; SHA-256 verified on read | S-02 |
+| 1 App filter | The package has **three** database modules: `ClaimRepository`, `CitationRepository`, `KnowledgeReader`. Every method takes a `TenantContext` produced by `TenantGuard` and runs inside `amw_core.tenancy` (`SET LOCAL app.org_id`); every SQL statement carries an explicit `org_id = :org` predicate, and every library read also `channel_id = :channel` and `collection_id ∈ :allowed` (`collection_id` is a column of `knowledge_chunks` since CCR-011). Every `script_id`, `claim_id`, `citation_ref` and approval id in the input is checked to belong to the task's org **before** any other read (`TenantGuard.check_*`); a lint rule forbids raw cursors and string-built SQL | U-25, S-02, S-03 |
+| 2 RLS | `claims`, `citations`, `scripts`, `knowledge_sources`, `knowledge_chunks`, `knowledge_collections`, `memory_items` are `FORCE ROW LEVEL SECURITY`; the agent role is `amw_app` (`NOBYPASSRLS`). An unset context returns zero rows. The library read and claims tests run twice: RLS on, and RLS bypassed in a test role so that the explicit predicates alone are shown sufficient (first line of defence) | S-10, INF-11 |
+| 3 Storage URIs | Output blobs, checkpoints, reference snapshots and the `agent_08.chart_facts` documents are written and read under `amw-blob://<org>/…` through `amw_core.storage`; the reader compares the URI's org to the context before resolving; `..` and absolute segments are rejected; SHA-256 verified on read. The only other root read is the platform area `amw-blob://platform/…` (rule-pack text, read-only, 03 §8, resolved by `RulePackResolver`), which holds no tenant data | S-02 |
 | 4 Cache keys | No tenant-keyed cache outside `amw_core.tenancy.cache_key()`. The shared prompt prefix (system prompt and rule-pack text) holds no tenant data; claims, passages and script text come after it. The 3C fact cache is keyed by org and channel | S-08 |
 | 5 Logs and metrics | Every line carries `org_id`; script text, quotes, passage text, discrepancy values, corrections and source titles never appear in a log, metric label, error message, audit row, trace attribute or eval record (IDs, offsets, hashes, counts only) | S-05 |
 
 Additional Agent 06 controls:
-1. **Evidence scope.** The model sees only the windows the code selected for the claim. It receives no `org_id`, no storage path, no database id and no collection internals; evidence ids `p01…` are per-batch aliases mapped back by code; its output can only name an evidence id that is one of the claim's candidates (check P3). It has no tools (§1.3).
+1. **Evidence scope.** The model sees only the windows the code selected for the claim. It receives no `org_id`, no storage path, no database id and no collection internals; evidence ids `p01…` and `f01…` are per-batch aliases mapped back by code; its output can only name an evidence id that is one of the claim's candidates (check P3). It has no tools (§1.3).
 2. **Restricted gate.** A restricted chunk is loaded only when the gate allows it (`our_method_release_approved` and a same-org `APPROVED` `KNOWLEDGE_RELEASE` covering the chunk) and only when the **script cites it**; library search never reaches restricted collections. A chunk whose org, channel or collection differs from the context after load raises `CrossTenantRef`. Case RG-33.
 3. **No existence oracle.** A foreign id gets the same generic `CROSS_TENANT_REF` / not-found text as a missing one; the event is logged with the caller's org only (08 §8.2.2).
 4. **Injection.** Script text, claims, passages, chart facts and reference snapshots are data (08 §5.3). Instructions in them are extracted and flagged as content (extraction) or flagged `INJECTION_SUSPECTED` and excluded (verification); no tool exists, and every effect (status, rows) is produced by code from validated fields. Eval cases EDGE-22 (extraction), INJ-25, INJ-26 (verification) and 08 §8.2.6 (a passage that asks for another tenant's data or a secret: expected outcome is no compliance and no effect).
@@ -1139,14 +1173,14 @@ Additional Agent 06 controls:
 | Item | Value |
 |---|---|
 | Identity | service actor `agent_06` (`actor` in logs); DB role `amw_app` with the grants of §13 only |
-| Reads | `scripts`, `claims`, `knowledge_sources`, `knowledge_chunks`, `knowledge_collections` (pending CCR), `approvals` (release check), channel compliance profile, `memory_items`, reference snapshots |
+| Reads | `scripts`, `claims`, `knowledge_sources`, `knowledge_chunks`, `knowledge_collections`, `approvals` (release check), channel compliance profile, `memory_items`, reference snapshots, `agent_08.chart_facts` documents; access is a code-level allow-list (one repository class per agent, import lint and a test against the 04 §3.3 grant list, CCR-048), not a per-agent database role |
 | Writes | `claims` (INSERT; UPDATE of `status`), `citations`, `memory_items` (pointer), checkpoints and cost ledger through `amw_core`, storage areas of §16 |
 | Never | `approvals` writes, `budgets`, `oauth_tokens`, `audit_log` direct DML, `rule_packs`, `compliance_verdicts`, `knowledge_*` writes, other agents' tables, the YouTube API, outbound HTTP |
 | Who may trigger | only the orchestrator creates the tasks; humans never call Agent 06 directly |
 | Who may read claims and evidence | users with job read permission; evidence text is shown only in the owner's operator tool under the library read permission (08 §5.2: **REQUIRES REVIEW (Phase 1): exact permission names are 08's**); Tier 1 client guests never see library text (08 §5.4) |
 
 ### 19.3 Secrets and data governance
-Keys are read only from the environment's secret mechanism by the adapter process (08 §3.1); never in prompts, fixtures, eval files, logs or payloads (names only in §24). Library text goes only to the tenant's own LLM calls and only after the owner accepted the provider terms (§11, 3A-BLOCKING item, one decision with Agent 04). Script text is the tenant's content and is confidential (unreleased videos); it is excluded from logs and from eval datasets (all dataset text is invented).
+Keys are read only from the environment's secret mechanism by the adapter process (08 §3.1); never in prompts, fixtures, eval files, logs or payloads (names only in §24). Library text goes only to the tenant's own LLM calls and only after the owner accepted the provider terms (§11; 3A_SLICE_SPEC R19, owner question Q-O5: until recorded, fixtures and owner-approved material only). Script text is the tenant's content and is confidential (unreleased videos); it is excluded from logs and from eval datasets (all dataset text is invented).
 
 ### 19.4 Threat table
 | Threat | Control | Test |
@@ -1159,7 +1193,7 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 | Model invents evidence ids or spans | P3, P4, P5 | U-27…U-29 |
 | Correction text carries advice, a level or a link | P10 scanner | U-29 |
 | Claim text or passage text in logs | redaction, no-content logging, canary test | S-05 |
-| Replay creating duplicate rows or a second spend | idempotency keys, unique indexes (pending CCR) | I-02, I-05 |
+| Replay creating duplicate rows or a second spend | idempotency keys, unique indexes (CCR-029) | I-02, I-05 |
 | Verification skipped by feeding a BLOCKED script | V2 rejection | F-02, AK-02…AK-04 |
 | Poisoned library or reference | tier floor, `D_UNVERIFIED` cannot verify alone, injected passage exclusion | TIER-20, INJ-25 |
 
@@ -1171,14 +1205,14 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 ### 20.1 §1A, §1B.2 and §1 rules owned or touched by Agent 06 (each as a measurable requirement)
 | Rule (directive) | Applies to 06? | Measurable requirement | How measured | MVP |
 |---|---|---|---|---|
-| §1A.7 100-point score, dimension RESEARCH_ACCURACY (20; 18 §9.2) | yes: supplies the deterministic 12-point part | **Q-1** every FACTUAL, STATISTICAL, HISTORICAL_MARKET claim that leaves the stage is `VERIFIED` with a citation or chart reference, or the stage verdict is not `ALLOWED` (100 %); **Q-2** no claim left `CONTRADICTED`, `UNVERIFIABLE` or `NEEDS_SUBSTANTIATION` with an `ALLOWED` stage verdict (0); **Q-3** `accuracy_summary` equals a recount (100 %); Agent 16 computes the points | checks `fact.verified_requires_evidence`, `fact.accuracy_counters`; eval A5–A7 | 3A |
+| §1A.7 100-point score, dimension RESEARCH_ACCURACY (20; 18 §9.2) | yes: supplies the deterministic 12-point part | **Q-1** every FACTUAL, STATISTICAL, HISTORICAL_MARKET claim that leaves the stage is `VERIFIED` with a citation or chart reference, or the stage verdict is not `ALLOWED` (100 %); a chart claim is measured at `s06_chart` (it is `EXTRACTED` with `CHART_PENDING` after `s06_verify`); 18 §9.2 counts `UNVERIFIABLE` / `NEEDS_SUBSTANTIATION` as resolved only through an `APPROVED` `SENSITIVE_CLAIM` approval that names the `claim_id`, and `CONTRADICTED` never (CCR-045); **Q-2** no claim left `CONTRADICTED`, `UNVERIFIABLE` or `NEEDS_SUBSTANTIATION` with an `ALLOWED` stage verdict (0); **Q-3** `accuracy_summary` equals a recount (100 %); Agent 16 computes the points | checks `fact.verified_requires_evidence`, `fact.accuracy_counters`; eval A5–A7 | 3A |
 | §1A.7 judged part "correct use of evidence, no overreach beyond the evidence" | indirectly | **Q-4** claims that overreach their evidence are `NEEDS_SUBSTANTIATION` with `OVERREACH` (eval PAR-14…16 pass); the J-part is scored by Agent 16 | verification eval | 3A |
 | §1A.7 "any compliance failure rejects" (misleading claim, fabricated news, SEBI) | yes | **Q-5** a `CONTRADICTED` claim yields `BLOCKED`; no `FIN-R*` BLOCKING flag yields `ALLOWED`; answer-key cases 4/4 (extraction) and 4/4 (verification stage) | evals | 3A |
 | §1A.7 owner's spot check of 3–5 facts (H 3 points) | yes | **Q-6** every `VERIFIED` claim has at least one evidence span (source ref, offsets, hash), so a spot check is a direct look at one sentence | `fact.verified_requires_evidence` | 3A |
 | §1A.7 human editorial QC (Agent 16 + S7) | feeds it | **Q-7** every claim with status other than `VERIFIED` or skipped is listed with reason codes in the stage output and in the `SENSITIVE_CLAIM` approval | output check | 3A |
-| §1A.1a real charts from real historical data | touches (claims about the chart) | **Q-8** every `HISTORICAL_MARKET` claim with a chart reference is `VERIFIED` against a chart fact or the stage verdict is not `ALLOWED` | `fact.verified_requires_evidence` | 3A (needs the chart-facts provider) |
+| §1A.1a real charts from real historical data | touches (claims about the chart) | **Q-8** every `HISTORICAL_MARKET` claim with a chart reference is `VERIFIED` against a chart fact at `s06_chart`, or the `s06_chart` verdict is not `ALLOWED` | `fact.verified_requires_evidence` | 3A (needs `agent_08.chart_facts`) |
 | §1A.2 hook: first 30 seconds proves the promise with a concrete example | touches | **Q-9** hook segments get no exemption: their claims are extracted and verified like any other (eval case AK-01 segment s1 pattern) | unit test on batching (no segment skipped) | 3A |
-| §1A.8 Shorts cut from the same research | touches | **Q-10** the child script's claims are extracted (24 §7.2); a claim not matching a verified parent claim is verified (3C proposal) | I-08 / REQUIRES REVIEW | 3A (extraction), 3C |
+| §1A.8 Shorts cut from the same research | touches | **Q-10** the child script's claims are extracted, verified and chart-verified like the long form (`SHORTS` v2, 24 §7.2a, CCR-003); reuse of an unchanged parent verification without a paid call is FR-16 (3C) | I-08, I-10 | 3A (3C for the reuse) |
 | §1A.10 golden-sample pilot (3 videos) | yes (3B) | **Q-11** on the three samples record: claims per status, false-`VERIFIED` count found by the owner (target 0), cost and latency per stage; thresholds set with the owner | 3B run records | 3B |
 | §1A.11 cost; D1 per-video and pilot budget | yes | **Q-12** cost per stage reported from `cost_ledger`; 0 breaches; no call after a refusal | ledger query, F-11 | 3A |
 | §1A.1 (visual hierarchy), §1A.3–§1A.6 (voice, audio, video, QC), §1A.9 (niche benchmark) | no | not applicable; Agent 06 produces no media | — | — |
@@ -1187,22 +1221,22 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 ### 20.2 SEBI finance rules as flags (GLOSSARY §6.38; rule text and severities are 13 §5, not repeated here)
 | Rule | Agent 06's measurable duty | Deterministic net | Dataset cases | MVP |
 |---|---|---|---|---|
-| FIN-R1 | every buy/sell/hold call is flagged BLOCKING, in any wording or language | model flag (13 §5 pairs the rule with `claim_type = RECOMMENDATION`); no code net beyond D7 recomputation; eval gate: 0 false `ALLOWED` | AK-02 | 3A |
-| FIN-R2 | entry, exit, stop, target, strike for a current instrument | model flag (13 §5 pairs the rule with `claim_type = PRICE_LEVEL` and `time_reference_kind` in `CURRENT`, `FUTURE`, `UNSPECIFIED`); no code net beyond D7; eval gate: 0 false `ALLOWED` | AK-02, EDGE-13 | 3A |
-| FIN-R3 | forward view on a current market | model flag | AK-02 | 3A |
+| FIN-R1 | every buy/sell/hold call is flagged BLOCKING, in any wording or language | model flag (13 §5 pairs the rule with `claim_type = RECOMMENDATION`) plus the D11 marker lists where 13 defines one for the rule (at least WARNING); D7 recomputation; eval gate: 0 false `ALLOWED` | AK-02 | 3A |
+| FIN-R2 | entry, exit, stop, target, strike for a current instrument | model flag (13 §5 pairs the rule with `claim_type = PRICE_LEVEL` and `time_reference_kind` in `CURRENT`, `FUTURE`, `UNSPECIFIED`) plus the D11 marker net; D7; eval gate: 0 false `ALLOWED` | AK-02, EDGE-13 | 3A |
+| FIN-R3 | forward view on a current market | model flag plus the D11 marker net | AK-02, HN-33 | 3A |
 | FIN-R4, R5 | live session; paid group with ongoing guidance | model flag | EDGE-16, EDGE-17 | 3A |
 | FIN-R6, R7 | performance or profit claim; profit testimonial | model flag; a backtest success rate is WARNING (open point 13) | AK-03, EDGE-18, EDGE-19 | 3A |
 | FIN-R8 | broker referral or paid association with a regulated entity | D4 URL/referral detector ⇒ at least WARNING; model flag | AK-04, HN-27 | 3A |
 | FIN-R9 | chart data not older than the lag | D0 and D3 (code): `WITHIN_LAG` and `UNKNOWN` ⇒ BLOCKING | EDGE-14, EDGE-15 | 3A |
 | FIN-R10, R11 | disclaimer; AI persona | **not Agent 06** (Agent 16 checks the assembled video) | — | — |
 | FIN-R12 | "our method" only on historical charts and only when released | `our_method_release_approved` input; the verification restricted gate; WARNING when method content appears unreleased | EDGE-20, EDGE-21, RG-33 | 3A |
-| FIN-R13 | no forward-looking statement on a named security, even from a historical chart | model flag (extraction rule 8). 13 §5.4 also describes a deterministic future-marker pre-filter for the gate; Agent 06's extraction has no such pre-filter and the extraction dataset expects `ALLOWED` for a no-forecast framing that contains the word "will" (HN-32). **REQUIRES REVIEW (Phase 1): 13 decides whether Agent 06 must run the pre-filter too; if yes, HN-32's expectation changes by CCR** | EDGE-31, HN-32 | 3A |
+| FIN-R13 | no forward-looking statement on a named security, even from a historical chart | model flag (extraction rule 8) plus **D11** (13 §5.4, CCR-046): a named instrument with a future marker from `compliance.finance_sebi_in.markers.*` is at least a WARNING `FIN-R13` flag, so `NEEDS_HUMAN_REVIEW` at minimum. HN-32's expectation is therefore `NEEDS_HUMAN_REVIEW` (the no-forecast sentence contains "will"); the gate re-runs the same pre-filter at `agent_16.compliance_gate` | EDGE-31, HN-32, HN-33 | 3A |
 
 ### 20.3 Process and eval criteria
 | ID | Criterion | Threshold | MVP |
 |---|---|---|---|
-| Q-14 | extraction dataset (32 cases) | thresholds of its README §6 | 3A |
-| Q-15 | verification dataset (37 cases) | thresholds of its README §7: answer key 4/4; deterministic cases 100 %; false `VERIFIED` 0; flagged-passage evidence 0; overall ≥ 0.90 | 3A |
+| Q-14 | extraction dataset (35 cases) | thresholds of its README §6 | 3A |
+| Q-15 | verification dataset (41 cases) | thresholds of its README §7: answer key 4/4; deterministic cases 100 %; false `VERIFIED` 0; flagged-passage evidence 0; overall ≥ 0.90 | 3A |
 | Q-16 | coverage floors in CI | **REQUIRES REVIEW (Phase 1): set in the first build ticket (27 §10)**; every function of §10 has at least one unit test | 3A |
 | Q-17 | no log, metric or audit row contains script or passage text | 0 (canary) | 3A |
 | Q-18 | `NEEDS_HUMAN_REVIEW` share of verified claims on the golden samples | measured; threshold **REQUIRES REVIEW (Phase 1): owner sets after the first measurement** (keeps human effort minimal without lowering the gate) | 3B |
@@ -1215,10 +1249,10 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 ### 21.1 Unit (marker `unit`; free; every PR)
 | ID | Subject | Cases |
 |---|---|---|
-| U-01 | `PriceDataAge.classify` (D0) | range end exactly at the lag, one day inside, one day outside, `None`; stricter-value rule; lag config 0, 30 and negative (`ConfigInvalid`) |
+| U-01 | `PriceDataAge.classify` (D0) | range end exactly at the lag, one day inside, one day outside, `None`; stricter-value rule; basis `CONSTRAINT` keeps `OLDER_THAN_LAG`; schematic `null`; lag config 0, 30 and negative (`ConfigInvalid`) |
 | U-02 | `SegmentBatcher` (D8) | no segment split; global renumbering in segment order; one segment over the cap |
 | U-03 | D2 offsets | ASCII, Devanagari, combining marks, emoji, offsets in code points, a quote that differs by one space, a claim spanning two segments |
-| U-04 | D3 chart-lag flag | `WITHIN_LAG`, `UNKNOWN`, `OLDER_THAN_LAG`; flag present only for finance packs |
+| U-04 | D3 chart-lag flag | `WITHIN_LAG`, `UNKNOWN`, `OLDER_THAN_LAG`, `null` (schematic); flag present only for finance packs |
 | U-05 | D4 URL and referral detector | URL, bare domain with path, referral parameter, coupon code, look-alike text without a link; Devanagari text with a Latin URL |
 | U-06 | D5 and D6 | citation outside `available_citations`; `requires_citation` without citation ⇒ at least `NEEDS_HUMAN_REVIEW` |
 | U-07 | D7 recompute | every combination of BLOCKING / WARNING / citation gap; overall = most severe; the model's proposed verdict never wins |
@@ -1244,12 +1278,17 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 | U-37 | `ConflictCandidateFinder` | shared tokens, differing numerals, opposite-direction words, negation; cap |
 | U-38 | `VerdictEngine`, `RevisionAdvisor`, `AccuracyCounter` | verdict map; combined verdict; stage verdict with conflicts; revision action per reason code; counters |
 | U-39 | `claims_sha256` | canonicalisation: key order, Unicode, separators |
-| U-40 | idempotency keys | scopes and natural key parts of §10.6 |
+| U-40 | idempotency keys | scopes and natural key parts of §10.6, including `stage_id` (`s06_verify` and `s06_chart` never collide) |
+| U-41 | D11 `FutureMarkerFilter` | instrument plus each marker kind, marker without instrument, instrument without marker, Devanagari markers, finance pack inactive (no flag); a flagged claim is never `ALLOWED` after D7 |
+| U-42 | `s06_chart` planning and V0 | chart claim at `EVIDENCE` ⇒ `SKIPPED`/`CHART_PENDING`; at `CHART_FACTS` claims without `chart_data_ref` ⇒ `INPUT_INVALID`; no chart claim ⇒ immediate success, zero calls; `script_sha256` mismatch ⇒ `INPUT_INVALID` |
+| U-43 | citation hash | `content_sha256` of `available_citations` equal to the loaded source; a different hash ⇒ `CITATION_UNRESOLVABLE`; a library hit without a pack tier counts as `D_UNVERIFIED` |
+| U-44 | refusal mapping | verification `UNSAFE_CONTENT` ⇒ one `MODEL_REFUSED` entry per claim and stage `NEEDS_HUMAN_REVIEW`; `RULE_WOULD_BE_BROKEN` ⇒ `PERMANENT.INPUT_INVALID`; extraction `UNSAFE_CONTENT` ⇒ `claims = []` |
+| U-45 | gate results and revision mapping | `gate: true` results only from the registered gate stages; `BLOCKED` ⇔ `FAIL`; every `revision_requests[]` item carries the `segment_id` of its claim; ≤ 60 grouped feedback items after the orchestrator mapping |
 
 ### 21.2 Integration (marker `integration`; real PostgreSQL with RLS, fake LLM, fake blob store)
 | ID | Scenario |
 |---|---|
-| I-01 | extraction end to end: segments in, `claims` rows `EXTRACTED` out, output blob, `validation_results` all `PASS`, answer-key case AK-01 and AK-02 outputs |
+| I-01 | extraction end to end: segments in, `claims` rows `EXTRACTED` out, output blob, process-integrity `validation_results` all `PASS`, the `gate: true` result `FAIL` exactly when the verdict is `BLOCKED`, answer-key case AK-01 and AK-02 outputs |
 | I-02 | extraction replay: same task key ⇒ stored output, no second call, no duplicate rows; crash after the first batch resumes with only the second call |
 | I-03 | verification end to end: statuses and `citations` rows written; cited chunk rows carry `support`; chart facts create no citation row |
 | I-04 | restricted flow: unreleased ⇒ `RESTRICTED_NOT_RELEASED`; with an `APPROVED` same-org release and the chunk cited ⇒ used; foreign-org approval ⇒ not used |
@@ -1257,22 +1296,25 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 | I-06 | memory pointer written once per (job, iteration) |
 | I-07 | two orgs with the same script text: no row, blob or log of one visible to the other |
 | I-08 | revision loop: iteration 1 verifies the new script version; old claims keep their status |
+| I-09 | `s06_verify` then `s06_chart` on the same script: chart claims stay `EXTRACTED` with `CHART_PENDING` after the first, are set `VERIFIED` / `CONTRADICTED` / `UNVERIFIABLE` by the second; both tasks have different idempotency keys; `claims.verified_by_task_id` is the chart task |
+| I-10 | `SHORTS` v2: extraction, verification and chart verification run on the child script and write rows under the child's script id |
 
 ### 21.3 Contract (marker `contract`)
 | ID | Check |
 |---|---|
 | C-01 | prompt Output JSON Schemas of both prompt files equal the schemas generated from the Pydantic models (27 §4.4); the task input and output schemas of §7 and §8 likewise |
 | C-02 | Agent 04's `citations_available` is accepted unchanged as `available_citations` by both Agent 06 inputs (agent_04 AC-2) |
-| C-03 | extraction output → `build_verification_input` → validates `agent_06.claim_verification.input` 1.0.0; `claims_sha256` stable |
+| C-03 | extraction output → the orchestrator's `input_builders` mapping (§7.2) → validates `agent_06.claim_verification.input` 1.0.0; `claims_sha256` and `script_sha256` stable |
 | C-04 | both Task Outputs validate against `amw.task_output` 1.0.0 including `validation_results` id pattern and the `SUCCEEDED` rule of 03 §5.3 |
 | C-05 | Agent 16's read of `claims` (04 §5.11 columns) works on rows written by Agent 06; `proposed_verdict` is a `compliance_verdict` value |
-| C-06 | chart-facts fixture shape (pending CCR) accepted by the input schema |
+| C-06 | an `agent_08.chart_facts` 1.0.0 fixture maps to `chart_facts[]` and is accepted by the input schema; `<chart_id>#<fact_id>` ≤ 64 characters |
+| C-07 | the verification output validates the consumer reads of Agent 07 (FR-2 / F-02) and Agent 09 (F-03): `script_sha256` and `overall.proposed_verdict`; `revision_requests[]` map to the Agent 05 `revision.feedback[]` schema |
 
 ### 21.4 Regression (eval gate; marker `eval`; triggered by a prompt, model tier, rule-pack, threshold, policy-table or dataset change; paid, capped by `evals.max_run_cost_micros`)
 | ID | Run |
 |---|---|
-| R-01 | `agent_06.claim_extraction` dataset (32 cases) |
-| R-02 | `agent_06.claim_verification` dataset (37 cases) |
+| R-01 | `agent_06.claim_extraction` dataset (35 cases) |
+| R-02 | `agent_06.claim_verification` dataset (41 cases) |
 | R-03 | judge calibration for both judges (fixed human-labelled subset) |
 Deterministic assertions run offline on stored outputs for free on every CI run (evals/README §3).
 
@@ -1318,8 +1360,8 @@ Deterministic assertions run offline on stored outputs for free on every CI run 
 ### 21.8 End to end (marker `e2e`)
 | ID | Scenario | MVP |
 |---|---|---|
-| E2E-1 | answer-key script A1 from the Agent 05 fixture through `s06_claims` and `s06_verify` with fakes: verdict `ALLOWED`, claims `VERIFIED` against chart facts | 3A |
-| E2E-2 | answer-key scripts A2…A4: `s06_claims` returns `BLOCKED`, verification not run, revision routed to `s05_script`, job outcome after the revision cap `BLOCKED_COMPLIANCE` | 3A |
+| E2E-1 | answer-key script A1 from the Agent 05 fixture through `s06_claims` and `s06_verify` with fakes: verdict `ALLOWED`, the three chart claims `EXTRACTED` with `CHART_PENDING`; then `s06_chart` after a fake `s08_assets` that supplies `agent_08.chart_facts`: verdict `ALLOWED`, the chart claims `VERIFIED` against chart facts | 3A |
+| E2E-2 | answer-key scripts A2…A4: `s06_claims` returns `SUCCEEDED` with verdict `BLOCKED` and the failed gate result, verification not run, revision routed to `s05_script`, job outcome after the revision cap `BLOCKED_COMPLIANCE` | 3A |
 | E2E-3 | the three golden samples: claims, statuses, cost, latency recorded; owner audits 3–5 facts per sample and any false `VERIFIED` | 3B |
 
 ### 21.9 Coverage floors
@@ -1328,7 +1370,7 @@ Every function of §10 has a unit test; contract and security tests are blocking
 ---
 
 ## 22 Observability
-**MVP: 3A (logs, metrics, audit, cost ledger) · 3B (dashboards from measurements) · Tier 0. Rule: no script text, quote, passage text, discrepancy value, correction or secret in any signal (27 §7.3.6, 08 §8 layer 5). Names below are proposed; the metric registry is 03 / 16 (REQUIRES REVIEW (Phase 1)).**
+**MVP: 3A (logs, metrics, audit, cost ledger) · 3B (dashboards from measurements) · Tier 0. Rule: no script text, quote, passage text, discrepancy value, correction or secret in any signal (27 §7.3.6, 08 §8 layer 5). Names below are proposed; the metric registry is 03 / 16 (REQUIRES REVIEW (Phase 1)). Task-level metrics carry the `stage_id` label so `s06_verify` and `s06_chart` are separable.**
 
 ### 22.1 Logs (structured JSON; fields `org_id`, `correlation_id`, `job_id`, `task_id`, `attempt_id`, `actor = agent_06`)
 | Event | Level | Extra fields (ids and counts only) |
@@ -1377,9 +1419,9 @@ Alert on: any `CROSS_TENANT_REF`; task failure rate; repair rate rising; `INFRAS
 ### 23.1 Human steps
 | # | Human step | Who | Mechanism | When | Blocks | MVP |
 |---|---|---|---|---|---|---|
-| H-1 | **Sensitive-claim review**: look at each claim with status other than `VERIFIED`, with reason codes, evidence references and suggested corrections; accept (recorded), request changes (revision), or reject | owner (`owner_sensitive`; level 2 `ORG_OWNER` for the finance channel, 24 §3.4) | approval kind `SENSITIVE_CLAIM` inserted by the orchestrator through `svc_s07.request_approval` on a `NEEDS_HUMAN_REVIEW` stage verdict (24 §3.3.2). A recorded accept is a human verdict row (13 §1.1 item 7); it never edits the claim's status and never overrides FIN-R9 or FIN-R13 for a finance channel without lawyer sign-off (13 §11 item 9, ⚖) | after `s06_claims` or `s06_verify` | the job's next stage | 3A |
+| H-1 | **Sensitive-claim review**: look at each claim with status other than `VERIFIED`, with reason codes, evidence references and suggested corrections; accept (recorded), request changes (revision), or reject | owner (`owner_sensitive`; level 2 `ORG_OWNER` for the finance channel, 24 §3.4) | approval kind `SENSITIVE_CLAIM` inserted by the orchestrator through `svc_s07.request_approval` on a `NEEDS_HUMAN_REVIEW` stage verdict (24 §3.3.2). A recorded accept is a human verdict row (13 §1.1 item 7) recorded by the operator from the owner's own chat message with confirmed evidence (`approval_channel = OWNER_CHAT_OPERATOR`, an `owner_instruction_evidence` row in state `CONFIRMED`, CCR-010; an agent never records it), and the approval names each accepted `claim_id` (18 §9.2, CCR-045); it never edits the claim's status, never accepts a `CONTRADICTED` claim, and never overrides FIN-R9 or FIN-R13 for a finance channel without lawyer sign-off (13 §11 item 9, ⚖) | after `s06_claims`, `s06_verify` or `s06_chart` | the job's next stage | 3A |
 | H-2 | **Release of "our method" material for a topic** (Q26, FIN-R12) | owner | `KNOWLEDGE_RELEASE`, requested from Agent 04's `method.restricted_pending`; Agent 06 only reads the state | before verification of a method topic | restricted evidence | 3A |
-| H-3 | **Provider-terms acceptance for sending library and script text to the provider** | owner (and counsel ⚖) | recorded owner decision (IMPLEMENTATION_PROGRESS), one decision with Agent 04 H-3 | before the first real library call | real library use (3A-BLOCKING, §11) | 3A |
+| H-3 | **Provider-terms acceptance for sending library and script text to the provider** | owner (and counsel ⚖) | recorded owner decision (IMPLEMENTATION_PROGRESS; 3A_SLICE_SPEC R19; owner question Q-O5), one decision with Agent 04 H-3 | before the first real library call | real library use (3A-BLOCKING, §11) | 3A |
 | H-4 | **Policy table, verdict map, tier floor, thresholds** (Q-F1, Q-F2, Q-F4) | owner | config change with a recorded decision | after the golden-sample measurement | none; provisional defaults apply | 3B |
 | H-5 | **Spot check of 3–5 facts per video** (18 §9.2, H 3 points) | owner | in the final video approval; evidence spans make each check one sentence | per video | none (it scores) | 3A |
 | H-6 | **Spend limits** | owner, at the provider and in the budgets (D1) | outside this agent | before any paid call | all paid calls | 3A |
@@ -1389,7 +1431,7 @@ No approval has a timeout; reminders only (03 §11.3 T16).
 | ID | Question | Provisional default | Where it matters |
 |---|---|---|---|
 | Q-F1 | Which claim types are verified, skipped, or sent to a human? (OPINION without citation, QUOTED_THIRD_PARTY without citation, PERFORMANCE/TESTIMONIAL on non-finance channels) | §6.3 table | `factcheck.verify.policy.*`; cases SKIP-30, QT-31 |
-| Q-F2 | Should a true-but-uncited claim go to the owner (`NEEDS_HUMAN_REVIEW`) or straight back to the script to add the suggested citation (revision)? And should `UNVERIFIABLE` ever be `BLOCKED`? | owner sees it; `CONTRADICTED` only is `BLOCKED` (§6.4 step 4) | `factcheck.verdict_map`; cases SUB-19, PAR-14…16 |
+| Q-F2 | Should a true-but-uncited claim go to the owner (`NEEDS_HUMAN_REVIEW`) or straight back to the script to add the suggested citation (revision)? And should `UNVERIFIABLE` ever be `BLOCKED`? | owner sees it; `CONTRADICTED` only is `BLOCKED` (§6.4 step 4). Consequence: a `PROVIDE_EVIDENCE` gap never fails the gate, so it reaches `s04_research` only through the owner's `CHANGES_REQUESTED` (24 §3.3 rule 7); Agent 06 names no `remedy_stage_id` | `factcheck.verdict_map`; cases SUB-19, PAR-14…16 |
 | Q-F3 | Is verification at the same model tier as the writer independent enough, or should it use another tier or provider? | `MID` for both; measured in 3B (ADR-007) | §11 |
 | Q-F4 | Lowest source tier that may verify a claim alone (`factcheck.min_tier_for_verified`) | `C_SECONDARY` (Agent 04 tiers `A_PRIMARY`…`D_UNVERIFIED`) | case TIER-20 |
 | Q-F5 | Are numbers written in words ("one in four") acceptable evidence for a numeral claim? | no, in v1 (downgrade to `NEEDS_SUBSTANTIATION`) | case NUM-21, §6.5 |
@@ -1407,11 +1449,11 @@ No approval has a timeout; reminders only (03 §11.3 T16).
 ### 24.1 Services
 | Unit | Process | Task types | Capabilities | Window | Placement | MVP |
 |---|---|---|---|---|---|---|
-| Fact-check executor | in `workers/ai_worker` (SOURCE_LAYOUT), package `agent_06_fact_checker` | `agent_06.claim_extraction`, `agent_06.claim_verification` | `llm` | any time (`AI_IO`, light CPU, external API); obeys `DRAIN`; whether 06 drains `AI_IO` at 06:30 is 06's decision | factory Compose project, development environment first | 3A |
+| Fact-check executor | in `workers/ai_worker` (SOURCE_LAYOUT), package `agent_06_fact_checker` | `agent_06.claim_extraction`, `agent_06.claim_verification` | `llm` | any time (`AI_IO`, light CPU, external API); obeys `DRAIN`; whether `AI_IO` is drained at the window end is the scheduler's rule (07 §8 item 2) | factory Compose project, development environment first | 3A |
 The package is a library imported by the worker; it has no HTTP server and no public port, no outbound HTTP other than the LLM adapter's, and no render dependency. Agents never import each other (27 §7.1).
 
 ### 24.2 Configuration and environment variables (names only; values never in this repository)
-All configuration is read through `amw_core.config`; no package reads the environment directly (27 §7.3.1). Names are **proposed**; the registry of env and config keys is pending (18 §13, CCR).
+All configuration is read through `amw_core.config`; no package reads the environment directly (27 §7.3.1). Env names are **proposed** (the env registry is 18 §13); config keys follow 27 §4.2 and CCR-019, and `amw_core.config` is the registry that rejects duplicates.
 | Name | Kind | Purpose | Scope |
 |---|---|---|---|
 | `AMW_ENV` | plain | environment label (dev / factory) | all services |
@@ -1434,7 +1476,7 @@ A failed readiness check means the worker does not claim these task types; it ne
 Start: database (migrations applied by the deploy step only, `amw_migrator` never in a running service) → storage → orchestrator and queue functions → shared services (S4 cost guard, audit, S2 rule packs) → AI worker (Agents 04, 05, 06 task types). Stop: stop claiming; at `DRAIN`, finish the current LLM call, write a checkpoint and return `SUSPENDED`; never kill mid-call except on host shutdown (the idempotency keys then prevent a second spend on resume).
 
 ### 24.5 Release and rollback
-Prompt files, rule-pack versions, the policy table and config are versioned (27 §4.1); a prompt, policy, tier or threshold change goes through the eval gate (§26) before merge; rollback is the previous prompt version (files are immutable; a change is a new version). The pending migrations of §13.1 (unique indexes, two `claims` columns) ship with RLS in the same migration and are additive, so a rollback of the code leaves them harmless.
+Prompt files, rule-pack versions, the policy table and config are versioned (27 §4.1); a prompt, policy, tier or threshold change goes through the eval gate (§26) before merge; rollback is the previous prompt version (files are immutable; a change is a new version). The migrations of CCR-029 (unique indexes, two `claims` columns) are Wave A and ship with RLS in the same migration; they are additive, so a rollback of the code leaves them harmless.
 
 ---
 
@@ -1444,10 +1486,10 @@ Prompt files, rule-pack versions, the policy table and config are versioned (27 
 | ID | Criterion (testable) | Covers | Test | MVP |
 |---|---|---|---|---|
 | AC-1 | Given a valid script, extraction returns `SUCCEEDED` with claims whose every quote equals the segment slice at its offsets and no claim spans a segment | FR-2, SC-4 | I-01, U-03, ext. A2 | 3A |
-| AC-2 | The four answer-key scripts give: A1 `ALLOWED`, A2 `BLOCKED` (FIN-R1, R3, R2), A3 `BLOCKED` (FIN-R6), A4 `BLOCKED` (FIN-R8) at extraction; A2–A4 never reach verification; A1 verifies to `VERIFIED` | §1B.2, Q-13 | extraction AK-01…AK-04, verification AK-01…AK-04, E2E-1, E2E-2 | 3A |
+| AC-2 | The four answer-key scripts give: A1 `ALLOWED`, A2 `BLOCKED` (FIN-R1, R3, R2), A3 `BLOCKED` (FIN-R6), A4 `BLOCKED` (FIN-R8) at extraction; A2–A4 never reach verification; A1's chart claims are `EXTRACTED` / `CHART_PENDING` at `s06_verify` and `VERIFIED` against chart facts at `s06_chart` (CCR-004) | §1B.2, Q-13 | extraction AK-01…AK-04, verification AK-01…AK-04, E2E-1, E2E-2 | 3A |
 | AC-3 | Every verdict and status is recomputed by code; a model-supplied verdict is never copied | SC-6, NFR-12 | U-07, U-32…U-38, checks `claims.verdict_recomputed`, `fact.verdict_recomputed` | 3A |
-| AC-4 | A chart with `WITHIN_LAG` or `UNKNOWN` data age adds a BLOCKING FIN-R9 flag to every claim linked to it, regardless of the model | FIN-R9, IN-02 | U-01, U-04, extraction EDGE-14, EDGE-15 | 3A |
-| AC-5 | URLs and referral or coupon codes in a finance script add at least a WARNING FIN-R8 flag by code | FIN-R8 | U-05 | 3A |
+| AC-4 | A chart with `WITHIN_LAG` or `UNKNOWN` data age adds a BLOCKING FIN-R9 flag to every claim linked to it, regardless of the model; a `CONSTRAINT` chart (`OLDER_THAN_LAG`) and a schematic chart (`null`) add none | FIN-R9, IN-02 | U-01, U-04, extraction EDGE-14, EDGE-15 | 3A |
+| AC-5 | URLs and referral or coupon codes in a finance script add at least a WARNING FIN-R8 flag by code; a named instrument with a future marker adds at least a WARNING FIN-R13 flag by code (D11) | FIN-R8, FIN-R13 | U-05, U-41 | 3A |
 | AC-6 | No claim is `VERIFIED` without a valid `SUPPORTS` evidence span, a passing number guard, a source at or above the tier floor and a script citation (or chart reference) | SC-2, SC-3, Q-1 | U-26, U-34, A11 | 3A |
 | AC-7 | Zero false `VERIFIED` and zero evidence from a flagged passage on the verification dataset; answer-key 4/4; deterministic cases 100 % | SC-2 | R-02 | 3A |
 | AC-8 | A `CONTRADICTED` claim yields `BLOCKED`; an unresolved or unverifiable claim yields at least `NEEDS_HUMAN_REVIEW`; the stage verdict is the most severe combined verdict | Q-2, Q-5 | U-38, I-03 | 3A |
@@ -1455,18 +1497,20 @@ Prompt files, rule-pack versions, the policy table and config are versioned (27 
 | AC-10 | Every cross-tenant and cross-channel attempt (script, claim, citation, chunk, snapshot, approval) is rejected with the exact 07 code before any read; no existence oracle | NFR-1, SC-5 | S-01…S-03, S-07, S-10 | 3A |
 | AC-11 | A restricted chunk is loaded only when released, cited and the topic is a method topic; search never expands into restricted collections | FIN-R12 | I-04, S-04, U-24, RG-33 | 3A |
 | AC-12 | A blocked extraction verdict, a bad `claims_sha256` or a skipped/code-only claim causes no model call | NFR-15 | F-02, SKIP-30, NF-18, QT-31, CH-32, RG-33 | 3A |
-| AC-13 | A replay of the same task creates no duplicate claim, no duplicate citation row and no second paid call; a crash mid-batch resumes without repeating a finished call | SC-8, NFR-3 | I-02, I-05, F-06 | 3A |
+| AC-13 | A replay of the same task (key includes `stage_id`) creates no duplicate claim, no duplicate citation row and no second paid call; a crash mid-batch resumes without repeating a finished call | SC-8, NFR-3 | I-02, I-05, F-06 | 3A |
 | AC-14 | A budget refusal suspends the task (`AWAITING_BUDGET`), makes no call after the refusal and never raises the budget | SC-7, NFR-5 | F-11 | 3A |
 | AC-15 | Each error row of §18 yields its 07 code and disposition; the model output is repaired at most once; no loop exceeds a cap | §18 | F-01…F-13 | 3A |
 | AC-16 | A full run's logs, audit rows, metrics and errors contain no script, claim or passage text (canary) | NFR-6, Q-17 | S-05 | 3A |
 | AC-17 | The stable prompt prefix of both prompts contains no tenant data; both prompt files pass the prompt lint and match their registered sha256 | 08 §8 layer 4 | S-08, U-09, C-01 | 3A |
-| AC-18 | Extraction and verification datasets meet the thresholds of §26.5 | §26 | R-01, R-02 | 3A to merge; recalibrated 3B |
+| AC-18 | Extraction (35 cases) and verification (41 cases) datasets meet the thresholds of §26.5 | §26 | R-01, R-02 | 3A to merge; recalibrated 3B |
 | AC-19 | Marathi, Hindi and mixed scripts: quotes keep their script and offsets; cross-language evidence is accepted | NFR-10 | POS-07, POS-08, EDGE-23…25 | 3A |
 | AC-20 | Agent 06 makes zero YouTube API calls, no outbound HTTP other than the LLM adapter, and reads no OAuth value | D1 | static import check; network-guard test; grant test | 3A |
 | AC-21 | Metrics on the three golden samples are recorded (claims per status, cost, latency per stage, owner-found false `VERIFIED`); the owner sets the thresholds of Q-11 and Q-18 | §1A.10 | E2E-3, P-01…P-03 | 3B |
 | AC-22 | Marathi and Hindi token cost and accuracy against the English control are measured and recorded | SC-10 | P-03 | 3B |
-| AC-23 | Reuse of an unchanged verified claim across iterations without a paid call; Shorts verification of non-inherited claims | FR-16, Q-10 | cache and Shorts tests | 3C |
+| AC-23 | Reuse of an unchanged verified claim across iterations (and from the parent job to a Shorts cut) without a paid call | FR-16, Q-10 | cache tests | 3C |
 | AC-24 | Ad claims verified against a client substantiation document yield `SUBSTANTIATED` | directive §1D.3 / 25, 3C | ads tests | 3C (Tier 1) |
+| AC-25 | `s06_verify` and `s06_chart` outputs carry `script_sha256` equal to `scripts.content_sha256`, `overall.proposed_verdict`, `gate: true` results and `revision_requests[].segment_id`; Agents 07 and 09 read them without a private field | CCR-049, CCR-001, CCR-009 | C-07, U-45, I-09 | 3A |
+| AC-26 | A verification model refusal `UNSAFE_CONTENT` yields one `MODEL_REFUSED` / `UNVERIFIABLE` entry per claim and stage `NEEDS_HUMAN_REVIEW` | 27 §4.3, CCR-023 | U-44, F-09 | 3A |
 §1A mapping: the §1A rules that concern facts and claims appear as Q-1…Q-13 and AC-2, AC-6…AC-9, AC-21; the other §1A rules do not concern this agent (§20.1).
 
 ---
@@ -1480,20 +1524,20 @@ Agent 06 has **two LLM steps**, one per task type. Everything else (price-data a
 | Step | Prompt ID | File | Output schema | Config key family |
 |---|---|---|---|---|
 | extraction | `agent_06/claim_extraction.v1` | [`prompts/agent_06_fact_checker/claim_extraction.v1.md`](../prompts/agent_06_fact_checker/claim_extraction.v1.md) (exists; referenced, not rewritten) | `agent_06.claim_extraction.output` 1.0.0 | `llm.agent_06.claim_extraction.*` |
-| verification | `agent_06/claim_verification.v1` | [`prompts/agent_06_fact_checker/claim_verification.v1.md`](../prompts/agent_06_fact_checker/claim_verification.v1.md) | `agent_06.claim_verification_batch.output` 1.0.0 | `llm.agent_06.claim_verification.*` |
+| verification | `agent_06/claim_verification.v1` | [`prompts/agent_06_fact_checker/claim_verification.v1.md`](../prompts/agent_06_fact_checker/claim_verification.v1.md) | `agent_06.claim_verification.batch.output` 1.0.0 | `llm.agent_06.claim_verification.*` |
 | (judge, extraction) | `agent_06/claim_extraction_judge.v1` | written with the first build ticket for the eval gate | judge score object | `evals.agent_06.claim_extraction.*` |
 | (judge, verification) | `agent_06/claim_verification_judge.v1` | written with the first build ticket for the eval gate | judge score object | `evals.agent_06.claim_verification.*` |
 
 ### 26.2 Golden datasets
 | Dataset | Path | Cases | Scope | Judge |
 |---|---|---|---|---|
-| extraction | [`evals/agent_06_fact_checker/claim_extraction/`](../evals/agent_06_fact_checker/claim_extraction/) (`README.md`, `cases.jsonl`, `rubric.md`) | 32 (4 answer key, 8 hard negatives, 19 edge, 1 refusal) | extraction output plus checks D1–D7 | J1 completeness, J2 atomicity, J3 normalisation faithfulness, J4 rationale |
-| verification | [`evals/agent_06_fact_checker/claim_verification/`](../evals/agent_06_fact_checker/claim_verification/) (`README.md`, `cases.jsonl`, `rubric.md`) | 37 (4 answer key, 4 positive, 4 hard negative, 24 edge, 1 refusal; 8 deterministic cases that must not reach the model) | verification output plus checks V0–V8, P1–P11 | J1 evidence precision, J2 discrepancy accuracy, J3 correction faithfulness, J4 rationale |
+| extraction | [`evals/agent_06_fact_checker/claim_extraction/`](../evals/agent_06_fact_checker/claim_extraction/) (`README.md`, `cases.jsonl`, `rubric.md`) | 35 (4 answer key, 9 hard negatives, 21 edge, 1 refusal) | extraction output plus checks D1–D7 and D11 | J1 completeness, J2 atomicity, J3 normalisation faithfulness, J4 rationale |
+| verification | [`evals/agent_06_fact_checker/claim_verification/`](../evals/agent_06_fact_checker/claim_verification/) (`README.md`, `cases.jsonl`, `rubric.md`) | 41 (4 answer key, 4 positive, 4 hard negative, 26 edge, 3 refusal; 10 deterministic cases that must not reach the model; `verify_mode` selects `s06_verify` or `s06_chart`) | verification output plus checks V0–V8, P1–P11 | J1 evidence precision, J2 discrepancy accuracy, J3 correction faithfulness, J4 rationale |
 All text is invented (no book text, no real source, no tenant data, no calendar dates). The answer-key cases apply the directive §1B.2 key; finance rule IDs follow GLOSSARY §6.38.
 
 ### 26.3 Deterministic checks (run on every case; the judge never overrides them)
 - **Extraction**: A1 schema; A2 exact quotes and segment ids; A3 overall verdict after D7; A4 `must_flag`; A5 `must_not_flag`; A6 `min_claims`; A7 refusal reason and `claims == []`; A8 `claim_types_any`; A9 no invented citation or chart reference; A10 no `FIN-*` flag when the finance pack is inactive; A11 no claim spans segments and local ids unique.
-- **Verification**: A1 schemas; A2 one result per claim; A3 evidence ids are candidates; A4 span bounds; A5 status; A6 verdict; A7 stage verdict; A8 evidence and relations; A9 discrepancy kinds and verbatim values; A10 correction rule and P10; A11 no false `VERIFIED`; A12 conflict set; A13 flagged passages and no evidence from them; A14 reason codes and suggested citation; A15 model-call count (0 for code-only cases); A16 code outcome and refusal; A17 number guard.
+- **Verification**: A1 schemas; A2 one result per claim; A3 evidence ids are candidates; A4 span bounds; A5 status; A6 verdict; A7 stage verdict; A8 evidence and relations; A9 discrepancy kinds and verbatim values; A10 correction rule and P10; A11 no false `VERIFIED`; A12 conflict set; A13 flagged passages and no evidence from them; A14 reason codes and suggested citation; A15 model-call count (0 for code-only cases); A16 code outcome and refusal; A17 number guard; A18 task output schema, `script_sha256`, `segment_id` of revision requests and `gate_verdict`. Extraction adds A12 (D11 marker flag).
 
 ### 26.4 Judge rubric and calibration
 Rubrics in each dataset's `rubric.md`; integer 1–5 per criterion with a one-sentence justification; a score below the case's `judge_min` fails the case. The judge scores only subjective quality, never verdicts, statuses or deterministic checks; it sees passage text only inside the private worker and stores IDs and its one-sentence justifications, never passage text. Each judge prompt is versioned and regression-tested against a fixed human-labelled calibration subset (two humans label at least 10 cases; the judge must agree within ±1 point on ≥ 90 % of scores; design default, recalibrated after the pilot).
@@ -1520,5 +1564,5 @@ Rubrics in each dataset's `rubric.md`; integer 1–5 per criterion with a one-se
 5. Dataset growth: every production failure that reached a human (a missed flag, a wrong `VERIFIED`, a false `CONTRADICTED`, an injected passage that got through) becomes a new case before the fix (27 §6.1); no real tenant text is ever copied into a case.
 6. Open points live in each dataset README (extraction §8; verification §9).
 
-### 26.7 Pending items affecting the pack
-`factcheck.verify.policy`, `factcheck.verdict_map`, `factcheck.min_tier_for_verified`, word-to-digit tables, per-language conflict word lists, the chart-facts provider and the provider data-terms acceptance are REQUIRES REVIEW (Phase 1); the verification dataset carries its own values in each case (`fixture.step_config`) so no product default is hidden in it. The extraction README §6 states "≥ 27 of 30" while the file holds 32 cases; the figure is recomputed in the first build ticket. Whether the 13 §5.4 future-marker pre-filter also runs in Agent 06 (HN-32) is 13's decision (§20.2).
+### 26.7 Open items affecting the pack
+`factcheck.verify.policy`, `factcheck.verdict_map`, `factcheck.min_tier_for_verified`, word-to-digit tables, per-language conflict word lists, the D11 marker lists, and the provider data-terms acceptance are REQUIRES REVIEW (Phase 1); the verification dataset carries its own values in each case (`fixture.step_config`) so no product default is hidden in it. The `agent_08.chart_facts` document is Agent 08's to write (the cases AK-01, CH-32 and CH-34 use the shape of §7.2). The eval README index (`evals/README.md` §5) still lists the extraction dataset with its old case count; it is not this blueprint's file and is aligned by the lane that owns it.
