@@ -22,6 +22,10 @@ PROTOCOLS = [
     interfaces.IdempotencyStore,
     interfaces.CheckpointStore,
     interfaces.ReadableStream,
+    interfaces.OwnerEvidenceStore,
+    interfaces.SessionEventSource,
+    interfaces.KnowledgeCollections,
+    interfaces.VoiceRegistry,
 ]
 
 
@@ -76,3 +80,13 @@ def test_storage_is_stream_based() -> None:
 def test_job_store_has_no_cross_tenant_scans() -> None:
     assert not hasattr(interfaces.JobStore, "retry_due")
     assert not hasattr(interfaces.JobStore, "stuck_tasks")
+
+
+def test_ledger_and_job_records_carry_ccr_fields() -> None:
+    entry = {f.name for f in dataclasses.fields(interfaces.NewCostEntry)}
+    assert {"tokens_cache_write_in", "chars_in", "language"} <= entry
+    assert "monetized_destination" in {f.name for f in dataclasses.fields(interfaces.JobRecord)}
+    voice = {f.name for f in dataclasses.fields(interfaces.VoiceRecord)}
+    assert {"licence_id", "presenter_kind"} <= voice
+    consent = {f.name for f in dataclasses.fields(interfaces.VoiceConsentRecord)}
+    assert "permitted_channel_ids" in consent

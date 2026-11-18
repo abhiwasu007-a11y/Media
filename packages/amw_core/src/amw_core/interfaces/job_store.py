@@ -92,6 +92,8 @@ class JobRecord:
     idempotency_key: IdempotencyKey
     requested_by: ActorRef
     input_ref: str | None
+    monetized_destination: bool
+    """CCR-028: set at J02, read by the licence insert guard; never changed after J03."""
     task_count: int
     cost_estimate_micros: int
     cost_verified_micros: int
@@ -194,6 +196,8 @@ class JobTransition:
     actor: ActorRef
     outcome: JobOutcome | None = None
     failed_task_id: TaskId | None = None
+    monetized_destination: bool | None = None
+    """Only at J02 (CCR-028)."""
     reason: str | None = None
 
 

@@ -115,3 +115,80 @@ def test_checkpoints_seq_and_latest() -> None:
     assert store.latest(tx(), task) is None
     with pytest.raises(InputInvalidError):
         store.write(t, _ckpt(task, "c", "1.5"), NOW)
+
+
+# --- owner instruction evidence (04 section 5.16, CCR-010) -------------------------------
+
+from amw_core.enums import (  # noqa: E402
+    ApprovalStepState,
+    EvidenceRecordKind,
+    EvidenceState,
+    InstructionSourceKind,
+)
+from amw_core.interfaces import NewEvidence, OwnerEvidenceStore, SessionEvent  # noqa: E402
+from amw_core.testing.memory import MemoryOwnerEvidenceStore  # noqa: E402
+
+
+def _evidence(
+    source: InstructionSourceKind = InstructionSourceKind.OWNER_CHAT_MESSAGE,
+) -> NewEvidence:
+    return NewEvidence(
+        record_kind=EvidenceRecordKind.STEP_DECISION,
+        subject_kind="render",
+        subject_id=ids.new_id(ids.Prefix.RENDER),
+        source_kind=source,
+        session_id="session_x",
+        event_uuid="event-1",
+        quote="approve R7K2",
+        message_at=NOW,
+        recorded_by=ids.ActorRef("sys_operator"),
+        on_behalf_of=ids.USER.new(),
+        review_code="R7K2",
+        parsed_decision=ApprovalStepState.APPROVED,
+    )
+
+
+def _event(uuid: str, at: datetime) -> SessionEvent:
+    return SessionEvent("session_x", uuid, "user", False, "human", "yes", at)
+
+
+def test_evidence_forward_only_lifecycle() -> None:
+    store: OwnerEvidenceStore = MemoryOwnerEvidenceStore()
+    t = tx()
+    row = store.record(t, _evidence())
+    assert row.state is EvidenceState.PENDING_VERIFICATION
+    assert len(row.evidence_sha256) == 64
+    with pytest.raises(InvalidTransitionError):
+        store.confirm(t, row.id, _event("event-2", NOW + timedelta(minutes=1)))
+    verified = store.mark_verified(t, row.id, {"role_user": True}, NOW)
+    assert verified.state is EvidenceState.VERIFIED
+    with pytest.raises(InvalidTransitionError):
+        store.confirm(t, row.id, _event("event-1", NOW + timedelta(minutes=1)))  # same event
+    with pytest.raises(InvalidTransitionError):
+        store.confirm(t, row.id, _event("event-2", NOW))  # not later
+    confirmed = store.confirm(t, row.id, _event("event-2", NOW + timedelta(minutes=1)))
+    assert confirmed.state is EvidenceState.CONFIRMED
+    with pytest.raises(InvalidTransitionError):
+        store.refuse(t, row.id, "too late")
+    assert store.for_subject(t, "render", row.evidence.subject_id) == [confirmed]
+    assert store.get(tx(), row.id) is None
+
+
+def test_evidence_replay_key_and_refusal() -> None:
+    store = MemoryOwnerEvidenceStore()
+    t = tx()
+    first = store.record(t, _evidence())
+    with pytest.raises(IdempotencyConflictError):
+        store.record(t, first.evidence)
+    refused = store.refuse(t, first.id, "ambiguous")
+    assert refused.state is EvidenceState.REFUSED
+    assert store.record(t, first.evidence).state is EvidenceState.PENDING_VERIFICATION
+
+
+def test_non_owner_source_can_never_be_verified() -> None:
+    store = MemoryOwnerEvidenceStore()
+    t = tx()
+    row = store.record(t, _evidence(InstructionSourceKind.TOOL_RESULT))
+    with pytest.raises(InvalidTransitionError):
+        store.mark_verified(t, row.id, {}, NOW)
+    assert store.refuse(t, row.id, "not owner-authored").state is EvidenceState.REFUSED

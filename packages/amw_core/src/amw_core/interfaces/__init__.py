@@ -28,6 +28,18 @@ from amw_core.interfaces.job_store import (
     TaskRecord,
     TaskTransition,
 )
+from amw_core.interfaces.knowledge_collections import (
+    KnowledgeCollection,
+    KnowledgeCollections,
+    NewKnowledgeCollection,
+)
+from amw_core.interfaces.owner_evidence import (
+    EvidenceRecord,
+    NewEvidence,
+    OwnerEvidenceStore,
+    SessionEvent,
+    SessionEventSource,
+)
 from amw_core.interfaces.queue import (
     ClaimedItem,
     ClaimRequest,
@@ -46,6 +58,7 @@ from amw_core.interfaces.system_functions import (
     SystemFunctions,
 )
 from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
+from amw_core.interfaces.voices import VoiceConsentRecord, VoiceRecord, VoiceRegistry
 
 __all__ = [
     "AttemptRecord",
@@ -74,22 +87,30 @@ __all__ = [
     "CostTotals",
     "DueResume",
     "DueTask",
+    "EvidenceRecord",
     "ExpiredLease",
     "IdempotencyRecord",
     "IdempotencyStore",
     "JobRecord",
     "JobStore",
     "JobTransition",
+    "KnowledgeCollection",
+    "KnowledgeCollections",
     "NewAuditEntry",
     "NewCheckpoint",
     "NewCostEntry",
+    "NewEvidence",
     "NewJob",
+    "NewKnowledgeCollection",
     "NewQueueItem",
     "NewTask",
+    "OwnerEvidenceStore",
     "QueueItem",
     "ReadableStream",
     "Reservation",
     "ReservationOutcome",
+    "SessionEvent",
+    "SessionEventSource",
     "StuckTask",
     "SystemFunctions",
     "TaskQueue",
@@ -98,4 +119,7 @@ __all__ = [
     "TenancyContext",
     "TenantContext",
     "TenantTransaction",
+    "VoiceConsentRecord",
+    "VoiceRecord",
+    "VoiceRegistry",
 ]

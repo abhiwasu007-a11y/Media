@@ -12,7 +12,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Protocol, runtime_checkable
 
-from amw_core.enums import BillingMode, CostFigureKind, CostUnitKind
+from amw_core.enums import BillingMode, CostFigureKind, CostOperation, CostUnitKind
 from amw_core.ids import (
     AttemptId,
     ChannelId,
@@ -31,7 +31,7 @@ class NewCostEntry:
     """Columns of 04 section 5.14 filled as 09 section 5 describes (none added)."""
 
     provider: str
-    operation: str
+    operation: CostOperation
     amount_micros: int
     currency: str
     figure_kind: CostFigureKind
@@ -46,6 +46,12 @@ class NewCostEntry:
     tokens_in: int | None = None
     tokens_out: int | None = None
     tokens_cached_in: int | None = None
+    tokens_cache_write_in: int | None = None
+    """CCR-037: prompt-cache write tokens."""
+    chars_in: int | None = None
+    """CCR-037: input characters of an LLM/TTS call (Devanagari token ratio)."""
+    language: str | None = None
+    """CCR-037: BCP 47 language of the call."""
     units: Decimal | None = None
     unit_kind: CostUnitKind | None = None
     fx_rate: Decimal | None = None

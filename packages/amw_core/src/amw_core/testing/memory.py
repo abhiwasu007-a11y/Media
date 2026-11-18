@@ -1,28 +1,34 @@
-"""In-memory fakes: ``MemoryTransaction``, ``MemoryIdempotencyStore``, ``MemoryCheckpointStore``.
+"""In-memory fakes: transaction, idempotency, checkpoint and owner-evidence stores.
 
 They follow the interface docstrings exactly and partition every row by the transaction's
 ``org_id`` (a fake tenant boundary). Not for production use.
 """
 
-from collections.abc import Sequence
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
-from amw_core.enums import IdempotencyStatus
+from amw_core.enums import EvidenceState, IdempotencyStatus, InstructionSourceKind
 from amw_core.errors import IdempotencyConflictError, InputInvalidError, InvalidTransitionError
 from amw_core.ids import (
     CHECKPOINT,
     NEVER_EXPIRING_SCOPE_PREFIXES,
+    OWNER_EVIDENCE,
     CheckpointId,
     IdempotencyKey,
     OrgId,
     TaskId,
+    WireId,
     idempotency_key_of,
     is_idempotency_scope,
 )
 from amw_core.interfaces.checkpoint_store import CheckpointRecord, NewCheckpoint
 from amw_core.interfaces.idempotency_store import BeginAction, BeginDecision, IdempotencyRecord
+from amw_core.interfaces.owner_evidence import EvidenceRecord, NewEvidence, SessionEvent
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
 
 
@@ -157,3 +163,115 @@ class MemoryCheckpointStore:
     def list_for_task(self, tx: TenantTransaction, task_id: TaskId) -> Sequence[CheckpointRecord]:
         rows = self._rows.get(tx.context.org_id, [])
         return sorted((r for r in rows if r.checkpoint.task_id == task_id), key=lambda r: r.seq)
+
+
+def evidence_sha256(evidence: NewEvidence) -> str:
+    """SHA-256 of the canonical evidence fields listed in 04 section 5.16."""
+    material = {
+        "session_id": evidence.session_id,
+        "event_uuid": evidence.event_uuid,
+        "quote": evidence.quote,
+        "message_at": evidence.message_at.isoformat(),
+        "record_kind": evidence.record_kind.value,
+        "subject_kind": evidence.subject_kind,
+        "subject_id": evidence.subject_id,
+        "review_code": evidence.review_code,
+        "parsed_decision": evidence.parsed_decision.value if evidence.parsed_decision else None,
+    }
+    canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class MemoryOwnerEvidenceStore:
+    """Forward-only states; the replay key is unique among non-refused rows (04 section 5.16)."""
+
+    def __init__(self) -> None:
+        self._rows: dict[tuple[OrgId, WireId], EvidenceRecord] = {}
+
+    def _replay_key(self, org: OrgId, e: NewEvidence) -> tuple[Any, ...]:
+        return (org, e.event_uuid, e.record_kind, e.subject_kind, e.subject_id)
+
+    def record(self, tx: TenantTransaction, evidence: NewEvidence) -> EvidenceRecord:
+        org = tx.context.org_id
+        key = self._replay_key(org, evidence)
+        for (row_org, _), row in self._rows.items():
+            live = row.state is not EvidenceState.REFUSED
+            if row_org == org and live and self._replay_key(org, row.evidence) == key:
+                raise IdempotencyConflictError("owner message already backs this record")
+        row = EvidenceRecord(
+            id=OWNER_EVIDENCE.new(),
+            org_id=org,
+            evidence=evidence,
+            state=EvidenceState.PENDING_VERIFICATION,
+            evidence_sha256=evidence_sha256(evidence),
+        )
+        self._rows[(org, row.id)] = row
+        return row
+
+    def _move(
+        self, tx: TenantTransaction, evidence_id: WireId, allowed: tuple[EvidenceState, ...]
+    ) -> EvidenceRecord:
+        row = self._rows.get((tx.context.org_id, evidence_id))
+        if row is None or row.state not in allowed:
+            raise InvalidTransitionError("evidence state change not allowed")
+        return row
+
+    def mark_verified(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        verifier_result: Mapping[str, Any],
+        at: datetime,
+    ) -> EvidenceRecord:
+        row = self._move(tx, evidence_id, (EvidenceState.PENDING_VERIFICATION,))
+        if row.evidence.source_kind is not InstructionSourceKind.OWNER_CHAT_MESSAGE:
+            raise InvalidTransitionError("only an owner chat message can be verified")
+        row = replace(
+            row,
+            state=EvidenceState.VERIFIED,
+            event_verified_at=at,
+            verifier_result=dict(verifier_result),
+        )
+        self._rows[(tx.context.org_id, evidence_id)] = row
+        return row
+
+    def confirm(
+        self, tx: TenantTransaction, evidence_id: WireId, confirmation: SessionEvent
+    ) -> EvidenceRecord:
+        row = self._move(tx, evidence_id, (EvidenceState.VERIFIED,))
+        if confirmation.event_uuid == row.evidence.event_uuid or (
+            confirmation.timestamp <= row.evidence.message_at
+        ):
+            raise InvalidTransitionError("confirmation must be a second, later owner event")
+        row = replace(
+            row,
+            state=EvidenceState.CONFIRMED,
+            confirmation_event_uuid=confirmation.event_uuid,
+            confirmation_quote=confirmation.content,
+            confirmation_message_at=confirmation.timestamp,
+        )
+        self._rows[(tx.context.org_id, evidence_id)] = row
+        return row
+
+    def refuse(self, tx: TenantTransaction, evidence_id: WireId, reason: str) -> EvidenceRecord:
+        row = self._move(
+            tx, evidence_id, (EvidenceState.PENDING_VERIFICATION, EvidenceState.VERIFIED)
+        )
+        row = replace(row, state=EvidenceState.REFUSED, refused_reason=reason)
+        self._rows[(tx.context.org_id, evidence_id)] = row
+        return row
+
+    def get(self, tx: TenantTransaction, evidence_id: WireId) -> EvidenceRecord | None:
+        return self._rows.get((tx.context.org_id, evidence_id))
+
+    def for_subject(
+        self, tx: TenantTransaction, subject_kind: str, subject_id: WireId
+    ) -> Sequence[EvidenceRecord]:
+        org = tx.context.org_id
+        return [
+            r
+            for (row_org, _), r in self._rows.items()
+            if row_org == org
+            and r.evidence.subject_kind == subject_kind
+            and r.evidence.subject_id == subject_id
+        ]

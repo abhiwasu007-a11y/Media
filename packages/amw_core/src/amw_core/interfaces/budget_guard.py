@@ -6,10 +6,9 @@ call (``check_call``), E3 after the ledger write (``after_call``). Fail closed: 
 ``ACTIVE`` applicable budget is refused; no automatic spend increase ever (rule 8, B6).
 ``committed = sum(ledger: VERIFIED else ESTIMATE) + sum(HELD reservations)`` (09 section 3.3).
 
-Pending CCRs: the provider start gate (09 section 8) needs ``budget_scope_kind = PROVIDER``
-(CCR-3A-5) and the pilot budget needs ``budget_period = PILOT_TOTAL`` (CCR-3A-4); neither value
-exists in GLOSSARY yet, so ``check_provider_gate`` is specified but cannot be backed by rows until
-they are applied. Implementation: lane L1.
+The provider start gate (09 section 8) uses ``budget_scope_kind = PROVIDER`` with ``scope_key``
+= the provider config key, and the pilot budget ``budget_period = PILOT_TOTAL`` (never resets);
+both were applied by CCR-035. Implementation: lane L1.
 """
 
 from collections.abc import Sequence
@@ -102,7 +101,8 @@ class BudgetGuard(Protocol):
 
     def check_provider_gate(self, tx: TenantTransaction, provider: str) -> None:
         """09 section 8.1-8.2: raise ``BudgetExhaustedError`` before any network request if the
-        owner has not acknowledged a provider limit (pending CCR-3A-5)."""
+        owner has not acknowledged a provider limit: no ``ACTIVE`` ``PROVIDER`` budget row whose
+        ``scope_key`` is ``provider`` (CCR-035)."""
         ...
 
     def after_call(self, tx: TenantTransaction, entry: CostEntry) -> Sequence[Budget]:
