@@ -29,9 +29,9 @@ class RecordingAuditLog:
         self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None
     ) -> Iterator[AuditEntry]:
         for e in self.entries:
-            if e.org_id == tx.context.org_id and e.seq > since_seq:
-                if target_id is None or e.entry.target_id == target_id:
-                    yield e
+            mine = e.org_id == tx.context.org_id and e.seq > since_seq
+            if mine and (target_id is None or e.entry.target_id == target_id):
+                yield e
 
     def actions(self) -> list[str]:
         return [e.entry.action for e in self.entries]

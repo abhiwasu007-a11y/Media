@@ -144,7 +144,8 @@ def _validating_job(store: PgJobStore, t: TenantTransaction, tenant: Tenant) -> 
             monetized_destination=True,
         ),
     )
-    assert moved.state is JobState.VALIDATING and moved.state_version == 2
+    assert moved.state is JobState.VALIDATING
+    assert moved.state_version == 2
     return job.id
 
 
@@ -181,7 +182,8 @@ def test_create_job_is_idempotent_and_audited(
         assert again.id == first.id
         assert store.get_job(t, first.id) == first
         assert store.get_job(t, JOB.new()) is None
-    assert first.state is JobState.PENDING and first.priority is Priority.NORMAL
+    assert first.state is JobState.PENDING
+    assert first.priority is Priority.NORMAL
     assert audit.actions() == ["job.created"]
     rows = admin.execute(
         "SELECT transition_id, from_state, to_state, actor_kind, audit_seq FROM state_transitions"
@@ -208,12 +210,11 @@ def test_job_transition_locking(
         )
         with pytest.raises(MissingDependencyError):
             store.transition_job(t, missing)
-    with tx(tenancy, tenant_a) as t:
-        with pytest.raises(InvalidTransitionError):
-            store.transition_job(
-                t,
-                JobTransition(job_id, TransitionId.J03, JobState.PENDING, JobState.QUEUED, 2, ORCH),
-            )
+    with tx(tenancy, tenant_a) as t, pytest.raises(InvalidTransitionError):
+        store.transition_job(
+            t,
+            JobTransition(job_id, TransitionId.J03, JobState.PENDING, JobState.QUEUED, 2, ORCH),
+        )
 
 
 def test_add_job_cost(tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, store: PgJobStore) -> None:
@@ -249,7 +250,8 @@ def test_task_lifecycle_end_to_end(
         assert store.dependants(t, a.id) == [b.id]
         assert [x.id for x in store.list_tasks(t, job_id)] == [a.id, b.id]
         job = store.get_job(t, job_id)
-        assert job is not None and job.task_count == 2
+        assert job is not None
+        assert job.task_count == 2
         sha = "ab" * 32
         a = _move(
             store,
@@ -266,7 +268,8 @@ def test_task_lifecycle_end_to_end(
     with tx(tenancy, tenant_a, WKR) as t:
         a = _move(store, t, a, TransitionId.T07, TaskState.RUNNING)
         attempt = store.start_attempt(t, a.id, worker, None, False)
-        assert attempt.attempt_no == 1 and attempt.result is AttemptResult.RUNNING
+        assert attempt.attempt_no == 1
+        assert attempt.result is AttemptResult.RUNNING
         store.heartbeat_attempt(t, attempt.id)
         err = error_object_from_exception(
             NetworkError("reset"),
@@ -278,7 +281,8 @@ def test_task_lifecycle_end_to_end(
         done = store.finish_attempt(
             t, attempt.id, AttemptResult.FAILED_RETRYABLE, 12, None, None, err
         )
-        assert done.error == err and done.ended_at is not None
+        assert done.error == err
+        assert done.ended_at is not None
         with pytest.raises(InvalidTransitionError):
             store.finish_attempt(t, attempt.id, AttemptResult.SUCCEEDED, 1, None, None, None)
         with pytest.raises(InvalidTransitionError):
@@ -292,7 +296,8 @@ def test_task_lifecycle_end_to_end(
             next_attempt_at=datetime.now(UTC) + timedelta(seconds=5),
             error=err,
         )
-        assert a.last_error == err and a.attempt_count == 1
+        assert a.last_error == err
+        assert a.attempt_count == 1
     with tx(tenancy, tenant_a, ActorRef("sys_scheduler")) as t:
         a = _move(store, t, a, TransitionId.T12, TaskState.QUEUED)
     with tx(tenancy, tenant_a, WKR) as t:
@@ -313,7 +318,8 @@ def test_task_lifecycle_end_to_end(
         finished = store.finish_attempt(
             t, attempt.id, AttemptResult.SUCCEEDED, 5, "amw-blob://o", usage, None
         )
-        assert finished.resource_usage == usage and finished.attempt_no == 2
+        assert finished.resource_usage == usage
+        assert finished.attempt_no == 2
         a = _move(
             store,
             t,
@@ -323,7 +329,8 @@ def test_task_lifecycle_end_to_end(
             output_ref="amw-blob://o",
             output_sha256="cd" * 32,
         )
-        assert a.completed_at is not None and a.output_sha256 == "cd" * 32
+        assert a.completed_at is not None
+        assert a.output_sha256 == "cd" * 32
     events = audit.actions()
     assert events.count("task.created") == 2
     assert events[-1] == "task.completed"
@@ -352,7 +359,8 @@ def test_checkpoint_and_cancel(
         )
         assert task.wait_reason is WaitReason.AWAITING_BUDGET
         task = store.request_cancel(t, task.id, "superseded")
-        assert task.cancel_reason == "superseded" and task.cancel_requested_at is not None
+        assert task.cancel_reason == "superseded"
+        assert task.cancel_requested_at is not None
         task = _move(store, t, task, TransitionId.T19, TaskState.CANCELLED, reason="superseded")
         assert task.wait_reason is None
         with pytest.raises(InputInvalidError):
@@ -403,9 +411,11 @@ def test_create_tasks_guards(
         ):
             with pytest.raises(InputInvalidError):
                 store.create_tasks(t, job_id, bad)
-    with tx(tenancy, tenant_a, ActorRef("sys_scheduler")) as t:
-        with pytest.raises(InvalidTransitionError):
-            store.create_tasks(t, job_id, [new_task(job_id, tenant_a, 1)])
+    with (
+        tx(tenancy, tenant_a, ActorRef("sys_scheduler")) as t,
+        pytest.raises(InvalidTransitionError),
+    ):
+        store.create_tasks(t, job_id, [new_task(job_id, tenant_a, 1)])
 
 
 def test_finish_attempt_input_checks(
@@ -474,4 +484,5 @@ def test_job_completion_and_failure(
                 outcome=JobOutcome.DELIVERED,
             ),
         )
-        assert job.completed_at is not None and job.outcome is JobOutcome.DELIVERED
+        assert job.completed_at is not None
+        assert job.outcome is JobOutcome.DELIVERED
