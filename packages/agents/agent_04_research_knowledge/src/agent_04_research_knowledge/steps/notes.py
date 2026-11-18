@@ -6,9 +6,16 @@ or is ambiguous. A note with a future reference or a forward-looking flag is sto
 usable for the script (FIN-R3, FIN-R13). The model never sets reliability, release or usability.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from agent_04_research_knowledge.guards.copy_guard import CROSS_LANGUAGE, CopyGuard, CopyResult
+from agent_04_research_knowledge.guards.copy_guard import (
+    CROSS_LANGUAGE,
+    CopyGuard,
+    CopyResult,
+    CopyThresholds,
+)
+from agent_04_research_knowledge.guards.text_match import dominant_script
 from agent_04_research_knowledge.llm import StructuredLlmCaller
 from agent_04_research_knowledge.models.common import Refusal
 from agent_04_research_knowledge.models.enums import (
@@ -34,19 +41,23 @@ from agent_04_research_knowledge.runtime import RunInfo
 from agent_04_research_knowledge.settings import CopyGuardSettings, NotesSettings, StepLlm
 from amw_core.enums import TimeReferenceKind
 
+NOTE_SCRIPT = "LATIN"
+"""Notes are written in English (prompt rule 2); their script must be Latin."""
+
 
 @dataclass(frozen=True, slots=True)
 class NoteLimits:
     max_note_chars: int
-    max_verbatim_words: int
-    max_overlap_ratio: float
-    ngram_n: int
+    copy: CopyThresholds
+    max_pack_source_coverage: float
 
     @classmethod
     def from_settings(cls, notes: NotesSettings, guard: CopyGuardSettings) -> NoteLimits:
-        return cls(
-            notes.max_note_chars, guard.max_verbatim_words, guard.max_overlap_ratio, guard.ngram_n
-        )
+        return cls(notes.max_note_chars, guard.thresholds(), guard.max_pack_source_coverage)
+
+    @property
+    def max_verbatim_words(self) -> int:
+        return self.copy.max_verbatim_words
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +75,8 @@ class NoteVerdict:
 
 
 class NoteValidator:
-    """Pure: NT6 copy guard, NT7 length, NT8 number match and URL/quote, NT9 forward-looking."""
+    """Pure: NT6 copy guard (cited passage AND the whole retrieval set), NT7 length and script,
+    NT8 number match and URL/quote, NT9 forward-looking."""
 
     def __init__(self, guard: CopyGuard | None = None) -> None:
         self._guard = guard or CopyGuard()
@@ -73,35 +85,37 @@ class NoteValidator:
         self,
         note: NoteCandidate,
         passage_text: str,
-        passage_language: str | None,
         limits: NoteLimits,
-        note_language: str = "en",
+        pool: Sequence[str] = (),
     ) -> NoteVerdict:
+        """``pool``: every passage text of the job's retrieval set; a note that copies any of
+        them fails, whichever passage it cites."""
         text = note.note
         problem: NoteProblem | None = None
         copy: CopyResult | None = None
         if has_url_or_referral(text) or has_quote_span(text):
             problem = NoteProblem.URL_OR_QUOTE
         else:
-            copy = self._guard.check(
-                text,
-                passage_text,
-                limits.ngram_n,
-                limits.max_overlap_ratio,
-                max_verbatim_words=limits.max_verbatim_words,
-                note_language=note_language,
-                passage_language=passage_language,
+            cited = self._guard.check(text, passage_text, limits.copy)
+            others = self._guard.check_pool(text, pool, limits.copy)
+            copy = (
+                cited if cited.passed and others.passed else (cited if not cited.passed else others)
             )
-            if not copy.passed:
+            if not (cited.passed and others.passed):
                 problem = NoteProblem.COPY_OVERLAP
             elif not numbers_in(text) <= numbers_in(passage_text) or not (
                 {n.replace(",", "").rstrip("%") for n in note.numbers_in_note}
                 <= numbers_in(passage_text)
             ):
                 problem = NoteProblem.NUMBER_NOT_IN_PASSAGE
-            elif note.clarity is Clarity.AMBIGUOUS or len(text) > limits.max_note_chars:
-                # NT7: a note over the cap is not one short statement; the repair-feedback enum
-                # is closed, so it is reported as AMBIGUOUS.
+            elif (
+                note.clarity is Clarity.AMBIGUOUS
+                or len(text) > limits.max_note_chars
+                or dominant_script(text) not in (None, NOTE_SCRIPT)
+            ):
+                # NT7: a note over the cap, or not in the note language's script (notes are
+                # English, prompt rule 2), is not acceptable; the repair-feedback enum is closed,
+                # so it is reported as AMBIGUOUS.
                 problem = NoteProblem.AMBIGUOUS
         if problem is not None:
             return NoteVerdict(False, problem, False, None, copy)
@@ -215,6 +229,7 @@ class EvidenceNoter:
         step_key: str,
         channel_category: str,
         rule_packs: tuple[str, ...],
+        pool: Sequence[str] = (),
     ) -> NotesResult:
         result = NotesResult(concept.concept_id)
         rendered = self._prompts.render(self._prompts.load(NOTES_PROMPT_ID), rule_packs)
@@ -248,7 +263,7 @@ class EvidenceNoter:
         result.excluded_forward_looking = sum(
             1 for e in output.excluded_statements if e.passage_id in by_id
         )
-        accepted, failing = self._check(output.notes, by_id, relevance, result)
+        accepted, failing = self._check(output.notes, by_id, relevance, result, pool)
         if failing and self._settings.max_repair_rounds > 0:
             repair_items = [
                 RepairItem(note_ref=n, passage_id=p, problem=pr) for n, p, pr in failing
@@ -269,7 +284,7 @@ class EvidenceNoter:
             result.repaired = True
             wanted = {n for n, _, _ in failing}
             retry = tuple(n for n in repaired.value.notes if n.note_ref in wanted)
-            more, failing = self._check(retry, by_id, relevance, result)
+            more, failing = self._check(retry, by_id, relevance, result, pool)
             accepted.extend(more)
         for note_ref, passage_id, problem in failing:
             result.dropped.append(DroppedNote(note_ref, passage_id, problem))
@@ -288,6 +303,7 @@ class EvidenceNoter:
         by_id: dict[str, PassageSource],
         relevance: dict[str, Relevance],
         result: NotesResult,
+        pool: Sequence[str] = (),
     ) -> tuple[list[ValidatedNote], list[tuple[str, str, NoteProblem]]]:
         accepted: list[ValidatedNote] = []
         failing: list[tuple[str, str, NoteProblem]] = []
@@ -300,7 +316,7 @@ class EvidenceNoter:
                 continue  # NT10 and rule 2: notes only from RELEVANT passages
             if per_passage.get(cand.passage_id, 0) >= self._settings.max_notes_per_passage:
                 continue
-            verdict = self._validator.validate(cand, passage.text, passage.language, self._limits)
+            verdict = self._validator.validate(cand, passage.text, self._limits, pool)
             if not verdict.passed:
                 problem = verdict.problem or NoteProblem.AMBIGUOUS
                 failing.append((cand.note_ref, cand.passage_id, problem))

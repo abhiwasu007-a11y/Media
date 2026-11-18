@@ -592,7 +592,7 @@ def test_restricted_pending_released_and_general_topic_never_mixed() -> None:
         source=src2,
         collection="owner_method",
     )
-    apr = approval(w2)
+    apr = approval(w2, subject_id=src2)
     from dataclasses import replace
 
     w2.library._sources[(w2.org, src2)] = replace(
@@ -612,7 +612,7 @@ def test_restricted_pending_released_and_general_topic_never_mixed() -> None:
         source=src3,
         collection="owner_method",
     )
-    apr3 = approval(w3)
+    apr3 = approval(w3, subject_id=src3)
     w3.library._sources[(w3.org, src3)] = replace(
         w3.library._sources[(w3.org, src3)], release_approval_id=apr3.approval_id
     )

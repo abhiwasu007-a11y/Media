@@ -8,12 +8,14 @@ allow-list of blueprint 13, no string formatting of values). The runner is opene
 inside ``amw_core.tenancy`` (``SET LOCAL app.org_id``), one short transaction per call.
 """
 
+import hashlib
+import json
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
-from agent_04_research_knowledge.errors import InputInvalid
+from agent_04_research_knowledge.errors import IdempotencyConflict, InputInvalid
 from agent_04_research_knowledge.guards.restricted import ApprovalView
 from agent_04_research_knowledge.library.models import (
     ChunkHit,
@@ -35,6 +37,8 @@ from amw_core.enums import (
 )
 from amw_core.ids import Prefix, format_id, parse_id
 
+UNIQUE_VIOLATION = "23505"
+
 ALLOWED_TABLES = frozenset(
     {"knowledge_collections", "knowledge_sources", "knowledge_chunks", "approvals"}
 )
@@ -49,6 +53,12 @@ class SqlRunner(Protocol):
     def execute(self, sql: str, params: Mapping[str, Any]) -> int:
         """Number of rows affected."""
         ...
+
+
+class SubjectDocuments(Protocol):
+    """Reads an approval's ``subject_ref`` document (a tenant-scoped storage read)."""
+
+    def read(self, scope: TenantScope, subject_ref: str) -> bytes | None: ...
 
 
 RunnerFactory = Callable[[TenantScope], AbstractContextManager[SqlRunner]]
@@ -98,7 +108,8 @@ WHERE org_id = %(org_id)s AND channel_id = %(channel_id)s AND id = ANY(%(chunk_i
 """
 
 SELECT_APPROVAL = """
-SELECT id, org_id, kind, state, subject_kind, subject_id, subject_sha256
+SELECT id, org_id, kind, state, subject_kind, subject_id,
+       encode(subject_sha256, 'hex') AS subject_sha256, subject_ref
 FROM approvals
 WHERE org_id = %(org_id)s AND id = %(approval_id)s
 """
@@ -157,6 +168,20 @@ def _wire(prefix: Prefix, value: Any) -> str:
     return str(format_id(prefix, value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))))
 
 
+SUBJECT_PREFIX: Mapping[str, Prefix] = {
+    "knowledge_source": Prefix.KNOWLEDGE_SOURCE,
+    "knowledge_release": Prefix.KNOWLEDGE_COLLECTION,
+}
+
+
+def _subject_wire(subject_kind: str | None, value: Any) -> str | None:
+    """``approvals.subject_id`` is a uuid; the release rule compares wire IDs."""
+    if value is None:
+        return None
+    prefix = SUBJECT_PREFIX.get(subject_kind or "")
+    return _wire(prefix, value) if prefix else str(value)
+
+
 def _opt_wire(prefix: Prefix, value: Any) -> str | None:
     return None if value is None else _wire(prefix, value)
 
@@ -164,9 +189,15 @@ def _opt_wire(prefix: Prefix, value: Any) -> str | None:
 class SqlKnowledgeLibrary:
     """``KnowledgeLibrary`` over a ``SqlRunner`` (one short tenant transaction per call)."""
 
-    def __init__(self, runner: RunnerFactory, fts: FtsQueryBuilder) -> None:
+    def __init__(
+        self,
+        runner: RunnerFactory,
+        fts: FtsQueryBuilder,
+        documents: SubjectDocuments | None = None,
+    ) -> None:
         self._runner = runner
         self._fts = fts
+        self._documents = documents
 
     @staticmethod
     def _base(scope: TenantScope) -> dict[str, Any]:
@@ -304,19 +335,33 @@ class SqlKnowledgeLibrary:
         if not rows:
             return None
         r = rows[0]
+        kind = r["subject_kind"]
         return ApprovalView(
             approval_id=_wire(Prefix.APPROVAL, r["id"]),
             org_id=_wire(Prefix.ORGANISATION, r["org_id"]),
             kind=ApprovalKind(r["kind"]),
             state=ApprovalState(r["state"]),
-            subject_kind=r["subject_kind"],
-            subject_id=None if r["subject_id"] is None else str(r["subject_id"]),
+            subject_kind=kind,
+            subject_id=_subject_wire(kind, r["subject_id"]),
             subject_sha256=r["subject_sha256"],
+            subject_ref=r["subject_ref"],
         )
 
     def released_chunk_ids(
         self, scope: TenantScope, approval_id: str, collection_id: str
     ) -> frozenset[str]:
+        """The chunk list of a per-topic release. Authoritative: the approval's ``subject_ref``
+        document (CCR-070), whose bytes must hash to ``subject_sha256``; a missing or mismatching
+        document releases nothing (fail closed). Without a document reader, the set-once pointer
+        ``knowledge_chunks.release_approval_id`` is used (documented fallback)."""
+        approval = self.approval(scope, approval_id)
+        if approval is not None and approval.subject_ref and self._documents is not None:
+            raw = self._documents.read(scope, approval.subject_ref)
+            if raw is None or hashlib.sha256(raw).hexdigest() != approval.subject_sha256:
+                return frozenset()
+            doc = json.loads(raw)
+            ids = doc.get("chunk_ids", []) if isinstance(doc, dict) else []
+            return frozenset(str(i) for i in ids)
         params = {
             **self._base(scope),
             "approval_id": _uuid(approval_id, Prefix.APPROVAL),
@@ -350,6 +395,9 @@ class SqlKnowledgeLibrary:
         return source
 
     def insert_chunks(self, scope: TenantScope, chunks: Sequence[ChunkRow]) -> IngestWrite:
+        for chunk in chunks:
+            if (chunk.org_id, chunk.channel_id) != (scope.org_id, scope.channel_id):
+                raise InputInvalid("chunk does not belong to the tenant scope")
         written = 0
         with self._runner(scope) as run:
             for chunk in chunks:
@@ -377,7 +425,12 @@ class SqlKnowledgeLibrary:
                     "ts_config": query.config,
                     "token_count": chunk.token_count,
                 }
-                written += run.execute(INSERT_CHUNK, params)
+                try:
+                    written += run.execute(INSERT_CHUNK, params)
+                except Exception as exc:
+                    if getattr(exc, "sqlstate", None) == UNIQUE_VIOLATION:
+                        raise IdempotencyConflict("chunk id already exists") from None
+                    raise
         return IngestWrite(written, len(chunks) - written)
 
     def chunk_count(self, scope: TenantScope, source_id: str, ingest_version: int) -> int:

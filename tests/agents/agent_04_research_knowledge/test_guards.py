@@ -1,6 +1,7 @@
 """Unit tests: CopyGuard, NoteValidator, ReliabilityScorer, TierScores, gate, TenantGuard (10.3-10.6)."""
 # ruff: noqa: E501, PT018
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -13,7 +14,7 @@ from agent_04_research_knowledge.errors import (
     TenantInactive,
     TenantMismatch,
 )
-from agent_04_research_knowledge.guards.copy_guard import CopyGuard, longest_shared_run, normalise
+from agent_04_research_knowledge.guards.copy_guard import CopyGuard, longest_shared_run
 from agent_04_research_knowledge.guards.restricted import (
     ApprovalView,
     ChunkMeta,
@@ -22,6 +23,11 @@ from agent_04_research_knowledge.guards.restricted import (
     release_subject_sha256,
 )
 from agent_04_research_knowledge.guards.tenant import TenantGuard
+from agent_04_research_knowledge.guards.text_match import (
+    dominant_script,
+    normalise_for_matching,
+    scripts_differ,
+)
 from agent_04_research_knowledge.models.enums import (
     DomainClass,
     GateReason,
@@ -45,11 +51,16 @@ from amw_core.enums import (
     SourceOwnership,
     VideoKind,
 )
-from tests.agents.agent_04_research_knowledge.conftest import World, build_world, make_settings
+from tests.agents.agent_04_research_knowledge.conftest import (
+    PROPOSED,
+    World,
+    build_world,
+    make_settings,
+)
 
 pytestmark = pytest.mark.unit
 SCORES = make_settings().tier_scores()
-LIMITS = NoteLimits(300, 6, 0.5, 3)
+LIMITS = NoteLimits(300, PROPOSED, 0.5)
 
 
 def note(text: str, **over: object) -> NoteCandidate:
@@ -69,61 +80,31 @@ def note(text: str, **over: object) -> NoteCandidate:
 
 
 def test_normalise_and_longest_run() -> None:
-    assert normalise("A Stop-Loss, ORDER!") == ["a", "stop", "loss", "order"]
+    assert normalise_for_matching("A Stop-Loss, ORDER!") == ["a", "stop", "loss", "order"]
     assert longest_shared_run(["a", "b", "c", "d"], ["x", "b", "c", "y"]) == 2
     assert longest_shared_run([], ["a"]) == 0
 
 
-def test_copy_guard_symmetric_and_monotonic() -> None:
+def test_copy_guard_run_is_monotonic_and_symmetric() -> None:
     guard = CopyGuard()
     a = "one two three four five six seven eight"
+    loose = replace(PROPOSED, max_verbatim_words=20, max_containment_ratio=1.0, max_lcs_ratio=1.0)
     for run_len in range(1, 8):
         b = " ".join(a.split()[:run_len]) + " zzz yyy xxx"
-        res = guard.check(b, a, 3, 0.99, max_verbatim_words=20, passage_language="en")
-        assert res.longest_shared_run == run_len
-    r1 = guard.check(
-        a, "five six seven nine", 2, 0.99, max_verbatim_words=20, passage_language="en"
-    )
-    r2 = guard.check(
-        "five six seven nine", a, 2, 0.99, max_verbatim_words=20, passage_language="en"
-    )
+        assert guard.check(b, a, loose).longest_shared_run == run_len
+    r1 = guard.check(a, "five six seven nine", loose)
+    r2 = guard.check("five six seven nine", a, loose)
     assert r1.longest_shared_run == r2.longest_shared_run == 3
 
 
-def test_copy_guard_overlap_ratio_fails_without_long_run() -> None:
-    guard = CopyGuard()
-    passage = "alpha beta gamma delta epsilon zeta eta theta"
-    note_text = "alpha beta gamma. delta epsilon zeta. eta theta"
-    res = guard.check(note_text, passage, 2, 0.5, max_verbatim_words=20, passage_language="en")
-    assert res.longest_shared_run == 8
-    res = guard.check(
-        "alpha beta x delta epsilon y eta theta",
-        passage,
-        2,
-        0.3,
-        max_verbatim_words=20,
-        passage_language="en",
-    )
-    assert not res.passed and res.longest_shared_run < 20
-
-
-def test_copy_guard_cross_language_by_script_and_tag() -> None:
+def test_copy_guard_cross_language_only_when_scripts_really_differ() -> None:
     guard = CopyGuard()
     mr = "स्टॉप-लॉस म्हणजे ठरावीक पातळीवर व्यवहार बंद करणारी ऑर्डर"
-    assert (
-        guard.check("a stop loss closes", mr, 3, 0.5, max_verbatim_words=6).skipped_reason
-        == "CROSS_LANGUAGE"
-    )
-    res = guard.check(
-        "a stop loss",
-        "a stop loss",
-        3,
-        0.5,
-        max_verbatim_words=6,
-        note_language="en",
-        passage_language="mr",
-    )
-    assert res.skipped_reason == "CROSS_LANGUAGE" and res.passed
+    assert guard.check("a stop loss closes", mr, PROPOSED).skipped_reason == "CROSS_LANGUAGE"
+    assert dominant_script(mr) == "DEVANAGARI" and dominant_script("a stop") == "LATIN"
+    assert dominant_script("12 34") is None and not scripts_differ("12", mr)
+    same = guard.check(mr, mr, PROPOSED)
+    assert same.skipped_reason is None and not same.passed  # same script: always checked
 
 
 @pytest.mark.parametrize(
@@ -138,7 +119,7 @@ def test_copy_guard_cross_language_by_script_and_tag() -> None:
 )
 def test_note_validator_problems(text: str, problem: NoteProblem) -> None:
     verdict = NoteValidator().validate(
-        note(text), "Prices moved over a long year with no fixed pattern.", "en", LIMITS
+        note(text), "Prices moved over a long year with no fixed pattern.", LIMITS
     )
     assert not verdict.passed and verdict.problem is problem and not verdict.usable
 
@@ -147,18 +128,18 @@ def test_note_validator_ambiguous_and_too_long_and_usable_flags() -> None:
     v = NoteValidator()
     passage = "Risk limits keep losses small over many trades."
     assert (
-        v.validate(note("Limits help.", clarity="AMBIGUOUS"), passage, "en", LIMITS).problem
+        v.validate(note("Limits help.", clarity="AMBIGUOUS"), passage, LIMITS).problem
         is NoteProblem.AMBIGUOUS
     )
     long_note = note("x" * 10 + " " + "words " * 60)
-    assert v.validate(long_note, passage, "en", LIMITS).problem is NoteProblem.AMBIGUOUS
-    ok = v.validate(note("Small risk caps keep any loss modest."), passage, "en", LIMITS)
+    assert v.validate(long_note, passage, LIMITS).problem is NoteProblem.AMBIGUOUS
+    ok = v.validate(note("Small risk caps keep any loss modest."), passage, LIMITS)
     assert ok.passed and ok.usable and ok.exclusion_reason is None
     future = v.validate(
-        note("A cap may help later.", time_reference_kind="FUTURE"), passage, "en", LIMITS
+        note("A cap may help later.", time_reference_kind="FUTURE"), passage, LIMITS
     )
     assert future.passed and not future.usable and future.exclusion_reason is not None
-    fwd = v.validate(note("A cap may help later.", forward_looking=True), passage, "en", LIMITS)
+    fwd = v.validate(note("A cap may help later.", forward_looking=True), passage, LIMITS)
     assert not fwd.usable
 
 
@@ -283,6 +264,8 @@ def apv(**over: object) -> ApprovalView:
         "org_id": ORG,
         "kind": ApprovalKind.KNOWLEDGE_RELEASE,
         "state": ApprovalState.APPROVED,
+        "subject_kind": "knowledge_source",
+        "subject_id": "ksr_1",
     }
     base.update(over)
     return ApprovalView(**base)  # type: ignore[arg-type]
@@ -315,9 +298,9 @@ def test_gate_matrix() -> None:
             GateReason.RELEASE_NOT_APPROVED,
         ),
         (
-            chunk(source_release_approval_id="apr_9"),
+            chunk(),
             METHOD,
-            Lookup(apv()),
+            Lookup(apv(subject_id="ksr_other")),
             GateReason.RELEASE_NOT_COVERING,
         ),
     ]
@@ -459,3 +442,44 @@ def test_settings_validation() -> None:
 
     with pytest.raises(ConfigInvalid):
         ResearchSettings.from_flat({})
+
+
+def test_gate_pointer_alone_never_releases_and_both_approvals_are_consulted() -> None:
+    gate = RestrictedCollectionGate()
+    # a pointer to an approval that is for another source, or for a per-topic release of another
+    # collection, covers nothing (04 section 5.16 reads what the approval is FOR)
+    other_source = apv(subject_kind="knowledge_source", subject_id="ksr_other")
+    assert (
+        gate.evaluate(chunk(), METHOD, Lookup(other_source)).reason
+        is GateReason.RELEASE_NOT_COVERING
+    )
+    per_topic_elsewhere = apv(
+        subject_kind="knowledge_release", subject_id="kcl_other", subject_sha256="0" * 64
+    )
+    assert (
+        gate.evaluate(chunk(), METHOD, Lookup(per_topic_elsewhere)).reason
+        is GateReason.RELEASE_NOT_COVERING
+    )
+    assert (
+        gate.evaluate(chunk(), METHOD, Lookup(apv(subject_kind=None, subject_id=None))).reason
+        is GateReason.RELEASE_NOT_COVERING
+    )
+
+    # a chunk with a (non-covering) per-topic approval whose source has a covering source release
+    class Two:
+        def approval(self, approval_id: str) -> ApprovalView | None:
+            if approval_id == "apr_chunk":
+                return apv(
+                    approval_id="apr_chunk",
+                    subject_kind="knowledge_release",
+                    subject_id="kcl_1",
+                    subject_sha256="0" * 64,
+                )
+            return apv(approval_id="apr_src")
+
+        def released_chunk_ids(self, approval_id: str, collection_id: str) -> frozenset[str]:
+            return frozenset({"kch_1"})
+
+    both = chunk(chunk_release_approval_id="apr_chunk", source_release_approval_id="apr_src")
+    res = gate.evaluate(both, METHOD, Two())
+    assert res.allowed and res.release_approval_id == "apr_src"

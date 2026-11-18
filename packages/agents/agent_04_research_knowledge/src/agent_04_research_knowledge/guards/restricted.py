@@ -29,6 +29,7 @@ class ApprovalView:
     subject_kind: str | None = None
     subject_id: str | None = None
     subject_sha256: str | None = None
+    subject_ref: str | None = None
 
 
 class ApprovalLookup(Protocol):
@@ -82,16 +83,17 @@ def release_subject_sha256(
 def _covers(
     approval: ApprovalView, chunk: ChunkMeta, topic: TopicFlags, lookup: ApprovalLookup
 ) -> bool:
-    """04 section 5.16 release rule, both forms."""
-    # (a) source level: the source carries the approval, or the approval's subject is the source
-    if chunk.source_release_approval_id == approval.approval_id or (
-        approval.subject_kind == SUBJECT_KNOWLEDGE_SOURCE and approval.subject_id == chunk.source_id
-    ):
-        return True
-    # (b) per topic and chunk
+    """04 section 5.16 release rule, both forms, checked against what the approval is FOR.
+
+    (a) ``subject_kind = knowledge_source`` and ``subject_id`` = the chunk's own source: the whole
+    source. (b) ``subject_kind = knowledge_release``, ``subject_id`` = the chunk's collection,
+    ``subject_sha256`` = hash of the canonical document for THIS topic title and the chunk list.
+    A pointer on the row alone (``release_approval_id``) never covers anything.
+    """
+    if approval.subject_kind == SUBJECT_KNOWLEDGE_SOURCE:
+        return approval.subject_id == chunk.source_id
     if (
-        chunk.chunk_release_approval_id == approval.approval_id
-        and approval.subject_kind == SUBJECT_KNOWLEDGE_RELEASE
+        approval.subject_kind == SUBJECT_KNOWLEDGE_RELEASE
         and approval.subject_id == chunk.collection_id
     ):
         released = lookup.released_chunk_ids(approval.approval_id, chunk.collection_id)
@@ -106,16 +108,27 @@ class RestrictedCollectionGate:
             return GateDecision(True, None, None, method_labelled=False)
         if topic.video_kind is not VideoKind.METHOD_TOPIC:
             return GateDecision(False, GateReason.NOT_METHOD_TOPIC)
-        approval_id = chunk.chunk_release_approval_id or chunk.source_release_approval_id
-        approval = lookup.approval(approval_id) if approval_id else None
-        if approval is None:
-            return GateDecision(False, GateReason.RELEASE_MISSING, restricted_pending=True)
-        if approval.org_id != chunk.org_id:
-            raise CrossTenantRef("approval belongs to another tenant")
-        if approval.kind is not ApprovalKind.KNOWLEDGE_RELEASE:
-            return GateDecision(False, GateReason.RELEASE_WRONG_KIND, restricted_pending=True)
-        if approval.state is not ApprovalState.APPROVED:
-            return GateDecision(False, GateReason.RELEASE_NOT_APPROVED, restricted_pending=True)
-        if not _covers(approval, chunk, topic, lookup):
-            return GateDecision(False, GateReason.RELEASE_NOT_COVERING, restricted_pending=True)
-        return GateDecision(True, None, approval.approval_id, method_labelled=True)
+        # a chunk may carry a per-topic approval and its source a source-level one: try both
+        ids = list(
+            dict.fromkeys(
+                i for i in (chunk.chunk_release_approval_id, chunk.source_release_approval_id) if i
+            )
+        )
+        first_denial = GateDecision(False, GateReason.RELEASE_MISSING, restricted_pending=True)
+        for position, approval_id in enumerate(ids):
+            approval = lookup.approval(approval_id)
+            if approval is None:
+                continue
+            if approval.org_id != chunk.org_id:
+                raise CrossTenantRef("approval belongs to another tenant")
+            if approval.kind is not ApprovalKind.KNOWLEDGE_RELEASE:
+                reason = GateReason.RELEASE_WRONG_KIND
+            elif approval.state is not ApprovalState.APPROVED:
+                reason = GateReason.RELEASE_NOT_APPROVED
+            elif _covers(approval, chunk, topic, lookup):
+                return GateDecision(True, None, approval.approval_id, method_labelled=True)
+            else:
+                reason = GateReason.RELEASE_NOT_COVERING
+            if position == 0 or first_denial.reason is GateReason.RELEASE_MISSING:
+                first_denial = GateDecision(False, reason, restricted_pending=True)
+        return first_denial

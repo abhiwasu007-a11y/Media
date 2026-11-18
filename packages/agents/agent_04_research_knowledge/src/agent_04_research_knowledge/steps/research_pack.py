@@ -68,6 +68,7 @@ from agent_04_research_knowledge.steps.assemble import (
     PackAssembler,
     SourceRecord,
     blocked_pack,
+    enforce_pack_coverage,
 )
 from agent_04_research_knowledge.steps.external import (
     ExternalReferenceFetcher,
@@ -470,13 +471,27 @@ class ResearchPackStep:
         # S4 notes per concept and batch
         evidence: list[ConceptEvidence] = []
         refused: list[ValidationResult] = []
+        concept_passages = {
+            c.concept_id: self._passages(
+                run,
+                c,
+                results[c.concept_id],
+                fetched,
+                topic,
+                source_cache,
+                sources,
+                citations,
+                approvals,
+            )
+            for c in plan.concepts
+        }
+        # every passage text of the job's retrieval set: a note is checked against all of them
+        pool = list(dict.fromkeys(p.text for ps in concept_passages.values() for p in ps))
         for concept in plan.concepts:
             ce = ConceptEvidence(concept)
             res = results[concept.concept_id]
             ce.restricted_blocked = bool(res.restricted_blocked)
-            passages = self._passages(
-                run, concept, res, fetched, topic, source_cache, sources, citations, approvals
-            )
+            passages = concept_passages[concept.concept_id]
             per_call = self._d.settings.notes.max_passages_per_call
             for b, start in enumerate(range(0, len(passages), per_call), start=1):
                 step_key = f"S4_notes_{concept.concept_id}_{b}"
@@ -492,6 +507,7 @@ class ResearchPackStep:
                         step_key,
                         data.channel_category,
                         tuple(data.active_rule_packs),
+                        pool,
                     )
                     state.batches[step_key] = self._store(notes)
                     self._checkpoint(run, step_key, state, 0.5)
@@ -502,6 +518,9 @@ class ResearchPackStep:
                     ce.notes_refused = True
                     refused.append(notes_refused_result(concept.concept_id, notes.refusal))
             evidence.append(ce)
+        enforce_pack_coverage(
+            evidence, self._limits.copy.ngram_n, self._limits.max_pack_source_coverage
+        )
         restricted_pending: dict[str, list[str]] = {}
         for cid, res in results.items():
             for ckey in res.restricted_blocked:
@@ -833,6 +852,8 @@ class ResearchPackStep:
                     "overlap_ratio": n.copy.overlap_ratio,
                     "passed": n.copy.passed,
                     "skipped_reason": n.copy.skipped_reason,
+                    "lcs_ratio": n.copy.lcs_ratio,
+                    "fuzzy_run": n.copy.fuzzy_run,
                 },
             )
             for n in notes.notes
@@ -850,9 +871,11 @@ class ResearchPackStep:
         from agent_04_research_knowledge.models.enums import NoteProblem
 
         result = NotesResult("restored")
+        texts = {p.passage_id: p.text for p in passages}
         for n in batch.notes:
+            text = texts.get(str(n.passage["passage_id"]), "")
             passage = PassageSource(
-                **{**n.passage, "text": "", "tier": ReliabilityTier(n.passage["tier"])}
+                **{**n.passage, "text": text, "tier": ReliabilityTier(n.passage["tier"])}
             )
             copy = None if n.copy_result is None else CopyResult(**n.copy_result)
             result.notes.append(
@@ -870,7 +893,6 @@ class ResearchPackStep:
         result.excluded_forward_looking = batch.excluded_forward_looking
         result.injection_passages = batch.injection
         result.refusal = batch.refusal
-        del passages
         return result
 
     # ---- outputs

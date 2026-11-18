@@ -95,9 +95,14 @@ def flat_settings() -> dict[str, Any]:
         "research.notes.max_notes_per_passage": 3,
         "research.notes.max_passages_per_call": 3,
         "research.notes.max_repair_rounds": 1,
-        "research.copy_guard.max_verbatim_words": 6,
-        "research.copy_guard.max_overlap_ratio": 0.5,
-        "research.copy_guard.ngram_n": 3,
+        "research.copy_guard.max_verbatim_words": 8,
+        # PROPOSALS only (REQUIRES REVIEW owner/counsel, see the package README)
+        "research.copy_guard.ngram_n": 5,
+        "research.copy_guard.max_containment_ratio": 0.3,
+        "research.copy_guard.max_lcs_ratio": 0.65,
+        "research.copy_guard.fuzzy_edits": 1,
+        "research.copy_guard.max_fuzzy_words": 12,
+        "research.copy_guard.max_pack_source_coverage": 0.5,
         "research.reliability.tier_scores": {
             "A_PRIMARY": 0.9,
             "B_PUBLISHED": 0.7,
@@ -128,6 +133,10 @@ def flat_settings() -> dict[str, Any]:
         for k, v in step.items():
             flat[f"llm.agent_04.research_pack.{name}.{k}"] = v
     return flat
+
+
+PROPOSED = ResearchSettings.from_flat(flat_settings()).copy_guard.thresholds()
+"""The proposed copy-guard thresholds (REQUIRES REVIEW owner/counsel); tests only."""
 
 
 def make_settings(**overrides: Any) -> ResearchSettings:
@@ -429,6 +438,7 @@ def approval(world: World, **over: Any) -> ApprovalView:
         "org_id": world.org,
         "kind": ApprovalKind.KNOWLEDGE_RELEASE,
         "state": ApprovalState.APPROVED,
+        "subject_kind": "knowledge_source",
     }
     fields.update(over)
     view = ApprovalView(**fields)

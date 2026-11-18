@@ -13,6 +13,7 @@ from typing import Annotated, Any, Self
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_04_research_knowledge.errors import ConfigInvalid
+from agent_04_research_knowledge.guards.copy_guard import CopyThresholds
 from agent_04_research_knowledge.models.enums import DomainClass, ReliabilityTier
 from agent_04_research_knowledge.scoring.reliability import DomainClassRegistry, TierScores
 from amw_core.enums import LlmModelTier
@@ -49,9 +50,33 @@ class NotesSettings(_Cfg):
 
 
 class CopyGuardSettings(_Cfg):
+    """Copy-guard thresholds (blueprint 10.6, YTG-R9, 13 section 8, IN-08).
+
+    REQUIRES REVIEW (owner and counsel, H-6): every field below is a legal-risk threshold. There
+    is no default in code; the values used in tests are PROPOSALS only (see the package README) and
+    must be set on measured samples of the owner's real sources before any real library run.
+    """
+
     max_verbatim_words: Annotated[int, Field(ge=3, le=20, strict=True)]
-    max_overlap_ratio: Ratio
-    ngram_n: Annotated[int, Field(ge=2, le=8, strict=True)]
+    """REQUIRES REVIEW (owner/counsel): a run of this many consecutive copied words fails."""
+    ngram_n: Annotated[int, Field(ge=3, le=8, strict=True)]
+    """REQUIRES REVIEW (owner/counsel): shingle size of the containment measure."""
+    max_containment_ratio: Ratio
+    """REQUIRES REVIEW (owner/counsel): share of the note's n-grams found in the passage."""
+    max_lcs_ratio: Ratio
+    """REQUIRES REVIEW (owner/counsel): windowed longest-common-subsequence share of the note."""
+    fuzzy_edits: Annotated[int, Field(ge=0, le=3, strict=True)]
+    """REQUIRES REVIEW (owner/counsel): edits tolerated inside one fuzzy aligned segment."""
+    max_fuzzy_words: Annotated[int, Field(ge=3, le=60, strict=True)]
+    """REQUIRES REVIEW (owner/counsel): matched words in one fuzzy segment that fail the note."""
+    max_pack_source_coverage: Ratio
+    """REQUIRES REVIEW (owner/counsel): share of a source passage all notes together may rebuild."""
+
+    def thresholds(self) -> CopyThresholds:
+        return CopyThresholds(
+            self.max_verbatim_words, self.ngram_n, self.max_containment_ratio,
+            self.max_lcs_ratio, self.fuzzy_edits, self.max_fuzzy_words,
+        )  # fmt: skip
 
 
 class ReliabilitySettings(_Cfg):

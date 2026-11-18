@@ -21,7 +21,7 @@ from agent_04_research_knowledge.errors import (
     InputInvalid,
     InsufficientInput,
 )
-from agent_04_research_knowledge.guards.copy_guard import CopyGuard
+from agent_04_research_knowledge.guards.copy_guard import CopyGuard, CopyThresholds
 from agent_04_research_knowledge.guards.restricted import (
     ApprovalView,
     ChunkMeta,
@@ -77,6 +77,7 @@ from amw_core.errors import AuthInvalidError, RateLimitedError, Upstream5xxError
 from amw_core.ids import ATTEMPT, CHANNEL, ORG, Prefix, make_idempotency_key, new_id
 from tests.agents.agent_04_research_knowledge.conftest import (
     BODY_1,
+    PROPOSED,
     build_world,
     make_run,
     user_payload,
@@ -101,7 +102,11 @@ CASES = [
 ]
 SCORES = TierScores(0.9, 0.7, 0.5, 0.2)
 #: Values the fixtures leave open (dataset README: "test values, not product defaults").
-NOTE_LIMITS = NoteLimits(max_note_chars=300, max_verbatim_words=8, max_overlap_ratio=0.9, ngram_n=3)
+# CG-05..08 test the number and URL/quote checks. Their fixtures leave the copy thresholds open and
+# CG-06 restates its passage with one word inserted (a near copy that the proposed strict thresholds
+# would reject as COPY_OVERLAP: reported as an open question), so the copy limbs are relaxed here.
+RELAXED = CopyThresholds(40, 5, 1.0, 1.0, 0, 60)
+NOTE_LIMITS = NoteLimits(300, RELAXED, 1.0)
 ORG_A = "org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e9f"
 ORG_B = "org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e90"
 
@@ -151,7 +156,9 @@ def rg(fx: dict[str, Any]) -> dict[str, Any]:
     )
     view: ApprovalView | None = None
     if ap is not None:
-        sub = ap.get("subject_kind")
+        # fixtures without a subject (RG-03..07) are source-level releases of the chunk's own
+        # source (the 3A default); the rule of 04 section 5.16 (a) needs that subject
+        sub = ap.get("subject_kind") or "knowledge_source"
         view = ApprovalView(
             "apr_1",
             ORG_A if ap["same_org"] else ORG_B,
@@ -173,7 +180,7 @@ def rg(fx: dict[str, Any]) -> dict[str, Any]:
             meta["source_release_approval_id"] = "apr_1"  # source-level release (the 3A default)
             if sub == "knowledge_source":
                 view = replace(
-                    view, subject_id="ksr_1" if ap["subject_is_chunk_source"] else "ksr_x"
+                    view, subject_id="ksr_1" if ap.get("subject_is_chunk_source", True) else "ksr_x"
                 )
 
     class L:
@@ -368,7 +375,6 @@ def cg(fx: dict[str, Any], case_id: str) -> dict[str, Any]:
                 forward_looking=fx.get("forward_looking", False),
             ),
             "Risk caps keep each trade small over time.",
-            "en",
             NOTE_LIMITS,
         )
         return {
@@ -380,16 +386,12 @@ def cg(fx: dict[str, Any], case_id: str) -> dict[str, Any]:
     if case_id in ("CG-05", "CG-06", "CG-07", "CG-08"):
         from tests.agents.agent_04_research_knowledge.test_guards import note
 
-        v = NoteValidator().validate(note(fx["note"]), fx["passage"], "en", NOTE_LIMITS)
+        v = NoteValidator().validate(note(fx["note"]), fx["passage"], NOTE_LIMITS)
         return {"pass": v.passed, **({"problem": v.problem.value} if v.problem else {})}
     res = CopyGuard().check(
         fx["note"],
         fx["passage"],
-        3,
-        0.9,
-        max_verbatim_words=fx["max_verbatim_words"],
-        note_language=fx.get("note_language", "en"),
-        passage_language=fx.get("passage_language", "en"),
+        replace(PROPOSED, max_verbatim_words=fx["max_verbatim_words"]),
     )
     out: dict[str, Any] = {"pass": res.passed}
     if not res.passed:
@@ -574,7 +576,6 @@ def as_case(fx: dict[str, Any], case_id: str, w_tmp: Path) -> dict[str, Any]:
         verdict = NoteValidator().validate(
             note("A stop-loss closes the trade automatically at a preset level."),
             "स्टॉप-लॉस म्हणजे किंमत ठरावीक पातळीवर आली की व्यवहार बंद करणारी ऑर्डर.",
-            "mr",
             NOTE_LIMITS,
         )
         vn = vnote("a", "DEFINITION", B, guard=verdict.copy_guard_status)

@@ -8,6 +8,7 @@ deterministic post-checks end to end, they do not measure model quality (see tes
 
 import json
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from agent_04_research_knowledge.models.plan import ResearchPlan, ResearchPlanIn
 from agent_04_research_knowledge.patterns import has_url_or_referral
 from agent_04_research_knowledge.steps.notes import NoteLimits, NoteValidator
 from agent_04_research_knowledge.steps.plan import PlanValidator
+from tests.agents.agent_04_research_knowledge.conftest import PROPOSED
 
 ROOT = Path(__file__).resolve().parents[3] / "docs" / "v4"
 EVALS = ROOT / "evals" / "agent_04_research_knowledge"
@@ -196,15 +198,16 @@ def check_notes(case: dict[str, Any], output: dict[str, Any]) -> dict[str, bool]
     out = EvidenceNotes.model_validate(output)
     nin = EvidenceNotesInput.model_validate(inp)
     texts = {p.passage_id: p.text for p in nin.passages}
-    langs = {p.passage_id: p.language for p in nin.passages}
-    limits = NoteLimits(nin.max_note_chars, nin.max_verbatim_words, 0.9, 3)
+    limits = NoteLimits(
+        nin.max_note_chars, replace(PROPOSED, max_verbatim_words=nin.max_verbatim_words), 0.5
+    )
     refused = out.refusal is not None
     ids_ok = {a.passage_id for a in out.assessments} <= set(texts) and all(
         n.passage_id in texts for n in out.notes
     )
     one_each = sorted(a.passage_id for a in out.assessments) == sorted(texts) or refused
     verdicts = [
-        (n, NoteValidator().validate(n, texts[n.passage_id], langs[n.passage_id], limits))
+        (n, NoteValidator().validate(n, texts[n.passage_id], limits))
         for n in out.notes
         if n.passage_id in texts
     ]

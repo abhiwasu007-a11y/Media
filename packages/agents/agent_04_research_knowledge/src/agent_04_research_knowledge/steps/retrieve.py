@@ -7,7 +7,7 @@ runs again on the candidate list and on the loaded rows before any text reaches 
 
 import hashlib
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from agent_04_research_knowledge.errors import CrossTenantRef
 from agent_04_research_knowledge.guards.restricted import (
@@ -250,7 +250,13 @@ class LibraryRetriever:
                 run.log.warning("research.chunk_hash_changed", chunk_id=row.chunk_id)
                 continue
             try:
-                decision = self._gate.evaluate(cand.meta, topic, lookup)
+                src = self._library.get_source(scope, row.source_id)
+                fresh = replace(
+                    cand.meta,
+                    chunk_release_approval_id=row.release_approval_id,
+                    source_release_approval_id=src.release_approval_id if src else None,
+                )
+                decision = self._gate.evaluate(fresh, topic, lookup)
             except CrossTenantRef:
                 self._security_event(run)
                 raise

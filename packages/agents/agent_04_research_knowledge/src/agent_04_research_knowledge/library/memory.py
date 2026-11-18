@@ -9,9 +9,9 @@ from collections import Counter
 from collections.abc import Sequence
 from dataclasses import replace
 
-from agent_04_research_knowledge.errors import InputInvalid
-from agent_04_research_knowledge.guards.copy_guard import normalise
+from agent_04_research_knowledge.errors import IdempotencyConflict, InputInvalid
 from agent_04_research_knowledge.guards.restricted import ApprovalView
+from agent_04_research_knowledge.guards.text_match import normalise_for_matching
 from agent_04_research_knowledge.library.models import (
     ChunkHit,
     ChunkRow,
@@ -26,7 +26,7 @@ from amw_core.enums import KnowledgeSourceStatus, SourceOwnership
 
 def fts_terms(text: str, language: str) -> list[str]:
     """Lower-cased word tokens; English gets a plural-stripping stand-in for stemming."""
-    words = normalise(text)
+    words = normalise_for_matching(text)
     if language.split("-", 1)[0].lower() == "en":
         words = [w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words]
     return words
@@ -176,6 +176,8 @@ class InMemoryKnowledgeLibrary:
                 skipped += 1
                 continue
             keys.add(key)
+            if chunk.chunk_id in self._chunks:
+                raise IdempotencyConflict("chunk id already exists")
             self._chunks[chunk.chunk_id] = chunk
             written += 1
         return IngestWrite(written, skipped)

@@ -206,7 +206,7 @@ def test_restricted_chunk_gate_pending_released_and_general() -> None:
     }
     assert all(not c.method_labelled for c in res.candidates)
     # release at source level: now allowed and labelled
-    apr = approval(w)
+    apr = approval(w, subject_id=src)
     w.library._sources[(w.org, src)] = __import__("dataclasses").replace(
         w.library._sources[(w.org, src)], release_approval_id=apr.approval_id
     )
@@ -385,3 +385,36 @@ def test_sql_library_parameters_and_mapping() -> None:
     assert make_sql_lib(RecordingRunner(affected=1)).insert_chunks(scope, []).written == 0
     cv = CollectionView(kcl, "k", "t", False)
     assert cv.collection_key == "k"
+
+
+def test_insert_chunks_typed_errors_in_memory() -> None:
+    from agent_04_research_knowledge.errors import IdempotencyConflict
+
+    w = build_world()
+    scope = TenantScope(w.org, w.channel)
+    src = next(iter(w.sources.values()))
+    col = w.collections["general_trading"]
+
+    def row(chunk_id: str, no: int, channel: str | None = None) -> ChunkRow:
+        return ChunkRow(
+            chunk_id,
+            w.org,
+            channel or w.channel,
+            src,
+            col,
+            5,
+            no,
+            None,
+            None,
+            None,
+            None,
+            "en",
+            "t",
+            "00" * 32,
+        )
+
+    assert w.library.insert_chunks(scope, [row("kch_a", 1)]).written == 1
+    with pytest.raises(IdempotencyConflict):  # same primary key, other natural key
+        w.library.insert_chunks(scope, [row("kch_a", 2)])
+    with pytest.raises(InputInvalid):  # a channel other than the scope's is never relabelled
+        w.library.insert_chunks(scope, [row("kch_b", 3, channel="chn_other")])
