@@ -7,8 +7,9 @@ from datetime import datetime
 from io import BytesIO
 
 from agent_09_video_director.assemble import canonical_json
-from agent_09_video_director.contracts import Model, ShotPlan
+from agent_09_video_director.contracts import Model, NarrationTimeline, ShotPlan
 from agent_09_video_director.direction.runner import ResumeState
+from agent_09_video_director.step import TimelineReader, TimelineRef
 from amw_core.errors import CorruptedOutputError
 from amw_core.ids import AttemptId, TaskId
 from amw_core.interfaces.checkpoint_store import CheckpointRecord, CheckpointStore, NewCheckpoint
@@ -50,6 +51,15 @@ def load_model[M: Model](
         return model.model_validate(json.loads(raw))
     except ValueError as exc:
         raise CorruptedOutputError("referenced blob is not valid for its schema") from exc
+
+
+def timeline_reader(storage: BlobStorage, ctx: TenantContext) -> TimelineReader:
+    """Reader for ``previous_timeline_ref`` (CCR-115): hash verified and tenant checked by core."""
+
+    def read(ref: TimelineRef) -> NarrationTimeline:
+        return load_model(storage, ctx, ref.uri, ref.sha256, NarrationTimeline)
+
+    return read
 
 
 def save_checkpoint(

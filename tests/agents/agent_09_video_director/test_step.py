@@ -10,6 +10,7 @@ import pytest
 from agent_09_video_director.assemble import plan_hash
 from agent_09_video_director.contracts import AspectRatio, RevisionFeedback, Scene, ShotPlan
 from agent_09_video_director.persistence import load_model, persist_plan
+from agent_09_video_director.step import TimelineRef
 from agent_09_video_director.step import Verification as Verif
 from agent_09_video_director.views import Views, build_views, view_matches_shots
 from amw_core.enums import CheckVerdict
@@ -105,9 +106,10 @@ def test_it06_changed_timeline_keeps_shot_ids_when_structure_holds() -> None:
         iteration=1,
         previous_plan=first.plan,
         timeline_sha256="c" * 64,
-        previous_timeline=make_request(script, durs).timeline,
+        previous_timeline_ref=TimelineRef(f"amw-blob://{ORG_ID}/jobs/prev_tl.json", "b" * 64),
     )
-    second = make_step()[0].run(req)
+    old_tl = make_request(script, durs).timeline
+    second = make_step()[0].run(req, read_timeline=lambda ref: old_tl)
     assert [s.shot_id for s in second.plan.shots[:6]] == [s.shot_id for s in first.plan.shots[:6]]
     assert second.plan.narration_timeline_sha256 == "c" * 64
 

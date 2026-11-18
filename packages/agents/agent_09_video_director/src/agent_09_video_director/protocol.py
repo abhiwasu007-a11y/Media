@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Protocol
 
 from agent_09_video_director.output import build_task_output
-from agent_09_video_director.persistence import persist_plan
+from agent_09_video_director.persistence import persist_plan, timeline_reader
 from agent_09_video_director.step import ShotPlanRequest, ShotPlanStep
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.interfaces.storage import BlobStorage
@@ -38,6 +38,6 @@ class ShotPlanTask:
         now: datetime,
         currency: str,
     ) -> TaskOutput:
-        result = self._step.run(req)
+        result = self._step.run(req, read_timeline=timeline_reader(self._storage, ctx))
         ref = persist_plan(self._storage, ctx, result.plan, task_path=task_path)
         return build_task_output(result, req.script, ref, now=now, duration_ms=0, currency=currency)

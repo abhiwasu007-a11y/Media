@@ -22,9 +22,10 @@ from agent_09_video_director.persistence import (
     load_checkpoint,
     persist_plan,
     save_checkpoint,
+    timeline_reader,
 )
 from agent_09_video_director.protocol import ShotPlanTask
-from agent_09_video_director.step import Verification
+from agent_09_video_director.step import TimelineRef, Verification
 from agent_09_video_director.views import build_views
 from amw_adapters.common import FailurePlan
 from amw_core.contracts.validation import validate_task_output
@@ -32,6 +33,7 @@ from amw_core.enums import CheckVerdict, OutputRefKind
 from amw_core.errors import (
     CallTimeoutError,
     ConfigInvalidError,
+    CorruptedOutputError,
     CrossTenantRefError,
     InputInvalidError,
     RateLimitedError,
@@ -207,25 +209,68 @@ def test_changed_timeline_is_rebased_and_limit_failure_is_reachable() -> None:
     script, durs = sample_script()
     first = make_step()[0].run(make_request(script, durs))
     old_tl = make_request(script, durs).timeline
+    prev_ref = TimelineRef(f"amw-blob://{ORG_ID}/jobs/old_timeline.json", "b" * 64)
+    reader = lambda ref: old_tl  # noqa: E731
     grown = {k: (v + 300 if k in ("s4", "s5") else v) for k, v in durs.items()}
     req = make_request(script, grown, iteration=1, previous_plan=first.plan,
-                       previous_timeline=old_tl, timeline_sha256="c" * 64)  # fmt: skip
-    ok = make_step()[0].run(req)
+                       previous_timeline_ref=prev_ref, timeline_sha256="c" * 64)  # fmt: skip
+    ok = make_step()[0].run(req, read_timeline=reader)
     assert [s.shot_id for s in ok.plan.shots[:6]] == [s.shot_id for s in first.plan.shots[:6]]
     huge = {k: (v * 2 if k == "s4" else v) for k, v in durs.items()}
     bad = make_request(script, huge, iteration=1, previous_plan=first.plan,
-                       previous_timeline=old_tl, timeline_sha256="d" * 64)  # fmt: skip
+                       previous_timeline_ref=prev_ref, timeline_sha256="d" * 64)  # fmt: skip
     step, llm, _ = make_step()
     with pytest.raises(InputInvalidError) as ei:
-        step.run(bad)
+        step.run(bad, read_timeline=reader)
     assert ei.value.details["violations"] == ["REBASE_LIMIT"] and llm.requests == []
-    with pytest.raises(InputInvalidError) as ei2:  # the previous timeline is required
-        step.run(
-            make_request(
-                script, grown, iteration=1, previous_plan=first.plan, timeline_sha256="c" * 64
-            )
-        )
+    absent = make_request(
+        script, grown, iteration=1, previous_plan=first.plan, timeline_sha256="c" * 64
+    )
+    with pytest.raises(InputInvalidError) as ei2:  # the previous timeline ref is required
+        step.run(absent)
     assert ei2.value.details["violations"] == ["PREVIOUS_TIMELINE_MISSING"]
+
+
+def test_previous_timeline_ref_must_match_the_previous_plan_and_tenant() -> None:
+    script, durs = sample_script()
+    first = make_step()[0].run(make_request(script, durs))
+    old_tl = make_request(script, durs).timeline
+    grown = {k: (v + 300 if k in ("s4", "s5") else v) for k, v in durs.items()}
+    step = make_step()[0]
+    reader = lambda ref: old_tl  # noqa: E731
+    wrong_hash = TimelineRef(f"amw-blob://{ORG_ID}/jobs/t.json", "e" * 64)
+    req = make_request(script, grown, iteration=1, previous_plan=first.plan,
+                       previous_timeline_ref=wrong_hash, timeline_sha256="c" * 64)  # fmt: skip
+    with pytest.raises(InputInvalidError) as ei:  # not the timeline the plan was made on
+        step.run(req, read_timeline=reader)
+    assert ei.value.details["violations"] == ["PREVIOUS_TIMELINE_MISSING"]
+    foreign = TimelineRef(f"amw-blob://{ORG.new()}/jobs/t.json", "b" * 64)
+    req2 = make_request(script, grown, iteration=1, previous_plan=first.plan,
+                        previous_timeline_ref=foreign, timeline_sha256="c" * 64)  # fmt: skip
+    with pytest.raises(CrossTenantRefError):
+        step.run(req2, read_timeline=reader)
+
+
+def test_timeline_reader_verifies_hash_and_tenant() -> None:
+    import hashlib
+
+    from amw_core.ids import actor_ref
+
+    script, durs = sample_script()
+    tl = make_request(script, durs).timeline
+    body = tl.model_dump_json().encode()
+    sha = hashlib.sha256(body).hexdigest()
+    store = MemBlob()
+    ctx = TenantContext(org_id=ORG_ID, actor=actor_ref("agent_09"))  # type: ignore[arg-type]
+    uri = str(store.blob_uri(ctx, "jobs", "tl.json"))
+    store.data[uri] = body
+    read = timeline_reader(store, ctx)
+    assert read(TimelineRef(uri, sha)).segments == tl.segments
+    with pytest.raises(CorruptedOutputError):
+        read(TimelineRef(uri, "0" * 64))
+    other = TenantContext(org_id=ORG.new(), actor=actor_ref("agent_09"))
+    with pytest.raises(CrossTenantRefError):
+        timeline_reader(store, other)(TimelineRef(uri, sha))
 
 
 # ---------------------------------------------------------------- (2) gate wiring
