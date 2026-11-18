@@ -1,7 +1,9 @@
 """03 section 11 transition tables: code == document, checks per row, job derivation."""
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -228,11 +230,7 @@ def test_wrong_entity_transition_id() -> None:
     assert rule is not None
     change = _task_change(TASK_RULES[1])
     with pytest.raises(InvalidTransitionError, match="not a task"):
-        check_task(TaskTransition(**{**_asdict(change), "transition_id": TransitionId.J02}))
-
-
-def _asdict(change: TaskTransition) -> dict[str, object]:
-    return {f: getattr(change, f) for f in change.__dataclass_fields__}
+        check_task(replace(change, transition_id=TransitionId.J02))
 
 
 @pytest.mark.parametrize(
@@ -245,25 +243,23 @@ def _asdict(change: TaskTransition) -> dict[str, object]:
         ("reason", None, 17),  # T18 without reason
     ],
 )
-def test_row_conditions(field: str, value: object, rule_index: int) -> None:
+def test_row_conditions(field: str, value: Any, rule_index: int) -> None:
     rule = TASK_RULES[rule_index]
     change = _task_change(rule)
     with pytest.raises(InvalidTransitionError):
-        check_task(TaskTransition(**{**_asdict(change), field: value}))
+        check_task(replace(change, **{field: value}))
 
 
 def test_job_row_conditions() -> None:
     j07 = next(r for r in JOB_RULES if r.transition_id is TransitionId.J07)
     base = _job_change(j07)
-    fields = {f: getattr(base, f) for f in base.__dataclass_fields__}
     with pytest.raises(InvalidTransitionError, match="outcome"):
-        check_job(JobTransition(**{**fields, "outcome": None}))
+        check_job(replace(base, outcome=None))
     with pytest.raises(InvalidTransitionError, match="J02"):
-        check_job(JobTransition(**{**fields, "monetized_destination": True}))
+        check_job(replace(base, monetized_destination=True))
     j08 = next(r for r in JOB_RULES if r.transition_id is TransitionId.J08)
-    fields = {f: getattr(_job_change(j08), f) for f in base.__dataclass_fields__}
     with pytest.raises(InvalidTransitionError, match="J08"):
-        check_job(JobTransition(**{**fields, "failed_task_id": None}))
+        check_job(replace(_job_change(j08), failed_task_id=None))
 
 
 def test_actor_kinds_and_authority() -> None:
