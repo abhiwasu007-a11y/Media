@@ -7,6 +7,7 @@ A judge answer can never clear a code flag; doubt goes to the owner (``review_re
 Inputs arrive assembled by ``GateInputAssembler`` (RLS reads, ref and hash checks: plumbing).
 """
 
+import logging
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any, Final, Literal
@@ -47,6 +48,7 @@ from amw_core.enums import (
 )
 from amw_core.errors import InputInvalidError, InsufficientInputError
 
+_LOG = logging.getLogger(__name__)
 FINANCE_PACK: Final = "rp.finance_sebi_in"
 KIDS_PACK: Final = "rp.kids"
 _COPYRIGHT_RULES: Final = frozenset({"YTG-R5", "YTG-R6", "YTG-R9"})
@@ -285,6 +287,11 @@ class ComplianceGate:
                         },
                     )
                 )
+        if injection or quote_failures:  # section 19.3 rule 9 / section 22 (no content text)
+            _LOG.warning(
+                "a16.gate.injection_or_quote_failure",
+                extra={"injection_items": len(injection), "quote_failures": quote_failures},
+            )
         checks: list[FrameCheckId] = ["qc.watermark.visual"]
         if inp.sensitive_channel:
             checks.append("qc.visual.no_synthetic_presenter")

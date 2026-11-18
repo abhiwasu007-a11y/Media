@@ -1,3 +1,4 @@
+# ruff: noqa: PT018
 """SEC-R14 (blueprint section 21) against **real rows**: the fake evidence database with its
 login roles and definer functions, the verifier component with a fake session event store, and
 Agent 16's G4 (``OwnerEvidenceVerifier`` -> ``evidence_problems``). Every forged, wrong-MAC,
@@ -41,7 +42,7 @@ from amw_core.errors import (
 from amw_core.interfaces import DbRole
 from amw_core.owner_evidence_mac import MacKeyring
 from amw_core.owner_evidence_service import EvidenceVerifierService
-from tests.agents.agent_16_compliance_qa.r14_support import CODE, POLICY, REQUESTED, R14
+from tests.agents.agent_16_compliance_qa.r14_support import CODE, POLICY, R14, REQUESTED
 
 pytestmark = pytest.mark.security
 ACC = frozenset({ApprovalChannel.OWNER_CHAT_OPERATOR})
@@ -65,14 +66,19 @@ def test_sec_r14_01_confirmed_decision_passes_g4() -> None:
 def test_sec_r14_15_and_46_scores_and_contribution_confirmed() -> None:
     h = R14()
     scores = ((QualityDimension.RESEARCH_ACCURACY, 18), (QualityDimension.STORYTELLING, 12))
-    row = h.record(f"{CODE} research_accuracy 18 storytelling 12",
-                   EvidenceRecordKind.HUMAN_SCORE, claimed_scores=scores)  # fmt: skip
+    row = h.record(
+        f"{CODE} research_accuracy 18 storytelling 12",
+        EvidenceRecordKind.HUMAN_SCORE,
+        claimed_scores=scores,
+    )
     assert row.state is EvidenceState.CONFIRMED
     ref = h.score_ref(row.id, ((QualityDimension.RESEARCH_ACCURACY, 18.0),))
     assert g4(h, ref) == []
     wrong = h.score_ref(row.id, ((QualityDimension.RESEARCH_ACCURACY, 19.0),))
     assert "parsed decision = recorded state" in g4(h, wrong)  # points != claimed_scores
-    text = "the 2008 gap example shows how a protective order limits the decision while the fill moves"
+    text = (
+        "the 2008 gap example shows how a protective order limits the decision while the fill moves"
+    )
     crow = h.record(f"{CODE} {text}", EvidenceRecordKind.CONTRIBUTION)
     assert crow.state is EvidenceState.CONFIRMED
     assert g4(h, h.contribution_ref(crow.id, text)) == []
@@ -82,9 +88,13 @@ def test_sec_r14_15_and_46_scores_and_contribution_confirmed() -> None:
 # --- sources other than the owner's own chat message ---------------------------------------
 @pytest.mark.parametrize(
     "source",
-    [InstructionSourceKind.SUBAGENT_MESSAGE, InstructionSourceKind.TOOL_RESULT,
-     InstructionSourceKind.DOCUMENT, InstructionSourceKind.NOTIFICATION],
-)  # fmt: skip
+    [
+        InstructionSourceKind.SUBAGENT_MESSAGE,
+        InstructionSourceKind.TOOL_RESULT,
+        InstructionSourceKind.DOCUMENT,
+        InstructionSourceKind.NOTIFICATION,
+    ],
+)
 def test_sec_r14_02_03_non_owner_sources_never_back_a_record(source: InstructionSourceKind) -> None:
     h = R14()
     row = h.record(f"approve {CODE}", source_kind=source)
@@ -95,10 +105,15 @@ def test_sec_r14_02_03_non_owner_sources_never_back_a_record(source: Instruction
 
 @pytest.mark.parametrize(
     "change",
-    [{"inbound_origin": "subagent"}, {"inbound_origin": "peer_session"},
-     {"parent_session_id": "ses-parent"}, {"sender_account": "acct-other-human"},
-     {"is_synthetic": True}, {"role": "assistant"}],
-)  # fmt: skip
+    [
+        {"inbound_origin": "subagent"},
+        {"inbound_origin": "peer_session"},
+        {"parent_session_id": "ses-parent"},
+        {"sender_account": "acct-other-human"},
+        {"is_synthetic": True},
+        {"role": "assistant"},
+    ],
+)
 def test_sec_r14_09_10_11_origin_and_sender_checks(change: dict[str, object]) -> None:
     h = R14()
     row = h.record(f"approve {CODE}", event_change=change)
@@ -108,9 +123,13 @@ def test_sec_r14_09_10_11_origin_and_sender_checks(change: dict[str, object]) ->
 
 @pytest.mark.parametrize(
     "change",
-    [{"inbound_origin": "subagent"}, {"inbound_origin": "tool_result"},
-     {"inbound_origin": "notification"}, {"sender_account": "acct-other-human"}],
-)  # fmt: skip
+    [
+        {"inbound_origin": "subagent"},
+        {"inbound_origin": "tool_result"},
+        {"inbound_origin": "notification"},
+        {"sender_account": "acct-other-human"},
+    ],
+)
 def test_sec_r14_13_44_confirmation_from_other_sources_leaves_verified(
     change: dict[str, object],
 ) -> None:
@@ -141,10 +160,19 @@ def test_sec_r14_12_27_unconfirmed_record_fails() -> None:
 # --- grammar negatives (whitelist decision grammar, CCR-087) -------------------------------
 @pytest.mark.parametrize(
     "message",
-    ["approve", f"don't approve {CODE}", f"approve {CODE}?", f"approve {CODE} after I check",
-     f"would approve {CODE}", f"my editor said: approve {CODE}", f'"approve {CODE}"',
-     f"approve {CODE} but redo the thumbnail", f"approve {CODE} 2AB9", f"changes {CODE}"],
-)  # fmt: skip
+    [
+        "approve",
+        f"don't approve {CODE}",
+        f"approve {CODE}?",
+        f"approve {CODE} after I check",
+        f"would approve {CODE}",
+        f"my editor said: approve {CODE}",
+        f'"approve {CODE}"',
+        f"approve {CODE} but redo the thumbnail",
+        f"approve {CODE} 2AB9",
+        f"changes {CODE}",
+    ],
+)
 def test_sec_r14_05_06_30_to_34_45_grammar_refusals(message: str) -> None:
     h = R14()
     row = h.record(message)
@@ -154,8 +182,11 @@ def test_sec_r14_05_06_30_to_34_45_grammar_refusals(message: str) -> None:
 
 def test_sec_r14_43_score_self_correction_refused() -> None:
     h = R14()
-    row = h.record(f"{CODE} research_accuracy 18 no 15", EvidenceRecordKind.HUMAN_SCORE,
-                   claimed_scores=((QualityDimension.RESEARCH_ACCURACY, 15),))  # fmt: skip
+    row = h.record(
+        f"{CODE} research_accuracy 18 no 15",
+        EvidenceRecordKind.HUMAN_SCORE,
+        claimed_scores=((QualityDimension.RESEARCH_ACCURACY, 15),),
+    )
     assert row.state is EvidenceState.REFUSED
     assert g4(h, h.score_ref(row.id, ((QualityDimension.RESEARCH_ACCURACY, 15.0),))) != []
 
@@ -218,8 +249,11 @@ def test_sec_r14_17_channel_null_or_not_accepted(channel: ApprovalChannel | None
 
 def test_sec_r14_16_18_records_without_evidence_fail() -> None:
     h = R14()
-    for ref in (h.step_ref(None), h.score_ref(None, ((QualityDimension.COMPLIANCE, 5.0),)),
-                h.contribution_ref(None, "some owner words of twenty plus")):  # fmt: skip
+    for ref in (
+        h.step_ref(None),
+        h.score_ref(None, ((QualityDimension.COMPLIANCE, 5.0),)),
+        h.contribution_ref(None, "some owner words of twenty plus"),
+    ):
         assert "no evidence_id" in g4(h, ref)
 
 
@@ -249,10 +283,14 @@ def test_sec_r14_38_direct_insert_in_confirmed_is_refused_and_forced_rows_fail_t
     # a superuser forces a CONFIRMED row with an all-pass verifier result and a valid hash
     row = h.db.insert_evidence(h.operator, h.tx(), ne)
     good = h.record(f"approve {CODE}")
-    h.db.superuser_tamper(h.tx(), row.id, state=EvidenceState.CONFIRMED,
-                          verifier_result=dict(good.verifier_result),
-                          confirmation_event_uuid="ev-x",
-                          confirmation_message_at=good.confirmation_message_at)  # fmt: skip
+    h.db.superuser_tamper(
+        h.tx(),
+        row.id,
+        state=EvidenceState.CONFIRMED,
+        verifier_result=dict(good.verifier_result),
+        confirmation_event_uuid="ev-x",
+        confirmation_message_at=good.confirmation_message_at,
+    )
     problems = g4(h, h.step_ref(row.id))
     assert "MAC re-verifies (amw_evidence_mac_valid)" in problems
     assert h.a16.log.mac_invalid  # security event recorded
@@ -261,8 +299,9 @@ def test_sec_r14_38_direct_insert_in_confirmed_is_refused_and_forced_rows_fail_t
 def test_sec_r14_39_wrong_mac_on_a_human_score() -> None:
     h = R14()
     scores = ((QualityDimension.RESEARCH_ACCURACY, 18),)
-    row = h.record(f"{CODE} research_accuracy 18", EvidenceRecordKind.HUMAN_SCORE,
-                   claimed_scores=scores)  # fmt: skip
+    row = h.record(
+        f"{CODE} research_accuracy 18", EvidenceRecordKind.HUMAN_SCORE, claimed_scores=scores
+    )
     other_key = MacKeyring({1: bytes(range(1, 33))})
     h.db.superuser_tamper(h.tx(), row.id, evidence_mac=other_key.sign(1, {"x": 1}))
     ref = h.score_ref(row.id, ((QualityDimension.RESEARCH_ACCURACY, 18.0),))
@@ -309,12 +348,15 @@ def test_sec_r14_35_37_one_event_two_roles() -> None:
     ne = replace(h.new_evidence(conf_event, STEP), step_no=2)
     with pytest.raises(IdempotencyConflictError):  # DB key: one message, one role
         h.db.insert_evidence(h.operator, t, ne)
+    own = h.source.fetch("ses-1", row.evidence.event_uuid)
+    assert own is not None
     with pytest.raises(IdempotencyConflictError):  # one live row per event
-        h.db.insert_evidence(h.operator, t, h.new_evidence(h.source.fetch("ses-1", row.evidence.event_uuid), STEP))  # type: ignore[arg-type]  # noqa: E501
+        h.db.insert_evidence(h.operator, t, h.new_evidence(own, STEP))
     # a row forced in with the reused event fails G4 (MAC and replay keys)
     forced = h.db.insert_evidence(h.operator, t, h.new_evidence(h.event(f"approve {CODE}"), STEP))
-    h.db.superuser_tamper(t, forced.id, evidence=replace(forced.evidence,
-                          event_uuid=row.confirmation_event_uuid))  # fmt: skip
+    h.db.superuser_tamper(
+        t, forced.id, evidence=replace(forced.evidence, event_uuid=row.confirmation_event_uuid)
+    )
     problems = g4(h, h.step_ref(forced.id))
     assert "replay keys free (CCR-101)" in problems
 
@@ -372,16 +414,28 @@ def test_operator_has_no_path_to_verified() -> None:
 def test_agent_16_source_never_calls_evidence_write_functions() -> None:
     """Static guarantee: no Agent 16 module references a write or verify function of the
     evidence store, a verifier credential or the operator role."""
-    root = Path(__import__("agent_16_compliance_qa").__file__).parent
-    banned = {"mark_verified", "mark_confirmed", "insert_evidence", "human_record_apply",
-              "refuse", "superuser_tamper", "EvidenceVerifierService", "MacKeyring"}  # fmt: skip
+    import agent_16_compliance_qa
+
+    root = Path(str(agent_16_compliance_qa.__file__)).parent
+    banned = {
+        "mark_verified",
+        "mark_confirmed",
+        "insert_evidence",
+        "human_record_apply",
+        "refuse",
+        "superuser_tamper",
+        "EvidenceVerifierService",
+        "MacKeyring",
+    }
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
         names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         names |= {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
         assert not (names & banned), (path.name, names & banned)
-        assert "DbRole.OPERATOR" not in path.read_text() and "DbRole.VERIFIER" not in path.read_text()
+        assert (
+            "DbRole.OPERATOR" not in path.read_text() and "DbRole.VERIFIER" not in path.read_text()
+        )
 
 
 # --- relied-on approvals: state from steps only (CCR-102) ----------------------------------
@@ -393,10 +447,15 @@ def _ev(**over: object) -> EvidenceFacts:
 
 def _step(**over: object) -> StepFacts:
     base: dict[str, object] = {
-        "step_no": 1, "state": "APPROVED", "decided_by_kind": "HUMAN", "membership_active": True,
-        "holds_required_role": True, "recorded_by_kind": "OPERATOR",
-        "approval_channel": "OWNER_CHAT_OPERATOR", "evidence": _ev(),
-    }  # fmt: skip
+        "step_no": 1,
+        "state": "APPROVED",
+        "decided_by_kind": "HUMAN",
+        "membership_active": True,
+        "holds_required_role": True,
+        "recorded_by_kind": "OPERATOR",
+        "approval_channel": "OWNER_CHAT_OPERATOR",
+        "evidence": _ev(),
+    }
     return StepFacts.model_validate(base | over)
 
 
@@ -409,8 +468,11 @@ def test_sec_r14_41_release_by_state_only_blocks_fin_r12() -> None:
     assert derive_approval_state(ApprovalState.APPROVED, [bad_mac], ACC) == "APPROVED_UNVERIFIED"
     assert derive_approval_state(ApprovalState.APPROVED, [_step()], ACC) == "APPROVED"
     assert derive_approval_state(ApprovalState.PENDING, [undecided], ACC) == "PENDING"
-    assert derive_approval_state(ApprovalState.REJECTED, [_step(state="REJECTED")], ACC) == "REJECTED"
+    assert (
+        derive_approval_state(ApprovalState.REJECTED, [_step(state="REJECTED")], ACC) == "REJECTED"
+    )
     assert derive_approval_state(None, [], ACC) == "NONE"
-    seg = MethodSegment(segment_ref="s01", cites_method_chunk=True, labelled=True,
-                        release_state=state)  # fmt: skip
+    seg = MethodSegment(
+        segment_ref="s01", cites_method_chunk=True, labelled=True, release_state=state
+    )
     assert method_release([seg], True).compliance_verdict is ComplianceVerdict.BLOCKED

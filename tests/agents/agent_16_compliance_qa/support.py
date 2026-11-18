@@ -18,11 +18,26 @@ BLUEPRINT = REPO / "docs/v4/agents/agent_16_compliance_qa.md"
 EN_LEXICON: dict[str, Any] = {
     "version": "lex.en.test.1",
     "future_markers": [
-        "will", "should", "likely to", "target", "next move", "again", "repeat",
+        "will",
+        "should",
+        "likely to",
+        "target",
+        "next move",
+        "again",
+        "repeat",
         "same setup now",
     ],
     "imperative_verbs": [
-        "buy", "sell", "hold", "enter", "exit", "add", "accumulate", "avoid", "go long", "short",
+        "buy",
+        "sell",
+        "hold",
+        "enter",
+        "exit",
+        "add",
+        "accumulate",
+        "avoid",
+        "go long",
+        "short",
     ],
     "level_words": ["target", "stop", "strike", "level"],
     "promotion_words": ["link", "code", "broker", "sponsor", "sponsored", "open an account"],
@@ -31,7 +46,7 @@ EN_LEXICON: dict[str, Any] = {
     "child_markers": ["nursery", "cartoon", "kids", "children", "little friends"],
     "person_markers": ["i", "my", "you", "your", "we", "our", "students"],
     "live_format_terms": ["live trading", "live session", "live"],
-}  # fmt: skip
+}
 
 BASE_CONFIG: dict[str, Any] = {
     "quality.publish_min_score": 85,
@@ -50,14 +65,23 @@ BASE_CONFIG: dict[str, Any] = {
     "compliance.prefilter.lexicon.mr": EN_LEXICON | {"version": "lex.mr.test.1"},
     "compliance.prefilter.lexicon.hi": EN_LEXICON | {"version": "lex.hi.test.1"},
 }
-for _step in ("compliance_gate.policy", "compliance_gate.paraphrase", "compliance_gate.frames",
-              "quality_score.judge"):  # fmt: skip
+for _step in (
+    "compliance_gate.policy",
+    "compliance_gate.paraphrase",
+    "compliance_gate.frames",
+    "quality_score.judge",
+):
     for _k, _v in {
-        "model": "test-model-from-config", "max_output_tokens": 2000, "temperature": 0,
-        "timeout_ms": 30000, "cache_system_prompt": True, "max_calls": 8,
-        "worst_case_call_micros": 100, "max_cost_micros": 100000,
+        "model": "test-model-from-config",
+        "max_output_tokens": 2000,
+        "temperature": 0,
+        "timeout_ms": 30000,
+        "cache_system_prompt": True,
+        "max_calls": 8,
+        "worst_case_call_micros": 100,
+        "max_cost_micros": 100000,
         "accepts_images": _step.endswith("frames") or _step.endswith("judge"),
-    }.items():  # fmt: skip
+    }.items():
         BASE_CONFIG[f"llm.agent_16.{_step}.{_k}"] = _v
 
 
@@ -77,7 +101,7 @@ def case_ids(rows: list[dict[str, Any]]) -> list[str]:
 class ScriptedLlm:
     """``LlmAdapter`` that returns queued texts (no network, no cost beyond fake micros)."""
 
-    provider = "fake-llm"
+    provider = "fake_llm"
 
     def __init__(self, texts: Iterator[str] | list[str], micros: int = 10) -> None:
         self._texts = iter(texts)
@@ -90,10 +114,15 @@ class ScriptedLlm:
         self.keys.append(idempotency_key)
         text = next(self._texts)
         usage = CallUsage(
-            provider="fake-llm", operation="llm.completion", model=request.model, tokens_in=10,
-            tokens_out=5, amount_micros=self._micros, currency="USD",
+            provider="fake_llm",
+            operation="llm.completion",
+            model=request.model,
+            tokens_in=10,
+            tokens_out=5,
+            amount_micros=self._micros,
+            currency="USD",
             idempotency_key=idempotency_key,
-        )  # fmt: skip
+        )
         return LlmResponse(text=text, stop_reason="end_turn", usage=usage)
 
     def count_tokens(self, request: LlmRequest, *, idempotency_key: str) -> Any:
@@ -117,13 +146,38 @@ def blueprint_schema(heading: str) -> dict[str, Any]:
     return dict(json.loads(text[block : text.index("```", block)]))
 
 
+def validate_against_blueprint(payload: Any, heading: str) -> None:
+    """JSON Schema check of a payload against the blueprint section, with ``amw.common`` from
+    the amw_core registry (no network)."""
+    from jsonschema import Draft202012Validator
+    from referencing import Registry, Resource
+
+    from amw_core.contracts.registry import get_schema, schema_id
+
+    common = get_schema("amw.common", "1.0.0")
+    registry: Registry[Any] = Registry().with_resource(
+        schema_id("amw.common", "1.0.0"), Resource.from_contents(dict(common))
+    )
+    Draft202012Validator(blueprint_schema(heading), registry=registry).validate(payload)
+
+
 def evidence_mapping(**over: Any) -> Mapping[str, Any]:
     base = {
-        "state": "CONFIRMED", "source_kind": "OWNER_CHAT_MESSAGE", "same_org": True,
-        "on_behalf_of_matches": True, "subject_matches": True, "review_code_matches": True,
-        "parsed_decision_matches": True, "message_after_request": True,
-        "confirmation_after_message": True, "verifier_all_passed": True, "failed_tests": [],
-        "refused_reason": None, "hash_recomputes": True, "mac_valid": True, "replay_free": True,
+        "state": "CONFIRMED",
+        "source_kind": "OWNER_CHAT_MESSAGE",
+        "same_org": True,
+        "on_behalf_of_matches": True,
+        "subject_matches": True,
+        "review_code_matches": True,
+        "parsed_decision_matches": True,
+        "message_after_request": True,
+        "confirmation_after_message": True,
+        "verifier_all_passed": True,
+        "failed_tests": [],
+        "refused_reason": None,
+        "hash_recomputes": True,
+        "mac_valid": True,
+        "replay_free": True,
         "backs_only_this_record": True,
-    }  # fmt: skip
+    }
     return base | over

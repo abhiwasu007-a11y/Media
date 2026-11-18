@@ -1,3 +1,4 @@
+# ruff: noqa: PT018
 """Dataset ``publication_authorisation`` (58 cases, 100 % threshold): every PA case through
 ``AuthorisationGuards.evaluate``; exact verdict, failed guards, action and human-wins total."""
 
@@ -59,7 +60,8 @@ def test_approval_state_alone_never_counts() -> None:
     fx = next(c for c in PA if c["case_id"] == "PA-01")["input"]["fixture"]
     rows = AuthRows.model_validate(fx)
     step = StepFacts.model_validate(
-        rows.steps[0].model_dump() | {"state": "PENDING", "approval_channel": None, "evidence": None}
+        rows.steps[0].model_dump()
+        | {"state": "PENDING", "approval_channel": None, "evidence": None}
     )
     d = GUARDS.evaluate(rows.model_copy(update={"steps": (step,)}))
     assert d.failed_guards == ["G2"]

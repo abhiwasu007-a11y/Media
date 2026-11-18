@@ -1,6 +1,7 @@
 """Real-row R14 harness: the fake evidence database with its three login roles, the verifier
 component, a fake session event store, and Agent 16's read side (``amw_app`` only)."""
 
+import contextlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -21,6 +22,7 @@ from amw_core.enums import (
     InstructionSourceKind,
     QualityDimension,
 )
+from amw_core.errors import MissingDependencyError, PermissionDeniedError
 from amw_core.ids import WireId
 from amw_core.interfaces import DbRole, EvidenceRecord, NewEvidence, TenantContext
 from amw_core.interfaces.tenancy_context import TenantTransaction
@@ -96,65 +98,105 @@ class R14:
 
     def event(self, content: str, at: datetime = SAID, **change: Any) -> SessionEvent:
         self._n += 1
-        ev = SessionEvent("ses-1", f"ev-{self._n}", "user", False, "human", content, at,
-                          OWNER_ACCOUNT, None)  # fmt: skip
+        ev = SessionEvent(
+            "ses-1", f"ev-{self._n}", "user", False, "human", content, at, OWNER_ACCOUNT, None
+        )
         ev = replace(ev, **change)
         self.source.add(ev)
         return ev
 
-    def new_evidence(self, ev: SessionEvent, kind: EvidenceRecordKind, **change: Any) -> NewEvidence:
+    def new_evidence(
+        self, ev: SessionEvent, kind: EvidenceRecordKind, **change: Any
+    ) -> NewEvidence:
         base = NewEvidence(
-            record_kind=kind, subject_kind="render", subject_id=self.render,
-            source_kind=InstructionSourceKind.OWNER_CHAT_MESSAGE, session_id=ev.session_id,
-            event_uuid=ev.event_uuid, quote=ev.content, message_at=ev.timestamp,
-            recorded_by=ids.ActorRef("sys_operator"), on_behalf_of=self.owner, job_id=self.job,
-            approval_id=self.approval, review_code=CODE,
+            record_kind=kind,
+            subject_kind="render",
+            subject_id=self.render,
+            source_kind=InstructionSourceKind.OWNER_CHAT_MESSAGE,
+            session_id=ev.session_id,
+            event_uuid=ev.event_uuid,
+            quote=ev.content,
+            message_at=ev.timestamp,
+            recorded_by=ids.ActorRef("sys_operator"),
+            on_behalf_of=self.owner,
+            job_id=self.job,
+            approval_id=self.approval,
+            review_code=CODE,
             step_no=1 if kind is EvidenceRecordKind.STEP_DECISION else None,
             parsed_decision=ApprovalStepState.APPROVED
-            if kind is EvidenceRecordKind.STEP_DECISION else None,
-        )  # fmt: skip
+            if kind is EvidenceRecordKind.STEP_DECISION
+            else None,
+        )
         return replace(base, **change)
 
-    def record(self, content: str, kind: EvidenceRecordKind = EvidenceRecordKind.STEP_DECISION,
-               confirm: str | None = f"confirm {CODE}", anchor: datetime = REQUESTED,
-               event_change: dict[str, Any] | None = None, confirm_change: dict[str, Any] | None = None,
-               **change: Any) -> EvidenceRecord:  # fmt: skip
+    def record(
+        self,
+        content: str,
+        kind: EvidenceRecordKind = EvidenceRecordKind.STEP_DECISION,
+        confirm: str | None = f"confirm {CODE}",
+        anchor: datetime = REQUESTED,
+        event_change: dict[str, Any] | None = None,
+        confirm_change: dict[str, Any] | None = None,
+        **change: Any,
+    ) -> EvidenceRecord:
         """The operator records, the verifier verifies, the owner confirms (if ``confirm``)."""
         t = self.tx()
         ev = self.event(content, **(event_change or {}))
         row = self.db.insert_evidence(self.operator, t, self.new_evidence(ev, kind, **change))
-        try:
+        with contextlib.suppress(MissingDependencyError):  # unfetchable: stays pending
             row = self.verifier.verify_recorded(t, row.id, anchor, NOW)
-        except Exception:  # noqa: S110 - unfetchable stays pending (the case under test)
-            pass
         if confirm is not None and row.state is EvidenceState.VERIFIED:
             cev = self.event(confirm, at=CONFIRM_AT, **(confirm_change or {}))
-            try:
-                row = self.verifier.confirm(t, row.id, cev.session_id, cev.event_uuid,
-                                            cev.content, NOW)  # fmt: skip
-            except Exception:  # noqa: S110 - a failed confirmation leaves VERIFIED
-                pass
+            with contextlib.suppress(PermissionDeniedError, MissingDependencyError):
+                row = self.verifier.confirm(
+                    t, row.id, cev.session_id, cev.event_uuid, cev.content, NOW
+                )  # a failed confirmation: VERIFIED
         got = self.db.get(self.app, t, row.id)
         assert got is not None
         return got
 
     def step_ref(self, evidence_id: WireId | None, **change: Any) -> HumanRecordRef:
         base = HumanRecordRef(
-            record_kind=EvidenceRecordKind.STEP_DECISION, record_key=f"step:{self.approval}:1",
-            org_id=self.org, subject_kind="render", subject_id=self.render,
-            approval_id=self.approval, step_no=1, human=self.owner,
-            approval_channel=ApprovalChannel.OWNER_CHAT_OPERATOR, recorded_by="sys_operator",
-            evidence_id=evidence_id, step_state=ApprovalStepState.APPROVED,
-        )  # fmt: skip
+            record_kind=EvidenceRecordKind.STEP_DECISION,
+            record_key=f"step:{self.approval}:1",
+            org_id=self.org,
+            subject_kind="render",
+            subject_id=self.render,
+            approval_id=self.approval,
+            step_no=1,
+            human=self.owner,
+            approval_channel=ApprovalChannel.OWNER_CHAT_OPERATOR,
+            recorded_by="sys_operator",
+            evidence_id=evidence_id,
+            step_state=ApprovalStepState.APPROVED,
+        )
         return replace(base, **change)
 
-    def score_ref(self, evidence_id: WireId | None,
-                  scores: tuple[tuple[QualityDimension, float], ...], **change: Any) -> HumanRecordRef:  # fmt: skip
-        return self.step_ref(evidence_id, record_kind=EvidenceRecordKind.HUMAN_SCORE,
-                             record_key=f"score:{evidence_id}", step_no=None, step_state=None,
-                             scores=scores, **change)  # fmt: skip
+    def score_ref(
+        self,
+        evidence_id: WireId | None,
+        scores: tuple[tuple[QualityDimension, float], ...],
+        **change: Any,
+    ) -> HumanRecordRef:
+        return self.step_ref(
+            evidence_id,
+            record_kind=EvidenceRecordKind.HUMAN_SCORE,
+            record_key=f"score:{evidence_id}",
+            step_no=None,
+            step_state=None,
+            scores=scores,
+            **change,
+        )
 
-    def contribution_ref(self, evidence_id: WireId | None, text: str, **change: Any) -> HumanRecordRef:
-        return self.step_ref(evidence_id, record_kind=EvidenceRecordKind.CONTRIBUTION,
-                             record_key=f"contribution:{evidence_id}", step_no=None,
-                             step_state=None, description=text, **change)  # fmt: skip
+    def contribution_ref(
+        self, evidence_id: WireId | None, text: str, **change: Any
+    ) -> HumanRecordRef:
+        return self.step_ref(
+            evidence_id,
+            record_kind=EvidenceRecordKind.CONTRIBUTION,
+            record_key=f"contribution:{evidence_id}",
+            step_no=None,
+            step_state=None,
+            description=text,
+            **change,
+        )
