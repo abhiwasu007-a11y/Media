@@ -1,0 +1,4 @@
+{
+  "description": "Known defects in existing draft prompts/evals under docs/v4 (lane owners fix them). Findings listed here are report-only; any finding not listed is blocking.",
+  "findings": []
+}

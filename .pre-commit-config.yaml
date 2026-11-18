@@ -11,3 +11,21 @@ repos:
         entry: python scripts/secret_scan.py
         language: system
         pass_filenames: false
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: markers
+        name: pytest markers registered
+        entry: python scripts/check_markers.py
+        language: system
+        pass_filenames: false
+        files: ^(tests/|pyproject\.toml)
+      - id: prompt-eval-lint
+        name: prompt and eval lint
+        entry: uv run python -m amw_evals lint --baseline scripts/docs_lint_baseline.json
+        language: system
+        pass_filenames: false
+        files: ^(docs/v4/(prompts|evals)/|scripts/docs_lint_baseline\.json)
