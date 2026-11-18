@@ -4,7 +4,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 
 | Track | Status |
 |---|---|
-| **Documentation** | Phase 0 complete. Phase 1 in progress. |
+| **Documentation** | Phase 0 complete. Phase 1 in progress (VPS audit and feasibility waiting on owner data). Architecture waves A/B/C started 2026-11-18 on the owner's instruction (in parallel with Phase 1). |
 | **Software** | **Planned.** Nothing implemented. Code starts only after written approval of the V4.0 baseline (rule 1). |
 
 ## Task ledger
@@ -18,8 +18,34 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | P1.2 | Progress ledger | Done | IMPLEMENTATION_PROGRESS.md | — | — | — |
 | P1.3 | Change-request register | Done | CHANGE_REQUESTS.md | — | — | — |
 | P1.4 | Repo & server audit | **Partial**: Parts A, B, D done; Part C blocked | 00_REPO_AND_SERVER_AUDIT.md | private repos inventoried read-only (counts only) | **VPS script output (A1)** | R3 |
-| P1.5 | Research log, wave 1 (§1 constraints) | In progress | RESEARCH_LOG.md | official-source reads | — | R8 |
-| P1.6 | Technical feasibility | Not started | 00b_TECHNICAL_FEASIBILITY.md | — | P1.4 Part C, research wave 2 (prices) | R3, R7 |
+| P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
+| P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | Done (2026-11-18) | RESEARCH_LOG.md | official pricing/licence pages read | Blocked: openai.com, artlist.io, pond5, pexels, pixabay, shutterstock, help.elevenlabs.io, support.storyblocks.com | R7 |
+| P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
+| W-A | Architecture Wave A (foundation docs) | In progress (1 agent) | branch `claude/v4-wave-a` | — | — | R6 |
+| W-B | Architecture Wave B (17 blueprints + shared docs + ADRs) | Not started | — | — | W-A | R6 |
+| W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
+| P1.6 | Technical feasibility | **Partial** (capabilities verdict done; server verdict + per-video totals REQUIRES REVIEW) | 00b_TECHNICAL_FEASIBILITY.md | every capability cites a research ID | P1.4 Part C (VPS), skeleton measurements, business plan | R3, R7 |
+
+## Owner decisions (binding; they amend the directive where stated)
+
+### D1 (2026-11-18): Phase 3 build order. Applies to BUILD_BACKLOG.md, the completion report, and every blueprint's MVP marking.
+Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skeleton included a private upload to a test channel; **no upload in 3A**).
+
+- **3A — Video production line first.** Build only the minimum shared core needed to run it: contracts, state machine, job store, cost ledger, audit, adapters with fakes. Then Agents **04, 05, 06, 07, 08, 09, 10, 11** and the **Agent 16 QC/compliance gates**.
+  - The owner supplies the topic directly; Agents 02/03 come later.
+  - Output per run, delivered as downloadable files: final MP4 (16:9, plus a 9:16 cut where applicable), thumbnail options, SRT, the QC report with the 100-point score, and the cost per stage.
+  - **No YouTube upload and no Google OAuth in 3A.**
+- **3B — Golden samples.** Three videos on owner-given trading-education topics. The owner scores them; prompts/templates are tuned until all three reach the threshold.
+- **3C — Everything else.** Orchestrator hardening, scheduler/night window, Agent 13 publishing, 14 analytics, 02/03 strategy, tenancy UI, client portal, billing.
+- **Spend controls.** Paid API calls start only after the owner has set spending limits at each provider. The cost ledger enforces a **per-video budget and a total pilot budget, and stops on breach**.
+- **Secrets.** Keys come only through the environment's secret mechanism: never in git, logs or shared environment variables.
+- **Rendering.** In the development environment, or in the VPS night window under the §1 limits. **Never during market hours.**
+
+### D2 (2026-11-18): fast-track without lowering quality
+- **Critical path:** Wave A foundation → full 26-section blueprints **only** for the 3A agents (04, 05, 06, 07, 08, 09, 10, 11, 16), plus the minimal shared core (`3A_SLICE_SPEC.md`, 18, 13, 09, 08 and the ADRs 3A needs) → independent slice check → **STOP for owner approval of this slice** → 3A code starts immediately after approval.
+- **In parallel (Wave B-2):** blueprints 01–03, 12–15, 17 and the enterprise/business docs. Each one is approved before its own build begins.
+- "REQUIRES REVIEW (Phase 1)" items do not block 3A unless they change a 3A design decision. Those that do are listed in `3A_SLICE_SPEC.md`.
+- Token discipline applies: at most 4 sub-agents in parallel. A 3-line Marathi progress update (done / next / blocked-on-owner) after each work block.
 
 ## Owner inputs: status
 
@@ -27,7 +53,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 |---|---|---|
 | A1 | VPS read-only output | **Waiting.** Script delivered; one consolidated command given. |
 | A2 | `trade-data` + `atp-private` read access | **Received** (2026-11-18, read-only clones) |
-| A3 | Research network access | **Received.** Environment network is open (checked 2026-11-18). |
+| A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
 | A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
 | A5 | Channel Google account / Brand Account decision | Waiting (same as A4) |
 | A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status, GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
@@ -47,4 +73,10 @@ Resume from this file after any context reset (directive §6). Finished work is 
 ## Session log
 | Date | Session | Work |
 |---|---|---|
-| 2026-11-18 | 1 | Phase 0 done; Phase 1 started: audit script, skeleton, ledger, CR register, audit Parts A/B/D, research wave 1 |
+| 2026-11-18 | 1 | Phase 0 done; Phase 1: audit script (+ sudo usage fix), skeleton, ledger, CR register, audit Parts A/B/D, research wave 1 complete, Knowledge Library plan; architecture Wave A launched |
+
+## Token usage per wave (sub-agent tokens as reported by the harness; main-session usage via /cost by the owner)
+| Wave / step | Agents | Sub-agent tokens | Note |
+|---|---|---|---|
+| Phase 1 research (wave 1 + re-runs + wave 2) | 4 (Sonnet), 2 re-runs | ≈ 680k | 73.5k + 125.7k (YouTube), 154.4k (India), 97.5k + 121.3k (infra), 107.8k (prices) |
+| Wave A | 1 (Opus) | pending | |
