@@ -79,6 +79,20 @@ Golden samples must not be judged without a music bed. The owner decides a **lic
 ### D7 (2026-11-18, overseer item 6): the repository becomes private
 The owner is making the Media repository private. As of this entry the repository is still **public** (checked via the repository listing), so the public-repo rules stay in force. After it is confirmed private (Q21 answered): the no-secrets rule stays forever; book content and the private method still stay out of git (they live in private storage); the "public" wording in `CLAUDE.md`, `CONTEXT_BRIEF.md` and `00_REPO_AND_SERVER_AUDIT.md` is then updated in one pass.
 
+### D8 (2026-11-18): owner written approval — partial 3A code start
+**Approved:** (a) the 3A minimal shared core (`3A_SLICE_SPEC.md` §2: contracts, state machine, job store, cost ledger, budget guard, audit log, tenancy fields + RLS, adapters with fakes and recorded fixtures), built on the merged Wave A documents; (b) Agents **04, 05, 06, 07, 08, 09** from their blueprints. Blueprints 10, 11, 16 continue in parallel; code for them starts only after each blueprint passes an independent check. **Not covered:** the rest of the slice and everything in 3C.
+Rules:
+1. Before coding each agent, a fresh reviewer (not the blueprint's author) checks the blueprint against GLOSSARY_AND_IDS, 03, 04, 07, 27. Gaps go to `CONTRACT_CHANGE_REQUESTS.md` and are resolved before the code that needs them. No private variants of contracts or tables.
+2. Follow the `3A_SLICE_SPEC.md` §14 ticket order and the 27 standards: typed interfaces, Pydantic outputs, ruff, mypy strict, pytest with the coverage floor, CI secret scan, cross-tenant test as blocking gates; every prompt step ships with its eval pack running against fakes in CI.
+3. **No paid API calls and no real keys** until the owner sets the per-video budget, the pilot budget and the provider spending limits and supplies keys through the secret mechanism. Ticket 3A-01's real LLM/TTS call waits for that.
+4. Development environment only; nothing on the VPS.
+5. One PR per ticket. A code PR is merged only when CI is fully green **and** a separate reviewer agent has passed the diff. Every merge is reported.
+6. Parallel sub-agents allowed (D4); no two agents edit the same module at the same time; shared-core changes go through one integrator (L1).
+7. Provisional topics (owner to confirm): skeleton = "RSI divergence explained on historical charts"; 3B = pullback trading basics, what a credit spread is, position sizing and risk management; all on data older than the SEBI lag.
+8. A 3-line Marathi update after each work block; this file stays current.
+Lanes: Step 0 (Opus: contracts package, core Protocols, fakes; the only gate before fan-out) → L1 core integrator (Opus), L2–L7 one coder per agent package 04–09 (Sonnet), L8 blueprints 10/11/16 + a fresh reviewer each, L9 eval harness + CI (Sonnet), L10 reviewer pool, L11 research-log backfill (done early: PR #7). Each lane works in its own worktree and branch and owns only its package; shared code, contracts and DB changes only through L1; merge order Step 0 → core → agent packages. A blocked lane records its blocker here and switches to tests or evals for its package.
+Build facts: Python **3.14** (newest stable bugfix minor installable here; 3.15 only as a beta; `uuid.uuid7()` stdlib); local PostgreSQL 16 for the tenancy suite, CI uses PostgreSQL 18; GitHub Actions CI confirmed working (run on PR #10 succeeded).
+
 ## Known corrections to apply in the integrator pass
 - Agent 14 §12: the "approved projects only" restriction belongs to the `postId` filter, not `allThreadsRelatedToChannelId` (research log A14-F5).
 - Agent 13: the resumable-upload init call returns `200`, the final upload `201` (A13-F1).
