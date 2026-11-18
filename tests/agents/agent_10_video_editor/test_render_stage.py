@@ -14,13 +14,15 @@ from tests.agents.agent_10_video_editor.support import World, payload_data
 
 
 def _run(world: World) -> object:
-    return RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    return RenderStage(world.deps()).run(
+        world.render_input(), world.attempt, envelope_org=world.org
+    )
 
 
 @pytest.mark.unit
 def test_render_completes_and_registers(tmp_path: Path) -> None:
     world = World(tmp_path, shots=4)  # 4 x 4 s, target 8 s -> 2 segments
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).run(world.render_input(), world.attempt, envelope_org=world.org)
     assert out.status is OutputStatus.SUCCEEDED
     data = payload_data(out)
     assert data["segments"] == {

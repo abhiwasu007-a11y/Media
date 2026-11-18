@@ -253,6 +253,11 @@ class MemoryCostLedger:
         self.rows: list[CostEntry] = []
 
     def record(self, tx: TenantTransaction, entry: NewCostEntry) -> CostEntry:
+        key = entry.idempotency_key
+        if key is not None:
+            same = next((r for r in self.rows if r.entry.idempotency_key == key), None)
+            if same is not None:
+                return same
         row = CostEntry(COST_ENTRY.new(), tx.context.org_id, entry)
         self.rows.append(row)
         return row

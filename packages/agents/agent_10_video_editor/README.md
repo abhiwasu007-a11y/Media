@@ -83,9 +83,21 @@ uv run pytest tests/agents/agent_10_video_editor -m integration         # real l
 * Motion other than `STATIC` and transitions other than `CUT` are carried in `$T` and rendered as hard cuts on a static frame; each is recorded as a warning (`MOTION_NOT_RENDERED`, `TRANSITION_RENDERED_AS_CUT`). The blueprint marks the look as REQUIRES REVIEW (owner look check in 3B).
 * The end-screen segment (plan `content_end_ms < total_duration_ms`) is the template of the plan's `END_SCREEN` overlay shown full-frame for the reserved length.
 * `agent_10.qc.single_pass` is refused (`CONFIG_INVALID`) until R-02 proves equality with the reference passes.
-* `qc.audio.music_bed_offset` and `qc.audio.speech_spans` are `SKIPPED` without stems (3A); `qc.watermark.visual` is `SKIPPED` with `JUDGED_BY_AGENT_16` unless the deterministic corner-patch input is supplied.
+* `qc.audio.music_bed_offset` and `qc.audio.speech_spans` are `SKIPPED` without stems (3A); `qc.watermark.visual` is always `SKIPPED` (`CORNER_PATCH_NOT_COMPUTED_3A`): no corner-patch input is computed in 3A and the judged part is Agent 16's.
 * `qc.visual.chart_data_age` treats "older than the lag" as strictly more than `price_data_lag_days` days.
 * Music bed: optional null input in 3A; non-null while `music_enabled` is false is `INPUT_INVALID`.
+
+## Review-fix behaviour and remaining limits (PR 42 review)
+
+* **AI disclosure.** `qc.visual.ai_disclosure_recorded` reads the manifest: a `D_AI_VIDEO` / `E_AI_STILL` shot without a `disclosure` record FAILs (blocking, remedy `s08_assets`); a record needs both flags. Whether the disclosure is *sufficient* is Agent 16's.
+* **Finance rules are fail-closed.** FIN-R9 / FIN-R11 apply on every channel unless it is listed in `agent_10.qc.non_finance_channel_ids` (or `finance_channel` is forced `false`); a chart in the manifest also makes the render finance-subject. With a chart and no `price_data_lag_days` the check is a blocking FAIL (`PRICE_DATA_LAG_UNSET`), never a WARN. The lag value is still owner config (30 per IN-02); no default is invented. The task input carries no channel type, so the channel list is configuration, not data read from the channel record (REQUIRES REVIEW (Phase 1): channel profile source).
+* **Short source clips are refused, not frozen.** A moving source shorter than its shot (manifest `media.duration_ms`, and the real probe of the staged file before encoding) is `INPUT_INVALID` `SOURCE_TOO_SHORT:<shot_id>`. `tpad=clone` stays in the filter graph only as a sub-frame (one frame) rounding guard and for looped stills. If the manifest has no `media.duration_ms`, only the render-time probe protects; a clip whose container duration lies is not detected.
+* **Cost rows** carry job, task, attempt, agent and channel ids and an idempotency key (org, task type, job, task; attempt independent): a QC retry records once. Amount is 0 `ESTIMATE` (render ms units) because no provider is called.
+* **Subtitles.** `qc.subtitles.accuracy` is the deterministic word overlap of the stored SRT with the script (WARN, not blocking, below 1000 permille; no LLM judge, per blueprint). A malformed SRT (BOM, CRLF, bad time line) is a blocking `qc.subtitles.format` FAIL with remedy `s10_render`.
+* **Silent audio** (`Peak: -inf`) is stored as -144 dBTP and FAILs `qc.audio.integrated_lufs` (`AUDIO_SILENT`, remedy `s07_voice`).
+* **Process checks.** `a10.q.tenant` is `PASS` only when the caller passes `envelope_org` to `run(...)`; otherwise it is `SKIPPED` (`ENVELOPE_ORG_NOT_SUPPLIED`; the context-ref owner check still runs). `a10.q.hash_chain` compares the render sha across payload, render output and DB row and the timeline sha with its context ref; `a10.q.no_provider_call` reports the recorded cost amount. Still not done: `a10.q.upstream` and `a10.q.segments_verified` are render-stage checks only; the QC stage does not emit them; hash chain does not re-hash every evidence ref.
+* **Self-drain** inside the VPS grace zone acts now (no week-long wrapped delay).
+* **Not changed (listed limits):** `inputs` models still ignore unknown upstream fields; `field_order=None` is read as progressive; chapter tolerance (1000 ms) and several QC defaults (1920x1080, 15/25 Mbps, 384 kbps) are code defaults of `QcConfig`; `edit.end_screen` never receives `other_content`; the hook check knows only `BRAND_STING`; DEV placement without `eta_ms_per_output_s` estimates 1:1 real time instead of failing closed.
 
 ## Needs from other lanes
 

@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from agent_10_video_editor.errors import input_invalid
@@ -18,11 +19,16 @@ from amw_core.contracts.task_output import (
 from amw_core.enums import (
     CheckKind,
     CheckVerdict,
+    CostFigureKind,
+    CostOperation,
+    CostUnitKind,
     NextActionType,
     OutputRefKind,
     OutputStatus,
     WaitReason,
 )
+from amw_core.ids import AttemptId, ChannelId, ExecutorId, JobId, TaskId, make_idempotency_key
+from amw_core.interfaces.cost_ledger import NewCostEntry
 
 ACTOR = "agent_10"
 SCHEMA_VERSION = "1.0.0"
@@ -126,4 +132,34 @@ def drain_action(reason: str) -> NextAction:
         wait_reason=WaitReason.DRAIN,
         escalation_level=None,
         reason=reason[:1000],
+    )
+
+
+def ffmpeg_cost_entry(
+    task_input: TaskInput, attempt_id: str, *, task_type: str, occurred_at: datetime, units_ms: int
+) -> NewCostEntry:
+    """The zero-amount ESTIMATE row of an FFmpeg stage, attributed and idempotent (09 section 5).
+
+    The key depends on (org, task type, job, task) and not on the attempt, so a retry of the same
+    task after a persist records the row once.
+    """
+    return NewCostEntry(
+        provider="ffmpeg",
+        operation=CostOperation.RENDER_FFMPEG,
+        amount_micros=0,
+        currency=task_input.resource_budget.currency,
+        figure_kind=CostFigureKind.ESTIMATE,
+        occurred_at=occurred_at,
+        job_id=JobId(task_input.job_id),
+        task_id=TaskId(task_input.task_id),
+        attempt_id=AttemptId(attempt_id),
+        channel_id=ChannelId(task_input.channel_id) if task_input.channel_id else None,
+        agent_id=ExecutorId(task_input.agent_id),
+        units=Decimal(units_ms),
+        unit_kind=CostUnitKind.RENDER_MS,
+        idempotency_key=make_idempotency_key(
+            task_input.org_id,
+            f"task.{task_type}",
+            ["cost", task_input.job_id, task_input.task_id],
+        ),
     )

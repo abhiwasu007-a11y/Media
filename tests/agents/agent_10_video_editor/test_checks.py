@@ -139,7 +139,7 @@ def test_unsourced_checks_warn_with_null_threshold_and_never_block() -> None:
         C.qc_sync_av_container(start_video_s="0", start_audio_s="1", duration_video_s="9", duration_audio_s="9", frame_ms=33, tol_start_ms=None, tol_dur_ms=None),
         C.qc_subtitles_sync(segments=[{"segment_id": "s", "start_ms": 0, "end_ms": 10}], cues=[], tol_sub_ms=None, calibrated=False),
         C.qc_duration_vs_script(actual_ms=10_000, narration_end_ms=9000, end_screen_ms=0, tol_dur_ms=None),
-        C.qc_visual_chart_data_age(charts=[], lag_days=None, today=date(2020, 1, 1), finance_channel=True),
+        C.qc_visual_chart_data_age(charts=[], lag_days=None, today=date(2020, 1, 1), finance_channel=False),
         C.edit_interrupt_first_dropoff(interrupt_times_ms=[], window_ms=None),
         C.edit_cuts_j_l(jl_count=0, min_count=None),
         C.edit_end_screen(end_screen_ms=1, configured_ms=None),

@@ -17,7 +17,8 @@ from agent_10_video_editor.qc.selftest import QcSelfTest, SelfTestRecord
 from agent_10_video_editor.qc.stage import QcStage
 from agent_10_video_editor.render import RenderStage
 from agent_10_video_editor.testing import make_config
-from amw_core.enums import OutputStatus
+from amw_core.enums import OutputStatus, RenderStatus
+from amw_core.errors import InputInvalidError
 from tests.agents.agent_10_video_editor.media import HAVE_FFMPEG, LavfiMedia
 from tests.agents.agent_10_video_editor.support import (
     World,
@@ -228,3 +229,73 @@ def test_r02_selftest_fixtures_yield_their_asserted_verdicts(tmp_path: Path) -> 
         "srt.overlap",
         "rate.bitrate",
     }
+
+
+class _HotMedia(LavfiMedia):
+    """Audio master far over full scale (clipped): the true-peak gate must FAIL."""
+
+    def master(self, duration_ms: int) -> bytes:
+        out = self._root / f"hot{duration_ms}.wav"
+        self._ff(
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-af", "volume=30dB",
+            "-t", f"{duration_ms / 1000:.3f}", "-ac", "2", str(out),
+        )  # fmt: skip
+        return out.read_bytes()
+
+
+class _SilentMedia(LavfiMedia):
+    def master(self, duration_ms: int) -> bytes:
+        out = self._root / f"silent{duration_ms}.wav"
+        self._ff(
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", f"{duration_ms / 1000:.3f}",
+            str(out),
+        )  # fmt: skip
+        return out.read_bytes()
+
+
+@pytest.mark.integration
+def test_failing_gate_end_to_end_with_real_ffmpeg(tmp_path: Path) -> None:
+    hot = _HotMedia(tmp_path / "media")
+    (tmp_path / "media").mkdir()
+    world = _world(tmp_path, hot)
+    world.licences.snapshot_value = licensed_snapshot(world)
+    chain = run_chain(world)
+    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).run(chain["qc_input"], world.attempt)
+    assert qc.status is OutputStatus.SUCCEEDED  # a failed gate is not a failed task
+    out = TechnicalQcOutput.model_validate(payload_data(qc))
+    assert out.gate_verdict == "FAILED"
+    failed = {f.check_id: f for f in out.failures}
+    assert "qc.audio.true_peak" in failed
+    assert failed["qc.audio.true_peak"].remedy_stage == "s07_voice"
+    assert failed["qc.audio.true_peak"].measured is not None
+    assert out.measurements.true_peak_dbtp > -1.0
+    row = world.renders.rows[(world.org, payload_data(chain["render"])["render_id"])]
+    assert row.status is RenderStatus.QC_FAILED
+    assert any(r.check_id == "qc.audio.true_peak" and r.verdict == "FAIL"
+               for r in world.qc_results.rows.values())  # fmt: skip
+
+
+@pytest.mark.integration
+def test_silent_audio_end_to_end_is_a_gate_fail_not_a_crash(tmp_path: Path) -> None:
+    silent = _SilentMedia(tmp_path / "media")
+    (tmp_path / "media").mkdir()
+    world = _world(tmp_path, silent)
+    world.licences.snapshot_value = licensed_snapshot(world)
+    chain = run_chain(world)
+    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).run(chain["qc_input"], world.attempt)
+    assert qc.status is OutputStatus.SUCCEEDED
+    out = TechnicalQcOutput.model_validate(payload_data(qc))
+    assert out.gate_verdict == "FAILED"
+    assert "qc.audio.integrated_lufs" in {f.check_id for f in out.failures}
+
+
+@pytest.mark.integration
+def test_a_source_clip_shorter_than_its_shot_is_refused_not_frozen(
+    tmp_path: Path, media: LavfiMedia
+) -> None:
+    world = _world(tmp_path, media)
+    data, ext = media.shot("too-short", 800)  # the last shot needs 2 s
+    world.revise_shot(3, data, ext)
+    with pytest.raises(InputInvalidError) as err:
+        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert "SOURCE_TOO_SHORT:sh04" in err.value.details["violations"]

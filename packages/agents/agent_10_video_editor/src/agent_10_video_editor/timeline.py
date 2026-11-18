@@ -39,6 +39,10 @@ class Fps(_Model):
     den: StrictInt
 
 
+IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "webp"})
+"""Extensions rendered as a looped still (no source duration to run out of)."""
+
+
 class RevealStep(_Model):
     k: StrictInt
     start_frame: StrictInt
@@ -333,6 +337,16 @@ class TimelineCompiler:
                     invalid.extend(
                         getattr(exc, "details", {}).get("violations", ["REVEAL_INVALID"])
                     )
+                    continue
+            if not steps and media is not None and media.duration_ms is not None:
+                ext = entry.asset_uri.rsplit(".", 1)[-1].lower()
+                needs_ms = media.source_in_ms + FrameQuantiser.frames_to_ms(
+                    end_f - start_f, fps_num, fps_den
+                )
+                one_frame_ms = FrameQuantiser.frames_to_ms(1, fps_num, fps_den)
+                if ext not in IMAGE_EXTENSIONS and needs_ms - media.duration_ms > one_frame_ms:
+                    # tpad=clone would silently freeze the tail: refuse instead (SOURCE_TOO_SHORT)
+                    invalid.append(f"SOURCE_TOO_SHORT:{ps.shot_id}")
                     continue
             shots.append(
                 TimelineShot(

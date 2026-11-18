@@ -28,6 +28,11 @@ class TenantScope:
         """F-01: org of envelope, Task Input and every ref are equal (``platform`` read-only)."""
         if envelope_org != task_input.org_id:
             raise TenantMismatchError("envelope and input organisations differ")
+        TenantScope.assert_refs_owned(task_input)
+
+    @staticmethod
+    def assert_refs_owned(task_input: TaskInput) -> None:
+        """Every context ref belongs to the input's organisation or to ``platform``."""
         for ref in task_input.context_refs:
             owner = _owner(ref.uri)
             if owner not in (task_input.org_id, "platform"):
@@ -72,6 +77,8 @@ class TenantScope:
 
 
 def _owner(uri: str) -> str:
+    if "://" not in uri:
+        raise CrossTenantRefError("reference has no storage owner")
     rest = uri.split("://", 1)[1]
     return rest.split("/", 1)[0]
 

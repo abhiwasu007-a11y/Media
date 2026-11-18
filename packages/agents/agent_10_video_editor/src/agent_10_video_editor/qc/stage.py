@@ -9,7 +9,6 @@ FAILED``. A missing or unparseable measurement is never ``PASS``: it raises and 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Protocol
@@ -65,7 +64,7 @@ from agent_10_video_editor.probe import (
 from agent_10_video_editor.qc import checks as C  # noqa: N812
 from agent_10_video_editor.qc.evidence import EvidenceWriter
 from agent_10_video_editor.qc.gate import SHORTS_SKIPPED, GateAggregator, QcPlan, profile_check_ids
-from agent_10_video_editor.qc.result import CheckResult, passed, skipped
+from agent_10_video_editor.qc.result import CheckResult, failed, passed, skipped
 from agent_10_video_editor.qc.selftest import SelfTestRecord
 from agent_10_video_editor.scope import ScratchDir, TenantScope, one_ref_per_schema
 from agent_10_video_editor.subtitles import SrtParser, SrtValidator
@@ -74,6 +73,7 @@ from agent_10_video_editor.taskio import (
     build_output,
     continue_action,
     drain_action,
+    ffmpeg_cost_entry,
     output_ref,
     to_validation_result,
     usage,
@@ -85,9 +85,6 @@ from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import (
     CheckKind,
     CheckVerdict,
-    CostFigureKind,
-    CostOperation,
-    CostUnitKind,
     GateVerdict,
     OutputRefKind,
     OutputStatus,
@@ -96,11 +93,11 @@ from amw_core.enums import (
 from amw_core.errors import (
     AgentCrashError,
     IncompleteOutputError,
+    InputInvalidError,
     RenderCrashError,
     SchemaInvalidError,
 )
 from amw_core.ids import ActorRef
-from amw_core.interfaces.cost_ledger import NewCostEntry
 from amw_core.interfaces.tenancy_context import TenantContext
 
 QC_SCHEMAS = (
@@ -148,8 +145,12 @@ class QcStage:
         self._d = deps
         self._selftests = selftests
 
-    def run(self, task_input: TaskInput, attempt_id: str) -> TaskOutput:
-        run = _QcRun(self._d, self._selftests, task_input, attempt_id)
+    def run(
+        self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
+    ) -> TaskOutput:
+        """``envelope_org`` is the organisation of the Task Input envelope the worker received; when
+        it is not supplied ``a10.q.tenant`` is reported ``SKIPPED`` (never a self-comparison)."""
+        run = _QcRun(self._d, self._selftests, task_input, attempt_id, envelope_org)
         try:
             return run.execute()
         finally:
@@ -159,9 +160,15 @@ class QcStage:
 
 class _QcRun:
     def __init__(
-        self, deps: StageDeps, selftests: SelfTestProvider, ti: TaskInput, attempt_id: str
+        self,
+        deps: StageDeps,
+        selftests: SelfTestProvider,
+        ti: TaskInput,
+        attempt_id: str,
+        envelope_org: str | None = None,
     ) -> None:
         self.d, self.ti, self.attempt_id, self.selftests = deps, ti, attempt_id, selftests
+        self.envelope_org = envelope_org
         from amw_core.ids import OrgId
 
         self.ctx = TenantContext(org_id=OrgId(ti.org_id), actor=ActorRef(ACTOR))
@@ -221,7 +228,10 @@ class _QcRun:
     def execute(self) -> TaskOutput:
         d, ti, qcfg = self.d, self.ti, self.d.cfg.qc
         emit("qc.start", self.log)
-        TenantScope.assert_consistent(ti.org_id, ti)
+        if self.envelope_org is not None:
+            TenantScope.assert_consistent(self.envelope_org, ti)
+        else:
+            TenantScope.assert_refs_owned(ti)
         validate_budget(ti)
         if ti.payload.data is None:
             raise input_invalid("PAYLOAD_NOT_INLINE")
@@ -259,7 +269,10 @@ class _QcRun:
         if row is None:
             raise missing_dependency(f"RENDER_NOT_FOUND:{payload.render_id}")
         render_ref = render_out["render_ref"]
-        hash_ok = payload.render_sha256 == render_ref["sha256"] == row.content_sha256
+        hash_ok = (
+            payload.render_sha256 == render_ref["sha256"] == row.content_sha256
+            and render_out["timeline_ref"]["sha256"] == refs["agent_10.timeline"][1]
+        )
         if not hash_ok:
             raise IncompleteOutputError(
                 "a10.q.hash_chain failed", details={"check": "a10.q.hash_chain"}
@@ -334,15 +347,9 @@ class _QcRun:
                     remedy_stage_id=",".join(gate.remedy_stage_ids),
                 ),
             )
-        process = [
-            passed("a10.q.schema", gate=False),
-            passed("a10.q.tenant", gate=False),
-            passed("a10.q.hash_chain", gate=False),
-            passed("a10.q.no_provider_call", gate=False, measured=0, threshold=0),
-        ]
         self._persist(payload, row, results, evidence)
         emit("qc.persisted", self.log, rows=len(results))
-        self._cost(row.duration_ms)
+        cost_amount = self._cost(row.duration_ms)
         output = TechnicalQcOutput(
             gate_verdict=gate.gate_verdict.value,
             failures=tuple(
@@ -396,6 +403,17 @@ class _QcRun:
                 output_ref(f.uri, OutputRefKind.IMAGE, f.sha256, 1, "image/png")
                 for f in evidence.frames
             ),
+        ]
+        # computed, not asserted: the output model above validated, every ref hash matched (the read
+        # path raises otherwise), the tenant check ran when the envelope org was supplied, and the
+        # cost row recorded for this task carries the amount of the (zero) provider spend
+        process = [
+            passed("a10.q.schema", gate=False, measured=len(refs_out)),
+            passed("a10.q.hash_chain", gate=False, measured=len(refs)),
+            passed("a10.q.no_provider_call", gate=False, measured=cost_amount, threshold=0),
+            passed("a10.q.tenant", gate=False)
+            if self.envelope_org is not None
+            else skipped("a10.q.tenant", "ENVELOPE_ORG_NOT_SUPPLIED", gate=False),
         ]
         failed_ids = [f.check_id for f in gate.failed_checks]
         action = continue_action(
@@ -552,13 +570,22 @@ class _QcRun:
                 ceiling_dbtp=float(qc.true_peak_ceiling_dbtp),
             )
         )
-        add(
-            C.qc_audio_integrated_lufs(
-                integrated_lufs=m.ebur["integrated_lufs"],
-                target_lufs=float(qc.target_lufs),
-                tolerance_lu=float(qc.lufs_tolerance_lu) if qc.lufs_tolerance_lu else None,
-            )
+        lufs_result = C.qc_audio_integrated_lufs(
+            integrated_lufs=m.ebur["integrated_lufs"],
+            target_lufs=float(qc.target_lufs),
+            tolerance_lu=float(qc.lufs_tolerance_lu) if qc.lufs_tolerance_lu else None,
         )
+        if m.ebur.get("silent"):
+            # ebur128 reports Peak -inf: a fully silent track is a blocking FAIL (remedy s07_voice),
+            # never a crash and never an unsourced WARN
+            lufs_result = failed(
+                "qc.audio.integrated_lufs",
+                measured=m.ebur["integrated_lufs"],
+                threshold=float(qc.target_lufs),
+                unit="LUFS",
+                message="AUDIO_SILENT",
+            )
+        add(lufs_result)
         add(C.qc_audio_lra_report(lra_lu=m.ebur["lra_lu"]))
         add(C.qc_audio_clipping(clipping_samples=audio.clipping_samples))
         add(
@@ -605,9 +632,15 @@ class _QcRun:
                 tol_dur_ms=qc.sync_tol_dur_ms,
             )
         )
-        srt_cues = SrtParser.parse((work / "sub.srt").read_bytes())
-        srt_errors = SrtValidator.validate(srt_cues, total_ms)
-        self._run(self.argv.srt_check("sub.srt"), work)
+        try:
+            srt_cues = SrtParser.parse((work / "sub.srt").read_bytes())
+        except InputInvalidError as exc:
+            # a malformed stored SRT (BOM, CRLF, bad time line) is a gate FAIL (remedy s10_render)
+            srt_cues = []
+            srt_errors = [f"PARSE:{', '.join(exc.details.get('violations', ['SRT_UNPARSEABLE']))}"]
+        else:
+            srt_errors = SrtValidator.validate(srt_cues, total_ms)
+            self._run(self.argv.srt_check("sub.srt"), work)
         add(C.qc_subtitles_format(errors=srt_errors))
         add(
             C.qc_subtitles_languages(
@@ -626,7 +659,13 @@ class _QcRun:
                 calibrated=qc.sub_tol_ms is not None,
             )
         )
-        add(C.qc_subtitles_accuracy(overlap_permille=1000))
+        add(
+            C.qc_subtitles_accuracy(
+                overlap_permille=_word_overlap_permille(
+                    srt_cues, [seg.segment_id for seg in narration.segments], script
+                )
+            )
+        )
         add(
             C.qc_duration_vs_script(
                 actual_ms=total_ms,
@@ -748,7 +787,7 @@ class _QcRun:
                 warning_window_days=qc.licence_expiry_warning_days,
             ),
             C.qc_watermark_provenance(stock_items=snap.stock_items),
-            C.qc_watermark_visual(corner_patch_by_shot=None),
+            skipped("qc.watermark.visual", "CORNER_PATCH_NOT_COMPUTED_3A"),
         ]
         frames_by_tier = dict.fromkeys(
             ("A_OWNER_REAL", "B_LICENSED_STOCK", "C_CODE_MOTION", "D_AI_VIDEO", "E_AI_STILL"), 0
@@ -772,23 +811,32 @@ class _QcRun:
         entries = {
             e.shot_id: e for e in manifest.shots if e.aspect_ratio == payload_aspect(timeline, plan)
         }
-        items = [
-            {
-                "element_id": s.shot_id,
-                "tier": s.tier,
-                "is_realistic_synthetic": entries[s.shot_id].disclosure.is_realistic_synthetic,
-                "depicts_real_person": entries[s.shot_id].disclosure.depicts_real_person,
-                "disclosure_recorded": True,
-            }
-            for s in timeline.shots
-            if s.shot_id in entries
-        ]
+        items = []
+        for s in timeline.shots:
+            entry = entries.get(s.shot_id)
+            if entry is None:
+                continue
+            record = entry.disclosure
+            items.append(
+                {
+                    "element_id": s.shot_id,
+                    "tier": s.tier,
+                    # no record: the flags are unknown, so an AI asset is treated as realistic
+                    # synthetic and the missing record FAILs (fail closed, YT-06/07)
+                    "is_realistic_synthetic": True
+                    if record is None
+                    else record.is_realistic_synthetic,
+                    "depicts_real_person": False if record is None else record.depicts_real_person,
+                    "disclosure_recorded": record is not None,
+                }
+            )
         out.append(C.qc_visual_ai_disclosure_recorded(items=items))
         charts = [
             {"element_id": sid, "data_end_date": e.chart.data_end_date}
             for sid, e in entries.items()
             if e.chart is not None
         ]
+        finance = self._is_finance_channel(charts)
         out.append(
             C.qc_visual_chart_data_age(
                 charts=charts,
@@ -796,13 +844,24 @@ class _QcRun:
                 today=self.d.clock.now().date()
                 if hasattr(self.d.clock.now(), "date")
                 else date.today(),
-                finance_channel=qc.finance_channel,
+                finance_channel=finance,
             )
         )
-        out.append(
-            C.qc_visual_no_synthetic_presenter(items=items, finance_channel=qc.finance_channel)
-        )
+        out.append(C.qc_visual_no_synthetic_presenter(items=items, finance_channel=finance))
         return out
+
+    def _is_finance_channel(self, charts: list[dict[str, Any]]) -> bool:
+        """FIN-R9/R11 apply unless the channel is explicitly a non-finance one (fail closed).
+
+        The explicit config override wins; a chart in the manifest then makes the render subject to
+        FIN-R9; otherwise only a channel listed in ``qc.non_finance_channel_ids`` is exempt.
+        """
+        qc = self.d.cfg.qc
+        if qc.finance_channel is not None:
+            return qc.finance_channel
+        if charts:
+            return True
+        return self.ti.channel_id is None or self.ti.channel_id not in qc.non_finance_channel_ids
 
     def _edit(
         self,
@@ -989,21 +1048,19 @@ class _QcRun:
                 float(peak) if isinstance(peak, int | float) else None,
             )
 
-    def _cost(self, duration_ms: int) -> None:
+    def _cost(self, duration_ms: int) -> int:
         with self.d.tenancy.transaction(self.ctx) as tx:
-            self.d.cost_ledger.record(
+            row = self.d.cost_ledger.record(
                 tx,
-                NewCostEntry(
-                    provider="ffmpeg",
-                    operation=CostOperation.RENDER_FFMPEG,
-                    amount_micros=0,
-                    currency=self.ti.resource_budget.currency,
-                    figure_kind=CostFigureKind.ESTIMATE,
+                ffmpeg_cost_entry(
+                    self.ti,
+                    self.attempt_id,
+                    task_type="agent_10.technical_qc",
                     occurred_at=self.d.clock.now(),
-                    units=Decimal(self._ms()),
-                    unit_kind=CostUnitKind.RENDER_MS,
+                    units_ms=self._ms(),
                 ),
             )
+        return row.entry.amount_micros
 
     @staticmethod
     def _failure(r: CheckResult) -> FailureOut:
@@ -1038,6 +1095,26 @@ def _json(data: bytes) -> dict[str, Any]:
 
 def _timeline(data: bytes) -> Timeline:
     return Timeline.model_validate_json(data)
+
+
+def _words(text: str) -> list[str]:
+    return text.casefold().split()
+
+
+def _word_overlap_permille(cues: list[Any], segment_ids: list[str], script: ScriptStrings) -> int:
+    """Deterministic word overlap of the stored SRT text with the script (18 section 7.6).
+
+    ``2 * |common words| / (|SRT words| + |script words|)`` over multisets, in permille: 1000 means
+    the same words, anything lower (changed, added or dropped words) is reported as a WARN.
+    """
+    from collections import Counter
+
+    expected = Counter(w for sid in segment_ids for w in _words(script.segments.get(sid, "")))
+    actual = Counter(w for cue in cues for w in _words(cue.text))
+    total = sum(expected.values()) + sum(actual.values())
+    if total == 0:
+        return 1000
+    return 2000 * sum((expected & actual).values()) // total
 
 
 def script_language(subs_out: dict[str, Any], default: str) -> str:

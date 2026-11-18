@@ -438,8 +438,13 @@ def qc_subtitles_sync(
 
 
 def qc_subtitles_accuracy(*, overlap_permille: int) -> CheckResult:
-    return passed(
-        "qc.subtitles.accuracy", blocking=False, measured=overlap_permille, unit="permille"
+    """Deterministic word overlap with the script; not blocking in 3A (18 section 7.6)."""
+    if overlap_permille >= 1000:
+        return passed(
+            "qc.subtitles.accuracy", blocking=False, measured=overlap_permille, unit="permille"
+        )
+    return warned(
+        "qc.subtitles.accuracy", measured=overlap_permille, threshold=1000, unit="permille"
     )
 
 
@@ -713,6 +718,25 @@ def qc_visual_chart_data_age(
 ) -> CheckResult:
     """FIN-R9: each chart's ``data_end_date`` must be older than the configured lag."""
     if lag_days is None:
+        if finance_channel and charts:
+            # FIN-R9 / IN-02: an unset lag on a finance channel is a blocking FAIL, not a WARN
+            return failed(
+                "qc.visual.chart_data_age",
+                measured=len(charts),
+                threshold=None,
+                unit="days",
+                offending=tuple(str(c["element_id"]) for c in charts),
+                shot_ids=tuple(str(c["element_id"]) for c in charts),
+                message="PRICE_DATA_LAG_UNSET",
+                details={"rule_id": "FIN-R9"},
+            )
+        if finance_channel:
+            return passed(
+                "qc.visual.chart_data_age",
+                measured=0,
+                threshold=None,
+                details={"rule_id": "FIN-R9"},
+            )
         return warned("qc.visual.chart_data_age", measured=len(charts), threshold=None)
     bad = tuple(
         str(c["element_id"])

@@ -62,7 +62,7 @@ from agent_10_video_editor.observability import LogContext, emit, labels
 from agent_10_video_editor.ports import RenderRow
 from agent_10_video_editor.probe import PacketParser, ProbeResult
 from agent_10_video_editor.qc.checks import a10_q_colour_tags, a10_q_gop_settings
-from agent_10_video_editor.qc.result import CheckResult, passed
+from agent_10_video_editor.qc.result import CheckResult, passed, skipped
 from agent_10_video_editor.scope import ScratchDir, TenantScope, one_ref_per_schema
 from agent_10_video_editor.segments import (
     BlobFacts,
@@ -81,6 +81,7 @@ from agent_10_video_editor.taskio import (
     build_output,
     continue_action,
     drain_action,
+    ffmpeg_cost_entry,
     output_ref,
     to_validation_result,
     usage,
@@ -98,9 +99,6 @@ from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import (
     CheckVerdict,
-    CostFigureKind,
-    CostOperation,
-    CostUnitKind,
     OutputRefKind,
     OutputStatus,
     RenderKind,
@@ -123,7 +121,6 @@ from amw_core.ids import (
     TaskId,
     make_idempotency_key,
 )
-from amw_core.interfaces.cost_ledger import NewCostEntry
 from amw_core.interfaces.idempotency_store import BeginAction
 from amw_core.interfaces.tenancy_context import TenantContext
 
@@ -207,8 +204,11 @@ class RenderStage:
 
     # -- public --------------------------------------------------------------------------------
 
-    def run(self, task_input: TaskInput, attempt_id: str) -> TaskOutput:
-        run = _RenderRun(self._d, task_input, attempt_id)
+    def run(
+        self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
+    ) -> TaskOutput:
+        """``envelope_org``: organisation of the received envelope (compared with the input)."""
+        run = _RenderRun(self._d, task_input, attempt_id, envelope_org)
         try:
             return run.execute()
         finally:
@@ -216,7 +216,14 @@ class RenderStage:
 
 
 class _RenderRun:
-    def __init__(self, deps: StageDeps, task_input: TaskInput, attempt_id: str) -> None:
+    def __init__(
+        self,
+        deps: StageDeps,
+        task_input: TaskInput,
+        attempt_id: str,
+        envelope_org: str | None = None,
+    ) -> None:
+        self.envelope_org = envelope_org
         self.d = deps
         self.ti = task_input
         self.attempt_id = attempt_id
@@ -266,7 +273,10 @@ class _RenderRun:
                 target_id=ti.task_id, job_id=ti.job_id, correlation_id=ti.correlation_id,
                 details={"attempt_id": self.attempt_id},
             )  # fmt: skip
-        TenantScope.assert_consistent(ti.org_id, ti)
+        if self.envelope_org is not None:
+            TenantScope.assert_consistent(self.envelope_org, ti)
+        else:
+            TenantScope.assert_refs_owned(ti)
         self._note("render.tenant_ok")
         payload = parse_render_input(ti)
         loaded = load_inputs(ti, self.scope)
@@ -609,6 +619,7 @@ class _RenderRun:
         cmd = plan.command
         for staged in cmd.inputs:
             self.scope.read_to(staged.uri, staged.sha256, work / staged.name)
+        self._check_sources_long_enough(cmd, probe)
         part = work / cmd.output_name
         part.unlink(missing_ok=True)
 
@@ -646,6 +657,14 @@ class _RenderRun:
             size_bytes=info.size_bytes,
             frames=segment.frames,
         )
+
+    def _check_sources_long_enough(self, cmd: SegmentCommand, probe: ProbeService) -> None:
+        """A moving source shorter than the shot would be frozen by ``tpad=clone``: refuse it."""
+        cfg = self.d.cfg.render
+        one_frame_ms = FrameQuantiser.frames_to_ms(1, cfg.fps_num, cfg.fps_den)
+        for name, shot_id, needs_ms in cmd.video_needs:
+            if probe.full(name).duration_ms + one_frame_ms < needs_ms:
+                raise input_invalid(f"SOURCE_TOO_SHORT:{shot_id}")
 
     def _raise_unreadable_asset(self, cmd: SegmentCommand, probe: ProbeService) -> None:
         for staged in cmd.inputs:
@@ -774,15 +793,12 @@ class _RenderRun:
                 )  # fmt: skip
                 self.d.cost_ledger.record(
                     tx,
-                    NewCostEntry(
-                        provider="ffmpeg",
-                        operation=CostOperation.RENDER_FFMPEG,
-                        amount_micros=0,
-                        currency=self.ti.resource_budget.currency,
-                        figure_kind=CostFigureKind.ESTIMATE,
+                    ffmpeg_cost_entry(
+                        self.ti,
+                        self.attempt_id,
+                        task_type="agent_10.render",
                         occurred_at=self.d.clock.now(),
-                        units=Decimal(self._render_ms()),
-                        unit_kind=CostUnitKind.RENDER_MS,
+                        units_ms=self._render_ms(),
                     ),
                 )
         if action is not BeginAction.RETURN_STORED:
@@ -867,7 +883,9 @@ class _RenderRun:
         cfg = self.d.cfg.render
         results = [
             passed("a10.q.schema", gate=False),
-            passed("a10.q.tenant", gate=False),
+            passed("a10.q.tenant", gate=False)
+            if self.envelope_org is not None
+            else skipped("a10.q.tenant", "ENVELOPE_ORG_NOT_SUPPLIED", gate=False),
             passed("a10.q.upstream", gate=False),
             CheckResult(
                 "a10.q.timeline_frames",

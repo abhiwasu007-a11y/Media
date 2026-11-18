@@ -167,7 +167,8 @@ class SelfDrainTimer:
             night = _night(guard)
             drain_point = (now // _DAY) * _DAY + night.end_min - _ceil_minutes(night.grace_ms)
             in_night = night.start_min <= now_local.minute_of_day < night.end_min
-            result = min(result, drain_point if in_night else now)
+            # inside the grace zone drain_point is in the past: act now, never wrap to next week
+            result = min(result, max(drain_point, now) if in_night else now)
         return LocalTime.from_week_minute(result)
 
     @staticmethod

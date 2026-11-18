@@ -143,6 +143,8 @@ class World:
         media: MediaFactory | None = None,
         storage: MemoryBlobStorage | None = None,
         script_overrides: dict[str, str] | None = None,
+        entry_overrides: dict[int, dict[str, Any]] | None = None,
+        channel_id: str | None = None,
     ) -> None:
         self.org = org or str(ORG.new())
         self.job = str(JOB.new())
@@ -168,6 +170,8 @@ class World:
         self.n_shots, self.shot_ms, self.chart = shots, shot_ms, chart
         self.media = media
         self.script_overrides = script_overrides or {}
+        self.entry_overrides = entry_overrides or {}
+        self.channel_id = channel_id
         self.refs: dict[str, tuple[str, str]] = {}
         self.docs: dict[str, Any] = {}
         self._build()
@@ -270,6 +274,7 @@ class World:
                     "reveal_stills": stills,
                 }
             )
+            entries[-1].update(self.entry_overrides.get(n, {}))
             segments[f"s{n + 1}"] = f"line number {n + 1} of the narration text"
             narration.append({"segment_id": f"s{n + 1}", "start_ms": start, "end_ms": end})
         segments.update(self.script_overrides)
@@ -347,7 +352,7 @@ class World:
                 "job_id": self.job,
                 "task_id": self.task,
                 "project_id": None,
-                "channel_id": None,
+                "channel_id": self.channel_id,
                 "agent_id": "agent_10",
                 "source_agent": "agent_01",
                 "priority": "NORMAL",

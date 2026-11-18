@@ -58,7 +58,9 @@ class SubtitleStage:
     def __init__(self, deps: StageDeps) -> None:
         self._d = deps
 
-    def run(self, task_input: TaskInput, attempt_id: str) -> TaskOutput:
+    def run(
+        self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
+    ) -> TaskOutput:
         d = self._d
         started = d.clock.monotonic_ms()
         log = LogContext(
@@ -70,7 +72,10 @@ class SubtitleStage:
         )
         ctx = TenantContext(org_id=task_input.org_id, actor=ActorRef(ACTOR))  # type: ignore[arg-type]
         scope = TenantScope(ctx, d.storage)
-        TenantScope.assert_consistent(task_input.org_id, task_input)
+        if envelope_org is not None:
+            TenantScope.assert_consistent(envelope_org, task_input)
+        else:
+            TenantScope.assert_refs_owned(task_input)
         validate_budget(task_input)
         if task_input.payload.data is None:
             raise input_invalid("PAYLOAD_NOT_INLINE")

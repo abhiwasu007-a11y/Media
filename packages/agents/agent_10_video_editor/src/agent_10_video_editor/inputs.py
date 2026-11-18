@@ -135,8 +135,10 @@ class Fingerprints(_Model):
 
 
 class Disclosure(_Model):
-    is_realistic_synthetic: bool = False
-    depicts_real_person: bool = False
+    """The manifest disclosure record (agent_08 D15): both flags are required when it exists."""
+
+    is_realistic_synthetic: bool
+    depicts_real_person: bool
 
 
 class ChartInfo(_Model):
@@ -170,7 +172,7 @@ class ManifestShot(_Model):
     fingerprints: Fingerprints | None = None
     chart: ChartInfo | None = None
     reveal_stills: tuple[RevealStill, ...] = ()
-    disclosure: Disclosure = Disclosure()
+    disclosure: Disclosure | None = None
     start_ms: StrictInt | None = None
     end_ms: StrictInt | None = None
 

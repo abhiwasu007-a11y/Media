@@ -183,7 +183,9 @@ class ProbeParser:
 
 _I = re.compile(r"^\s+I:\s+(-?\d+(?:\.\d+)?)\s+LUFS\s*$", re.MULTILINE)
 _LRA = re.compile(r"^\s+LRA:\s+(-?\d+(?:\.\d+)?)\s+LU\s*$", re.MULTILINE)
-_PEAK = re.compile(r"^\s+Peak:\s+(-?\d+(?:\.\d+)?)\s+dBFS\s*$", re.MULTILINE)
+_PEAK = re.compile(r"^\s+Peak:\s+(-?\d+(?:\.\d+)?|-inf)\s+dBFS\s*$", re.MULTILINE)
+SILENCE_FLOOR_DBTP = -144.0
+"""Stored in place of ``-inf``: digital silence has no finite true peak (``silent`` flag is set)."""
 
 
 class Ebur128Parser:
@@ -204,7 +206,10 @@ class Ebur128Parser:
                 continue
             match = pattern.search(summary, position)
             if match:
-                found[key] = float(match.group(1))
+                text = match.group(1)
+                if text == "-inf":
+                    found["silent"] = 1.0
+                found[key] = SILENCE_FLOOR_DBTP if text == "-inf" else float(text)
         missing = [k for k in ("integrated_lufs", "lra_lu", "true_peak_dbtp") if k not in found]
         if missing:
             raise MeasurementUnavailable(missing)

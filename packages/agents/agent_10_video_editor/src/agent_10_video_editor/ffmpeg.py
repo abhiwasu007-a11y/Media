@@ -19,10 +19,10 @@ from typing import Literal, Protocol, runtime_checkable
 from agent_10_video_editor.canonical import canonical_sha256
 from agent_10_video_editor.config import RenderConfig
 from agent_10_video_editor.errors import input_invalid
-from agent_10_video_editor.frames import ms_to_seconds_text
+from agent_10_video_editor.frames import FrameQuantiser, ms_to_seconds_text
 from agent_10_video_editor.inputs import CodecProfile
 from agent_10_video_editor.segments import SegmentSlice
-from agent_10_video_editor.timeline import TimelineShot
+from agent_10_video_editor.timeline import IMAGE_EXTENSIONS, TimelineShot
 from amw_core.errors import (
     AgentHangError,
     AmwError,
@@ -35,7 +35,7 @@ KilledBy = Literal["SIGTERM", "SIGKILL", "TIMEOUT"]
 _EXTENSIONS = frozenset(
     {"png", "jpg", "jpeg", "webp", "mp4", "mov", "mkv", "wav", "ttf", "otf", "flac"}
 )
-_IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "webp"})
+_IMAGE_EXTENSIONS = IMAGE_EXTENSIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +159,9 @@ class SegmentCommand:
     args_sha256: str
     warnings: tuple[str, ...] = ()
     gop: dict[str, object] = field(default_factory=dict)
+    video_needs: tuple[tuple[str, str, int], ...] = ()
+    """(staged input name, shot_id, source ms the shot consumes) of every moving-video input: the
+    render probes each staged input against it, because ``tpad=clone`` would freeze a short one."""
 
 
 def _ext_of(uri: str) -> str:
@@ -203,6 +206,7 @@ class ArgvBuilder:
         graph: list[str] = []
         warnings: list[str] = []
         labels: list[str] = []
+        needs: list[tuple[str, str, int]] = []
 
         def add_input(uri: str, sha: str, *, still: bool, seek_ms: int = 0) -> int:
             index = len(inputs)
@@ -247,6 +251,15 @@ class ArgvBuilder:
                 label = f"v{len(labels)}"
                 scale_chain(index, label, part.frames, part.crop)
                 labels.append(label)
+                if inputs[index].name.rsplit(".", 1)[-1] not in IMAGE_EXTENSIONS:
+                    needs.append(
+                        (
+                            inputs[index].name,
+                            part.shot_id,
+                            part.source_in_ms
+                            + FrameQuantiser.frames_to_ms(part.frames, cfg.fps_num, cfg.fps_den),
+                        )
+                    )
         joined = "".join(f"[{label}]" for label in labels)
         graph.append(
             f"{joined}concat=n={len(labels)}:v=1:a=0[vc0]"
@@ -343,6 +356,7 @@ class ArgvBuilder:
                 "closed_gop": True,
                 "idr_at_segment_start": True,
             },
+            video_needs=tuple(needs),
         )
 
     # -- mux -------------------------------------------------------------------------------
