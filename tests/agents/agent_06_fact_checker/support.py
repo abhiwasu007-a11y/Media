@@ -5,7 +5,7 @@ import json
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +15,12 @@ from agent_06_fact_checker.models import (
     CitationKind,
     ExtractedClaim,
     Relation,
+    Verdict,
     VerifiedClaim,
 )
 from agent_06_fact_checker.ports import CitationRow, SourceText
 from agent_06_fact_checker.prompts import PromptDoc, parse_prompt_doc
-from agent_06_fact_checker.rulepack import RulePack
+from agent_06_fact_checker.rulepack import FinLexicon, RulePack, load_provisional_finance_lexicon
 from amw_adapters.common import CallUsage
 from amw_adapters.llm.protocol import LlmRequest, LlmResponse
 from amw_core.contracts.task_input import TaskInput
@@ -258,6 +259,7 @@ class MemoryClaims:
         self.citations: list[CitationRow] = []
         self.status_task: dict[str, str] = {}
         self.owned_override: frozenset[str] | None = None
+        self.verdicts: dict[str, Verdict] = {}
 
     def insert_claims(
         self,
@@ -279,6 +281,16 @@ class MemoryClaims:
         if self.owned_override is not None:
             return self.owned_override
         return frozenset(claim_ids)
+
+    def extraction_verdicts(
+        self, tx: TenantTransaction, *, script_id: str, claim_ids: Sequence[str]
+    ) -> Mapping[str, Verdict]:
+        return {i: self.verdicts[i] for i in claim_ids if i in self.verdicts}
+
+    def register_extraction(self, claims: Sequence[Mapping[str, Any]]) -> None:
+        """What the stored ``claims`` rows hold (the code-recomputed extraction verdicts)."""
+        for c in claims:
+            self.verdicts[c["claim_id"]] = Verdict(c["extraction_verdict"])
 
     def update_status(
         self, tx: TenantTransaction, *, task_id: TaskId, results: Sequence[VerifiedClaim]
@@ -333,17 +345,52 @@ def source(
 
 
 class StaticPacks:
-    def __init__(self, markers: Mapping[str, tuple[str, ...]] | None = None) -> None:
-        self.markers = TEST_MARKERS if markers is None else markers
+    """Rule-pack records; the finance pack carries the provisional baseline lexicon data file."""
+
+    def __init__(
+        self,
+        markers: Mapping[str, tuple[str, ...]] | None = None,
+        lexicon: FinLexicon | None = None,
+    ) -> None:
+        base_markers, base_lexicon = load_provisional_finance_lexicon()
+        self.markers = base_markers if markers is None else markers
+        self.lexicon = base_lexicon if lexicon is None else lexicon
         self.missing: set[str] = set()
 
     def resolve(self, key: str) -> RulePack:
         if key in self.missing:
             raise MissingDependencyError("pack")
-        markers = self.markers if key == "rp.finance_sebi_in" else {}
+        finance = key == "rp.finance_sebi_in"
         return RulePack(
-            key=key, version=1, text=f"[rules of {key}]", rules_sha256="0" * 64, markers=markers
+            key=key,
+            version=1,
+            text=f"[rules of {key}]",
+            rules_sha256="0" * 64,
+            markers=self.markers if finance else {},
+            lexicon=self.lexicon if finance else None,
         )
+
+
+class FixedRanges:
+    """Last bar dates of the charts (the required D0 lookup); a missing entry is unknown."""
+
+    def __init__(self, ends: Mapping[str, date | None] | None = None) -> None:
+        self.ends = dict(ends or {})
+
+    def range_end(self, ref_id: str) -> date | None:
+        return self.ends.get(ref_id)
+
+
+def ranges_for(case_input: Mapping[str, Any]) -> FixedRanges:
+    """Dataset charts carry a precomputed age: give the lookup a consistent last bar date."""
+    ends: dict[str, date | None] = {}
+    for ref in case_input.get("chart_data_refs", []):
+        age = ref.get("data_age_vs_lag")
+        if age == "OLDER_THAN_LAG":
+            ends[ref["ref_id"]] = date(2025, 1, 1)
+        elif age == "WITHIN_LAG":
+            ends[ref["ref_id"]] = NOW.date() - timedelta(days=5)
+    return FixedRanges(ends)
 
 
 class DocPrompts:
@@ -486,6 +533,7 @@ def extraction_step(world: World, packs: StaticPacks | None = None, **kw: Any) -
         audit=world.audit,
         claims=world.claims,
         scripts=kw.pop("scripts", MemoryScripts(SCRIPT_SHA)),
+        chart_ranges=kw.pop("chart_ranges", FixedRanges()),
         rule_packs=packs or StaticPacks(),
         prompts=DocPrompts(),
         settings=kw.pop("settings", make_settings()),

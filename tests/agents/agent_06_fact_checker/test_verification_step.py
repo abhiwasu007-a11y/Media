@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from agent_06_fact_checker.hashing import claims_sha256, sha256_hex
-from agent_06_fact_checker.models import VerificationOutput
+from agent_06_fact_checker.models import Verdict, VerificationOutput
 from amw_core.contracts.task_output import gate_failures, integrity_failures
 from amw_core.enums import OutputStatus
 from tests.agents.agent_06_fact_checker.eval_support import load_cases
@@ -77,6 +77,11 @@ def data(claims: list[dict[str, Any]] | None = None, **over: Any) -> dict[str, A
         ],
         "chart_facts": [],
     }
+    rank = {"ALLOWED": 0, "NEEDS_HUMAN_REVIEW": 1, "BLOCKED": 2}
+    worst = max(
+        (c["extraction_verdict"] for c in d["claims"]), key=rank.__getitem__, default="ALLOWED"
+    )
+    d["extraction_overall_verdict"] = worst
     d.update(over)
     return with_claims_hash(d)
 
@@ -119,9 +124,12 @@ def go(
     *,
     world: World | None = None,
     stage: str = "s06_verify",
+    register: bool = True,
     **kw: Any,
 ) -> tuple[Any, World]:
     w = world or World(llm=RecordedLlm(responses or []))
+    if register:
+        w.claims.register_extraction(d["claims"])
     knowledge = MemoryKnowledge(sources if sources is not None else [source(REF, TEXT)])
     step = verification_step(w, knowledge, script_sha=SHA, **kw)
     out = step.run(task_input(SCHEMA, d), run_context(stage, 0))
@@ -341,11 +349,13 @@ def test_f01_schema_rejection_and_s02_cross_tenant_refs() -> None:
     out, _ = go(d, [])
     assert out.error is not None and out.error.code == "PERMANENT.SCHEMA_INVALID"
     w = World(llm=RecordedLlm([]))
+    w.claims.register_extraction([claim(1)])
     w.claims.owned_override = frozenset()  # a claim id of another tenant / script
     out, _ = go(data(), [], world=w)
     assert out.error is not None and out.error.code == "PERMANENT.CROSS_TENANT_REF"
     assert "exist" not in out.error.message  # no existence oracle
     w = World(llm=RecordedLlm([]))
+    w.claims.register_extraction([claim(1)])
     step = verification_step(w, MemoryKnowledge([source(REF, TEXT)], foreign=[REF]), script_sha=SHA)
     out = step.run(task_input(SCHEMA, data()), run_context("s06_verify"))
     assert out.error is not None and out.error.code == "PERMANENT.CROSS_TENANT_REF"
@@ -368,6 +378,7 @@ def test_unknown_script_is_a_missing_dependency() -> None:
 @pytest.mark.security
 def test_library_search_is_channel_scoped_and_never_restricted() -> None:
     w = World(llm=RecordedLlm([batch(result_for("c1"))]))
+    w.claims.register_extraction([claim(1)])
     k = MemoryKnowledge([source(REF, TEXT, restricted=True)])
     step = verification_step(w, k, script_sha=SHA)
     d = data([claim(1, citation_refs=[])], available_citations=[])
@@ -380,6 +391,7 @@ def test_library_search_is_channel_scoped_and_never_restricted() -> None:
 @pytest.mark.security
 def test_released_restricted_cited_source_is_used_and_recorded() -> None:
     w = World(llm=RecordedLlm([batch(result_for("c1"))]))
+    w.claims.register_extraction([claim(1)])
     k = MemoryKnowledge([source(REF, TEXT, restricted=True)])
     step = verification_step(w, k, script_sha=SHA)
     d = data(our_method_release_approved=True)
@@ -460,6 +472,7 @@ def test_chart_stage_rejects_a_non_chart_claim() -> None:
 # ---------------------------------------------------------------- budget, replay, caps, checkpoints
 def test_f11_budget_refusal_suspends_verification() -> None:
     w = World(llm=RecordedLlm([batch(result_for("c1"))]))
+    w.claims.register_extraction([claim(1)])
     w.budget.refuse = True
     out, _ = go(data(), world=w)
     assert out.status is OutputStatus.SUSPENDED and w.llm.calls == 0 and w.claims.status == {}
@@ -467,6 +480,7 @@ def test_f11_budget_refusal_suspends_verification() -> None:
 
 def test_i05_replay_pays_once_and_never_flips_a_status() -> None:
     w = World(llm=RecordedLlm([batch(result_for("c1"))]))
+    w.claims.register_extraction([claim(1)])
     task = task_input(SCHEMA, data())
     step = verification_step(w, MemoryKnowledge([source(REF, TEXT)]), script_sha=SHA)
     first = step.run(task, run_context("s06_verify"))
@@ -478,6 +492,7 @@ def test_i05_replay_pays_once_and_never_flips_a_status() -> None:
 
 def test_status_changed_by_another_task_is_an_idempotency_conflict() -> None:
     w = World(llm=RecordedLlm([batch(result_for("c1"))]))
+    w.claims.register_extraction([claim(1)])
     d = data()
     w.claims.status_task[d["claims"][0]["claim_id"]] = "tsk_other"
     out, _ = go(d, world=w)
@@ -539,3 +554,34 @@ def test_worked_dataset_case_through_a_responding_model_logs_no_text(
     )
     assert "stop-loss" not in joined and "automatically" not in joined
     assert isinstance(run.llm, RespondingLlm)
+
+
+def test_m5_the_extraction_verdicts_in_the_input_are_not_trusted() -> None:
+    d = data()
+    w = World(llm=RecordedLlm([batch(result_for("c1"))]))
+    w.claims.register_extraction([claim(1)])
+    w.claims.verdicts[d["claims"][0]["claim_id"]] = (
+        Verdict.NEEDS_HUMAN_REVIEW
+    )  # stored: not ALLOWED
+    out, _ = go(d, world=w, register=False)
+    assert out.status is OutputStatus.REJECTED and w.llm.calls == 0
+    assert out.error is not None and out.error.code == "PERMANENT.INPUT_INVALID"
+    w2 = World(llm=RecordedLlm([]))
+    w2.claims.register_extraction([claim(1, extraction_verdict="NEEDS_HUMAN_REVIEW")])
+    low = data(extraction_overall_verdict="ALLOWED")  # overall below a stored claim verdict
+    low["claims"][0]["extraction_verdict"] = "NEEDS_HUMAN_REVIEW"
+    low["claims_sha256"] = claims_sha256(low["claims"])
+    low["extraction_overall_verdict"] = "ALLOWED"
+    out, _ = go(low, world=w2, register=False)
+    assert out.error is not None and out.error.code == "PERMANENT.INPUT_INVALID"
+    w3 = World(llm=RecordedLlm([]))  # nothing stored for the claim at all
+    out, _ = go(data(), world=w3, register=False)
+    assert out.error is not None and out.error.code == "PERMANENT.INPUT_INVALID"
+
+
+def test_finance_script_without_the_finance_pack_is_rejected() -> None:
+    d = data(active_rule_packs=["rp.youtube_general"])
+    out, w = go(d, [])
+    assert (
+        out.error is not None and out.error.code == "PERMANENT.INPUT_INVALID" and w.llm.calls == 0
+    )

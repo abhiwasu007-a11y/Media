@@ -47,9 +47,9 @@ def resolve_chart_ages(
 
     * ``CONSTRAINT`` keeps its value (the chart path must meet it, CCR-004).
     * A schematic reference (``null``) keeps ``null``: no FIN-R9 flag.
-    * ``MEASURED`` with a known dataset range end is recomputed; the stricter of the supplied and
-      the recomputed value wins. A reference whose range end is not known keeps the supplied
-      value (the producer's own measurement); it is never made more permissive.
+    * ``MEASURED`` is recomputed from the dataset's last bar date and the stricter of the
+      supplied and the recomputed value wins. A reference whose last bar date the lookup cannot
+      give is ``UNKNOWN`` (fail closed: ``UNKNOWN`` is treated as inside the lag, GLOSSARY 6.52).
     """
     if lag_unit != SUPPORTED_LAG_UNIT:
         raise ConfigInvalidError(
@@ -58,8 +58,25 @@ def resolve_chart_ages(
     out: list[ChartDataRef] = []
     for ref in refs:
         value = ref.data_age_vs_lag
-        end = range_ends.get(ref.ref_id)
-        if ref.basis is DataAgeBasis.MEASURED and value is not None and end is not None:
-            value = stricter(value, classify(end, today, lag_days))
+        if ref.basis is DataAgeBasis.MEASURED and value is not None:
+            value = stricter(value, classify(range_ends.get(ref.ref_id), today, lag_days))
         out.append(ref.model_copy(update={"data_age_vs_lag": value}))
     return tuple(out)
+
+
+def recheck_lag_at(
+    range_ends: Mapping[str, date | None],
+    publish_date: date,
+    lag_days: int,
+    lag_unit: str = SUPPORTED_LAG_UNIT,
+) -> dict[str, DataAge]:
+    """FIN-R9 at *publish time* (13 5.5): for Agent 16's authorisation re-check.
+
+    ``publish_date - last_bar >= lag_days`` for every chart, a missing last bar date is
+    ``UNKNOWN``. D0 itself is a snapshot at extraction time; this function is the later
+    evaluation, with the same arithmetic and the same fail-closed rule."""
+    if lag_unit != SUPPORTED_LAG_UNIT:
+        raise ConfigInvalidError(
+            "price_data_lag_unit is not supported (13 5.5 is open)", details={"unit": lag_unit}
+        )
+    return {ref: classify(end, publish_date, lag_days) for ref, end in range_ends.items()}

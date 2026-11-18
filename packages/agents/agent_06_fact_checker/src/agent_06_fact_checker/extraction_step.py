@@ -10,19 +10,25 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent_06_fact_checker.config import FactCheckSettings
+from agent_06_fact_checker.detect import Detector, Finding, chart_findings
 from agent_06_fact_checker.extraction import (
+    FINANCE_CATEGORY,
     FINANCE_PACK,
     ExtractionReport,
     SegmentBatch,
-    apply_flags,
+    apply_chart_flags,
+    apply_floor,
+    attach_findings,
     batch_segments,
+    drop_fin_flags,
+    raising_refusal,
     recompute,
-    refusal_output,
+    refusal_effect,
+    refusal_only_output,
     structural_problems,
 )
 from agent_06_fact_checker.models import (
     DataAge,
-    ExtractedClaim,
     ExtractionInput,
     ExtractionOutput,
     RefusalReason,
@@ -38,7 +44,7 @@ from agent_06_fact_checker.outputs import (
 from agent_06_fact_checker.ports import ChartRanges, ClaimStore, ScriptRegistry
 from agent_06_fact_checker.price_age import resolve_chart_ages
 from agent_06_fact_checker.prompts import PromptSource, RenderedPrompt, render_system
-from agent_06_fact_checker.rulepack import RulePack, RulePackResolver
+from agent_06_fact_checker.rulepack import RulePack, RulePackResolver, ensure_lexicon
 from agent_06_fact_checker.runtime import (
     AGENT_ID,
     PaidCallRunner,
@@ -106,7 +112,7 @@ class ClaimExtractionStep:
         rule_packs: RulePackResolver,
         prompts: PromptSource,
         settings: FactCheckSettings,
-        chart_ranges: ChartRanges | None = None,
+        chart_ranges: ChartRanges,
     ) -> None:
         self._llm = llm
         self._tenancy = tenancy
@@ -173,7 +179,12 @@ class ClaimExtractionStep:
             raise InputInvalidError("duplicate segment_id")
         if FINANCE_PACK in inp.active_rule_packs and task.channel_id is None:
             raise InputInvalidError("channel_id is required for a finance script")
+        if inp.channel_category == FINANCE_CATEGORY and FINANCE_PACK not in inp.active_rule_packs:
+            raise InputInvalidError("a finance script needs the finance rule pack to be active")
         packs = {key: self._packs.resolve(key) for key in inp.active_rule_packs}  # D9
+        finance = packs.get(FINANCE_PACK)
+        if finance is not None:
+            ensure_lexicon(finance, inp.language)  # fail closed before any paid call
         self._check_script_hash(task, ctx, inp)
         return inp, packs
 
@@ -233,11 +244,7 @@ class ClaimExtractionStep:
         # E1 / D0
         if "E1_aged" not in done:
             today = self._clock.now().date()
-            ends = (
-                {r.ref_id: self._ranges.range_end(r.ref_id) for r in inp.chart_data_refs}
-                if self._ranges
-                else {}
-            )
+            ends = {r.ref_id: self._ranges.range_end(r.ref_id) for r in inp.chart_data_refs}
             aged = resolve_chart_ages(
                 inp.chart_data_refs,
                 ends,
@@ -285,44 +292,68 @@ class ClaimExtractionStep:
             outputs.append(out)
         report = ExtractionReport(batches=len(batches))
 
-        # refusals
-        refusal = next((o.refusal for o in outputs if o.refusal is not None), None)
-        if refusal is not None:
-            final = refusal_output(refusal)
-            if final is None:
-                if refusal.reason is RefusalReason.INSUFFICIENT_INPUT:
-                    raise InsufficientInputError(
-                        "the model refused: insufficient input",
-                        details={"refusal": refusal.to_doc()},
-                    )
-                raise InputInvalidError(
-                    "the model refused the input", details={"refusal": refusal.to_doc()}
+        # refusals (B-1): they never replace what the other batches or the code found
+        refusals = [o.refusal for o in outputs if o.refusal is not None]
+        merged = sorted(
+            (c for o in outputs for c in o.claims),
+            key=lambda c: (order[c.segment_id], c.char_start),
+        )
+        failing = raising_refusal(refusals)
+        if failing is not None and not merged:
+            if failing.reason is RefusalReason.INSUFFICIENT_INPUT:
+                raise InsufficientInputError(
+                    "the model refused: insufficient input", details={"refusal": failing.to_doc()}
                 )
-            claims_final: list[ExtractedClaim] = []
-            ids: dict[str, str] = {}
+            raise InputInvalidError(
+                "the model refused the input", details={"refusal": failing.to_doc()}
+            )
+        if len(merged) > 500:
+            raise OutputSchemaInvalidError("more than 500 claims")
+        renumbered = [c.model_copy(update={"local_id": f"c{i}"}) for i, c in enumerate(merged, 1)]
+        dropped = 0
+        loose: list[Finding] = []
+        restricted: frozenset[str] = frozenset()
+        if finance is not None and finance.lexicon is not None:
+            lex = finance.lexicon
+            restricted = frozenset(lex.claim_type_floor)
+            flagged = apply_chart_flags(apply_floor(renumbered, lex), ages)
+            extra = {r.instrument for r in inp.chart_data_refs} | {
+                c.instrument for c in flagged if c.instrument
+            }
+            detector = Detector(lex, finance.markers, settings.referral_patterns, extra)
+            findings = [f for seg in inp.segments for f in detector.scan(seg)]
+            linked = {c.chart_data_ref for c in flagged if c.chart_data_ref}
+            findings += chart_findings(aged_refs, inp.segments, linked)
+            flagged, loose = attach_findings(flagged, findings)
         else:
-            merged = sorted(
-                (c for o in outputs for c in o.claims),
-                key=lambda c: (order[c.segment_id], c.char_start),
-            )
-            if len(merged) > 500:
-                raise OutputSchemaInvalidError("more than 500 claims")
-            renumbered = [
-                c.model_copy(update={"local_id": f"c{i}"}) for i, c in enumerate(merged, 1)
-            ]
-            flagged, unattached, dropped = apply_flags(
-                renumbered, inp, ages, refs, finance, settings
-            )
-            claims_final, overall, changed = recompute(flagged, unattached)
-            report.dropped_fin_flags, report.verdicts_changed = dropped, changed
-            report.unattached_segments = unattached
-            final = ExtractionOutput(claims=tuple(claims_final), overall=overall, refusal=None)
-            with self._tenancy.transaction(tenant) as tx:
-                ids = dict(
-                    self._claims.insert_claims(
-                        tx, script_id=inp.script_id, task_id=task_key(task), claims=claims_final
-                    )
+            flagged, dropped = drop_fin_flags(renumbered)
+        effect = refusal_effect(refusals)
+        claims_final, overall, changed = recompute(flagged, loose, effect, restricted)
+        report = ExtractionReport(
+            batches=len(batches),
+            dropped_fin_flags=dropped,
+            verdicts_changed=changed,
+            loose_findings=loose,
+            refused_batches=len(refusals),
+        )
+        if claims_final:
+            if refusals:  # claims and a refusal object cannot coexist (output schema)
+                overall = overall.model_copy(
+                    update={
+                        "needs_human_review_reasons": tuple(
+                            sorted({*overall.needs_human_review_reasons, *effect.reasons})
+                        )
+                    }
                 )
+            final = ExtractionOutput(claims=tuple(claims_final), overall=overall, refusal=None)
+        else:
+            final = refusal_only_output(overall, effect)
+        with self._tenancy.transaction(tenant) as tx:
+            ids = dict(
+                self._claims.insert_claims(
+                    tx, script_id=inp.script_id, task_id=task_key(task), claims=claims_final
+                )
+            )
         return self._assemble(
             task, ctx, state, started, inp, final, ids, ages, finance is not None, report
         )
@@ -449,6 +480,8 @@ class ClaimExtractionStep:
             c.segment_id in segs and segs[c.segment_id].text[c.char_start : c.char_end] == c.quote
             for c in claims
         )
+        loose = report.loose_findings
+        loose_rules = sorted({f.rule_id for f in loose})
         r9_missing = [
             c.local_id
             for c in claims
@@ -463,8 +496,16 @@ class ClaimExtractionStep:
         uncited = [c.local_id for c in claims if c.requires_citation and not c.citation_refs]
         blocked = final.overall.proposed_verdict is Verdict.BLOCKED
         return [
-            check("claims.schema", True, "extraction payload validates against its model (D1)"),
-            check("claims.tenant_scope", True, "task, script and refs belong to the task's org"),
+            check(
+                "claims.schema",
+                True,
+                "extraction payload validated by its model when parsed (D1; a failure raises)",
+            ),
+            check(
+                "claims.tenant_scope",
+                True,
+                "org, script hash and rule packs were checked at E0 (a failure rejects the task)",
+            ),
             check("claims.offsets", offsets_ok, "quote equals segment text at the offsets (D2)"),
             check(
                 "claims.chart_lag",
@@ -474,13 +515,28 @@ class ClaimExtractionStep:
                 skipped=not finance,
             ),
             check(
-                "claims.url_referral",
-                not report.unattached_segments,
-                "URL and referral detector ran (D4)",
-                rule_id="FIN-R8",
+                "claims.code_findings",
+                not loose,
+                "code detections without an extracted claim: " + (",".join(loose_rules) or "none"),
                 skipped=not finance,
                 blocking=False,
                 warn_instead=True,
+                measured=len(loose),
+            ),
+            check(
+                "claims.future_marker_filter",
+                True,
+                "D11 sentence scan ran with the rule-pack marker lists (an empty list fails at E0)",
+                rule_id="FIN-R13",
+                skipped=not finance,
+            ),
+            check(
+                "claims.refusals",
+                report.refused_batches == 0,
+                f"{report.refused_batches} batch(es) refused by the model",
+                blocking=False,
+                warn_instead=True,
+                measured=report.refused_batches,
             ),
             check("claims.citation_refs_exist", citation_ok, "citation_refs exist (D5)"),
             check(

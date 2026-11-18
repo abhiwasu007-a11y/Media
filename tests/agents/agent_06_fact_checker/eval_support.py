@@ -15,6 +15,7 @@ from tests.agents.agent_06_fact_checker.support import (
     RecordedLlm,
     World,
     extraction_step,
+    ranges_for,
     run_context,
     task_input,
 )
@@ -43,7 +44,7 @@ class ExtractionStepAdapter:
         case = self.cases[request.case_id]
         self.calls.append(request.case_id)
         world = World(llm=RecordedLlm([recorded_response(case)]))
-        step = extraction_step(world)
+        step = extraction_step(world, chart_ranges=ranges_for(case["input"]))
         task = task_input(
             "agent_06.claim_extraction.input",
             case["input"],

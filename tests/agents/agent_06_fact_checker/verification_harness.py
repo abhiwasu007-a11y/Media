@@ -199,6 +199,7 @@ def run_case(case: dict[str, Any], *, script_sha: str | None = None) -> CaseRun:
     )
     llm = RespondingLlm(case)
     world = World(llm=llm)  # type: ignore[arg-type]
+    world.claims.register_extraction(case["input"]["claims"])
     pairs = [tuple(p) for p in case["fixture"].get("conflict_candidates") or []]
     step = verification_step(
         world,

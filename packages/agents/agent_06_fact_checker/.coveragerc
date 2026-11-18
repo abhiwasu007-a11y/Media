@@ -1,0 +1,11 @@
+# Package coverage for agent_06 (27 section 3 floor: agents >= 80 % line + branch).
+# The root coverage source does not list this package; run:
+#   uv run pytest tests/agents/agent_06_fact_checker --cov=agent_06_fact_checker --cov-branch \
+#       --cov-config=packages/agents/agent_06_fact_checker/.coveragerc
+[run]
+branch = True
+source = agent_06_fact_checker
+
+[report]
+fail_under = 90
+show_missing = True

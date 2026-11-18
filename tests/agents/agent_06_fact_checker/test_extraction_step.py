@@ -82,12 +82,35 @@ def test_allowed_and_human_review_verdicts_have_passing_gate() -> None:
     assert any(r.check_id == "claims.citation_required" for r in out.validation_results)
 
 
-def test_d11_lexicon_comes_from_the_rule_pack_record_not_from_code() -> None:
-    out, _ = run("HN-33", packs=StaticPacks(markers={}))
-    assert payload(out)["overall"]["proposed_verdict"] == "ALLOWED"  # empty lexicon: no FIN-R13
+def test_d11_lexicon_comes_from_the_rule_pack_record_and_fails_closed_when_empty() -> None:
+    out, world = run("HN-33", packs=StaticPacks(markers={}))  # M-2: no silent no-op filter
+    assert out.status is OutputStatus.FAILED and world.llm.calls == 0
+    assert out.error is not None and out.error.code == "PERMANENT.CONFIG_INVALID"
+    out, world = run("HN-33", packs=StaticPacks(markers={"en": ()}))
+    assert out.error is not None and out.error.code == "PERMANENT.CONFIG_INVALID"
     out, _ = run("HN-33", packs=StaticPacks(markers={"en": ("measured",)}))
     flags = payload(out)["claims"][0]["rule_flags"]
     assert [f["rule_id"] for f in flags] == ["FIN-R13"] and flags[0]["evidence"] == "measured"
+
+
+def test_lexicon_must_cover_the_script_language() -> None:
+    marathi = json.loads(json.dumps(CASES["AK-03"]["input"]))
+    marathi["language"] = "mr-IN"
+    base = StaticPacks()
+    only_en = StaticPacks(markers={"en": base.markers["en"]})
+    out, world = run("AK-03", data=marathi, packs=only_en)
+    assert out.error is not None and out.error.code == "PERMANENT.CONFIG_INVALID"
+    assert out.error.details.model_extra == {"missing_languages": ["mr"]}
+    assert world.llm.calls == 0
+    out, _ = run("AK-03", data=marathi, packs=base)  # the provisional baseline has mr and en
+    assert out.status is OutputStatus.SUCCEEDED
+    latin = dict(marathi, language="hi-Latn")
+    out, _ = run(
+        "AK-03",
+        data=latin,
+        packs=StaticPacks(markers={k: v for k, v in base.markers.items() if k != "hinglish"}),
+    )
+    assert out.error is not None and out.error.code == "PERMANENT.CONFIG_INVALID"
 
 
 def test_d3_chart_age_flag_is_code_not_model() -> None:
@@ -116,22 +139,27 @@ def test_d0_measured_range_overrides_a_permissive_supplied_value() -> None:
     assert payload(out)["overall"]["proposed_verdict"] == "BLOCKED"
 
 
-def test_d4_url_attaches_to_nearest_claim_and_unattached_goes_to_review() -> None:
-    case = CASES["AK-04"]
-    resp = json.loads(recorded_response(case))
-    resp["claims"][0]["rule_flags"] = []  # the model missed it; the detector must not
+def test_d4_url_attaches_to_its_sentence_and_loose_findings_decide_the_verdict() -> None:
+    resp = json.loads(recorded_response(CASES["AK-04"]))
+    resp["claims"][0]["rule_flags"] = []  # the model missed it; the code net must not
     out, _ = run("AK-04", [json.dumps(resp)])
     data = payload(out)
-    assert data["claims"][0]["rule_flags"][0]["rule_id"] == "FIN-R8"
-    assert data["claims"][0]["rule_flags"][0]["severity"] == "WARNING"
-    assert data["overall"]["proposed_verdict"] == "NEEDS_HUMAN_REVIEW"
+    flag = data["claims"][0]["rule_flags"][0]
+    assert (flag["rule_id"], flag["severity"]) == ("FIN-R8", "BLOCKING")  # broker + link detector
+    assert data["overall"]["proposed_verdict"] == "BLOCKED"
     empty = json.dumps({"claims": [], "overall": resp["overall"], "refusal": None})
-    out, _ = run("AK-04", [empty])
-    assert payload(out)["overall"]["proposed_verdict"] == "NEEDS_HUMAN_REVIEW"
+    out, _ = run("AK-04", [empty])  # no claim at all: still BLOCKED, by code alone
+    data = payload(out)
+    assert data["overall"]["proposed_verdict"] == "BLOCKED"
+    assert data["overall"]["blocking_rule_ids"] == ["FIN-R8"]
     assert any(
-        r.check_id == "claims.url_referral" and r.verdict is CheckVerdict.WARN
+        r.check_id == "claims.code_findings" and r.verdict is CheckVerdict.WARN
         for r in out.validation_results
     )
+    plain = json.loads(json.dumps(CASES["HN-05"]["input"]))
+    plain["segments"][0]["text"] = "Download the free notes at https://example.com/notes today."
+    out, _ = run("HN-05", [json.dumps(resp | {"claims": []})], data=plain)
+    assert payload(out)["overall"]["proposed_verdict"] == "NEEDS_HUMAN_REVIEW"  # a link alone
 
 
 def test_d10_non_finance_script_has_no_fin_flags() -> None:
@@ -214,7 +242,7 @@ def test_f09_refusal_mapping(
             "refusal": refusal,
         }
     )
-    out, world = run("AK-03", [response])
+    out, world = run("HN-05", [response])
     assert out.status is status
     if code is None:
         data = payload(out)

@@ -9,11 +9,13 @@ import pytest
 from agent_06_fact_checker.batches import build_batches
 from agent_06_fact_checker.config import FactCheckSettings, VerifyPolicy
 from agent_06_fact_checker.conflicts import find_pairs
+from agent_06_fact_checker.detect import Finding
 from agent_06_fact_checker.evidence import Candidate, ClaimEvidence
 from agent_06_fact_checker.extraction import (
-    apply_flags,
+    RefusalEffect,
     batch_segments,
     claim_verdict,
+    drop_fin_flags,
     recompute,
     structural_problems,
     with_flag,
@@ -26,7 +28,6 @@ from agent_06_fact_checker.models import (
     DataAge,
     EvidenceSourceKind,
     ExtractedClaim,
-    ExtractionInput,
     ReasonCode,
     Segment,
     Verdict,
@@ -42,7 +43,6 @@ from agent_06_fact_checker.windows import window
 from amw_core.enums import ClaimType, RuleSeverity
 from amw_core.errors import ConfigInvalidError, InputInvalidError
 from tests.agents.agent_06_fact_checker.support import (
-    SCRIPT,
     TEST_MARKERS,
     make_settings,
 )
@@ -119,7 +119,7 @@ def test_u01_never_more_permissive_and_basis_rules() -> None:
         ChartDataRef(ref_id="chart_3", instrument="N", data_age_vs_lag=None),
         ChartDataRef(ref_id="chart_4", instrument="N", data_age_vs_lag=DataAge.OLDER_THAN_LAG),
     )
-    ends = {
+    ends: dict[str, date | None] = {
         "chart_1": date(2026, 11, 10),  # measured: 8 days old, supplied claims it is old
         "chart_2": date(2026, 11, 10),  # constraint: kept
         "chart_3": date(2026, 11, 10),  # schematic: kept null
@@ -131,7 +131,7 @@ def test_u01_never_more_permissive_and_basis_rules() -> None:
         "chart_1": DataAge.WITHIN_LAG,
         "chart_2": DataAge.OLDER_THAN_LAG,
         "chart_3": None,
-        "chart_4": DataAge.OLDER_THAN_LAG,  # no known range end: supplied value kept
+        "chart_4": DataAge.UNKNOWN,  # MEASURED and no last bar date: fail closed
     }
     with pytest.raises(ConfigInvalidError):
         resolve_chart_ages(refs, {}, date(2026, 11, 18), 30, "TRADING_DAYS")
@@ -188,7 +188,7 @@ def test_u05_u06_verdict_recomputation() -> None:
     assert claim_verdict(warn) is Verdict.NEEDS_HUMAN_REVIEW
     block = ex_claim(rule_flags=[{"rule_id": "FIN-R1", "severity": "BLOCKING", "evidence": "e"}])
     assert claim_verdict(block) is Verdict.BLOCKED
-    out, overall, changed = recompute([cited, warn, block], ["s2"])
+    out, overall, changed = recompute([cited, warn, block], [], RefusalEffect())
     assert overall.proposed_verdict is Verdict.BLOCKED
     assert overall.blocking_rule_ids == ("FIN-R1",)
     assert changed == 2  # the model said ALLOWED for the warning and the blocking claim
@@ -197,8 +197,9 @@ def test_u05_u06_verdict_recomputation() -> None:
         Verdict.NEEDS_HUMAN_REVIEW,
         Verdict.BLOCKED,
     ]
-    _, only_unattached, _ = recompute([cited], ["s2"])
-    assert only_unattached.proposed_verdict is Verdict.NEEDS_HUMAN_REVIEW  # never silently ALLOWED
+    loose = Finding("s2", 0, 5, "FIN-R8", RuleSeverity.WARNING, "x")
+    _, only_loose, _ = recompute([cited], [loose], RefusalEffect())
+    assert only_loose.proposed_verdict is Verdict.NEEDS_HUMAN_REVIEW  # never silently ALLOWED
     assert most_severe() is Verdict.ALLOWED
 
 
@@ -218,28 +219,14 @@ def test_structural_problems_name_ids_not_text() -> None:
 
 
 def test_d10_drops_fin_flags_when_finance_pack_is_inactive() -> None:
-    inp = ExtractionInput.model_validate(
-        {
-            "script_id": SCRIPT,
-            "script_version": 1,
-            "language": "en",
-            "channel_category": "general",
-            "owner_sebi_registration": "UNREGISTERED",
-            "active_rule_packs": ["rp.youtube_general"],
-            "segments": [{"segment_id": "s1", "text": "hello", "visual_refs": []}],
-            "chart_data_refs": [],
-            "available_citations": [],
-            "our_method_release_approved": False,
-        }
-    )
     claim = ex_claim(
         rule_flags=[
             {"rule_id": "FIN-R1", "severity": "BLOCKING", "evidence": "e"},
             {"rule_id": "YTG-R1", "severity": "WARNING", "evidence": "e"},
         ]
     )
-    out, unattached, dropped = apply_flags([claim], inp, {}, {}, None, make_settings())
-    assert dropped == 1 and unattached == []
+    out, dropped = drop_fin_flags([claim])
+    assert dropped == 1
     assert [f.rule_id for f in out[0].rule_flags] == ["YTG-R1"]
 
 

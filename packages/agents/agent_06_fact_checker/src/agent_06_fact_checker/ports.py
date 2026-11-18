@@ -16,6 +16,7 @@ from agent_06_fact_checker.models import (
     CitationKind,
     ExtractedClaim,
     Relation,
+    Verdict,
     VerifiedClaim,
 )
 from amw_core.ids import ChannelId, TaskId
@@ -81,6 +82,12 @@ class ClaimStore(Protocol):
         self, tx: TenantTransaction, *, script_id: str, claim_ids: Sequence[str]
     ) -> frozenset[str]:
         """The subset of ``claim_ids`` that belong to the tx org and ``script_id``."""
+        ...
+
+    def extraction_verdicts(
+        self, tx: TenantTransaction, *, script_id: str, claim_ids: Sequence[str]
+    ) -> Mapping[str, Verdict]:
+        """The stored, code-recomputed extraction verdict of each claim (``claims`` rows)."""
         ...
 
     def update_status(

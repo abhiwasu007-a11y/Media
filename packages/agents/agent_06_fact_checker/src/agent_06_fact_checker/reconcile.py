@@ -227,7 +227,8 @@ def _correction(
     text = result.suggested_correction
     if text is None or assessment not in (Assessment.CONTRADICTED, Assessment.PARTIALLY_SUPPORTED):
         return
-    findings = scan_correction(text, s.referral_patterns, s.advice_words)
+    names = [n for n in (out.claim.instrument,) if n]
+    findings = scan_correction(text, s.referral_patterns, s.advice_words, names, s.advice_suffixes)
     if findings:
         out.correction_dropped = True
         return

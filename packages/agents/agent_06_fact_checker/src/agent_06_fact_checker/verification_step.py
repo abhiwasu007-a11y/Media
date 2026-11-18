@@ -7,7 +7,7 @@ guards every assessment and derives status, verdict, gate result and revision re
 import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -28,6 +28,7 @@ from agent_06_fact_checker.models import (
     VerificationOutput,
     VerifiedClaim,
     VerifyMode,
+    most_severe,
 )
 from agent_06_fact_checker.numbers import missing_numerals, numerals
 from agent_06_fact_checker.outputs import (
@@ -86,6 +87,7 @@ from amw_core.interfaces import (
     CostLedger,
     NewAuditEntry,
     TenancyContext,
+    TenantTransaction,
 )
 
 log = logging.getLogger(__name__)
@@ -200,6 +202,8 @@ class ClaimVerificationStep:
             raise InputInvalidError("channel_id is required (the library is channel scoped)")
         channel = ChannelId(task.channel_id)
         tenant = ctx.tenant(task)
+        if inp.channel_category == "finance" and "rp.finance_sebi_in" not in inp.active_rule_packs:
+            raise InputInvalidError("a finance script needs the finance rule pack to be active")
         # (3) hashes
         if claims_sha256(doc["claims"]) != inp.claims_sha256:
             raise InputInvalidError("claims_sha256 does not match the claims")
@@ -216,6 +220,7 @@ class ClaimVerificationStep:
             owned = self._claims.owned_claim_ids(tx, script_id=inp.script_id, claim_ids=ids)
             if set(ids) - owned:  # (2) generic message: no existence oracle
                 raise CrossTenantRefError("a reference does not belong to this tenant")
+            self._cross_check_extraction(tx, inp)
             reads = resolver.preflight(tx, channel, inp.available_citations)
         # (4) blocked input, (5) shape, (6) iteration
         reject_blocked_input(inp.claims, inp.extraction_overall_verdict.value, inp.verify_mode)
@@ -225,6 +230,19 @@ class ClaimVerificationStep:
         if inp.iteration != ctx.iteration:
             raise InputInvalidError("iteration differs from the task's revision counter")
         return reads
+
+    def _cross_check_extraction(self, tx: TenantTransaction, inp: VerificationInput) -> None:
+        """The extraction verdicts in the input are not trusted: they must equal the stored
+        (code-recomputed) ``claims`` rows, and the overall verdict may not be below any of them."""
+        stored = self._claims.extraction_verdicts(
+            tx, script_id=inp.script_id, claim_ids=[c.claim_id for c in inp.claims]
+        )
+        for c in inp.claims:
+            if stored.get(c.claim_id) is not c.extraction_verdict:
+                raise InputInvalidError("extraction_verdict differs from the stored claim")
+        floor = most_severe(*stored.values())
+        if most_severe(inp.extraction_overall_verdict, floor) is not inp.extraction_overall_verdict:
+            raise InputInvalidError("extraction_overall_verdict is below a stored claim verdict")
 
     # ------------------------------------------------------------------ the run
     def _run(self, task: TaskInput, ctx: RunContext, state: _State, started: int) -> TaskOutput:
@@ -349,7 +367,8 @@ class ClaimVerificationStep:
             channel_category=inp.channel_category,
         )
         sent = set(batch.local_ids)
-        digest_ids = {str(d["local_id"]) for d in variables["claim_digest"]}  # type: ignore[attr-defined]
+        digest = cast("list[dict[str, str]]", variables["claim_digest"])
+        digest_ids = {d["local_id"] for d in digest}
         known = sent | digest_ids | {i for pair in batch.pairs for i in pair}
 
         def check_output(out: VerificationBatchOutput) -> list[str]:
@@ -516,6 +535,15 @@ class ClaimVerificationStep:
         restricted_ok = inp.our_method_release_approved or not any(
             o.restricted_used for o in outcomes
         )
+        spans_ok = all(
+            any(
+                cand.source_ref == ev.source_ref and ev.char_end <= cand.source_len
+                for cand in evidence[c.local_id].candidates
+            )
+            for c in output.claims
+            for ev in c.evidence
+            if c.local_id in evidence
+        )
         recount = accuracy(outcomes)
         unresolved = [
             c.local_id
@@ -532,8 +560,14 @@ class ClaimVerificationStep:
             for p in output.claim_conflicts
         )
         return [
-            check("fact.schema", True, "verification payload validates against its model"),
-            check("fact.script_hash", True, "script_sha256 equals scripts.content_sha256"),
+            check(
+                "fact.schema", True, "payload validated by its model when parsed (a failure raises)"
+            ),
+            check(
+                "fact.script_hash",
+                output.script_sha256 == inp.script_sha256,
+                "script_sha256 echoes the input (equal to scripts.content_sha256, checked at V0)",
+            ),
             check(
                 "fact.tenant_scope", True, "claims and refs belong to the task's org and channel"
             ),
@@ -543,7 +577,9 @@ class ClaimVerificationStep:
                 resolvable,
                 "every evidence item has a resolvable source",
             ),
-            check("fact.span_valid", True, "every span lies inside its window (P4)"),
+            check(
+                "fact.span_valid", spans_ok, "every evidence span lies inside its source text (P4)"
+            ),
             check(
                 "fact.number_guard",
                 numbers_ok,

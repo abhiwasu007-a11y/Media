@@ -9,7 +9,7 @@ not converted in v1 (REQUIRES REVIEW, 3B). The guard can only lower a status, ne
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 _DEVANAGARI = {0x0966 + i: str(i) for i in range(10)}  # U+0966..U+096F
 _TOKEN = re.compile(
@@ -62,7 +62,7 @@ def _same(claim: Numeral, evidence: Numeral, rounding_match: bool) -> bool:
     if a == b:
         return True
     if rounding_match and evidence.decimals > claim.decimals:
-        return round(b, claim.decimals) == a
+        return b.quantize(Decimal(1).scaleb(-claim.decimals), rounding=ROUND_HALF_UP) == a
     return False
 
 

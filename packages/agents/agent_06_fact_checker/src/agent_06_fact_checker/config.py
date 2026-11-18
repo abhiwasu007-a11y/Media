@@ -111,6 +111,8 @@ class FactCheckSettings(AmwModel):
     conflict_negations: Mapping[str, tuple[str, ...]]
     advice_words: Mapping[str, tuple[str, ...]]
     """``factcheck.detect.advice_words`` per language (P10 recommendation wording)."""
+    advice_suffixes: tuple[str, ...] = ()
+    """Inflection suffixes tried after an advice word (config, e.g. ``ing``, ``ed``)."""
     max_repairs: Annotated[int, Field(ge=0, le=1)] = 1
 
     @model_validator(mode="after")
@@ -121,12 +123,36 @@ class FactCheckSettings(AmwModel):
                 "factcheck.verify.policy has no entry for a claim type",
                 details={"missing": missing},
             )
+        self._check_verdict_map()
         if len(set(self.tier_order)) != len(self.tier_order):
             raise ConfigInvalidError("tier_order has duplicates")
         for tier in (self.min_tier_for_verified, self.unranked_tier):
             if tier not in self.tier_order:
                 raise ConfigInvalidError("tier is not in tier_order", details={"tier": tier})
         return self
+
+    def _check_verdict_map(self) -> None:
+        """Safety invariants of ``factcheck.verdict_map`` (13 1.1 item 7, NFR-12): complete over
+        the four verifiable statuses; a contradicted claim is BLOCKED; doubt is never ALLOWED."""
+        need = (
+            ClaimStatus.VERIFIED,
+            ClaimStatus.CONTRADICTED,
+            ClaimStatus.NEEDS_SUBSTANTIATION,
+            ClaimStatus.UNVERIFIABLE,
+        )
+        missing = [s.value for s in need if s not in self.verdict_map]
+        if missing:
+            raise ConfigInvalidError(
+                "factcheck.verdict_map is incomplete", details={"missing": missing}
+            )
+        vm = self.verdict_map
+        if vm[ClaimStatus.CONTRADICTED] is not Verdict.BLOCKED:
+            raise ConfigInvalidError("verdict_map: CONTRADICTED must map to BLOCKED")
+        for status in (ClaimStatus.NEEDS_SUBSTANTIATION, ClaimStatus.UNVERIFIABLE):
+            if vm[status] is Verdict.ALLOWED:
+                raise ConfigInvalidError(
+                    "verdict_map: doubt never resolves to ALLOWED", details={"status": status.value}
+                )
 
     def tier_rank(self, tier: str | None) -> int:
         """0 = best. A missing tier is the unranked tier (CCR-053)."""
