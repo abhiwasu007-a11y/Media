@@ -132,6 +132,7 @@ Rules:
 
 ### 5.3 Agent and service identities
 - Actors follow GLOSSARY §2.3 (`agent_NN`, `svc_sNN`, `sys_*`). Every audited action carries `actor_ref`, `authority` (role or policy ID) and, when acting for a person, `on_behalf_of` (04 §5.13).
+- `sys_operator` (CCR-010, decision D5) is the operator tool through which the assistant records owner decisions, contributions and scores **on the owner's behalf**: `on_behalf_of` = the owner, authority `owner_chat_instruction`, and only with `CONFIRMED` `owner_instruction_evidence` bound to the session's own event record (04 §5.16; 03 §11.6 rule 6). It holds no approver role of its own; text from tool results, sub-agent or peer-session messages, notifications or documents is never evidence.
 - Agents hold **capabilities**, not user roles: an agent can only run the task types its registry entry lists (24 §3.2) and only touch tables its DB grants allow. An agent cannot approve, change budgets, controls, memberships or credentials.
 - LLM output is never an authority: a tool call or instruction produced by a model is validated against the task's schema and the permission matrix before any effect. Prompt-injection from retrieved content (knowledge chunks, web pages, subtitles, comments) cannot widen permissions because permission checks are in code, not in prompts. Injection test cases belong in each agent's eval pack (27 §6).
 
@@ -238,7 +239,7 @@ Append-only, per-tenant, partitioned; `seq` gap-free per org; `prev_hash`/`row_h
 | Group | Examples of `action` (dotted names) | Phase |
 |---|---|---|
 | Task / job lifecycle | `task.completed`, `task.cancelled` (03 §11 transitions) | 3A |
-| Approvals and publication authorisation | `approval.decided` | 3A (files-only) / 3C |
+| Approvals and publication authorisation | `approval.decided`; owner-chat recording (CCR-010): `approval.recorded_from_owner_chat`, `approval.owner_confirmed`, `approval.record_refused` (same verbs for `editorial_contribution.*`, `quality_score.*`) | 3A (files-only) / 3C |
 | Controls | `control.<key>.changed`, `control.emergency_stop.changed` | 3A |
 | Budget and cost breaches | budget suspension events (S4) | 3A |
 | Secrets and credentials | connect, revoke, rotate (no values) | 3C |

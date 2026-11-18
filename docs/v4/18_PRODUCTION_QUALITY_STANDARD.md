@@ -30,6 +30,8 @@ How to read the markers. **3A / 3B / 3C** = build phase (owner decision D1). **T
 | 4 | `D_AI_VIDEO` | AI text/image-to-video clips, short B-roll only where real footage does not exist | `AI_GENERATED` | disclosure decision recorded (YT-06/07); never a real identifiable person or fabricated real event; budgeted per video (§2.4) |
 | 5 | `E_AI_STILL` | AI stills with pan/zoom/parallax; last resort | `AI_GENERATED` | never the majority of screen time (check `qc.visual.tier_share_e`) |
 
+Charts (CCR-045): a chart that the code renders from real historical data is tier `C_CODE_MOTION`, `source_type = CODE_GENERATED`, `asset_kind = CHART`; the dataset it is drawn from is an `OWNER_MADE` asset (`kind = DOCUMENT`). Tier `A_OWNER_REAL` covers chart material the owner made himself (e.g. his own screen recording).
+
 Agent 08 sources in this order; falling to a lower rank requires a recorded reason (`qc_results.message` of the sourcing task) saying why every higher rank had no usable item. Agent 09 plans so that rank 4–5 usage stays inside the limits of §2.4.
 
 ### 2.2 Per-shot licence record (what must exist for every shot)
@@ -42,7 +44,8 @@ A "shot" is one contiguous timeline element on any visual track (video clip, sti
 | Licence terms | `licences` | `state = ACTIVE`, `covers_monetized_youtube` (NULL = unknown = blocks), `third_party_permission`, `indemnification`, `channel_registration_supported`, `terms_sha256`, `expires_at` |
 | Use | `licence_ledger` (append-only) | `asset_id`, `licence_id`, `job_id`, `render_id`, `usage_kind` (`SHOT`, `IMAGE`, `MUSIC_BED`, `SFX`, `VOICE`, `FONT`, `TEMPLATE`, `AI_OUTPUT`), `source_url`/`vendor_item_id`, `used_from_ms`, `used_to_ms`, `expiry_at` |
 
-Notes: (a) The ledger requires a `licence_id` for every row (04 §5.15), so owner-made and code-generated items are recorded against a tenant-held licence row of `source_type` `OWNER_MADE` / `CODE_GENERATED` with `covers_monetized_youtube = true` — **REQUIRES REVIEW (Phase 1): confirm in the Agent 08 blueprint that self-grant licence rows are the intended mechanism.** (b) In 3A there is no upload, but the deliverables are intended for later YouTube use, so the licence check evaluates as if the destination were monetized YouTube — **REQUIRES REVIEW (Phase 1): owner to confirm; provisional default as stated.** (c) Voice, music, SFX, fonts and templates are "shots" for licence purposes (`usage_kind` VOICE/MUSIC_BED/SFX/FONT/TEMPLATE; `licence_source_type` `TTS_PROVIDER`, `VOICE_CLONE`, `HUMAN_NARRATION`, `MUSIC_LIBRARY`, `SFX_LIBRARY`, `FONT`).
+Notes: (a) The ledger requires a `licence_id` for every row (04 §5.15), so owner-made and code-generated items are recorded against a tenant-held **self-grant** licence row of `source_type` `OWNER_MADE` / `CODE_GENERATED` with `covers_monetized_youtube = true` (decided, CCR-031; `licence_ledger.licence_id` stays NOT NULL, CCR-039 rejected).
+**Package-owned and overlay elements (CCR-031, one rule for Agents 08, 09, 10, 11).** Every licensable element is an `assets` row: the platform's code templates, code-drawn glyph sets and brand-sting templates are registered **once per tenant** as `assets` rows (`kind = TEMPLATE`, `source_type = CODE_GENERATED`, `attributes.template_id` / `template_version`, `content_sha256` of the template file; idempotent by `UNIQUE (org_id, content_sha256)`) by the shared asset registry of `amw_core` (L1), against the tenant's `CODE_GENERATED` self-grant licence; fonts are `kind = FONT` rows against a `FONT` licence row (an OFL font is recorded with its licence text, no purchase, rule 8). Ledger rows are written **by the agent that places the element**, at placement time (`render_id` NULL, `task_id`, `shot_id` set; 04 §5.15): Agent 08 for every shot **and** for the Agent 09 overlay track (V2: lower-thirds, caption cards, chapter cards, brand sting, end screen; `usage_kind = TEMPLATE`, one row per overlay interval) and one whole-timeline `FONT` row per brand font used by video or burned-in captions; Agent 07 for the voice (`VOICE`) and, from 3B, Agent 08 for the music bed (`MUSIC_BED`); Agent 11 for its own thumbnail elements (picture, template, font; no interval). Agent 10 writes no ledger rows. **Thumbnails:** a thumbnail asset (no render) passes licence completeness when every picture, font and template asset it uses has ≥ 1 ledger row with `job_id` = the job and no interval. (b) In 3A there is no upload, but the deliverables are intended for later YouTube use, so the licence check evaluates as if the destination were monetized YouTube — **REQUIRES REVIEW (Phase 1): owner to confirm; provisional default as stated.** (c) Voice, music, SFX, fonts and templates are "shots" for licence purposes (`usage_kind` VOICE/MUSIC_BED/SFX/FONT/TEMPLATE; `licence_source_type` `TTS_PROVIDER`, `VOICE_CLONE`, `HUMAN_NARRATION`, `MUSIC_LIBRARY`, `SFX_LIBRARY`, `FONT`).
 
 ### 2.3 Sourcing checks (all deterministic; run by `agent_10.technical_qc`, evidence from the timeline and database)
 | check_id | Criterion | Pass | Blocking | Scope |
@@ -51,10 +54,12 @@ Notes: (a) The ledger requires a `licence_id` for every row (04 §5.15), so owne
 | `qc.licence.expiry_window` | no licence expires inside the warning window (config; licence `EXPIRING`) | none, else `WARN` (FAIL if expired) | FAIL blocks | 3A |
 | `qc.visual.tier_share_e` | share of visual screen time in tier `E_AI_STILL` | `< 50 %` of visual screen time (directive: never the majority). A stricter target comes from niche benchmarks (19) — **REQUIRES REVIEW (Phase 1): 19_NICHE_BENCHMARKS; calibrate in 3B** | yes (50 % limit) | 3A |
 | `qc.visual.tier_mix_report` | tier shares A–E computed from timeline × `assets.visual_source_tier` and written to the report | report present | no | 3A |
-| `qc.visual.ai_video_budget` | `D_AI_VIDEO` seconds ≤ the per-video AI-B-roll budget reserved in S4 (§1A.11) | within budget; a breach is `RESOURCE.BUDGET_EXHAUSTED` upstream, not a QC rescue | yes | 3A; amount **REQUIRES REVIEW (Phase 1): 09_COST_AND_BUDGET and owner provider limits** |
-| `qc.visual.ai_disclosure_recorded` | every `D_AI_VIDEO` / `E_AI_STILL` asset that depicts realistic content has a recorded `disclosure_decision` (YT-06/07) | present | yes | 3A (decision made by Agent 16) |
-| `qc.visual.chart_data_age` | every chart asset of a finance channel has metadata `data_end_date` older than `compliance.finance_sebi_in.price_data_lag_days` (30; FIN-R9, IN-02) at delivery time | all older | yes | 3A (finance channel) |
+| `qc.visual.ai_video_budget` | `D_AI_VIDEO` seconds ≤ the per-video AI-B-roll limit of the shot plan (`agent_09.shot_plan.output` `tier_budget.ai_video_limit_ms`, set from the S4 reservation, §1A.11; CCR-055) | within budget; a breach is `RESOURCE.BUDGET_EXHAUSTED` upstream, not a QC rescue | yes | 3A; amount **REQUIRES REVIEW (Phase 1): 09_COST_AND_BUDGET and owner provider limits** |
+| `qc.visual.ai_disclosure_recorded` | every `D_AI_VIDEO` / `E_AI_STILL` asset with `is_realistic_synthetic = true` has a disclosure record in the Agent 08 manifest; the `disclosure_decision` itself is checked by Agent 16 at `s16_comp`, which runs after `s10_qc` (CCR-055) | present | yes | 3A (decision made by Agent 16) |
+| `qc.visual.chart_data_age` | every chart asset of a finance channel has `assets.attributes.data_end_date` older than `compliance.finance_sebi_in.price_data_lag_days` (30; FIN-R9, IN-02) at delivery time. This is the measured re-check of the `CONSTRAINT` that `s06_claims` assumed (CCR-004, `data_age_basis`); the stricter result wins and `s16_comp` re-checks it | all older | yes | 3A (finance channel) |
 | `qc.visual.no_synthetic_presenter` | finance channel: no AI presenter persona shot (FIN-R11); verified from asset metadata + LLM-judge frame sample | none | yes | 3A (finance channel); method **REQUIRES REVIEW (Phase 1): frame-sampling procedure agreed with 13** |
+
+Judged parts of these checks (CCR-058): the LLM-judge frame sample of `qc.visual.no_synthetic_presenter`, the visual watermark judge (§7.10) and `edit.promise_alignment` / `edit.hook.beat_content` run in **Agent 16** (`s16_comp` / `s16_score`), the only post-render stage with a judge; Agent 10 (no LLM) runs the deterministic parts and exports the sampled frames as `IMAGE` output refs.
 
 ### 2.4 Cost guard
 AI video is the most expensive item per second (§1A.11). The per-video AI-B-roll budget is a `PER_VIDEO` budget scope enforced by the cost ledger (D1: breach stops paid calls). Amount: **REQUIRES REVIEW (Phase 1)**.
@@ -93,7 +98,7 @@ Shorts (`qc.shorts`, 3C unless a 9:16 cut is produced in 3A): the same criteria 
 | Licence | voice recorded in `licence_ledger` (`usage_kind = VOICE`; `TTS_PROVIDER` / `VOICE_CLONE` / `HUMAN_NARRATION`); the provider's commercial-use terms recorded in `licences` (PR-04: paid plan allows commercial use; agency/client use is NOT CONFIRMED, PR-05, relevant only for client types, T1) | part of `qc.licence.completeness` |
 | Segment timeline | Agent 07 emits per-segment start/end (ms) on the narration track; this is the reference for subtitle sync and duration checks (§7.6, §7.7) | present for 100 % of sentences |
 | Audio quality of the raw voice | clipping: no sample at full scale; noise floor measured; both recorded | `qc.voice.clipping` (blocking), noise limit **REQUIRES REVIEW (Phase 1): calibrate in 3B** |
-| Human listening check | the owner (or delegate) listens to every pilot narration for pronunciation, pace, tone; scored in `AUDIO_QUALITY` (§9) | HUMAN, 3B mandatory; afterwards sampled — sampling rate **REQUIRES REVIEW (Phase 1)** |
+| Human listening check | the owner (or delegate) listens to every pilot narration for pronunciation, pace, tone; scored in `AUDIO_QUALITY` (§9) | `qc.voice.listening` (CCR-020; HUMAN, non-blocking, the 3 H points of `AUDIO_QUALITY`): 3B mandatory; afterwards sampled — sampling rate **REQUIRES REVIEW (Phase 1)** |
 | Finance channels | no AI presenter persona (FIN-R11): the voice is narration only; no avatar | see `qc.visual.no_synthetic_presenter` |
 
 ## 5. Audio delivery specification (§1A.4)
@@ -133,7 +138,7 @@ Checks: `qc.video.resolution`, `qc.video.codec_profile`, `qc.video.pix_fmt`, `qc
 1. **Runs on** the render worker (`HEAVY_CPU`, `agent_10.technical_qc`, 24 §7.1 `s10_qc`), on the final MP4 and its stems/SRT. No paid call. Never during market hours when run on the VPS (D1).
 2. **FFmpeg build.** The commands were syntax-checked against FFmpeg 6.1.1 (a development-environment build, **MEASURED 2026-11-18 locally; not a RESEARCH_LOG entry**). The production FFmpeg version is pinned in the render image — **REQUIRES REVIEW (Phase 1): pinned version; re-run the self-test of §7.11 on it**.
 3. **Output location.** FFmpeg filters write their results to **stderr** (`-nostats -hide_banner`); the runner captures stderr per command, stores it as evidence (`qc_results.evidence_ref`) and parses it with the patterns given. A non-zero exit, a missing summary line or an unparseable output is never `PASS`: the task fails (`RESOURCE.RENDER_CRASH` if the process died abnormally, otherwise `AGENT.CRASH`; 07) and is retried per policy.
-4. **Verdict mapping.** Sourced threshold → `PASS`/`FAIL` with `blocking: true`. Unsourced threshold → the measured value is recorded in `measured`, the threshold field is `null` and the verdict is `WARN`, `blocking: false`, until the value is calibrated and set in configuration (then it becomes `PASS`/`FAIL`, blocking per config). A blocking `FAIL` sends the job back to `s10_render` (24 §7.1); after `limits.max_revision_loops` the failure is `AGENT.QUALITY_REPEATED_FAILURE`.
+4. **Verdict mapping.** Sourced threshold → `PASS`/`FAIL` with `blocking: true`. Unsourced threshold → the measured value is recorded in `measured`, the threshold field is `null` and the verdict is `WARN`, `blocking: false`, until the value is calibrated and set in configuration (then it becomes `PASS`/`FAIL`, blocking per config). A blocking `FAIL` is a **gate** result (`gate: true`, optional `remedy_stage_id`, 03 §5.3 rule 4): the task still `SUCCEEDED` and the job goes back to `s10_render` or the named remedy stage (24 §3.3 rule 1, §7.1a); after `limits.max_revision_loops` the job completes with `outcome = BLOCKED_COMPLIANCE` (24 §3.3; CCR-001).
 5. Variables below: `$F` = final MP4, `$V` = narration stem (WAV 48 kHz), `$M` = music stem, `$S` = SRT, `$T` = timeline JSON. All times in seconds in tool output; stored in ms (GLOSSARY §3).
 6. Detector parameters: where the value is the FFmpeg filter default it is labelled **FFmpeg default** (read from `ffmpeg -h filter=<name>`, 6.1.1); defaults are *starting points*, not calibrated values: **REQUIRES REVIEW (Phase 1): calibrate in 3B pilot** for every detector parameter in this section.
 
@@ -150,7 +155,7 @@ ffprobe -v error -show_entries \
 | `qc.video.cfr` | `r_frame_rate == avg_frame_rate` **and** the packet-timestamp test below finds one frame interval | FAIL blocking |
 | `qc.video.fps_matches_project` | `r_frame_rate` equals the project frame rate in `$T` | FAIL blocking |
 | `qc.video.bitrate` | `bit_rate` of the video stream (if absent in the stream, compute `size_bytes×8 / duration`): ≥ 15 000 000 and ≤ 25 000 000 → PASS; 8 000 000–15 000 000 or > 25 000 000 → WARN; < 8 000 000 → FAIL | as §6 |
-| `qc.audio.codec` / `.sample_rate` / `.channels` / `.bitrate` | `codec_name = aac`, `profile = LC`, `sample_rate = 48000`, `channels = 2`, `bit_rate ≥ 384000` | FAIL blocking |
+| `qc.audio.codec` / `.sample_rate` / `.channels` / `.bitrate` | `codec_name = aac`, `profile = LC`, `sample_rate = 48000`, `channels = 2`; `.bitrate` (CCR-055): the **configured nominal** audio bitrate recorded for the render (`renders.audio_bitrate_bps`, from the encoder arguments of the preset) ≥ 384000; the measured stream average (`bit_rate`, or bytes × 8 / duration) is recorded in `measured` and reported, and is not the gate (the native AAC encoder's average falls below the nominal rate on simple signals). **REQUIRES REVIEW (Phase 1): confirm on the pinned build with speech material** | FAIL blocking (codec, rate, channels, nominal bitrate) |
 | `qc.container.faststart` | container tagged `mov,mp4,…`; moov before mdat (checked by Agent 10 from the mux log/atom order) | method **REQUIRES REVIEW (Phase 1)** |
 
 CFR packet test (frame intervals; passes when all intervals are equal to `1/fps` within one timebase tick):
@@ -187,7 +192,7 @@ Detections are lines `[blackdetect @ …] black_start:<s> black_end:<s> black_du
 | `qc.video.black_frames` | zero detections outside segments the shot plan tags `deliberate_black` (with start/end); any detection at the first or last frame also fails | FAIL, blocking once `d` is calibrated; `WARN` until then |
 
 ### 7.4 Music bed vs narration
-Agent 10 renders the narration and music stems from the same timeline (same length, same sample rate). Narration-active spans come from the inverse of `silencedetect` on `$V` (§7.5), with the span list written to `spans.json`.
+Agent 07 produces the narration stem and, from 3B, the music stem from the same timeline (same length, same sample rate); Agent 10 measures them (CCR-055). Narration-active spans come from the inverse of `silencedetect` on `$V` (§7.5), with the span list written to `spans.json`.
 ```bash
 # Narration level over the whole narration stem (silences are excluded by the integrated-loudness gate)
 ffmpeg -nostats -hide_banner -i "$V" -af ebur128=framelog=quiet -f null - 2> v.txt
@@ -229,7 +234,7 @@ Output per stream: `video,<start>,<duration>` / `audio,<start>,<duration>`.
 
 **Subtitle sync (SRT vs narration):**
 1. Format (deterministic, blocking): UTF-8; cues numbered, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, `start < end`, strictly non-overlapping, ordered; last cue end ≤ video duration; one SRT per language of the job; no empty cues. Check: `ffmpeg -v error -i "$S" -f null -` returns exit 0 and the cue count equals the parsed cue count.
-2. Sync (deterministic): each cue start/end is compared with the narration segment times that Agent 07 recorded for the same sentence (§4): `|cue_start − segment_start| ≤ tol_sub_ms` and `|cue_end − segment_end| ≤ tol_sub_ms`. `tol_sub_ms` **REQUIRES REVIEW (Phase 1): calibrate in 3B pilot**. For human narration (no segment record) the reference is a forced alignment — tool **REQUIRES REVIEW (Phase 1)**; until chosen, human-narration sync is a HUMAN check on 5 sampled points.
+2. Sync (deterministic; CCR-055): the cues of one narration segment (a sentence may be split into several cues) are compared with the segment times that Agent 07 recorded (§4): the **first** cue of a segment satisfies `|cue_start − segment_start| ≤ tol_sub_ms`, the **last** cue satisfies `|cue_end − segment_end| ≤ tol_sub_ms`, and every interior cue boundary lies strictly inside the segment. `tol_sub_ms` **REQUIRES REVIEW (Phase 1): calibrate in 3B pilot**. In 3A every narration, including a human recording, arrives with an aligned per-sentence timeline (CCR-051); a human recording without marks is refused at `s07_voice` until a forced-alignment tool is chosen (**REQUIRES REVIEW (Phase 1)**), so the earlier HUMAN 5-point check applies only from that later path (3C).
 3. Readability (information): reading speed and line length limits **REQUIRES REVIEW (Phase 1): not sourced; calibrate in 3B** (Marathi/Devanagari glyph widths included). Burned-in styled captions, when used, must lie inside the 9:16 safe area (§10).
 | check_id | Verdict |
 |---|---|
@@ -281,7 +286,7 @@ WHERE  l.id IS NULL
    OR (li.expires_at IS NOT NULL AND li.expires_at <= now())
    OR (li.third_party_permission = 'UNKNOWN' AND li.org_id IS DISTINCT FROM :tenant_org_id);
 ```
-Pass = zero rows. `timeline_elements` is a transient set built from `$T` (not a table). Full-file elements that the ledger records once (e.g. a font) are matched on `used_from_ms/used_to_ms` NULL = whole render. Verdict FAIL blocking; the failing element IDs are written to the check's `message`. An element that cannot be matched to an asset (no `asset_id`) fails too.
+Matching without a render (CCR-030): the join condition is `l.asset_id = e.asset_id AND (l.render_id = :render_id OR (l.render_id IS NULL AND l.job_id = :job_id)) AND …interval…`, because Agent 08 writes rows at sourcing before any render exists. Pass = zero rows. `timeline_elements` is a transient set built from `$T` (not a table). Full-file elements that the ledger records once (e.g. a font) are matched on `used_from_ms/used_to_ms` NULL = whole render. Verdict FAIL blocking; the failing element IDs are written to the check's `message`. An element that cannot be matched to an asset (no `asset_id`) fails too.
 
 ### 7.10 Watermark / logo from sources
 | check_id | Method | Verdict |
@@ -330,7 +335,7 @@ D = DETERMINISTIC, J = LLM_JUDGE, H = HUMAN. In each dimension: machine part = D
 
 | Dimension (max) | Criterion | Kind | Pts |
 |---|---|---|---|
-| **RESEARCH_ACCURACY (20)** | every claim of types FACTUAL, STATISTICAL, HISTORICAL_MARKET has a citation (100 %); no claim left `CONTRADICTED` / `UNVERIFIABLE` / `NEEDS_SUBSTANTIATION` (GLOSSARY §6.40) | D | 12 |
+| **RESEARCH_ACCURACY (20)** | every claim of types FACTUAL, STATISTICAL, HISTORICAL_MARKET has a citation or a chart reference (100 %); no claim left `CONTRADICTED`; no claim left `UNVERIFIABLE` / `NEEDS_SUBSTANTIATION` unless an `APPROVED` `SENSITIVE_CLAIM` approval names its `claim_id` (CCR-045; a `CONTRADICTED` claim is never accepted, it must be corrected or removed) | D | 12 |
 | | breadth/quality of sources, correct use of evidence, no overreach beyond the evidence | J | 5 |
 | | owner spot-check of 3–5 facts | H | 3 |
 | **STORYTELLING (15)** | hook criteria of §3 (`edit.hook.*`), chapters self-consistent, ≥ 3 hook options, promise fields present | D | 5 |
@@ -350,7 +355,7 @@ D = DETERMINISTIC, J = LLM_JUDGE, H = HUMAN. In each dimension: machine part = D
 | **THUMBNAIL_METADATA (10)** | 3 thumbnail variants present, size/format within the thumbnail spec, text contrast/legibility, title length per spec (spec **REQUIRES REVIEW (Phase 1)**: YT-05 logs a 50 MB maximum; dimensions and title limits not yet logged), chapters valid (3C) | D | 4 |
 | | promise alignment (script = title = thumbnail), click-worthiness without clickbait | J | 4 |
 | | owner pick and veto | H | 2 |
-| | *3A provisional default:* the 2 points normally earned by metadata (chapters/tags/SEO validation) are awarded from the deterministic thumbnail and working-title criteria (D 4 → 6); all other points as shown | — | — |
+| | *3A provisional default (arithmetic corrected, CCR-058):* the D criterion stays **4** points; in 3A its metadata part (chapters valid, 3C) is replaced by the thumbnail and working-title checks, so the 4 D points are earned from thumbnails and the working title only; the dimension stays 10 and the total stays 100 | — | — |
 | **COMPLIANCE (5)** | `agent_16.compliance_gate` verdict `ALLOWED` for every mandatory rule pack; licence completeness PASS; disclosure decision recorded; disclaimer present on finance (FIN-R10 — exact text **REQUIRES REVIEW (Phase 1): 13**) | D | 5 |
 A human reviewer may only record a compliance concern as a `NEEDS_HUMAN_REVIEW` / override action in the compliance flow, not as a score.
 
@@ -412,7 +417,7 @@ A human reviewer may only record a compliance concern as a `NEEDS_HUMAN_REVIEW` 
 | §5 `qc.ad_spot`, `qc.dubbing` timing | open (25; S3) |
 | §5 `qc.corporate` | as `qc.long_form` |
 
-## 13. Configuration keys used by this document (pending CCR — config-key registration)
+## 13. Configuration keys used by this document (registry rules decided: CCR-019, CCR-020)
 Values marked "—" are not sourced and have no default.
 | Config key | Meaning | Value |
 |---|---|---|
@@ -430,7 +435,8 @@ Values marked "—" are not sourced and have no default.
 | `qc.silence.max_ms`, `qc.detect.*` (black, freeze, silence parameters) | detector values | — (calibrate in 3B) |
 | `qc.sync.*`, `qc.duration.*` tolerances | | — (calibrate in 3B) |
 | `qc.licence.expiry_warning_window` | `EXPIRING` window | — |
-Check IDs of §2.3, §3, §5–§7 are values of the existing `check_id` field (03 §5.2 pattern `^[a-z0-9_.-]{3,96}$`); the list of IDs and their default `blocking` flags is a registry that 11_TESTING_STRATEGY and the evals must share — see contract request 1.
+Check IDs of §2.3, §3, §5–§7 are values of the existing `check_id` field (03 §5.2 pattern `^[a-z0-9_.-]{3,96}$`).
+**Registries (decided, CCR-019 / CCR-020).** Config keys: the shared namespaces are `contracts.*`, `limits.*`, `retry.*`, `breaker.*`, `quality.*`, `qc.*`, `compliance.*`, `memory.*` (e.g. `memory.project_ttl_ms`, `memory.task_ttl_ms`), `assets.*`, `llm.*` (27 §4.2); each agent owns `agent_NN.*` and any other namespace its blueprint §24 declares; `amw_core.config` is the registry in code and rejects a key declared twice. Check IDs: `qc.*` and `edit.*` are owned by this document; `aNN.*` (e.g. `a07.*`, `a09.q.*`, `a09.pre.*`, `a10.*`, `a11.*`) are agent-local and owned by blueprint NN, which lists each ID with its kind and default `blocking` flag in its §20; a blueprint never invents a `qc.*` / `edit.*` ID (a missing one is requested by CCR, as `qc.voice.listening` was). Audit action names follow `<record>.<verb>` and are listed by the blueprint that writes them.
 
 ## 14. Open items (summary of REQUIRES REVIEW)
 1. Unsourced detector and tolerance values (§7): calibrate in 3B pilot.

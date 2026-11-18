@@ -43,14 +43,14 @@ Binding for every line of production code, prompt, eval set, migration and CI jo
 1. Header table (metadata: prompt ID, task type, status, input/output payload schema names and versions, rule packs injected, eval path, config keys)
 2. `## Role`
 3. `## Objective`
-4. `## Inputs` — every runtime variable `{{name}}` with type and source
+4. `## Inputs` — every runtime variable `{{name}}` with type and source; the step's input JSON Schema 2020-12 (`<task_type>.<step>.input`, GLOSSARY §2.4) is defined in the blueprint §7 and eval inputs are validated against it (CCR-018)
 5. `## Rules` — numbered; compliance rule packs injected **by reference** `{{rule_pack:<key>}}` (resolved at runtime from `rule_packs`, version recorded per call); never pasted
 6. `## Output JSON Schema` — JSON Schema 2020-12, identical to the step's Pydantic output model (§4.4 check)
 7. `## Worked examples` — 2–3, each a full input and the exact valid output
 8. `## Refusal and escalation` — when and how to return the refusal object (§4.3)
 9. `## Self-check` — list the model must verify before answering
 
-Model, temperature, max output tokens, timeout, cost budget, prompt-caching and batch eligibility are configuration, never in the file or in code: keys `llm.<task_type>.model_tier`, `.temperature`, `.max_output_tokens`, `.timeout_ms`, `.cost_budget_micros`, `.cache_system_prompt`, `.batch_eligible` (§3.3 AI providers: cheapest tier that passes the gate; caching; Batch API for non-urgent overnight work — prices **REQUIRES REVIEW (Phase 1): 09 / research wave 2**).
+Model, temperature, max output tokens, timeout, cost budget, prompt-caching and batch eligibility are configuration, never in the file or in code: keys `llm.<task_type>.model_tier`, `.temperature`, `.max_output_tokens`, `.timeout_ms`, `.cost_budget_micros`, `.cache_system_prompt`, `.batch_eligible`, and `.fallback_tier` (optional). A task type with more than one LLM step uses one family per step, `llm.<task_type>.<step>.*` (same suffixes; CCR-019); a change to either form triggers the eval gate (§5). Tiers are `llm_model_tier` values (`SMALL` · `MID` · `TOP`, GLOSSARY §6.52), resolved by `llm.tiers.<tier>.provider` / `llm.tiers.<tier>.model` (ADR-007). Config namespaces: 18 §13. **Prompt caching and tenancy (CCR-025):** the cached stable prefix holds only the prompt file's system text and **PLATFORM**-scope rule packs; **TENANT**-scope packs (e.g. `rp.tenant_brand_safety`) and every other tenant value are rendered after the cache breakpoint, so a cached prefix never contains tenant data (§3.3 AI providers: cheapest tier that passes the gate; caching; Batch API for non-urgent overnight work — prices **REQUIRES REVIEW (Phase 1): 09 / research wave 2**).
 
 ### 4.3 Refusal object (every LLM output schema includes it)
 ```json
@@ -68,6 +68,7 @@ Model, temperature, max output tokens, timeout, cost budget, prompt-caching and 
 }
 ```
 Mapping by the step code (deterministic): `INSUFFICIENT_INPUT` → Task Output `FAILED` with `PERMANENT.INSUFFICIENT_INPUT` (07 §2; orchestrator re-plans upstream); `RULE_WOULD_BE_BROKEN` → `SUCCEEDED` with compliance verdict `BLOCKED` in the payload (03 §5.3.3); `OUT_OF_SCOPE`, `CONFLICTING_INSTRUCTIONS` → `FAILED` `PERMANENT.INPUT_INVALID` (L2); `UNSAFE_CONTENT` → `SUCCEEDED` with verdict `NEEDS_HUMAN_REVIEW` (L3 via S7).
+**Declared item-level mapping (CCR-023).** A step that is not a compliance gate (its payload carries no compliance verdict), or a per-item step inside a deterministic cascade (e.g. one shot's candidate ranking), may instead map a refusal to a deterministic per-item fallback, provided that (1) the blueprint §18 declares the mapping per refusal reason and the task-level failure condition (when too many items degrade, the task still fails with the codes above); (2) each degraded item emits a validation result with verdict `WARN`, `blocking: false`, and the refusal's `violated_rule_ids` in `rule_id` / `message`; (3) `RULE_WOULD_BE_BROKEN` and `UNSAFE_CONTENT` items are surfaced to Agent 16 through those results; (4) a refusal never becomes a `PASS`. A refusal inside a verification step that must return one entry per input item returns that entry with its "not decided" status and reason `MODEL_REFUSED` (GLOSSARY §6.52) rather than dropping it.
 
 ### 4.4 Prompt lint (pre-commit + CI)
 Sections present and ordered; every `{{variable}}` declared in Inputs and supplied by the step; the Output JSON Schema parses as 2020-12 and equals the schema generated from the Pydantic model; every worked example validates against it; no model names, provider names, API keys or prices in the file; no calendar dates or clock times in rules (owner rule C.4; operational time rules come from config); rule packs referenced, not pasted.
@@ -90,7 +91,13 @@ Sections present and ordered; every `{{variable}}` declared in Inputs and suppli
 
 ## 6. Evaluation standard (§3.5.3)
 ### 6.1 Golden dataset
-`evals/<agent package>/<task>/` (this phase `docs/v4/evals/…`), format defined in `evals/README.md`: ≥ 20 cases per LLM step, including hard negatives, edge cases and **every** answer-key case of the directive that applies to the step (e.g. §1B.2 for `agent_06.claim_extraction`). Cases contain no real personal data and no other tenant's data.
+`evals/<agent package>/<task>/` (this phase `docs/v4/evals/…`), format defined in `evals/README.md` (CCR-024 extensions below): ≥ 20 cases per LLM step, including hard negatives, edge cases and **every** answer-key case of the directive that applies to the step (e.g. §1B.2 for `agent_06.claim_extraction`). Cases contain no real personal data and no other tenant's data.
+Dataset format extensions (CCR-024; `evals/README.md` §2 is aligned by the eval-harness lane L9):
+- **LLM-step datasets:** `input` validates against the step input schema (`<task_type>.<step>.input`) or the task input schema; an optional top-level `fixture` object carries test doubles (search results, passages) and is declared in the dataset README.
+- **Deterministic executor datasets** (no LLM step, e.g. Agent 07 synthesis/master): `input = {"payload": <task_type>.input, "fixtures": {…}}`; CI validates `input.payload`.
+- **Function-level deterministic datasets** (engines such as a timeline or chart-fact engine): folder `<package>/<engine>_core/`, field `function` names the pure function, `input` is its argument object, `judge_min` is omitted.
+- **Case-ID prefixes:** the category prefixes (`AK-`, `HN-`, `EDGE-`/`MIX-`, `REF-`, `POS-`) or, in deterministic and component datasets, a component prefix `<COMP>-NN` (2–5 capitals, declared in the README); `category` always carries the `eval_case_category` value.
+- Each dataset README states which directive answer-key cases apply, or "none apply" with the reason.
 
 ### 6.2 Assertions
 1. Deterministic first: schema validity, required fields, exact-substring/offset checks, banned phrases, rule-pack violations expected/forbidden, lengths, verdict equality.
@@ -109,6 +116,8 @@ Stated per dataset in its `README.md`/`thresholds` block; answer-key cases alway
 - One package per agent and per shared service; each exposes a typed `Protocol` (its stage interface) and Pydantic models for its payload schemas; it imports only `amw_core` and adapter Protocols, never another agent (§2 of the directive: hand-offs only through contracts and the orchestrator).
 - Adapters (LLM, TTS, image, video generation, stock, music, destinations) implement Protocols and ship with a fake and recorded fixtures.
 - Only `workers/*` and `apps/*` wire concrete adapters (dependency injection via constructor parameters; no service locator, no globals).
+
+Adapter request/response models (e.g. `LlmRequest`, `TtsRequest`, stock/music search and licence, image, video, delivery) are **adapter-owned** typed models in `amw_adapters/<family>/`, not Wave A contracts; they change with their adapter's tests and fakes, never with a CCR (CCR-057). What crosses an agent boundary is always a 03 contract or a payload schema.
 
 ### 7.2 Package names (also the `prompts/` and `evals/` folder names)
 Agents: `agent_01_ceo_orchestrator` (code package `amw_orchestrator`), `agent_02_market_intelligence`, `agent_03_content_strategy`, `agent_04_research_knowledge`, `agent_05_scriptwriter`, `agent_06_fact_checker`, `agent_07_voice_production`, `agent_08_visual_assets`, `agent_09_video_director`, `agent_10_video_editor`, `agent_11_thumbnail_design`, `agent_12_seo_metadata`, `agent_13_publishing_delivery`, `agent_14_analytics`, `agent_15_growth_revenue`, `agent_16_compliance_qa`, `agent_17_brief_creative_strategy`.

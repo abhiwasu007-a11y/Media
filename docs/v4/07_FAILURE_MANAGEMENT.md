@@ -35,7 +35,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `PERMANENT.SCHEMA_VERSION_UNSUPPORTED` | version outside the supported set | FAIL | never | no | L2 |
 | `PERMANENT.INPUT_INVALID` | semantically invalid input (wrong ID prefix, impossible values) | FAIL | never | no | L2 |
 | `PERMANENT.CONFIG_INVALID` | missing/invalid configuration (model, provider, limit) | FAIL | never | no | L3 (operations) |
-| `PERMANENT.UNSUPPORTED_TASK` | task type not registered for the executor | FAIL | never | no | L2 |
+| `PERMANENT.UNSUPPORTED_TASK` | task type not registered for the executor, or a required capability value (e.g. the job language) not supported by the executor or its adapter (CCR-021) | FAIL | never | no | L2 |
 | `PERMANENT.MISSING_DEPENDENCY` | referenced row/blob absent | FAIL | never | no | L2 |
 | `PERMANENT.AUTH_INVALID` | provider credential rejected (HTTP 401/403, not refreshable) | FAIL | never | no | L3 (security/ops) |
 | `PERMANENT.PERMISSION_DENIED` | actor lacks the permission (RBAC) | FAIL | never | no | L3 (security) |
@@ -46,7 +46,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `PERMANENT.INVALID_TRANSITION` | state transition not allowed (03 §11.3) | FAIL | never | no | L2; L3 if repeated |
 | `PERMANENT.DEADLINE_EXCEEDED` | deadline passed or wait timed out | FAIL | never | no | L2 |
 | `PERMANENT.PROVIDER_REFUSAL` | provider refused the content (safety/policy) | FAIL (after configured fallback provider inside the attempt, if any) | never | no | L2 → L3 if a compliance question |
-| `PERMANENT.INSUFFICIENT_INPUT` | LLM step returned a refusal `INSUFFICIENT_INPUT` (27 §4) | FAIL | never | no | L2 (orchestrator re-plans upstream) |
+| `PERMANENT.INSUFFICIENT_INPUT` | LLM step returned a refusal `INSUFFICIENT_INPUT` (27 §4), or the step's deterministic checks found no usable input to produce a valid output (e.g. zero usable research notes; CCR-021) | FAIL | never | no | L2 (orchestrator re-plans upstream) |
 | `RESOURCE.OOM` | process killed for memory | RETRY with reduced concurrency (05) | `resource` | no | L1 → L2 |
 | `RESOURCE.CPU_SATURATION` | task aborted under CPU pressure | RETRY | `resource` | no | L1 → L2 |
 | `RESOURCE.DISK_FULL` | write failed: no space | SUSPEND:`OPERATOR_PAUSE` + heavy admission paused | none | no | L3 (operations) |
@@ -56,8 +56,8 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `AGENT.HANG` | heartbeat stale / wall budget exceeded | RETRY | `agent` | no | L1 → L2 |
 | `AGENT.INVALID_JSON` | LLM output not parseable | RETRY once with the parse error appended (§3.5.2) | `agent_parse` | no | L2 after cap |
 | `AGENT.OUTPUT_SCHEMA_INVALID` | parsed output fails the Pydantic/JSON schema | RETRY once with the validation error (§3.5.2) | `agent_parse` | no | L2 after cap |
-| `AGENT.CORRUPTED_OUTPUT` | output blob hash/size mismatch | RETRY | `agent` | no | L2 |
-| `AGENT.INCOMPLETE_OUTPUT` | success claimed but 03 §5.3 rule failed | RETRY once | `agent_parse` | no | L2 |
+| `AGENT.CORRUPTED_OUTPUT` | output blob, or provider-returned media, fails hash, size or decode validation (CCR-021) | RETRY | `agent` | no | L2 |
+| `AGENT.INCOMPLETE_OUTPUT` | success claimed but 03 §5.3 rule 2 failed. A failed blocking **gate** (03 §5.3 rule 4: results with `gate: true`) is not this code; it routes `on_fail` (24 §3.3) (CCR-001) | RETRY once | `agent_parse` | no | L2 |
 | `AGENT.QUALITY_REPEATED_FAILURE` | the step's own deterministic checks failed on every allowed attempt | FAIL | never (already capped) | no | L3 (quality) |
 | `AGENT.LOOP_CAP_EXCEEDED` | any hard cap of §9 reached | FAIL | never | no | L3 |
 | `INFRASTRUCTURE.HOST_RESTART` | host or container restarted mid-attempt | RETRY from checkpoint | `infra` | no | L1 |
@@ -74,11 +74,13 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `PUBLISHING.OAUTH_REFRESH_FAILED` | refresh failed (not a revocation) | RETRY | `temporary` | yes | L3 after cap; channel → `NEEDS_REAUTH` |
 | `PUBLISHING.PROCESSING_FAILED` | destination processing failed or timed out | FAIL | never | no | L3 (publishing) |
 | `PUBLISHING.VERIFICATION_MISMATCH` | post-publish read-back differs (privacy, title, disclosure flag) | FAIL; publication not marked `VERIFIED` | never | no | L3 (publishing) |
-| `PUBLISHING.DUPLICATE_DETECTED` | reconciliation found the video already uploaded | NO new upload; link existing video; task continues if consistent, else FAIL | never | no | L3 (data integrity) if inconsistent |
+| `PUBLISHING.DUPLICATE_DETECTED` | reconciliation found the video already uploaded **and it is inconsistent** with the publication row (the consistent case links the existing video and raises no error) | FAIL (no new upload) | never | no | L3 (data integrity) |
 | `PUBLISHING.NOT_AUTHORISED` | publish guard failed (approval, editorial contribution, authorisation verdict; 04 §5.21) | FAIL | never | no | L3 (publishing; should never happen) |
 | `PUBLISHING.DESTINATION_UNAVAILABLE` | destination returns 5xx/outage | RETRY | `temporary` | yes | L1 |
 
 New codes are additive and require a CCR (CONTRACT_CHANGE_REQUESTS.md).
+
+Reading the table (CCR-057): `retryable` (03 §6) is `true` for **RETRY** and **NO-ATTEMPT** codes (both come back to `RETRY_WAIT` / re-evaluation; NO-ATTEMPT consumes no attempt) and `false` for **FAIL** and **SUSPEND** codes (a suspension resumes through T15, not a retry). The disposition values are the GLOSSARY §6.52 set `error_disposition`; the policy names are `retry_policy`. In the Escalation column the first level is the level on first occurrence; a second level written `X → Y`, `Y after cap` or `Y if …` is the level after the retry cap or under the stated condition.
 
 ## 3. Retry policies
 
@@ -115,6 +117,9 @@ Window interaction: if `next_attempt_at` is outside the admissible window for th
 
 ### 3.4 Never retried
 Every `PERMANENT.*` code; `AGENT.QUALITY_REPEATED_FAILURE`; `AGENT.LOOP_CAP_EXCEEDED`; `PUBLISHING.UPLOAD_REJECTED`, `OAUTH_REVOKED`, `PROCESSING_FAILED`, `VERIFICATION_MISMATCH`, `NOT_AUTHORISED`. Suspensions (`QUOTA_EXHAUSTED`, `BUDGET_EXHAUSTED`, `DISK_FULL`) are waits, not retries, and consume no attempt.
+
+### 3.5 Deterministic in-stage fallback (CCR-023)
+The dispositions of §2 always win; no blueprint sets a private default. A stage that has a deterministic equivalent of an LLM step (e.g. a template thumbnail layout) may use it inside the same attempt only when config `agent_NN.llm.fallback_on_unavailable` is `true` (default `false`; enabling it is an owner decision, D1), and only after `TEMPORARY.CIRCUIT_OPEN`, `PERMANENT.PROVIDER_REFUSAL`, or `AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID` after its one retry. It never applies to a suspension (`RESOURCE.BUDGET_EXHAUSTED`, `QUOTA_EXHAUSTED`, `DISK_FULL`) or to any `PERMANENT.*` input or tenancy code. The fallback is recorded as a `WARN` validation result (`blocking: false`) naming the code; it is not returned as the task error.
 
 ## 4. Circuit breakers (per external provider)
 
@@ -207,6 +212,8 @@ L3 routing: security (`CROSS_TENANT_REF`, `TENANT_MISMATCH`, `PERMISSION_DENIED`
 | `limits.max_job_active_ms` (excludes `CHECKPOINTED` time) | 86,400,000 | reaper | L2, then L3 |
 | `caps.lock_conflict_reevaluations` | 5 per transition | state machine | FAIL `PERMANENT.INVALID_TRANSITION` |
 | LLM self-repair | 1 retry with the validation error | `agent_parse` policy | DLQ |
+| In-attempt repair (CCR-022) | per LLM step: at most 1 parse repair and at most 1 quality repair inside the attempt, declared in the blueprint; every repair call counts against `resource_budget.max_llm_calls` | step code | parse: `AGENT.INVALID_JSON` / `OUTPUT_SCHEMA_INVALID` → `agent_parse`; quality: `AGENT.QUALITY_REPEATED_FAILURE` |
+| Per-agent structural caps (CCR-022) | declared in the agent blueprint (§24 config keys, e.g. `agent_09.max_slots`) | agent code, before any paid call | FAIL `AGENT.LOOP_CAP_EXCEEDED` |
 Structural guarantees: only the orchestrator creates tasks; graphs come from the registry and are validated as DAGs at load (24 §3); revision edges are bounded counters, not cycles; no task type may enqueue another task.
 
 ## 10. Checkpoint, resume and restart-only-the-failed-component

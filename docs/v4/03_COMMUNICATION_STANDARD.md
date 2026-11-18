@@ -19,10 +19,11 @@
 ## 2. Schema registry and versioning
 
 ### 2.1 Registry
-- Location (build): `packages/amw_core/contracts/schemas/<schema name>/<semver>.json`. Each file's `$id` is `urn:amw:schema:<schema name>:<semver>`.
+- Location (build): `packages/amw_core/src/amw_core/contracts/schemas/<schema name>/<semver>.json` (uv src layout; CCR-057). Each file's `$id` is `urn:amw:schema:<schema name>:<semver>`.
 - Schemas are **immutable once released**. A change is a new version file.
 - The validator resolves `$ref` only from this registry (no network fetch).
-- Contract schemas: `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`. Registry record schema: `amw.production_type` (fields in 24 §2). Payload schemas: one input and one output per task type, owned by the agent blueprint.
+- Contract schemas: `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`, `amw.owner_topic` (§3.4, CCR-006). Registry record schema: `amw.production_type` (fields in 24 §2). Payload schemas: one input and one output per task type, plus one input and one output per LLM step inside a task type (`<task_type>.<step>.input/.output`) and agent document schemas (`<agent_id>.<snake_case>`), all owned by the agent blueprint (GLOSSARY §2.4, CCR-018). A payload, step or document schema whose name follows GLOSSARY §2.4 is registered by being defined in its blueprint (§7/§8) and shipped in the registry folder; no per-name CCR is needed.
+- Release status (CCR register, 2026-11-18): no schema of this document has been released yet (no build has shipped them). The integrator pass edited the 1.0.0 texts in place (CCR-001, CCR-006); from the first merged build that ships them, every change is a new version file.
 
 ### 2.2 Semantic versioning rules
 | Change | Version bump | Examples |
@@ -68,7 +69,7 @@
   "$id": "urn:amw:schema:amw.common:1.0.0",
   "title": "AMW common definitions",
   "$defs": {
-    "uuid7_body": { "type": "string", "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "uuid7_body": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "org_id":     { "type": "string", "pattern": "^org_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "job_id":     { "type": "string", "pattern": "^job_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "task_id":    { "type": "string", "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
@@ -169,6 +170,56 @@
 }
 ```
 Rules: `payload.data` serialized ≤ config `contracts.inline_payload_max_bytes` (default 262,144 bytes, design value); larger payloads use `data_ref` + `data_sha256`. Every `context_refs[].uri` and `payload.data_ref` must belong to `org_id` or to `platform` (§8).
+
+### 3.4 Owner topic input (`amw.owner_topic` 1.0.0, CCR-006)
+The one topic contract of 3A: the owner gives the topic in chat; the operator tool (`sys_operator`, D5) records it as the job input (`jobs.input_ref`) with the evidence of §11.6 rule 6. The orchestrator copies the fields Agent 04 and Agent 05 need into their payloads under these names (no agent renames them).
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:amw.owner_topic:1.0.0",
+  "title": "AMW owner topic input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "brief", "angle", "language", "video_kind", "course_chapter_pointer",
+               "owner_references", "target_duration_ms", "shorts_wanted"],
+  "properties": {
+    "title": { "type": "string", "minLength": 3, "maxLength": 400 },
+    "brief": { "oneOf": [ { "type": "string", "maxLength": 2000 }, { "type": "null" } ] },
+    "angle": { "oneOf": [ { "type": "string", "maxLength": 500 }, { "type": "null" } ] },
+    "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$" },
+    "video_kind": { "enum": ["GENERAL", "METHOD_TOPIC"] },
+    "course_chapter_pointer": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "object", "additionalProperties": false, "required": ["label"],
+          "properties": { "label": { "type": "string", "minLength": 1, "maxLength": 200 } } }
+      ]
+    },
+    "owner_references": {
+      "type": "array", "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url", "knowledge_source_id", "note"],
+        "properties": {
+          "kind": { "enum": ["EXTERNAL_URL", "KNOWLEDGE_SOURCE"] },
+          "url": { "oneOf": [ { "type": "string", "maxLength": 2048, "pattern": "^https://" }, { "type": "null" } ] },
+          "knowledge_source_id": { "oneOf": [ { "type": "string", "pattern": "^ksr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" }, { "type": "null" } ] },
+          "note": { "oneOf": [ { "type": "string", "maxLength": 500 }, { "type": "null" } ] }
+        },
+        "allOf": [
+          { "if": { "properties": { "kind": { "const": "EXTERNAL_URL" } } },
+            "then": { "properties": { "url": { "type": "string" }, "knowledge_source_id": { "type": "null" } } } },
+          { "if": { "properties": { "kind": { "const": "KNOWLEDGE_SOURCE" } } },
+            "then": { "properties": { "url": { "type": "null" }, "knowledge_source_id": { "type": "string" } } } }
+        ]
+      }
+    },
+    "target_duration_ms": { "type": "integer", "minimum": 1000 },
+    "shorts_wanted": { "type": "boolean" }
+  }
+}
+```
 
 ## 4. Message Envelope (`amw.envelope` 1.0.0)
 
@@ -318,8 +369,16 @@ The output carries no IDs of its own: it is stored at `amw-blob://<org>/jobs/<jo
           "threshold": { "type": ["number", "string", "boolean", "null"] },
           "unit": { "oneOf": [ { "type": "string", "maxLength": 16 }, { "type": "null" } ] },
           "message": { "type": "string", "maxLength": 2000 },
-          "evidence_ref": { "oneOf": [ { "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri" }, { "type": "null" } ] }
-        }
+          "evidence_ref": { "oneOf": [ { "$ref": "urn:amw:schema:amw.common:1.0.0#/$defs/storage_uri" }, { "type": "null" } ] },
+          "gate": { "type": "boolean", "default": false },
+          "remedy_stage_id": { "oneOf": [ { "type": "string", "pattern": "^[a-z0-9_]{2,32}$" }, { "type": "null" } ] }
+        },
+        "allOf": [
+          { "if": { "properties": { "verdict": { "enum": ["WARN", "SKIPPED"] } } },
+            "then": { "properties": { "blocking": { "const": false } } } },
+          { "if": { "required": ["remedy_stage_id"], "properties": { "remedy_stage_id": { "type": "string" } } },
+            "then": { "required": ["gate"], "properties": { "gate": { "const": true } } } }
+        ]
       }
     },
     "duration": { "type": "integer", "minimum": 0 },
@@ -363,15 +422,23 @@ The output carries no IDs of its own: it is stored at `amw-blob://<org>/jobs/<jo
     { "if": { "properties": { "status": { "enum": ["FAILED", "REJECTED"] } } },
       "then": { "properties": { "error": { "type": "object" } } } },
     { "if": { "properties": { "status": { "const": "SUSPENDED" } } },
-      "then": { "properties": { "next_action": { "properties": { "type": { "const": "WAIT" }, "wait_reason": { "type": "string" } } } } } }
+      "then": { "properties": { "next_action": { "properties": { "type": { "const": "WAIT" }, "wait_reason": { "type": "string" } } } } } },
+    { "if": { "properties": { "status": { "const": "REJECTED" } } },
+      "then": { "properties": { "payload": { "type": "null" }, "output_refs": { "maxItems": 0 },
+                                "error": { "properties": { "attempt_no": { "const": 0 } } } } } }
   ]
 }
 ```
 
 ### 5.3 Advisory fields and the success rule
 1. `next_action` and `downstream_agent` are hints. The orchestrator compares them with the production type's task graph (24 §3); a mismatch is ignored and logged as `orchestrator.advice_ignored`. They never create tasks.
-2. **An incomplete output is never successful** (§3.3 Quality): `SUCCEEDED` requires (a) the payload validates against its named output schema, (b) every `blocking: true` validation result is `PASS`, (c) every `output_refs[]` object exists in storage with the stated SHA-256 and size. If any fails, the orchestrator records the attempt as `AGENT.INCOMPLETE_OUTPUT` (07 §2) regardless of the reported status.
+2. **An incomplete output is never successful** (§3.3 Quality): `SUCCEEDED` requires (a) the payload validates against its named output schema, (b) every `blocking: true` validation result **that is not a gate result** (`gate` absent or `false`) is `PASS`, (c) every `output_refs[]` object exists in storage with the stated SHA-256 and size. If any fails, the orchestrator records the attempt as `AGENT.INCOMPLETE_OUTPUT` (07 §2) regardless of the reported status.
 3. A compliance verdict `BLOCKED` is **not** a failure: the task `SUCCEEDED` with the verdict in its payload, and the orchestrator routes the job (revision loop or `BLOCKED_COMPLIANCE` outcome, 24 §3.3).
+4. **A failed blocking gate is not a failed task** (CCR-001). A stage registered with `gate.blocking = true` (24 §3.1) reports its domain-quality result (for example loudness, technical QC, the 100-point score, unresolved shots) as validation results with `gate: true`, `blocking: true` and their own verdict `PASS` or `FAIL`. The task then returns `status = SUCCEEDED`, a valid payload (which may echo `gate_verdict` `PASSED`/`FAILED`, GLOSSARY §6.52) and `next_action = {type: CONTINUE, wait_reason: null, escalation_level: null, reason: "gate FAILED: <check_ids>"}` (advisory only). The gate has **failed** when at least one result has `gate: true`, `blocking: true` and `verdict = FAIL`; the orchestrator then takes the `on_fail` route of the stage (24 §3.3), never a retry. Each failing gate result may name `remedy_stage_id`, the stage that can fix it (24 §3.3 rule 1). Rules:
+   - `gate: true` is accepted only from a stage that the production type registers as a blocking gate; from any other stage a `gate: true` result fails rule 2 (`AGENT.INCOMPLETE_OUTPUT`).
+   - Process-integrity checks (schema, tenant scope, consent, licence lookup, cost, persistence, the step's own parser) are never gate results: they keep `gate: false`, and a FAIL among them still fails rule 2(b).
+   - A measurement that could not be made is never `PASS`: it is a process-integrity `FAIL` (the task fails) or, where the blueprint defines it, a gate `FAIL`.
+5. **`blocking` describes this result, not the check in general** (CCR-001). A result with verdict `WARN` or `SKIPPED` always carries `blocking: false` (schema rule). A check that is blocking by default but is not computable in a run (for example a rate check before calibration, an iteration-0 revision check) is emitted `SKIPPED` with `blocking: false` and its precondition in `message`. 13 §2.3 still applies to compliance rules: a rule that cannot be evaluated is `NEEDS_HUMAN_REVIEW`, not `SKIPPED`.
 
 ## 6. Error object (`amw.error` 1.0.0)
 ```json
@@ -421,7 +488,8 @@ Rules:
 1. `error_class` must equal the prefix of `code` (checked by `amw_core.contracts`, not expressible in the schema). Codes come only from the catalogue in 07 §2.
 2. `retryable` is decided by the retry policy of 07 §3 for that code, not by the producer's opinion; the producer's value is overwritten by the policy engine before persistence.
 3. `message` and `details` never contain secrets, tokens, raw provider keys, personal data beyond IDs, or another tenant's data. Tracebacks are stored separately (redacted) as `dead_letter.traceback_ref`.
-4. `attempt_no` is 0 for rejections at validation (no attempt started).
+4. `attempt_no` is 0 for rejections at validation (no attempt started); `amw.task_output` enforces it for `REJECTED` together with `payload = null` and no `output_refs` (CCR-057).
+5. `details` is deliberately open (no `additionalProperties: false`): each code may add its own keys (e.g. `unresolved_shots`, `missing_inputs`), documented by the blueprint that raises it; rule 3 applies to every key (CCR-057).
 
 ## 7. Validation before processing and structured rejection
 
@@ -449,10 +517,10 @@ A rejected input produces a Task Output with `status = REJECTED`, `payload = nul
 | Entity | `amw-entity://<org wire id>/<table>/<entity wire id>` | Pointer to a DB row. |
 | Platform entity | `amw-entity://platform/<table>/<entity wire id>` | Pointer to a platform-owned catalogue row (`org_id IS NULL`, 04 §3.5), e.g. a platform rule pack. Read-only. |
 
-Areas: `jobs/<job>/tasks/<task>/attempts/<att>/{input.json,output.json}`, `jobs/<job>/renders/`, `jobs/<job>/checkpoints/`, `assets/<ast>/`, `knowledge/<chn>/<ksr>/`, `licences/<lic>/`, `consents/<vcn>/`, `exports/<dtr>/`, `evidence/<job>/`.
+Areas: `jobs/<job>/tasks/<task>/attempts/<att>/{input.json,output.json}`, `jobs/<job>/tasks/<task>/attempts/<att>/artifacts/<name>` (write-once task documents such as a script document, a research pack, a shot plan; CCR-017), `jobs/<job>/renders/`, `jobs/<job>/checkpoints/`, `jobs/<job>/deliveries/<pub>/` (3A delivery bundle files, CCR-017), `assets/<ast>/`, `knowledge/<chn>/<ksr>/`, `licences/<lic>/`, `consents/<vcn>/`, `exports/<dtr>/`, `evidence/<job>/` (write-once snapshots of every external reference cited by a usable research note: extracted text, `content_sha256`, URL, `accessed_at`; written by Agent 04, read by Agent 06; CCR-016).
 
 Rules:
-1. `amw_core.storage` maps a URI to the backend (local disk first, S3-compatible later, §3.2a) as `<root>/<org uuid>/<area>/<path>`; the org segment is always first, so a tenant's data can be exported or erased as one prefix (§1C.10).
+1. `amw_core.storage` maps a URI to the backend (local disk first, S3-compatible later, §3.2a) as `<root>/<org uuid>/<area>/<path>`, and a platform URI as `<root>/platform/<area>/<path>` (CCR-017, ADR-005); the org segment is always first, so a tenant's data can be exported or erased as one prefix (§1C.10).
 2. Blobs are **write-once**: a new version gets a new path; nothing is overwritten. Final media is always written to persistent storage, never only to temp (§3.3 Disaster recovery).
 3. A reader resolves a URI only after checking the URI's org equals the transaction's `app.org_id` (or `platform` for read-only access). Mismatch = `PERMANENT.CROSS_TENANT_REF`, logged as a security event and escalated L3.
 4. Every input consumed by a task carries a SHA-256; the reader verifies it.
@@ -473,12 +541,14 @@ Rules:
 | Scope | Natural key parts | Effect |
 |---|---|---|
 | `job.create` | `org_id`, requesting source (calendar entry, brief, API request ID or human request ID) | Job creation (`jobs.idempotency_key`) |
-| `task.<task_type>` | `job_id`, `task_type`, `iteration` (revision loop number) | Task-level key (Task Input `idempotency_key`) |
+| `task.<task_type>` | `job_id`, `stage_id`, `task_type`, `iteration` (revision loop number) | Task-level key (Task Input `idempotency_key`). `stage_id` (CCR-005) separates two stages of one graph that use the same task type (`a_script` / `a_final`, `s06_verify` / `s06_chart`) |
 | `llm.call` | `task_id`, `step_key`, `call_seq` | LLM call + its cost ledger row |
 | `tts.synthesize` | `task_id`, `segment_id`, text SHA-256, voice ID | Paid TTS call |
 | `media.generate` | `task_id`, `shot_id`, prompt SHA-256 | Image/video generation |
+| `fetch.reference` (CCR-015) | `task_id`, `ref_id`, URL SHA-256 | Fetch and snapshot an external reference (Agent 04, `web_fetch` adapter) |
 | `stock.license` | `org_id`, vendor item ID, licence ID | Stock purchase/licence registration |
 | `render.master` | `job_id`, timeline SHA-256, preset key | Render |
+| `render.segment` (CCR-015) | `job_id`, timeline SHA-256, preset key, segment index | One resumable render segment (Agent 10) |
 | `db.output` | `task_id`, output kind | Persisting a stage output |
 | `upload.youtube` | `channel_id`, render SHA-256 | `videos.insert` |
 | `publish.youtube` | `publication_id`, target privacy | Privacy change to public / schedule |
@@ -597,7 +667,7 @@ Invalid transitions: any pair not in the table, or a valid pair whose guard fail
 | J11 | DEAD_LETTER | CANCELLED | Every dead-lettered task discarded (T18) and the human cancels the job | `job.cancelled` |
 | J12 | PENDING / VALIDATING / QUEUED / RUNNING / CHECKPOINTED / FAILED | CANCELLED | Human or orchestrator cancels the job; cascades T19/T20 to every non-terminal task | `job.cancelled` |
 
-Blocking outcomes: when a blocking gate (compliance, originality, QC) returns `BLOCKED`/`FAIL`, the orchestrator creates a revision task (new `iteration`) until `limits.max_revision_loops` (07 §9) is reached; then the job ends `COMPLETED` with `outcome = BLOCKED_COMPLIANCE` (or `REJECTED_BY_APPROVER` for a human rejection). It is never published.
+Blocking outcomes: when a blocking gate (compliance, originality, QC) returns `BLOCKED`/`FAIL` (a failed gate per §5.3 rule 4), the orchestrator creates revision tasks (new `iteration`, routing in 24 §3.3) until `limits.max_revision_loops` (07 §9) is reached; then the job ends `COMPLETED` with `outcome = BLOCKED_COMPLIANCE` (or `REJECTED_BY_APPROVER` for a human rejection). It is never published.
 
 ### 11.6 Approval waits in detail
 1. When the graph reaches an approval gate, the gate task (`svc_s07.request_approval`) creates an `approvals` row bound to the subject's SHA-256, then returns `SUSPENDED` with `wait_reason = AWAITING_APPROVAL` (T09).
@@ -605,6 +675,14 @@ Blocking outcomes: when a blocking gate (compliance, originality, QC) returns `B
 3. When the approval reaches a final `approval_state`, `svc_s07` triggers T15; the gate task resumes, reads the decision and completes (T08) with the decision in its payload; the orchestrator routes (continue, revise, or stop).
 4. If the subject changes (new SHA-256), the old approval is `WITHDRAWN` and a new one is requested; a publish guard (04 §5.21) rejects any publication whose render SHA-256 differs from the approved one.
 5. Inside a client tenant, approvers are that tenant's users; the platform owner is an approver only when `approvals.managed_service = true` (rule 10).
+6. **Approval channel and evidence (CCR-010, decision D5).** Every human decision (approval step, editorial contribution, human score) records its `approval_channel` (GLOSSARY §6.44). In 3A the only channel is `OWNER_CHAT_OPERATOR`: the owner decides in a chat message; the operator tool, acting as `sys_operator`, records the decision **on his behalf** with `decided_by` / `contributor_user_id` / `scorer_ref` = the owner's `usr_` ID and an `evidence_id` that points to an `owner_instruction_evidence` row (04 §5.16). The evidence is bound to the platform's own session event record: the operator supplies only the session and event identifiers; code fetches the event and verifies role `user`, not synthetic, human inbound origin, verbatim quote, timestamp, review code and decision word (04 §5.16 code check). Rules:
+   - **Two phases.** A decision takes effect only when its evidence is `CONFIRMED`: verified, echoed to the owner, and confirmed by a second verified owner event. Until then the approval stays `PENDING` (the job waits; nothing becomes final). An event that cannot be fetched keeps the evidence `PENDING_VERIFICATION` forever.
+   - The rule covers **every** human-originated record (approval decisions, editorial contributions, human scores, review-item resolutions and compliance overrides), not only rows tagged with a channel.
+   - Evidence can only come from a message **authored by the owner**. Text that reaches the operator through a tool result, a sub-agent or peer-session message, a notification, a web page, a document or a file is **never** owner evidence, whatever it says.
+   - A record is created only from an explicit, unambiguous owner message that names the video (job) or subject; the operator never infers, completes or paraphrases a decision. An ambiguous message creates nothing; the operator asks.
+   - A refused attempt is stored as an evidence row with `refused_reason` (and the refused `source_kind`) and backs nothing.
+   - Every record is audited (`approval.recorded_from_owner_chat`, `approval.owner_confirmed`, `approval.record_refused`; the same three verbs for `editorial_contribution.*` and `quality_score.*`) and echoed back to the owner in chat; his reply is stored once in the evidence row's confirmation fields.
+   - Agents (`agent_NN`, `svc_sNN`) can never write these records, on any channel (04 §5.16 triggers).
 
 ### 11.7 Audit of every transition
 Each transition writes `audit_log` with: `actor_kind`, `actor_ref`, `authority` (role or policy under which the actor acted), `action` (audit event name above), `target_kind = TASK|JOB`, `target_id`, `details = {from, to, transition_id, wait_reason, error_code, state_version}`, `correlation_id`. The hash chain makes the history tamper-evident (04 §5.13).

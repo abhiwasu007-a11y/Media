@@ -22,11 +22,15 @@ amw-media-factory/
 │   │   ├── config/             #   pydantic-settings; models/providers/limits only from config
 │   │   ├── queue/              #   Postgres-backed queue wrapper (library chosen in ADR-001)
 │   │   ├── storage/            #   S3-compatible interface; local-disk backend first
-│   │   └── observability/      #   JSON logging, metrics, correlation IDs
+│   │   ├── observability/      #   JSON logging, metrics, correlation IDs
+│   │   ├── ids/                #   UUIDv7, prefixed wire IDs (GLOSSARY §2)
+│   │   └── rulepacks/          #   rule-pack loading, version pinning, PLATFORM/TENANT split for prompt caching (CCR-047)
 │   ├── amw_adapters/           # PROVIDER ADAPTERS behind Protocols, each with a fake + recorded fixtures
-│   │   ├── llm/  tts/  image/  video_gen/  stock_footage/  music/
+│   │   ├── llm/  tts/  image/  video_gen/  stock_footage/  music/  web_fetch/ (CCR-015: allow-listed HTTPS GET, size/time/redirect caps, private-address block)
 │   │   └── destinations/youtube/ (OAuth, resumable upload, analytics)
-│   ├── amw_orchestrator/       # Agent 01: workflow engine, admission control, night scheduler, shutdown
+│   ├── amw_orchestrator/       # Agent 01: workflow engine, admission control, night scheduler, shutdown;
+│   │                           #   input_builders/: one pure mapping per task type that builds its Task Input from
+│   │                           #   registry params and earlier outputs (CCR-047; agents never build each other's inputs)
 │   ├── agents/                 # ONE PACKAGE PER STAGE (02–17), each exposing a typed Protocol
 │   │   ├── agent_02_market_intelligence/
 │   │   ├── agent_03_content_strategy/
@@ -61,6 +65,7 @@ amw-media-factory/
 3. Only `workers/*` and `apps/*` wire concrete adapters and start processes.
 4. Every call that has an external side effect goes through an adapter that takes an idempotency key (§3.3 Recovery).
 5. No package reads environment variables directly; all configuration goes through `amw_core.config`.
+6. Module mapping (CCR-047): checkpoint helpers live in `amw_core.state_machine`; control-payload handling (drain, cancel, pause) in `amw_core.queue`; rule packs in `amw_core.rulepacks`; the shared asset registry for package templates and fonts (18 §2.2) in `amw_core.storage`. A blueprint names only these modules.
 
 ## 3. Note on the current documentation-phase location
 During this phase, `prompts/` and `evals/` skeletons live in `docs/v4/prompts/` and `docs/v4/evals/` (execution plan Q3). They move to the repo root in the first build ticket.
