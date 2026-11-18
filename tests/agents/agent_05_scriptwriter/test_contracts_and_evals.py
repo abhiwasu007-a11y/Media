@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 # ruff: noqa: PT018
 """Contract tests C-01/C-02 and the offline eval run R-03 for the three LLM-step datasets.
 
@@ -16,6 +15,7 @@ from typing import Any
 
 import pytest
 from jsonschema import Draft202012Validator
+from pydantic import BaseModel
 
 from agent_05_scriptwriter.checks.plan_checker import PlanChecker
 from agent_05_scriptwriter.checks.results import failing_ids
@@ -35,12 +35,14 @@ from amw_evals.prompt_doc import parse_prompt
 from tests.agents.agent_05_scriptwriter import support as sp
 
 ROOT = Path(__file__).resolve().parents[3] / "docs" / "v4"
-SETS = {
+SETS: dict[str, tuple[type[BaseModel], type[BaseModel], str, str]] = {
     "script_draft": (PlanStepInput, PlanOutput, "PLAN", "plan"),
     "script_draft_section": (SectionStepInput, SectionOutput, "SCENES", "section_sec1"),
     "shorts_adaptation": (CutStepInput, CutOutput, "CUT", "cut"),
 }
 NOT_RUNNABLE: list[str] = []
+
+pytestmark = pytest.mark.contract
 
 
 def cases(name: str) -> list[dict[str, Any]]:
@@ -160,7 +162,7 @@ EXPECTED_STATUS = {
 )
 def test_refusal_cases_run_through_the_real_step_code(name: str, case: dict[str, Any]) -> None:
     model, out_model, _, step_key = SETS[name]
-    step_in = model.model_validate(case["input"])
+    step_in: Any = model.model_validate(case["input"])
     ctx = sp.make_ctx()
     llm = sp.ScriptedLlm([{"text": json.dumps(refusal_output(name, case))}])
     st = sp.MemoryState()
@@ -174,14 +176,16 @@ def test_refusal_cases_run_through_the_real_step_code(name: str, case: dict[str,
         "script_draft_section": prompts.section,
         "shorts_adaptation": prompts.cut,
     }[name]
-    rendered = render(loaded, sp.make_resolved(ctx).rule_packs, step_in.active_rule_packs, step_in)
+    rendered = render(
+        sp.need(loaded), sp.make_resolved(ctx).rule_packs, step_in.active_rule_packs, step_in
+    )
     step_cfg = {
         "script_draft": settings.plan,
         "script_draft_section": settings.section,
         "shorts_adaptation": settings.cut,
     }[name]
     assert step_cfg is not None
-    result = caller.run_step(
+    result: Any = caller.run_step(
         ctx,
         model_cls=out_model,
         step=step_cfg,

@@ -8,6 +8,7 @@ from agent_05_scriptwriter.assemble.assembler import canonical_bytes
 from agent_05_scriptwriter.assemble.cut_assembler import CutAssemblyInput, assemble_cut
 from agent_05_scriptwriter.checks.context import Scanners
 from agent_05_scriptwriter.checks.cut_checker import CutChecker, CutReport
+from agent_05_scriptwriter.checks.echo import EchoGuard
 from agent_05_scriptwriter.checks.results import CheckResult, failing_ids, passed, skipped
 from agent_05_scriptwriter.checks.script_validator import (
     HOOK_KINDS,
@@ -25,6 +26,7 @@ from agent_05_scriptwriter.contracts import (
     CutProvenance,
     CutSpeechBudget,
     DocPromise,
+    DocRef,
     DocumentProvenance,
     Flags,
     GlossaryTerm,
@@ -46,11 +48,16 @@ from agent_05_scriptwriter.contracts import (
     ShortsAdaptationResult,
     Totals,
 )
-from agent_05_scriptwriter.errors import InputInvalid, MissingDependency, QualityRepeatedFailure
+from agent_05_scriptwriter.errors import (
+    CrossTenantRef,
+    InputInvalid,
+    MissingDependency,
+    QualityRepeatedFailure,
+)
 from agent_05_scriptwriter.hooks import HookScore, select_hook
 from agent_05_scriptwriter.llm.prompt_renderer import render
 from agent_05_scriptwriter.llm.structured_caller import CallCounter, CallRecord, StructuredCaller
-from agent_05_scriptwriter.observability import log_event
+from agent_05_scriptwriter.observability import log_event, log_security_event
 from agent_05_scriptwriter.pre.brief_mapper import map_briefs
 from agent_05_scriptwriter.pre.speech_budget import hook_budget
 from agent_05_scriptwriter.protocols import CheckpointState, HookHistoryEntry, Ports, StepContext
@@ -167,7 +174,7 @@ class ShortsAdaptationStep:
                 records=records_from_state(state),
             )
         except AmwError as exc:
-            log_event("shorts_adaptation.failed", code=exc.code, task_id=ctx.task_id)
+            log_event("shorts_adaptation.failed", ctx, code=exc.code, task_id=ctx.task_id)
             outcome = StepOutcome("FAILED", None, [], error=exc, records=records_from_state(state))
         if outcome.status == "SUCCEEDED" and not outcome.stored_output_returned:
             self._p.idempotency.complete(ctx, outcome)
@@ -186,14 +193,19 @@ class ShortsAdaptationStep:
             language=inp.language,
             active_rule_packs=inp.active_rule_packs,
             channel_category=inp.channel_category,
+            budget=self._p.budget,
         )
         limit = s.require_shorts_limit()
         step_cfg = s.require_cut()
         parent = res.parent_script
         if parent is None or res.parent_script_sha256 != inp.parent_script.sha256:
             raise MissingDependency("the parent script is missing or its hash differs")
-        if parent.channel_id != ctx.channel_id or parent.script_id != inp.parent_script.script_id:
-            raise InputInvalid("the parent script belongs to another channel or script")
+        if parent.channel_id != ctx.channel_id:
+            log_security_event("security.cross_tenant_ref", ctx.org_id)
+            self._p.audit.record(ctx, "security.cross_tenant_ref", {"input_class": "parent_script"})
+            raise CrossTenantRef("the parent script belongs to another channel")
+        if parent.script_id != inp.parent_script.script_id:
+            raise InputInvalid("the parent script id differs from the input")
         if not res.parent_claims_cleared:
             raise MissingDependency("the parent script is not cleared by Agent 06 and Agent 16")
         pre.append(passed("a05.sh.pre", "parent loaded by hash, cleared, same org and channel"))
@@ -250,7 +262,17 @@ class ShortsAdaptationStep:
 
         def check(out: CutOutput) -> list[CheckResult]:
             holder["r"] = checker.check(
-                out, step_in, parent_citations=parent_citations, shorts_limit_ms=limit
+                out,
+                step_in,
+                parent_citations=parent_citations,
+                shorts_limit_ms=limit,
+                echo=EchoGuard(
+                    (self._prompts.cut or _missing()).system_text,
+                    [
+                        *([inp.owner_instruction] if inp.owner_instruction else []),
+                        *[f.instruction for f in (inp.revision.feedback if inp.revision else [])],
+                    ],
+                ),
             )
             return holder["r"].results
 
@@ -388,7 +410,7 @@ class ShortsAdaptationStep:
             version=1,
             iteration=inp.iteration,
             language=inp.language,
-            verdict=mapped.verdict,  # type: ignore[arg-type]
+            verdict=mapped.verdict,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
             parent=ParentEcho(
                 script_id=inp.parent_script.script_id, sha256=inp.parent_script.sha256
             ),
@@ -545,7 +567,7 @@ def _result(
         scenes.append(
             OutScene(
                 scene_id=sc.scene_id,
-                beat=sc.beat,  # type: ignore[arg-type]
+                beat=sc.beat,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                 segment_ids=[s.segment_id for s in own],
                 parent_segment_ids=list(own[0].parent_segment_ids),
                 est_start_ms=own[0].est_start_ms,
@@ -594,7 +616,7 @@ def _result(
             hypothetical_segment_ids=[x.segment_id for x in segs if x.hypothetical_example],
             course_pointer_present=False,
         ),
-        script_document={"uri": uri, "sha256": sha},  # type: ignore[arg-type]
+        script_document=DocRef(uri=uri, sha256=sha),
         refusal=None,
         provenance=CutProvenance(
             cut_prompt_id=next(iter(provenance.prompt_ids.values())),

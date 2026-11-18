@@ -749,7 +749,6 @@ class ScriptDocument(A05Model):
     description_draft: Annotated[str, StringConstraints(max_length=1500)] | None
     thumbnail_brief: ThumbnailBrief | None
     hook_options: list[OptionOut]
-    omitted_concepts: list[OutOmitted]
     provenance: DocumentProvenance
 
 

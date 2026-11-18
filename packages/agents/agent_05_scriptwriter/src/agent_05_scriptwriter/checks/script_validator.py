@@ -138,6 +138,7 @@ class ValidationContext:
     briefs: Mapping[str, ConceptBrief]
     concept_plan_ids: Sequence[str]
     pack_concept_ids: Sequence[str]
+    omitted_concept_ids: Sequence[str]
     target_duration_ms: int
     duration_tolerance: float | None
     disclaimer_required: bool
@@ -154,7 +155,7 @@ def validate_document(doc: ScriptDocument, ctx: ValidationContext) -> list[Check
         check_coverage(
             list(ctx.concept_plan_ids),
             covered_by_segment,
-            [o.concept_id for o in doc.omitted_concepts],
+            list(ctx.omitted_concept_ids),
             [f"k{int(c[1:])}" if c.startswith("c") else c for c in ctx.pack_concept_ids],
         )
     )

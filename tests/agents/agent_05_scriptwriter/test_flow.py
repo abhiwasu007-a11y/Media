@@ -1,18 +1,22 @@
-# mypy: ignore-errors
 # ruff: noqa: PT018, RUF059
 """End-to-end flow with fakes (I-01, I-02, F-series, E-01): no network, no paid call."""
 
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Any
+
+import pytest
 
 from agent_05_scriptwriter import ScriptDraftRequest, ScriptDraftStep
 from agent_05_scriptwriter.task_output import build_task_output
 from amw_core.contracts.validation import validate_task_output
 from tests.agents.agent_05_scriptwriter import support as sp
 
+pytestmark = pytest.mark.integration
 
-def build(script, n=2, **state_over):
+
+def build(script: Any, n: Any = 2, **state_over: Any) -> Any:
     st = sp.MemoryState(**state_over)
     llm = sp.ScriptedLlm(script, n)
     step = ScriptDraftStep(
@@ -21,12 +25,12 @@ def build(script, n=2, **state_over):
     return st, llm, step
 
 
-def request(ctx=None, **over):
+def request(ctx: Any = None, **over: Any) -> Any:
     ctx = ctx or sp.make_ctx()
     return ScriptDraftRequest(ctx, sp.make_input(**over), sp.make_resolved(ctx)), ctx
 
 
-def test_happy_path_produces_scored_script_and_valid_task_output():
+def test_happy_path_produces_scored_script_and_valid_task_output() -> None:
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"])
     req, ctx = request()
     out = step.run(req)
@@ -37,7 +41,7 @@ def test_happy_path_produces_scored_script_and_valid_task_output():
     assert len(llm.requests) == 3  # plan + 2 sections
     assert all(r.verdict in ("PASS", "WARN", "SKIPPED") for r in out.validation_results)
     # disclaimer slots inserted by code, verbatim
-    doc = json.loads(st.saved_contents[out.saved.uri])
+    doc = json.loads(st.saved_contents[sp.need(out.saved).uri])
     kinds = [s["kind"] for s in doc["segments"]]
     assert kinds[:3] == ["HOOK_PROOF", "HOOK_WHY", "HOOK_COVERS"] and kinds.count("DISCLAIMER") == 2
     assert [s["segment_id"] for s in doc["segments"]] == [f"s{i}" for i in range(1, len(kinds) + 1)]
@@ -46,7 +50,7 @@ def test_happy_path_produces_scored_script_and_valid_task_output():
     assert st.hooks and st.hooks[0].channel_id == ctx.channel_id
 
 
-def test_replay_returns_stored_output_without_calls():
+def test_replay_returns_stored_output_without_calls() -> None:
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"])
     req, _ = request()
     first = step.run(req)
@@ -55,7 +59,7 @@ def test_replay_returns_stored_output_without_calls():
     assert second.stored_output_returned and second is first and len(llm.requests) == calls
 
 
-def test_failure_modes_map_to_07_codes():
+def test_failure_modes_map_to_07_codes() -> None:
     cases = [
         (["INVALID_JSON", "INVALID_JSON"], "AGENT.INVALID_JSON", 2),
         (["SCHEMA_INVALID", "SCHEMA_INVALID"], "AGENT.OUTPUT_SCHEMA_INVALID", 2),
@@ -67,31 +71,31 @@ def test_failure_modes_map_to_07_codes():
         st, llm, step = build(script)
         st.chunk_texts = {}
         out = step.run(request()[0])
-        assert out.status == "FAILED" and out.error.code == code
+        assert out.status == "FAILED" and sp.need(out.error).code == code
         assert len(llm.requests) == calls
     st, llm, step = build([{"http": 429, "retry_after_ms": 15000}])
     assert step.run(request()[0]).error.retry_after_ms == 15000
 
 
-def test_parse_repair_then_valid():
+def test_parse_repair_then_valid() -> None:
     st, llm, step = build(["INVALID_JSON", "VALID_PLAN", "VALID_SECTIONS"])
     out = step.run(request()[0])
     assert out.status == "SUCCEEDED" and len(st.ledger) == 4
     assert llm.keys[0] != llm.keys[1]  # call_seq is part of the idempotency key
 
 
-def test_budget_refused_suspends_without_a_call():
+def test_budget_refused_suspends_without_a_call() -> None:
     st, llm, step = build(["VALID_PLAN"], refuse_budget=True)
     out = step.run(request()[0])
     assert out.status == "SUSPENDED" and out.wait_reason == "AWAITING_BUDGET"
-    assert out.error.code == "RESOURCE.BUDGET_EXHAUSTED" and not llm.requests
+    assert sp.need(out.error).code == "RESOURCE.BUDGET_EXHAUSTED" and not llm.requests
 
 
-def test_loop_cap_and_drain_resume_without_rebuying():
+def test_loop_cap_and_drain_resume_without_rebuying() -> None:
     ctx = sp.make_ctx(max_calls=3)
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"], n=4)
     out = step.run(request(ctx)[0])
-    assert out.error.code == "AGENT.LOOP_CAP_EXCEEDED" and len(llm.requests) == 3
+    assert sp.need(out.error).code == "AGENT.LOOP_CAP_EXCEEDED" and len(llm.requests) == 3
     # drain after sec2, then resume from the checkpoint
     ctx = sp.make_ctx()
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"], n=4, drain_after="sec2")
@@ -108,7 +112,7 @@ def test_loop_cap_and_drain_resume_without_rebuying():
     assert not any("plan" in r.system[:0] for r in llm2.requests)
 
 
-def test_persist_failure_resumes_at_assembled_without_new_calls():
+def test_persist_failure_resumes_at_assembled_without_new_calls() -> None:
     from amw_core.errors import DbTransientError
 
     ctx = sp.make_ctx()
@@ -117,14 +121,14 @@ def test_persist_failure_resumes_at_assembled_without_new_calls():
     )
     req, _ = request(ctx)
     first = step.run(req)
-    assert first.error.code == "TEMPORARY.DB_TRANSIENT"
+    assert sp.need(first.error).code == "TEMPORARY.DB_TRANSIENT"
     calls = len(llm.requests)
     second = step.run(req)
     assert second.status == "SUCCEEDED" and len(llm.requests) == calls
     assert len(st.scripts) == 1 and st.blob_writes == 1
 
 
-def test_no_content_in_logs(caplog):
+def test_no_content_in_logs(caplog: Any) -> None:
     caplog.set_level(logging.DEBUG)
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"])
     out = step.run(request()[0])
@@ -132,18 +136,18 @@ def test_no_content_in_logs(caplog):
     assert "lesson" not in text and "divergence" not in text and out.status == "SUCCEEDED"
 
 
-def test_partial_revision_rewrites_only_the_pointed_section():
+def test_partial_revision_rewrites_only_the_pointed_section() -> None:
     ctx = sp.make_ctx()
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"], n=3)
     first = step.run(request(ctx)[0])
-    prior_bytes = st.saved_contents[first.saved.uri]
+    prior_bytes = st.saved_contents[sp.need(first.saved).uri]
     prior = json.loads(prior_bytes)
     from agent_05_scriptwriter.contracts import ScriptDocument
 
     doc = ScriptDocument.model_validate(prior)
     target = next(s for s in doc.segments if s.section_id == "sec2").segment_id
     rev = {
-        "prior_script": {"uri": first.saved.uri, "sha256": first.saved.sha256},
+        "prior_script": {"uri": sp.need(first.saved).uri, "sha256": sp.need(first.saved).sha256},
         "feedback": [
             {
                 "source": "CLAIM_VERIFICATION",
@@ -160,25 +164,30 @@ def test_partial_revision_rewrites_only_the_pointed_section():
     step2 = ScriptDraftStep(
         llm2, sp.make_ports(st2), sp.make_settings(), sp.prompts(), sp.scanners_for
     )
-    res = sp.make_resolved(ctx2, prior_script=doc, prior_script_sha256=first.saved.sha256)
+    res = sp.make_resolved(
+        ctx2,
+        prior_script=doc,
+        prior_script_sha256=sp.need(first.saved).sha256,
+        prior_omitted=sp.draft(first).omitted_concepts,
+    )
     out = step2.run(ScriptDraftRequest(ctx2, sp.make_input(revision=rev, iteration=1), res))
     assert out.status == "SUCCEEDED", out.error
     assert len(llm2.requests) == 1  # only sec2 re-run
-    new = json.loads(st2.saved_contents[out.saved.uri])
+    new = json.loads(st2.saved_contents[sp.need(out.saved).uri])
     old_hash, new_hash = prior["provenance"]["section_sha256"], new["provenance"]["section_sha256"]
     assert old_hash["sec1"] == new_hash["sec1"] and old_hash["sec3"] == new_hash["sec3"]
     assert old_hash["sec2"] == new_hash["sec2"]  # scripted model reproduces the same text
 
 
-def test_unknown_segment_ref_is_input_invalid():
+def test_unknown_segment_ref_is_input_invalid() -> None:
     ctx = sp.make_ctx()
     st, llm, step = build(["VALID_PLAN", "VALID_SECTIONS"])
     first = step.run(request(ctx)[0])
     from agent_05_scriptwriter.contracts import ScriptDocument
 
-    doc = ScriptDocument.model_validate(json.loads(st.saved_contents[first.saved.uri]))
+    doc = ScriptDocument.model_validate(json.loads(st.saved_contents[sp.need(first.saved).uri]))
     rev = {
-        "prior_script": {"uri": first.saved.uri, "sha256": first.saved.sha256},
+        "prior_script": {"uri": sp.need(first.saved).uri, "sha256": sp.need(first.saved).sha256},
         "feedback": [
             {"source": "COMPLIANCE", "segment_ref": "s99", "rule_ids": [], "instruction": "x"}
         ],
@@ -191,6 +200,6 @@ def test_unknown_segment_ref_is_input_invalid():
         sp.prompts(),
         sp.scanners_for,
     )
-    res = sp.make_resolved(ctx2, prior_script=doc, prior_script_sha256=first.saved.sha256)
+    res = sp.make_resolved(ctx2, prior_script=doc, prior_script_sha256=sp.need(first.saved).sha256)
     out = step2.run(ScriptDraftRequest(ctx2, sp.make_input(revision=rev, iteration=1), res))
-    assert out.error.code == "PERMANENT.INPUT_INVALID"
+    assert sp.need(out.error).code == "PERMANENT.INPUT_INVALID"

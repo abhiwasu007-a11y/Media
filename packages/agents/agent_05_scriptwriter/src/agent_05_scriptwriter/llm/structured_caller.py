@@ -112,7 +112,7 @@ class StructuredCaller:
             except (json.JSONDecodeError, ValidationError) as exc:
                 invalid_json = isinstance(exc, json.JSONDecodeError)
                 if parse_repaired or quality_repaired:
-                    log_event("llm_step.parse_failed", step_key=step_key, repair=True)
+                    log_event("llm_step.parse_failed", ctx, step_key=step_key, repair=True)
                     if invalid_json:
                         raise InvalidJson("model output is not valid JSON") from None
                     raise OutputSchemaInvalid("model output violates the schema") from None
@@ -141,7 +141,7 @@ class StructuredCaller:
             failing = failing_ids(results)
             if not failing:
                 return StepResult(parsed, results, records, parse_repaired or quality_repaired)
-            log_event("llm_step.quality_failed", step_key=step_key, check_ids=failing)
+            log_event("llm_step.quality_failed", ctx, step_key=step_key, check_ids=failing)
             if quality_repaired:
                 raise QualityRepeatedFailure(
                     "deterministic checks still fail after the repair",
@@ -205,10 +205,9 @@ class StructuredCaller:
         )
         log_event(
             "llm_step.call",
+            ctx,
             step_key=step_key,
             count=seq,
-            org_id=ctx.org_id,
-            task_id=ctx.task_id,
         )
         return response.text
 

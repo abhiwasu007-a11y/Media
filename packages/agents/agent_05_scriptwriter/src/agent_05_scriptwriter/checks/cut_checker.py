@@ -1,10 +1,10 @@
 """``CutChecker`` (blueprint 10.4): the ``a05.sh.*`` checks of a Shorts cut."""
 
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from agent_05_scriptwriter.checks.context import Scanners
+from agent_05_scriptwriter.checks.echo import EchoGuard
 from agent_05_scriptwriter.checks.language import check_language
 from agent_05_scriptwriter.checks.plan_checker import contains_term, repeats_history
 from agent_05_scriptwriter.checks.results import (
@@ -17,8 +17,6 @@ from agent_05_scriptwriter.contracts import CutHook, CutOutput, CutStepInput, Gl
 from agent_05_scriptwriter.hooks import HookScore, Selection, select_hook
 from agent_05_scriptwriter.settings import Agent05Settings
 from agent_05_scriptwriter.text import normalise, speech_chars
-
-_TOKEN = re.compile(r"[A-Za-z][A-Za-z0-9'\-]*|\d[\d,.]*")
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,10 +36,6 @@ def parent_segments(inp: CutStepInput) -> dict[str, str]:
     return {seg.segment_id: seg.text for sec in inp.parent.sections for seg in sec.segments}
 
 
-def _tokens(text: str) -> set[str]:
-    return {t.casefold().rstrip(".,") for t in _TOKEN.findall(text)}
-
-
 class CutChecker:
     def __init__(self, settings: Agent05Settings, scanners: Scanners) -> None:
         self._settings = settings
@@ -54,6 +48,7 @@ class CutChecker:
         *,
         parent_citations: Mapping[str, set[str]] | None = None,
         shorts_limit_ms: int | None = None,
+        echo: EchoGuard | None = None,
     ) -> CutReport:
         results: list[CheckResult] = [passed("a05.sh.schema", "cut output valid")]
         if out.refusal is not None:
@@ -82,6 +77,10 @@ class CutChecker:
         results.append(self._flags(out, inp, usable, removed))
         if inp.revision_feedback is not None:
             results.append(self._revision(out, inp))
+        if echo is not None:
+            texts = [" ".join(hook_sentences(h)) for h in out.hooks]
+            texts += [" ".join(s.text for s in sc.sentences) for sc in out.scenes]
+            results.append(echo.check("a05.sh.echo", texts))
         return CutReport(
             results,
             option_failures,
@@ -150,16 +149,19 @@ class CutChecker:
         parent_concepts = {
             c for sec in inp.parent.sections for seg in sec.segments for c in seg.concept_refs
         }
-        parent_tokens = _tokens(" ".join(segments.values()))
-        parent_tokens |= {t for g in inp.glossary_terms for t in _tokens(g.term_en)}
-        parent_tokens |= {a.casefold() for a in inp.latin_allow_list}
+        templates = {normalise(t) for t in self._settings.pointer_templates.get(inp.language, ())}
         for scene in out.scenes:
-            if scene.beat != "FULL_VIDEO_POINTER":
+            sentences = [normalise(s.text) for s in scene.sentences]
+            if scene.beat == "FULL_VIDEO_POINTER":
+                # only the closed, owner-approved pointer template (no link, no name, no new text)
+                if not templates or any(x not in templates for x in sentences):
+                    problems.append("pointer scene is not the closed pointer template")
+            else:
                 if not scene.parent_segment_ids or not set(scene.parent_segment_ids) <= set(usable):
                     problems.append("scene not drawn from usable parent segments")
-                scene_tokens = _tokens(" ".join(s.text for s in scene.sentences))
-                if not scene_tokens <= parent_tokens:
-                    problems.append("scene adds a number or term the parent lacks")
+                allowed = {normalise(usable[p]) for p in scene.parent_segment_ids if p in usable}
+                if any(x not in allowed for x in sentences):
+                    problems.append("scene holds a sentence that is not a parent sentence")
             if scene.chart_ref is not None and scene.chart_ref not in parent_charts:
                 problems.append("chart not in the parent")
             for ref in scene.concept_refs:
@@ -232,6 +234,7 @@ class CutChecker:
         tokens: set[str] = set()
         for text in texts:
             fin.update(self._scan.fin_ids(text, inp.language))
+            fin.update(self._scan.forward_ids(text, inp.language, "ANY"))
             tokens.update(self._scan.tokens(text, inp.language))
         return [
             failed("a05.sh.fin_prefilter", "FIN pre-filter hit", rule_ids=tuple(sorted(fin)))

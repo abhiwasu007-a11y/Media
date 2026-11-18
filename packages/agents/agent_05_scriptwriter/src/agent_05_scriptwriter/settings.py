@@ -22,7 +22,7 @@ class LlmStepSettings(BaseModel):
     temperature: float = Field(ge=0, le=2)
     max_output_tokens: int = Field(ge=1)
     timeout_ms: int = Field(ge=1)
-    cost_budget_micros: int = Field(ge=0)
+    cost_budget_micros: int = Field(ge=1)
     cache_system_prompt: bool = False
     batch_eligible: bool = False
     fallback_tier: str | None = None
@@ -63,6 +63,8 @@ class Agent05Settings(BaseModel):
     hook_window_ms: int = Field(default=30_000, ge=1)
     max_change_gap_ms: int = Field(default=5_000, ge=1)
     max_scenes_per_section: int = Field(default=20, ge=1, le=20)
+    pointer_templates: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    """Closed ``FULL_VIDEO_POINTER`` sentences per language (owner-approved; no default)."""
     prompts_root: str | None = None
 
     def rate_for(self, language: str) -> float | None:

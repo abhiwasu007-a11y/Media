@@ -11,6 +11,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from agent_05_scriptwriter.protocols import StepContext
+
 logger = logging.getLogger("agent_05")
 
 _TOKEN = re.compile(r"^[A-Za-z0-9_.:\-/]{1,128}$")
@@ -61,9 +63,19 @@ def safe_fields(fields: Mapping[str, Any]) -> dict[str, Any]:
     return {k: _clean(v) for k, v in fields.items() if k in ALLOWED_FIELDS}
 
 
-def log_event(event: str, **fields: Any) -> None:
-    """One JSON line; ``event`` is a fixed name such as ``script_draft.plan_done``."""
-    payload = {"event": event, **safe_fields(fields)}
+def log_event(event: str, ctx: StepContext, **fields: Any) -> None:
+    """One JSON line with the standard fields (27 section 7.3.6); ``event`` is a fixed name such as
+    ``script_draft.plan_done``. Content never reaches a field (whitelist, token-shaped values)."""
+    standard = {
+        "org_id": ctx.org_id,
+        "channel_id": ctx.channel_id,
+        "job_id": ctx.job_id,
+        "task_id": ctx.task_id,
+        "attempt_id": ctx.attempt_id,
+        "correlation_id": ctx.correlation_id,
+        "actor": ctx.actor,
+    }
+    payload = {"event": event, **safe_fields({**fields, **standard})}
     logger.info(json.dumps(payload, sort_keys=True, ensure_ascii=False))
 
 

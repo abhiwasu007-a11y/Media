@@ -6,18 +6,20 @@ step outcome. Content (narration, briefs, feedback) never reaches a log line.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agent_05_scriptwriter.assemble.assembler import AssemblyInput, assemble
 from agent_05_scriptwriter.assemble.parts import allocate_charts, section_pool
 from agent_05_scriptwriter.checks.context import Scanners
+from agent_05_scriptwriter.checks.echo import EchoGuard
 from agent_05_scriptwriter.checks.plan_checker import PlanChecker, PlanReport
 from agent_05_scriptwriter.checks.results import CheckResult, failing_ids
 from agent_05_scriptwriter.checks.script_validator import ValidationContext, validate_document
 from agent_05_scriptwriter.checks.section_checker import SectionChecker
 from agent_05_scriptwriter.contracts import (
     DocPromise,
+    DocRef,
     DocumentProvenance,
     Flags,
     HookBeat,
@@ -127,7 +129,10 @@ class ScriptDraftStep:
         if isinstance(stored, StepOutcome):
             stored.stored_output_returned = True
             return stored
-        log_event("script_draft.started", org_id=ctx.org_id, task_id=ctx.task_id)
+        log_event(
+            "script_draft.started",
+            ctx,
+        )
         checkpoint = self._p.checkpoints.latest(ctx)
         state: dict[str, Any] = dict(checkpoint.state) if checkpoint else {}
         last_step = checkpoint.step_key if checkpoint else None
@@ -146,7 +151,7 @@ class ScriptDraftStep:
                 records=records_from_state(state),
             )
         except AmwError as exc:
-            log_event("script_draft.failed", code=exc.code, task_id=ctx.task_id)
+            log_event("script_draft.failed", ctx, code=exc.code, task_id=ctx.task_id)
             outcome = StepOutcome("FAILED", None, [], error=exc, records=records_from_state(state))
         if outcome.status == "SUCCEEDED" and not outcome.stored_output_returned:
             self._p.idempotency.complete(ctx, outcome)
@@ -167,6 +172,7 @@ class ScriptDraftStep:
             language=inp.language,
             active_rule_packs=inp.active_rule_packs,
             channel_category=inp.channel_category,
+            budget=self._p.budget,
         )
         pack = require_pack(res)
         scanners: Scanners = self._scanners_for(res.lexicons)
@@ -174,7 +180,7 @@ class ScriptDraftStep:
         if verdict is not None and verdict.verdict != "ALLOWED":
             reason = "RULE_WOULD_BE_BROKEN" if verdict.verdict == "BLOCKED" else "UNSAFE_CONTENT"
             refusal = Refusal(
-                reason=reason,  # type: ignore[arg-type]
+                reason=reason,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                 message="the research pack topic verdict stops the script",
                 missing_inputs=[],
                 violated_rule_ids=list(verdict.violated_rule_ids),
@@ -230,7 +236,7 @@ class ScriptDraftStep:
                 else self._view(plan, report, briefs, req)
             )
         self._checkpoint(ctx, state, "plan_done")
-        log_event("script_draft.plan_done", count=len(view.options))
+        log_event("script_draft.plan_done", ctx, count=len(view.options))
         # ---- charts and sections
         first_free = 2 if view.hook_chart_id else 1
         prior = res.prior_script if revision is not None else None
@@ -321,7 +327,6 @@ class ScriptDraftStep:
                 section_scenes=section_scenes,
                 concept_map=briefs.concept_map,
                 hook_options=view.options,
-                omitted=view.omitted,
                 description_draft=view.description,
                 thumbnail_brief=view.thumbnail,
                 rate_cps=rate,
@@ -330,7 +335,7 @@ class ScriptDraftStep:
                 provenance=provenance,
             )
         )
-        log_event("script_draft.assembled", segments=len(assembled.document.segments))
+        log_event("script_draft.assembled", ctx, segments=len(assembled.document.segments))
         validation = validate_document(
             assembled.document,
             ValidationContext(
@@ -340,6 +345,7 @@ class ScriptDraftStep:
                 briefs={b.concept_id: b for b in briefs.briefs},
                 concept_plan_ids=view.concept_plan_ids,
                 pack_concept_ids=[c.concept_id for c in pack.concepts],
+                omitted_concept_ids=[o.concept_id for o in view.omitted],
                 target_duration_ms=inp.topic.target_duration_ms,
                 duration_tolerance=s.duration_tolerance,
                 disclaimer_required=inp.channel_category in s.disclaimer_categories,
@@ -358,6 +364,7 @@ class ScriptDraftStep:
         state["assembled"] = {
             "document": assembled.document.model_dump(mode="json"),
             "sha256": assembled.sha256,
+            "omitted": [o.model_dump(mode="json") for o in view.omitted],
             "splits": assembled.split_count,
             "validation": [
                 {
@@ -456,6 +463,7 @@ class ScriptDraftStep:
         state["sections"][sec.section_id] = {"output": step.parsed.model_dump(mode="json")}
         log_event(
             "script_draft.section_done",
+            ctx,
             section_id=sec.section_id,
             scenes=len(step.parsed.scenes),
             repair=step.repaired,
@@ -508,7 +516,7 @@ class ScriptDraftStep:
         if selection.selected is None:
             raise QualityRepeatedFailure("too few qualified hook options")
         if selection.mismatch:
-            log_event("agent_05.hook_selection_mismatch", hook_id=selection.selected)
+            log_event("agent_05.hook_selection_mismatch", req.ctx, hook_id=selection.selected)
         return [
             OptionOut(
                 hook_id=h.hook_id,
@@ -522,6 +530,10 @@ class ScriptDraftStep:
             for h in plan.hooks
         ]
 
+    def _echo(self, prompt_text: str, req: ScriptDraftRequest) -> EchoGuard:
+        feedback = req.input.revision.feedback if req.input.revision else []
+        return EchoGuard(prompt_text, [f.instruction for f in feedback])
+
     # ------------------------------------------------------------------ revision
     def _route(self, req: ScriptDraftRequest) -> RevisionPlan | None:
         inp, res = req.input, req.inputs
@@ -530,7 +542,11 @@ class ScriptDraftStep:
         prior = res.prior_script
         if prior is None or res.prior_script_sha256 != inp.revision.prior_script.sha256:
             raise MissingDependency("the prior script is missing or its hash differs")
-        return route_feedback(doc_rebuild.routing_map(prior), inp.revision.feedback)
+        plan = route_feedback(doc_rebuild.routing_map(prior), inp.revision.feedback)
+        if not plan.rerun_plan and res.prior_omitted is None:
+            # the omitted-concept list lives in the prior task output, not in the script document
+            return replace(plan, rerun_plan=True)
+        return plan
 
     def _run_plan(
         self,
@@ -550,7 +566,9 @@ class ScriptDraftStep:
         holder: dict[str, PlanReport] = {}
 
         def check_plan(out: PlanOutput) -> list[CheckResult]:
-            holder["r"] = plan_checker.check(out, plan_in)
+            holder["r"] = plan_checker.check(
+                out, plan_in, self._echo(self._prompts.plan.system_text, req)
+            )
             return holder["r"].results
 
         rendered = render(self._prompts.plan, res.rule_packs, inp.active_rule_packs, plan_in)
@@ -620,7 +638,7 @@ class ScriptDraftStep:
             concept_plan_ids=sorted(
                 {r.concept_id for seg in prior.segments for r in seg.concept_refs}
             ),
-            omitted=list(prior.omitted_concepts),
+            omitted=list(req.inputs.prior_omitted or []),
             description=prior.description_draft,
             thumbnail=prior.thumbnail_brief,
         )
@@ -664,7 +682,12 @@ class ScriptDraftStep:
 
         pre_results = [r.to_validation_result() for r in pre if r.check_id.startswith("a05.pre.")]
         mapped = map_refusal(refusal, step, pre_results)
-        log_event("script_draft.refused", reason=refusal.reason, rule_ids=refusal.violated_rule_ids)
+        log_event(
+            "script_draft.refused",
+            req.ctx,
+            reason=refusal.reason,
+            rule_ids=refusal.violated_rule_ids,
+        )
         if mapped.status == "FAILED":
             assert mapped.error_code is not None  # noqa: S101
             return StepOutcome(
@@ -682,7 +705,7 @@ class ScriptDraftStep:
             version=1,
             iteration=inp.iteration,
             language=inp.language,
-            verdict=mapped.verdict,  # type: ignore[arg-type]
+            verdict=mapped.verdict,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
             title_promise=None,
             hook_options=[],
             selected_hook_id=None,
@@ -766,10 +789,18 @@ class ScriptDraftStep:
         )
         self._checkpoint(ctx, state, "persisted")
         result = _build_result(
-            document, saved.uri, sha, records, self._prompts, s, state, len(records)
+            document,
+            saved.uri,
+            sha,
+            records,
+            self._prompts,
+            s,
+            state,
+            len(records),
+            [OutOmitted.model_validate(o) for o in asm.get("omitted", [])],
         )
         results = [*pre, *scanners_results]
-        log_event("script_draft.completed", script_id=saved.script_id, version=saved.version)
+        log_event("script_draft.completed", ctx, script_id=saved.script_id, version=saved.version)
         return StepOutcome(
             "SUCCEEDED",
             result,
@@ -815,6 +846,7 @@ def _build_result(
     s: Agent05Settings,
     state: dict[str, Any],
     llm_calls: int,
+    omitted: list[OutOmitted],
 ) -> ScriptDraftResult:
     segs = doc.segments
     by_section: dict[str, list[str]] = {}
@@ -843,7 +875,6 @@ def _build_result(
                 sha256=doc.provenance.section_sha256[sec.section_id],
             )
         )
-    pack_of = {o.concept_id: o.pack_concept_id for o in doc.omitted_concepts}
     cov: dict[str, OutCoverage] = {}
     for seg in segs:
         for ref in seg.concept_refs:
@@ -859,7 +890,6 @@ def _build_result(
             if seg.section_id and seg.section_id not in entry.taught_in_section_ids:
                 entry.taught_in_section_ids.append(seg.section_id)
             entry.segment_ids.append(seg.segment_id)
-    _ = pack_of
     method = [x.segment_id for x in segs if x.method_label]
     ests = [x.est_duration_ms for x in segs]
     return ScriptDraftResult(
@@ -873,7 +903,7 @@ def _build_result(
         selected_hook_id=next(o.hook_id for o in doc.hook_options if o.segment_ids),
         sections=out_sections,
         concept_coverage=list(cov.values()),
-        omitted_concepts=doc.omitted_concepts,
+        omitted_concepts=omitted,
         chart_requests=doc.chart_requests,
         description_draft=doc.description_draft,
         thumbnail_brief=doc.thumbnail_brief,
@@ -890,7 +920,7 @@ def _build_result(
             hypothetical_segment_ids=[x.segment_id for x in segs if x.hypothetical_example],
             course_pointer_present=any(x.section_kind == "COURSE_POINTER" for x in doc.sections),
         ),
-        script_document={"uri": uri, "sha256": sha},  # type: ignore[arg-type]
+        script_document=DocRef(uri=uri, sha256=sha),
         refusal=None,
         provenance=make_provenance(
             prompts,

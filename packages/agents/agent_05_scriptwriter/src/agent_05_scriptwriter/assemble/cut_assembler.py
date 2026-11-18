@@ -67,12 +67,12 @@ def assemble_cut(inp: CutAssemblyInput) -> Assembled:
                 segments.append(
                     DocSegment(
                         segment_id=seg_id,
-                        kind=kind,  # type: ignore[arg-type]
+                        kind=kind,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                         section_id=None,
                         scene_id=scene_id,
                         text=part.text,
-                        pace=part.pace,  # type: ignore[arg-type]
-                        emotion=part.emotion,  # type: ignore[arg-type]
+                        pace=part.pace,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
+                        emotion=part.emotion,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                         concept_refs=[
                             DocConceptRef(
                                 concept_id=r.concept_id,
@@ -126,7 +126,7 @@ def assemble_cut(inp: CutAssemblyInput) -> Assembled:
         script_id=inp.script_id,
         job_id=inp.job_id,
         channel_id=inp.channel_id,
-        language=inp.language,  # type: ignore[arg-type]
+        language=inp.language,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
         version=inp.version,
         iteration=inp.iteration,
         aspect_ratio="9:16",
@@ -140,7 +140,6 @@ def assemble_cut(inp: CutAssemblyInput) -> Assembled:
         description_draft=None,
         thumbnail_brief=None,
         hook_options=options,
-        omitted_concepts=[],
         provenance=inp.provenance,
     )
     content = canonical_bytes(document.model_dump(mode="json"))

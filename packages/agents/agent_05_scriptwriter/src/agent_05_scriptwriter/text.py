@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from dataclasses import dataclass
 from fractions import Fraction
 
 _JOINERS = ("\u200d", "\u200c")
@@ -85,3 +86,90 @@ def to_fraction(value: float | int) -> Fraction:
 
 def has_devanagari(text: str) -> bool:
     return DEVANAGARI.search(text) is not None
+
+
+# Letters of other scripts that render like Latin letters (matching only, never in output).
+_CONFUSABLES = {
+    "\u0430": "a",
+    "\u0435": "e",
+    "\u043e": "o",
+    "\u0440": "p",
+    "\u0441": "c",
+    "\u0443": "y",
+    "\u0445": "x",
+    "\u0456": "i",
+    "\u0455": "s",
+    "\u0458": "j",
+    "\u043d": "h",
+    "\u043a": "k",
+    "\u0442": "t",
+    "\u043c": "m",
+    "\u0410": "A",
+    "\u0412": "B",
+    "\u0415": "E",
+    "\u041a": "K",
+    "\u041c": "M",
+    "\u041d": "H",
+    "\u041e": "O",
+    "\u0420": "P",
+    "\u0421": "C",
+    "\u0422": "T",
+    "\u0425": "X",
+    "\u0391": "A",
+    "\u0392": "B",
+    "\u0395": "E",
+    "\u0397": "H",
+    "\u0399": "I",
+    "\u039a": "K",
+    "\u039c": "M",
+    "\u039d": "N",
+    "\u039f": "O",
+    "\u03a1": "P",
+    "\u03a4": "T",
+    "\u03a5": "Y",
+    "\u03a7": "X",
+    "\u03bf": "o",
+    "\u03bd": "v",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Normalised:
+    """Text prepared for matching plus, per character, its index in the original text."""
+
+    text: str
+    offsets: tuple[int, ...]
+
+
+def normalise_for_matching(text: str) -> Normalised:
+    """The ONE normalisation used before every lexicon match (blueprint 6.4, review M2).
+
+    NFKC per character; every format character (Unicode category Cf: zero-width space, ZWJ, ZWNJ,
+    soft hyphen, word joiner, bidi marks) is dropped; look-alike Cyrillic/Greek letters are folded
+    to Latin. The result is for comparison only: the script text itself is never altered. Will be
+    replaced by the shared ``amw_core.text_normalise`` when that module exists (same signature).
+    """
+    out: list[str] = []
+    offsets: list[int] = []
+    for index, ch in enumerate(text):
+        for piece in unicodedata.normalize("NFKC", ch):
+            if unicodedata.category(piece) == "Cf":
+                continue
+            out.append(_CONFUSABLES.get(piece, piece))
+            offsets.append(index)
+    return Normalised("".join(out), tuple(offsets))
+
+
+def invisible_characters(text: str) -> list[str]:
+    """Format characters that are not a joiner next to Devanagari (hiding places for evasion)."""
+    found: list[str] = []
+    for i, ch in enumerate(text):
+        if unicodedata.category(ch) != "Cf":
+            continue
+        if ch in _JOINERS and (
+            (i > 0 and DEVANAGARI.match(text[i - 1]))
+            or (i + 1 < len(text) and DEVANAGARI.match(text[i + 1]))
+        ):
+            continue
+        found.append(f"U+{ord(ch):04X}")
+    return found

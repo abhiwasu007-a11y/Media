@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 # ruff: noqa: PT018, RUF059
 """Branch tests of the plan, section, cut and whole-script checks, owner topic and task output."""
 
@@ -32,6 +31,8 @@ from amw_core.contracts.validation import validate_task_output
 from amw_core.errors import InputInvalidError, QualityRepeatedFailureError
 from tests.agents.agent_05_scriptwriter import support as sp
 from tests.agents.agent_05_scriptwriter.test_shorts import parent_script, shorts_input
+
+pytestmark = pytest.mark.unit
 
 
 def plan_input(**over: Any) -> PlanStepInput:
@@ -69,7 +70,7 @@ def failing(plan: dict[str, Any], inp: PlanStepInput | None = None) -> list[str]
     return failing_ids(report.results)
 
 
-def test_valid_plan_passes_every_check():
+def test_valid_plan_passes_every_check() -> None:
     assert failing(sp.plan_json(3)) == []
 
 
@@ -125,7 +126,7 @@ def test_plan_mutations_fail_the_named_check(plan: dict[str, Any], check_id: str
     assert check_id in failing(plan)
 
 
-def test_plan_history_budget_and_method_gate():
+def test_plan_history_budget_and_method_gate() -> None:
     assert "a05.plan.selection" in failing(
         sp.plan_json(3),
         plan_input(hook_history=["A divergence showed up on an invented chart, option h1."]),
@@ -191,7 +192,7 @@ def good_section(inp: SectionStepInput | None = None) -> dict[str, Any]:
     return sp.section_json((inp or section_input()).model_dump(mode="json"))
 
 
-def test_valid_section_passes():
+def test_valid_section_passes() -> None:
     assert sec_failing(good_section()) == []
 
 
@@ -201,7 +202,7 @@ def tweak(fn: Any, inp: SectionStepInput | None = None) -> dict[str, Any]:
     return out
 
 
-def test_section_mutations():
+def test_section_mutations() -> None:
     cases = [
         (
             lambda o: o["scenes"][0]["concept_refs"][0].update(citation_refs=["kch_zzz"]),
@@ -288,7 +289,7 @@ def test_section_mutations():
     )
 
 
-def test_case_study_section_rules_and_cadence_with_rate():
+def test_case_study_section_rules_and_cadence_with_rate() -> None:
     plan = {
         "section_id": "sec2",
         "section_kind": "CASE_STUDY_HISTORICAL",
@@ -313,7 +314,7 @@ def test_case_study_section_rules_and_cadence_with_rate():
     assert "a05.sec.cadence" in found  # few change beats at a measured rate
 
 
-def test_cut_checker_branches():
+def test_cut_checker_branches() -> None:
     doc, sha, cites_l, _ = parent_script()
     cites = {k: set(v) for k, v in cites_l.items()}
     from agent_05_scriptwriter.steps.shorts import parent_view
@@ -371,7 +372,7 @@ def test_cut_checker_branches():
     assert "a05.sh.fin_prefilter" in run(bad)
 
 
-def test_cut_duration_with_a_rate():
+def test_cut_duration_with_a_rate() -> None:
     settings = sp.make_settings(speech_rate_cps={"en-IN": 0.5})
     doc, _, cites_l, _ = parent_script()
     cites = {k: set(v) for k, v in cites_l.items()}
@@ -406,7 +407,7 @@ def test_cut_duration_with_a_rate():
     assert "a05.sh.duration" in failing_ids(report.results)
 
 
-def test_whole_script_checks_with_a_rate_and_task_output_paths():
+def test_whole_script_checks_with_a_rate_and_task_output_paths() -> None:
     ctx = sp.make_ctx()
     st = sp.MemoryState()
     settings = sp.make_settings(
@@ -426,9 +427,9 @@ def test_whole_script_checks_with_a_rate_and_task_output_paths():
     out = step.run(ScriptDraftRequest(ctx, sp.make_input(), sp.make_resolved(ctx)))
     assert out.status in ("SUCCEEDED", "FAILED")
     if out.status == "SUCCEEDED":
-        doc = ScriptDocument.model_validate(json.loads(st.saved_contents[out.saved.uri]))
+        doc = ScriptDocument.model_validate(json.loads(st.saved_contents[sp.need(out.saved).uri]))
         assert all(s.est_duration_ms is not None for s in doc.segments)
-        assert doc.chapters[0].est_start_ms == 0 and out.result.totals.est_duration_ms
+        assert doc.chapters[0].est_start_ms == 0 and sp.draft(out).totals.est_duration_ms
     failed = StepOutcome("FAILED", None, [], error=QualityRepeatedFailureError("x"))
     validate_task_output(
         build_task_output(
@@ -452,7 +453,7 @@ def test_whole_script_checks_with_a_rate_and_task_output_paths():
     assert task.next_action.type.value == "RETRY"
 
 
-def test_owner_topic_maps_to_the_task_input():
+def test_owner_topic_maps_to_the_task_input() -> None:
     owner = OwnerTopic.model_validate(
         {
             "title": "Divergence on a past chart",
@@ -473,7 +474,10 @@ def test_owner_topic_maps_to_the_task_input():
         active_rule_packs=["rp.youtube_general", "rp.finance_sebi_in"],
     )
     assert inp.topic.title == owner.title and inp.topic.angle == "keep it simple"
-    assert inp.video_kind == "METHOD_TOPIC" and inp.course_chapter_pointer.label == "Chapter label"
+    assert (
+        inp.video_kind == "METHOD_TOPIC"
+        and sp.need(inp.course_chapter_pointer).label == "Chapter label"
+    )
     assert inp.language == "mr-IN" and inp.iteration == 0 and inp.revision is None
     assert "brief" not in inp.model_dump()["topic"]
     bad = owner.model_copy(update={"language": "fr-FR"})
@@ -483,6 +487,6 @@ def test_owner_topic_maps_to_the_task_input():
         )
 
 
-def test_shorts_input_fixture_is_valid():
+def test_shorts_input_fixture_is_valid() -> None:
     doc, sha, _, _ = parent_script()
     assert shorts_input(doc, sha).short_target_duration_ms == 45000

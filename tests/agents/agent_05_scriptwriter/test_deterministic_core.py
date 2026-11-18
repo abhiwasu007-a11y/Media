@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 # ruff: noqa: PT018
 """The 114-case ``deterministic_core`` golden dataset (blueprint 21 U-series, 26.5: 114 of 114).
 
@@ -48,6 +47,8 @@ DATASET = (
 )
 CASES = [json.loads(line) for line in DATASET.read_text(encoding="utf-8").splitlines() if line]
 
+pytestmark = pytest.mark.unit
+
 
 def _check_equal(actual: dict[str, Any], expected: dict[str, Any], case_id: str) -> None:
     for key, want in expected.items():
@@ -78,8 +79,8 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
         }
     if fn == "SpeechBudgeter":
         if i["method"] == "budgets":
-            r = hook_budget(i["rate_cps"], i["window_ms"], i["min_fill_ratio"])
-            return {"budget": r.budget.model_dump() if r.budget else None, "verdict": r.verdict}
+            hb = hook_budget(i["rate_cps"], i["window_ms"], i["min_fill_ratio"])
+            return {"budget": hb.budget.model_dump() if hb.budget else None, "verdict": hb.verdict}
         b = scene_budget(
             share_permille=i["share_permille"],
             target_ms=i["target_ms"],
@@ -111,7 +112,7 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
             )
         }
     if fn == "CadenceChecker":
-        r = check_cadence(
+        cad = check_cadence(
             explanatory=i["explanatory"],
             chars=i["chars"],
             sentences=i["sentences"],
@@ -124,13 +125,13 @@ def run_case(case: dict[str, Any]) -> dict[str, Any]:
             scene_interrupts=i["scene_interrupts"],
         )
         return {
-            "verdict": r.verdict,
-            "required": r.required,
-            "interrupt_missing": r.interrupt_missing,
+            "verdict": cad.verdict,
+            "required": cad.required,
+            "interrupt_missing": cad.interrupt_missing,
         }
     if fn == "NearCopyGuard":
-        r = check_sentence(i["sentence"], i["cited"], NearCopySettings(**i["thresholds"]))
-        return {"violation": r.violation, "overlap_ratio": r.overlap_ratio}
+        nc = check_sentence(i["sentence"], i["cited"], NearCopySettings(**i["thresholds"]))
+        return {"violation": nc.violation, "overlap_ratio": nc.overlap_ratio}
     if fn == "Segmenter":
         parts, splits = split_segments(i["text"], i["pace"], i["emotion"])
         return {
@@ -212,8 +213,14 @@ def _disclaimer(i: dict[str, Any]) -> dict[str, Any]:
 
 
 def _assemble_min(
-    *, placements=(), template=None, hook_sentences=(1, 1, 1), sections=(2, 1), same=True, tag=""
-):
+    *,
+    placements: Any = (),
+    template: Any = None,
+    hook_sentences: Any = (1, 1, 1),
+    sections: Any = (2, 1),
+    same: Any = True,
+    tag: Any = "",
+) -> Any:
     plan = sp.plan_json(len(sections))
     from agent_05_scriptwriter.contracts import PlanOutput, Scene
 
@@ -259,7 +266,6 @@ def _assemble_min(
             section_scenes=sc,
             concept_map={"k1": "c01", "k2": "c02"},
             hook_options=[],
-            omitted=[],
             description_draft=None,
             thumbnail_brief=None,
             rate_cps=None,
@@ -269,7 +275,7 @@ def _assemble_min(
     ).document
 
 
-def _promise(p):
+def _promise(p: Any) -> Any:
     from agent_05_scriptwriter.contracts import DocPromise
 
     assert p.title_promise
@@ -492,8 +498,8 @@ def _flow(case: dict[str, Any]) -> dict[str, Any]:
         out = step.run(req)
     result: dict[str, Any] = {"adapter_calls": len(llm.requests)}
     if out.error is not None:
-        result["error_code"] = out.error.code
-        result["retry_after_ms"] = out.error.retry_after_ms
+        result["error_code"] = sp.need(out.error).code
+        result["retry_after_ms"] = sp.need(out.error).retry_after_ms
     if out.status == "SUCCEEDED":
         result["result"] = "OK"
     if out.status == "SUSPENDED":
@@ -503,7 +509,7 @@ def _flow(case: dict[str, Any]) -> dict[str, Any]:
     plan_calls = sum(1 for r in llm.requests if "section_plan" not in r.messages[0].content)
     result["plan_calls"] = plan_calls
     result["plan_called"] = plan_calls > 0
-    result["ledger_rows_plan"] = plan_calls
+    result["ledger_rows_plan"] = st.ledger_steps.count("plan")
     result["stored_output_returned"] = out.stored_output_returned
     result["scripts_rows"] = len(st.scripts)
     result["blob_writes"] = st.blob_writes

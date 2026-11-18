@@ -8,6 +8,7 @@ from typing import Any
 from agent_05_scriptwriter.assemble.parts import DisclaimerTemplate
 from agent_05_scriptwriter.checks.results import CheckResult, passed, warned
 from agent_05_scriptwriter.contracts import (
+    OutOmitted,
     Provenance,
     ProvenanceCall,
     ScriptDocument,
@@ -22,7 +23,7 @@ from agent_05_scriptwriter.observability import log_security_event
 from agent_05_scriptwriter.pre.brief_mapper import ApprovalView, ResearchPackView
 from agent_05_scriptwriter.pre.speech_budget import hook_budget
 from agent_05_scriptwriter.pre.tenant_guard import TenantFacts, check_tenant
-from agent_05_scriptwriter.protocols import RulePack, SavedScript, StepContext
+from agent_05_scriptwriter.protocols import CallBudget, RulePack, SavedScript, StepContext
 from agent_05_scriptwriter.settings import Agent05Settings
 from amw_core.errors import AmwError
 
@@ -62,6 +63,8 @@ class ResolvedInputs:
     parent_script: ScriptDocument | None = None
     parent_script_sha256: str | None = None
     parent_claims_cleared: bool = False
+    prior_omitted: list[OutOmitted] | None = None
+    """Omitted concepts of the prior task output (contract 8.2), needed for a partial revision."""
     previous_cut: ScriptDocument | None = None
 
 
@@ -88,7 +91,7 @@ def pre_checks(
     language: str,
     active_rule_packs: Sequence[str],
     channel_category: str,
-    pointer_needed_pack: str = "rp.finance_sebi_in",
+    budget: CallBudget,
 ) -> list[CheckResult]:
     """D-PRE-1..5; raises typed errors before any paid call."""
     check_tenant(inputs.tenant, lambda event, _f: log_security_event(event, ctx.org_id))
@@ -104,16 +107,21 @@ def pre_checks(
     if "rp.youtube_general" not in active_rule_packs:
         raise InputInvalid("rp.youtube_general is required")
     results.append(passed("a05.pre.rules", "rule packs present"))
+    if ctx.max_cost_micros <= 0:
+        raise ConfigInvalid("resource_budget.max_cost_micros is not set: no spend without a limit")
+    budget.confirm_reservation(ctx)
     if ctx.max_llm_calls < 2:
         from agent_05_scriptwriter.errors import LoopCapExceeded
 
         raise LoopCapExceeded("max_llm_calls too small for a plan and one section")
-    results.append(passed("a05.pre.budget", "reservation and call cap present"))
+    results.append(
+        passed("a05.pre.budget", "cost limit set, reservation held and call cap sufficient")
+    )
     rate = settings.rate_for(language)
-    budget = hook_budget(rate, settings.hook_window_ms, settings.hook_min_fill_ratio)
+    speech = hook_budget(rate, settings.hook_window_ms, settings.hook_min_fill_ratio)
     results.append(
         passed("a05.pre.speech_budget", "speech budget computed")
-        if budget.budget is not None
+        if speech.budget is not None
         else warned("a05.pre.speech_budget", "speech rate unset: budgets are null")
     )
     return results

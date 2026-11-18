@@ -34,6 +34,7 @@ class Scanners:
         ids: set[str] = set()
         for lang in self.languages(language):
             ids.update(self.fin.scan(text, lang))
+            ids.update(self.forward.scan(text, lang, "ANY"))
         return sorted(ids)
 
     def tokens(self, text: str, language: str) -> list[str]:

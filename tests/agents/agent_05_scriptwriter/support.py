@@ -70,6 +70,27 @@ LEX_TEST_V1 = LexiconPack(
 SCANNERS = Scanners.from_lexicons(LEX_TEST_V1)
 
 
+def need[T](value: T | None) -> T:
+    """Narrow an Optional in a test (fails the test when it is ``None``)."""
+    assert value is not None
+    return value
+
+
+def draft(out: Any) -> Any:
+    """The long-form result of an outcome (fails the test when absent or a cut result)."""
+    from agent_05_scriptwriter.contracts import ScriptDraftResult
+
+    assert isinstance(out.result, ScriptDraftResult)
+    return out.result
+
+
+def cut(out: Any) -> Any:
+    from agent_05_scriptwriter.contracts import ShortsAdaptationResult
+
+    assert isinstance(out.result, ShortsAdaptationResult)
+    return out.result
+
+
 def scanners_for(_pack: LexiconPack) -> Scanners:
     return SCANNERS
 
@@ -503,7 +524,10 @@ class ScriptedLlm:
         self.requests.append(request)
         self.keys.append(idempotency_key)
         scripted = self.script[0]
-        if scripted != "VALID_SECTIONS" and scripted != "VALID_CUT":
+        if scripted == "VALID_SECTIONS_ONCE":
+            self.script.popleft()
+            scripted = "VALID_SECTIONS"
+        elif scripted != "VALID_SECTIONS" and scripted != "VALID_CUT":
             self.script.popleft()
         text = self._text(scripted, request)
         usage = CallUsage(
@@ -554,6 +578,7 @@ class MemoryState:
     blob_writes: int = 0
     hooks: list[HookHistoryEntry] = field(default_factory=list)
     ledger: list[LedgerRow] = field(default_factory=list)
+    ledger_steps: list[str] = field(default_factory=list)
     audit: list[str] = field(default_factory=list)
     completed: Any = None
     refuse_budget: bool = False
@@ -615,6 +640,10 @@ class _Budget:
     def __init__(self, st: MemoryState) -> None:
         self.st = st
 
+    def confirm_reservation(self, ctx: StepContext) -> None:
+        if self.st.refuse_budget:
+            raise BudgetExhaustedError("no held reservation")
+
     def check_call(self, ctx: StepContext, estimated_cost_micros: int) -> None:
         if self.st.refuse_budget:
             raise BudgetExhaustedError("budget refused")
@@ -635,6 +664,7 @@ class _Ledger:
             usage.amount_micros,
         )
         self.st.ledger.append(row)
+        self.st.ledger_steps.append(step_key)
         return row
 
 

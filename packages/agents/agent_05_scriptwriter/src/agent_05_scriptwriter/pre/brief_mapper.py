@@ -141,7 +141,7 @@ def map_briefs(pack: ResearchPackView, approvals: Sequence[ApprovalView]) -> Bri
     citations = [
         AvailableCitation(
             citation_ref=c.citation_ref,
-            kind=c.kind,  # type: ignore[arg-type]
+            kind=c.kind,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
             title=c.title[:300],
         )
         for c in pack.citations_available

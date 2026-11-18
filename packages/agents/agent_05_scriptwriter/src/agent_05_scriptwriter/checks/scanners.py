@@ -7,7 +7,7 @@ blocking (Agent 06 and Agent 16 keep the final authority).
 import re
 
 from agent_05_scriptwriter.lexicon import LexiconPack, PatternRule, any_match, compiled
-from agent_05_scriptwriter.text import split_sentences
+from agent_05_scriptwriter.text import normalise_for_matching, split_sentences
 
 URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
 EMAIL = re.compile(r"[\w.+\-]+@[\w\-]+\.[\w.\-]+")
@@ -21,6 +21,7 @@ def _rule_fires(rule: PatternRule, sentence: str) -> bool:
 
 
 def _fired(rules: tuple[PatternRule, ...], text: str) -> list[str]:
+    text = normalise_for_matching(text).text
     sentences = split_sentences(text) or [text]
     hits = {rule.rule_id for rule in rules for sentence in sentences if _rule_fires(rule, sentence)}
     return sorted(hits)
@@ -44,6 +45,7 @@ class ForbiddenTokenScanner:
 
     def scan(self, text: str, language: str) -> list[str]:
         lex = self._lexicons.for_language(language)
+        text = normalise_for_matching(text).text
         found: set[str] = set()
         if URL.search(text):
             found.add("URL")
@@ -71,12 +73,13 @@ class ForwardLookingScanner:
         self._lexicons = lexicons
 
     def scan(self, text: str, language: str, scene_kind: str) -> list[str]:
-        if scene_kind != "CASE_STUDY_HISTORICAL":
-            return []
+        # Review M3: scanned on every script surface, whatever the section kind.
+        _ = scene_kind
         return _fired(self._lexicons.for_language(language).forward_rules, text)
 
 
 def promise_outcome_terms(lexicons: LexiconPack, text: str, language: str) -> bool:
     """True when a promise text contains a guaranteed-outcome / urgency word of the lexicon."""
     patterns = lexicons.for_language(language).promise_forbidden
-    return any(compiled(p).search(text) for p in patterns)
+    normalised = normalise_for_matching(text).text
+    return any(compiled(p).search(normalised) for p in patterns)

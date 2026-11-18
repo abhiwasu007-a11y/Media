@@ -132,6 +132,11 @@ class CheckpointPort(Protocol):
 
 @runtime_checkable
 class CallBudget(Protocol):
+    def confirm_reservation(self, ctx: StepContext) -> None:
+        """D-PRE-5: the T03 reservation of the task exists and is held (S4); ``BudgetExhausted``
+        otherwise. Fail closed: no reservation, no paid call."""
+        ...
+
     def check_call(self, ctx: StepContext, estimated_cost_micros: int) -> None:
         """E2: raise ``BudgetExhausted`` before a call that would exceed a budget."""
         ...

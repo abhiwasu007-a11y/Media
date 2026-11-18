@@ -32,7 +32,6 @@ from agent_05_scriptwriter.contracts import (
     DocumentProvenance,
     HookBeat,
     OptionOut,
-    OutOmitted,
     PlanSection,
     Scene,
     ScriptDocument,
@@ -69,7 +68,6 @@ class AssemblyInput:
     section_scenes: Mapping[str, Sequence[Scene]]
     concept_map: Mapping[str, str]
     hook_options: Sequence[OptionOut]
-    omitted: Sequence[OutOmitted]
     description_draft: str | None
     thumbnail_brief: ThumbnailBrief | None
     rate_cps: float | None
@@ -152,12 +150,12 @@ def assemble(inp: AssemblyInput) -> Assembled:
                 segments.append(
                     DocSegment(
                         segment_id=segment_id,
-                        kind=kind,  # type: ignore[arg-type]
+                        kind=kind,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                         section_id=section_id,
                         scene_id=scene_id,
                         text=part.text,
-                        pace=part.pace,  # type: ignore[arg-type]
-                        emotion=part.emotion,  # type: ignore[arg-type]
+                        pace=part.pace,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
+                        emotion=part.emotion,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                         concept_refs=refs,
                         chart_ref=chart_ref,
                         method_label=method_label,
@@ -325,7 +323,7 @@ def assemble(inp: AssemblyInput) -> Assembled:
         script_id=inp.script_id,
         job_id=inp.job_id,
         channel_id=inp.channel_id,
-        language=inp.language,  # type: ignore[arg-type]
+        language=inp.language,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
         version=inp.version,
         iteration=inp.iteration,
         aspect_ratio="16:9",
@@ -339,7 +337,6 @@ def assemble(inp: AssemblyInput) -> Assembled:
         description_draft=inp.description_draft,
         thumbnail_brief=inp.thumbnail_brief,
         hook_options=_with_selected_ids(inp.hook_options, segments),
-        omitted_concepts=list(inp.omitted),
         provenance=provenance,
     )
     content = canonical_bytes(document.model_dump(mode="json"))

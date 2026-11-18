@@ -6,7 +6,12 @@ from collections.abc import Sequence
 from typing import Any
 
 from agent_05_scriptwriter.contracts import GlossaryTerm
-from agent_05_scriptwriter.text import has_devanagari, normalise, strip_brackets
+from agent_05_scriptwriter.text import (
+    has_devanagari,
+    invisible_characters,
+    normalise,
+    strip_brackets,
+)
 
 _LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z0-9'\-]*")
 _DEVANAGARI_LANGUAGES = ("mr-IN", "hi-IN")
@@ -53,6 +58,9 @@ def check_language(
 ) -> list[dict[str, Any]]:
     """Violations of one text; an empty list means pass. Codes only, never the text."""
     violations: list[dict[str, Any]] = []
+    hidden = invisible_characters(text)
+    if hidden:
+        violations.append({"kind": "INVISIBLE_CHARACTER", "codes": sorted(set(hidden))})
     if language in _DEVANAGARI_LANGUAGES:
         if _foreign_script(text, language):
             violations.append({"kind": "SCRIPT_MISMATCH"})

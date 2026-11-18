@@ -62,7 +62,7 @@ def hook_beats(doc: ScriptDocument) -> list[HookBeat]:
         segs = [s for s in doc.segments if s.scene_id == scene.scene_id]
         beats.append(
             HookBeat(
-                beat=scene.beat,  # type: ignore[arg-type]
+                beat=scene.beat,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                 sentences=_sentences(segs),
                 concrete_example=None,
                 chart_request=_chart(doc, scene.chart_id),
@@ -96,7 +96,7 @@ def section_scenes(doc: ScriptDocument, section_id: str) -> list[Scene]:
         scenes.append(
             Scene(
                 scene_local_id=f"sc{position}",
-                beat=scene.beat,  # type: ignore[arg-type]
+                beat=scene.beat,  # type: ignore[arg-type]  # str narrowed to a Literal; value comes from a validated model
                 sentences=_sentences(segs),
                 on_screen_text=list(scene.on_screen_text),
                 visual_intent=scene.visual_intent,

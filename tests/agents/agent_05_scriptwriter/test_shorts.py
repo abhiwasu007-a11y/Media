@@ -1,10 +1,11 @@
-# mypy: ignore-errors
 # ruff: noqa: PT018, RUF059
 """Shorts adaptation (FR-12, FR-16; I-03, E-03): a re-edit of a cleared parent, no new content."""
 
 import json
 from datetime import UTC, datetime
 from typing import Any
+
+import pytest
 
 from agent_05_scriptwriter import (
     ScriptDraftRequest,
@@ -17,6 +18,8 @@ from agent_05_scriptwriter.steps.common import StepOutcome
 from agent_05_scriptwriter.task_output import build_task_output
 from amw_core.contracts.validation import validate_task_output
 from tests.agents.agent_05_scriptwriter import support as sp
+
+pytestmark = pytest.mark.integration
 
 
 def parent_script() -> tuple[ScriptDocument, str, dict[str, list[str]], Any]:
@@ -31,13 +34,13 @@ def parent_script() -> tuple[ScriptDocument, str, dict[str, list[str]], Any]:
     )
     out = step.run(ScriptDraftRequest(ctx, sp.make_input(), sp.make_resolved(ctx)))
     assert out.status == "SUCCEEDED", out.error
-    doc = ScriptDocument.model_validate(json.loads(st.saved_contents[out.saved.uri]))
+    doc = ScriptDocument.model_validate(json.loads(st.saved_contents[sp.need(out.saved).uri]))
     cites: dict[str, list[str]] = {}
     for seg in doc.segments:
         for r in seg.concept_refs:
             cites.setdefault(r.concept_id, [])
             cites[r.concept_id] += [c for c in r.citation_refs if c not in cites[r.concept_id]]
-    return doc, out.saved.sha256, cites, ctx
+    return doc, sp.need(out.saved).sha256, cites, ctx
 
 
 def shorts_input(doc: ScriptDocument, sha: str, **over: Any) -> ShortsAdaptationInput:
@@ -86,10 +89,10 @@ def run_cut(
     return out, llm, st, ctx
 
 
-def test_cut_end_to_end_and_task_output():
+def test_cut_end_to_end_and_task_output() -> None:
     out, llm, st, ctx = run_cut(["VALID_CUT"])
     assert out.status == "SUCCEEDED", out.error
-    doc = json.loads(st.saved_contents[out.saved.uri])
+    doc = json.loads(st.saved_contents[sp.need(out.saved).uri])
     assert doc["aspect_ratio"] == "9:16" and doc["sections"] == []
     assert doc["segments"][0]["kind"] == "SHORT_HOOK"
     assert all(s["parent_segment_ids"] for s in doc["segments"])
@@ -104,12 +107,12 @@ def test_cut_end_to_end_and_task_output():
     assert len(llm.requests) == 1
 
 
-def test_uncleared_parent_is_refused_before_any_call():
+def test_uncleared_parent_is_refused_before_any_call() -> None:
     out, llm, _, _ = run_cut(["VALID_CUT"], cleared=False)
-    assert out.error.code == "PERMANENT.MISSING_DEPENDENCY" and not llm.requests
+    assert sp.need(out.error).code == "PERMANENT.MISSING_DEPENDENCY" and not llm.requests
 
 
-def test_shorts_limit_unset_is_config_invalid():
+def test_shorts_limit_unset_is_config_invalid() -> None:
     doc, sha, cites, _ = parent_script()
     ctx = sp.make_ctx()
     step = ShortsAdaptationStep(
@@ -123,28 +126,28 @@ def test_shorts_limit_unset_is_config_invalid():
         ctx, parent_script=doc, parent_script_sha256=sha, parent_claims_cleared=True
     )
     out = step.run(ShortsRequest(ctx, shorts_input(doc, sha), res))
-    assert out.error.code == "PERMANENT.CONFIG_INVALID"
+    assert sp.need(out.error).code == "PERMANENT.CONFIG_INVALID"
 
 
-def test_removed_segment_is_never_used_and_is_not_dropped_either():
+def test_removed_segment_is_never_used_and_is_not_dropped_either() -> None:
     doc, _, _, _ = parent_script()
     removed = next(s for s in doc.segments if s.section_id == "sec1").segment_id
     out, _, st, _ = run_cut(["VALID_CUT"], inp_over={"removed_segment_ids": [removed]})
     assert out.status == "SUCCEEDED", out.error
-    cut = json.loads(st.saved_contents[out.saved.uri])
+    cut = json.loads(st.saved_contents[sp.need(out.saved).uri])
     used = {p for s in cut["segments"] for p in s["parent_segment_ids"]}
     assert removed not in used
-    dropped = {d.parent_segment_id for d in out.result.dropped_parent_content}
+    dropped = {d.parent_segment_id for d in sp.cut(out).dropped_parent_content}
     assert removed not in dropped
 
 
-def test_invalid_json_twice_is_a_typed_error():
+def test_invalid_json_twice_is_a_typed_error() -> None:
     out, llm, _, _ = run_cut(["INVALID_JSON", "INVALID_JSON"])
-    assert out.error.code == "AGENT.INVALID_JSON" and len(llm.requests) == 2
+    assert sp.need(out.error).code == "AGENT.INVALID_JSON" and len(llm.requests) == 2
 
 
-def test_refusal_rule_would_be_broken_is_blocked_verdict():
-    refusal = {
+def test_refusal_rule_would_be_broken_is_blocked_verdict() -> None:
+    refusal: dict[str, Any] = {
         "title_promise": None,
         "hooks": [],
         "selected_hook_id": None,
@@ -158,13 +161,13 @@ def test_refusal_rule_would_be_broken_is_blocked_verdict():
         },
     }
     out, _, st, ctx = run_cut([{"text": json.dumps(refusal)}], inp_over={"owner_instruction": "x"})
-    assert out.status == "SUCCEEDED" and out.result.verdict == "BLOCKED"
-    assert out.result.script_document is None and not st.scripts
+    assert out.status == "SUCCEEDED" and sp.cut(out).verdict == "BLOCKED"
+    assert sp.cut(out).script_document is None and not st.scripts
     task_out = build_task_output(out, ctx, now=datetime.now(UTC), duration_ms=1, attempt_no=1)
     validate_task_output(task_out.model_dump(mode="json"), version="1.0.0")
 
 
-def test_shorts_revision_reruns_the_single_cut_step():
+def test_shorts_revision_reruns_the_single_cut_step() -> None:
     doc, sha, cites, _ = parent_script()
     ctx = sp.make_ctx()
     st = sp.MemoryState()
@@ -178,10 +181,10 @@ def test_shorts_revision_reruns_the_single_cut_step():
     )
     first = step.run(ShortsRequest(ctx, shorts_input(doc, sha), res))
     assert first.status == "SUCCEEDED", first.error
-    cut_doc = ScriptDocument.model_validate(json.loads(st.saved_contents[first.saved.uri]))
+    cut_doc = ScriptDocument.model_validate(json.loads(st.saved_contents[sp.need(first.saved).uri]))
     target = next(s for s in cut_doc.segments if s.kind == "BODY").segment_id
     rev = {
-        "prior_script": {"uri": first.saved.uri, "sha256": first.saved.sha256},
+        "prior_script": {"uri": sp.need(first.saved).uri, "sha256": sp.need(first.saved).sha256},
         "feedback": [
             {
                 "source": "CLAIM_VERIFICATION",
@@ -207,5 +210,5 @@ def test_shorts_revision_reruns_the_single_cut_step():
     )
     out = step2.run(ShortsRequest(ctx2, shorts_input(doc, sha, iteration=1, revision=rev), res2))
     # the scripted model returns the flagged sentence verbatim: a05.sh.revision fails the repair
-    assert out.error is not None and out.error.code == "AGENT.QUALITY_REPEATED_FAILURE"
+    assert out.error is not None and sp.need(out.error).code == "AGENT.QUALITY_REPEATED_FAILURE"
     assert len(llm2.requests) == 2

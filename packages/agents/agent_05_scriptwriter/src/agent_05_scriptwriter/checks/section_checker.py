@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 
 from agent_05_scriptwriter.checks.cadence import check_cadence
 from agent_05_scriptwriter.checks.context import Scanners
+from agent_05_scriptwriter.checks.echo import EchoGuard
 from agent_05_scriptwriter.checks.language import check_language
 from agent_05_scriptwriter.checks.near_copy import check_sentences
 from agent_05_scriptwriter.checks.plan_checker import glossary_terms
@@ -50,6 +51,7 @@ class SectionChecker:
         *,
         cited_texts: Mapping[str, str] | None = None,
         used_chart_ids: Sequence[str] = (),
+        echo: EchoGuard | None = None,
     ) -> list[CheckResult]:
         plan = inp.section_plan
         briefs = {b.concept_id: b for b in inp.concept_briefs}
@@ -66,6 +68,8 @@ class SectionChecker:
         results.append(self._method_label(out, inp, briefs))
         results.append(self._budget(out, inp))
         results.append(self._near_copy(out, briefs, cited_texts or {}))
+        if echo is not None:
+            results.append(echo.check("a05.sec.echo", [t for t, _k in self._scan_texts(out)]))
         _ = plan
         return results
 
@@ -147,12 +151,8 @@ class SectionChecker:
         for text, _kind in self._scan_texts(out):
             fin.update(self._scan.fin_ids(text, inp.language))
             tokens.update(self._scan.tokens(text, inp.language))
-        for scene in out.scenes:
-            fin.update(
-                self._scan.forward_ids(
-                    scene_text(scene), inp.language, inp.section_plan.section_kind
-                )
-            )
+        for text, _kind in self._scan_texts(out):
+            fin.update(self._scan.forward_ids(text, inp.language, inp.section_plan.section_kind))
         return [
             failed("a05.sec.fin_prefilter", "FIN pre-filter hit", rule_ids=tuple(sorted(fin)))
             if fin
@@ -286,13 +286,12 @@ class SectionChecker:
         briefs: Mapping[str, ConceptBrief],
         cited_texts: Mapping[str, str],
     ) -> CheckResult:
+        """Every sentence against every cited chunk and every brief summary of the section, whether
+        or not the scene cites them (YTG-R9, IN-08)."""
+        texts = [t for _ref, t in sorted(cited_texts.items())]
+        texts += [b.summary for b in briefs.values() if b.summary]
         violations = 0
         for scene in out.scenes:
-            refs = {c for r in scene.concept_refs for c in r.citation_refs}
-            texts = [cited_texts[c] for c in sorted(refs) if c in cited_texts]
-            texts += [
-                briefs[r.concept_id].summary for r in scene.concept_refs if r.concept_id in briefs
-            ]
             violations += len(
                 check_sentences([s.text for s in scene.sentences], texts, self._settings.near_copy)
             )

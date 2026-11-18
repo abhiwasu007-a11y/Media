@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 from agent_05_scriptwriter.checks.context import Scanners
+from agent_05_scriptwriter.checks.echo import EchoGuard
 from agent_05_scriptwriter.checks.language import check_language
 from agent_05_scriptwriter.checks.results import (
     CheckResult,
@@ -95,7 +96,9 @@ class PlanChecker:
         self._settings = settings
         self._scan = scanners
 
-    def check(self, plan: PlanOutput, inp: PlanStepInput) -> PlanReport:
+    def check(
+        self, plan: PlanOutput, inp: PlanStepInput, echo: EchoGuard | None = None
+    ) -> PlanReport:
         results: list[CheckResult] = [passed("a05.plan.schema", "plan output valid")]
         if plan.refusal is not None:
             return PlanReport(results, {}, None)
@@ -126,6 +129,8 @@ class PlanChecker:
         results.extend(self._text_scans(plan, inp))
         results.append(self._method_gate(plan, inp))
         results.append(self._sections(plan, inp))
+        if echo is not None:
+            results.append(echo.check("a05.plan.echo", [t for t, _k in self._text_fields(plan)]))
         return PlanReport(
             results,
             option_failures,
@@ -282,6 +287,7 @@ class PlanChecker:
         language_problems = 0
         for text, kind in self._text_fields(plan):
             fin.update(self._scan.fin_ids(text, inp.language))
+            fin.update(self._scan.forward_ids(text, inp.language, "ANY"))
             tokens.update(self._scan.tokens(text, inp.language))
             if kind == "local" and check_language(
                 text, inp.language, inp.latin_allow_list, [], terms

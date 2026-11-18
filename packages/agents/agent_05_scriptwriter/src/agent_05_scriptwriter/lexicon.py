@@ -13,6 +13,7 @@ from functools import lru_cache
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_05_scriptwriter.errors import ConfigInvalid
+from agent_05_scriptwriter.text import normalise_for_matching
 
 
 class PatternRule(BaseModel):
@@ -56,4 +57,6 @@ def compiled(pattern: str) -> re.Pattern[str]:
 
 
 def any_match(patterns: Sequence[str], text: str) -> bool:
-    return any(compiled(p).search(text) for p in patterns)
+    """Match on the normalised copy (zero-width characters and look-alike letters do not hide)."""
+    normalised = normalise_for_matching(text).text
+    return any(compiled(p).search(normalised) for p in patterns)
