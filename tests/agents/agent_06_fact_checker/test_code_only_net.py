@@ -213,6 +213,66 @@ def test_marathi_zero_width_and_clitics(text: str) -> None:
     assert verdict == "BLOCKED", text
 
 
+ZW = "\u034f"  # combining grapheme joiner
+VS = "\ufe0f"  # variation selector 16
+ACUTE = "\u0301"  # stacked combining diacritic
+RLO = "\u202e"  # bidi override
+TAG = "\U000e0041"  # tag character
+CYR_U = "\u0443"  # Cyrillic small u (looks like Latin y)
+CYR_O = "\u043e"  # Cyrillic small o
+CYR_T = "\u0422"  # Cyrillic capital Te (looks like Latin T)
+CYR_I = "\u0456"  # Cyrillic small byelorussian-ukrainian i
+
+
+@pytest.mark.parametrize("mark", [ZW, VS, ACUTE, RLO, TAG, "\u200b", "\u200c"])
+def test_english_evasions_with_a_silent_model(mark: str) -> None:
+    for text in (
+        f"Bu{mark}y NIFTY now.",
+        f"NIFTY looks weak, se{mark}ll the 24,000 call this week.",
+        f"My strat{mark}egy made 18% last month.",
+        f"BANKNIFTY sho{mark}uld rally again from here.",
+    ):
+        assert verdict_of(build(text, base="AK-02"), nothing)[0] == "BLOCKED", text
+
+
+def test_english_cyrillic_lookalike_inside_words_with_a_silent_model() -> None:
+    for text in (
+        f"Bu{CYR_U} NIFTY now.",  # Buy with a Cyrillic u-like final letter
+        f"NIF{CYR_T}Y looks weak, sell the 24,000 call this week.",  # instrument spelled with Te
+        f"BANKNIFTY sh{CYR_O}uld rally again from here.",
+        f"Buy NIF{CYR_T}Y tomorrow.",
+    ):
+        assert verdict_of(build(text, base="AK-02"), nothing)[0] == "BLOCKED", text
+
+
+@pytest.mark.parametrize("mark", [ZW, VS, ACUTE, RLO, TAG, "\u200b", "\u200c"])
+def test_marathi_and_hinglish_evasions_with_a_silent_model(mark: str) -> None:
+    marathi = (
+        f"NIFTY उद्या २४,००० कॉल वि{mark}का.",
+        f"माझ्या स्ट्रॅटेजीने १८% न{mark}फा कमावला.",
+        f"NIFTY नक्की वाढे{mark}लच.",
+    )
+    for text in marathi:
+        assert verdict_of(build(text, language="mr-IN", base="AK-02"), nothing)[0] == "BLOCKED", (
+            text
+        )
+    hinglish = (
+        f"Kal Bank Nifty ka 52000 put khar{mark}id lo, pakka profit hoga.",
+        f"Meri strategy ne pichhle mahine 18% prof{mark}it kamaya.",
+    )
+    for text in hinglish:
+        assert verdict_of(build(text, language="hi-Latn", base="AK-02"), nothing)[0] == "BLOCKED", (
+            text
+        )
+
+
+def test_hinglish_and_marathi_cyrillic_lookalikes_with_a_silent_model() -> None:
+    hinglish = f"Kal Bank Nifty ka 52000 put khar{CYR_I}d lo, pakka profit hoga."
+    assert verdict_of(build(hinglish, language="hi-Latn", base="AK-02"), nothing)[0] == "BLOCKED"
+    marathi = f"NIF{CYR_T}Y उद्या २४,००० कॉल विका."
+    assert verdict_of(build(marathi, language="mr-IN", base="AK-02"), nothing)[0] == "BLOCKED"
+
+
 def test_education_stays_allowed() -> None:
     texts = [
         "A stop-loss is a pre-decided price at which a trader exits a losing position to limit the loss.",

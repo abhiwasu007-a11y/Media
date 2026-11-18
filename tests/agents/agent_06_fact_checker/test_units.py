@@ -143,7 +143,7 @@ def test_marker_matching_is_whole_word_and_lexicon_driven() -> None:
     assert find_marker("the target was reached", markers) == "target"
     assert find_marker("a targeted approach", markers) is None
     assert find_marker("it WILL double", markers) == "will"
-    assert find_marker("likely  to rise", markers) is None  # double space is a different phrase
+    assert find_marker("likely  to rise", markers) == "likely to"  # white space is normalised
     assert find_marker("anything", ()) is None  # no lexicon, no hit: nothing is hard-coded
     assert find_marker("कधी target गाठला", all_markers({"mr": ("target", "")})) == "target"
 

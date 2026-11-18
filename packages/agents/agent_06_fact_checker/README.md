@@ -11,8 +11,12 @@ wrong cannot lower what code found. The lexicon is **data**:
 `src/agent_06_fact_checker/data/finance_sebi_in.provisional.json` (English, Marathi, Hindi,
 Hinglish), **provisional, REQUIRES REVIEW (owner / counsel)**. An empty lexicon, or one without the
 script's language, fails with `PERMANENT.CONFIG_INVALID` before any paid call.
-All matching goes through `lexicon.normalise_for_matching` (zero-width removal, NFKC, case fold):
-the single seam to swap for the shared `amw_core` normaliser.
+All matching (text and lexicon entries) goes through `lexicon.normalise_for_matching`, which now
+delegates to the shared `amw_core.text_normalise` (zero-width, bidi, variation-selector, tag and
+combining characters, Cyrillic look-alikes, Devanagari canonical forms).
+
+**Judgment:** a silent model with no code hits stays ALLOWED (needed for the allowed historical
+AK-01 case); it is not escalated to NEEDS_HUMAN_REVIEW merely for having no claims.
 
 ## Time of the price-data lag
 D0 is evaluated at **extraction time** (a snapshot). `price_age.recheck_lag_at(range_ends,

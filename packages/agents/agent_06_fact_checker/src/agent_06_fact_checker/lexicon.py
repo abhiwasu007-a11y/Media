@@ -9,6 +9,8 @@ import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 
+from amw_core.text_normalise import normalise_for_matching as shared_normalise
+
 _URL = re.compile(
     r"(?:https?://|www\.)[^\s<>\"']+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|in|co|io|net|org|me|ly|link)(?:/[^\s<>\"']*)?",
     re.IGNORECASE,
@@ -18,18 +20,11 @@ Suffixes = Mapping[str, Sequence[str]]
 """Suffix / clitic lists per script family: ``latin`` and ``deva``."""
 
 
-_INVISIBLE = dict.fromkeys(
-    [0x00AD, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x2060, 0x2061, 0x2062, 0x2063, 0xFEFF]
-)
-
-
 def normalise_for_matching(text: str) -> str:
-    """THE single normalisation of every lexicon match: invisible / zero-width characters removed
-    (a ZWSP inside "Buy" or a ZWNJ inside a Devanagari word must not defeat a filter), NFKC (width
-    and compatibility forms), case folded. One function so it can be swapped for the shared
-    ``amw_core`` text normaliser when that module is merged."""
-    stripped = text.translate(_INVISIBLE)
-    return unicodedata.normalize("NFKC", stripped).casefold()
+    """THE single normalisation of every lexicon match (text and lexicon entries alike): the shared
+    ``amw_core.text_normalise`` (invisible, bidi, variation-selector and tag characters, look-alike
+    letters, stacked diacritics, Devanagari canonical forms and digits, NFKC, case fold)."""
+    return shared_normalise(text).text
 
 
 norm = normalise_for_matching
