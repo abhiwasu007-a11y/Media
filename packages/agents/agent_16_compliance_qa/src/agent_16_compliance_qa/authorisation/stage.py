@@ -51,6 +51,7 @@ from agent_16_compliance_qa.authorisation.guards import (
 from agent_16_compliance_qa.base import Model
 from agent_16_compliance_qa.config import Agent16Config
 from amw_core.enums import (
+    ActorKind,
     ApprovalChannel,
     ApprovalKind,
     ApprovalState,
@@ -63,7 +64,8 @@ from amw_core.enums import (
     RenderStatus,
 )
 from amw_core.errors import InputInvalidError
-from amw_core.ids import ApprovalId, OrgId, Prefix, UserId, WireId, is_valid_id
+from amw_core.ids import ActorRef, ApprovalId, OrgId, Prefix, UserId, WireId, is_valid_id
+from amw_core.interfaces.audit_log import AuditLog, NewAuditEntry
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.owner_evidence_review_code import is_valid_review_code
 
@@ -371,13 +373,39 @@ class AuthorisationResult:
 
 
 class PublicationAuthorisationStage:
+    def _event(
+        self,
+        tx: TenantTransaction,
+        now: datetime,
+        action: str,
+        req: AuthorisationInput,
+        details: dict[str, object],
+    ) -> None:
+        """NF-09: every authorisation emits an ``audit_log`` entry with actor ``agent_16``."""
+        self._audit.append(
+            tx,
+            NewAuditEntry(
+                actor_kind=ActorKind.AGENT,
+                actor_ref=ActorRef("agent_16"),
+                authority="agent_16",
+                action=action,
+                target_kind="render",
+                target_id=req.subject.render_id,
+                occurred_at=now,
+                correlation_id=tx.context.correlation_id,
+                details=details,
+            ),
+        )
+
     def __init__(
         self,
         config: Agent16Config,
         repository: AuthorisationRepository,
         evidence: OwnerEvidenceVerifier,
         writer: AuthorisationWriter,
+        audit: AuditLog,
     ) -> None:
+        self._audit = audit
         self._cfg = config
         self._repo = repository
         self._evidence = evidence
@@ -649,6 +677,27 @@ class PublicationAuthorisationStage:
         rows, evidence_ids, gate = self.build_rows(tx, req, evaluation_date)
         decision = self._guards.evaluate(rows)
         verdict_id = self._writer.write_final(tx, req.subject, decision, idempotency_key)
+        for kind, evidence_id in self._evidence.log.mac_invalid:  # section 22 security event
+            self._event(
+                tx,
+                now,
+                "security.evidence_mac_invalid",
+                req,
+                {"evidence_id": evidence_id, "record_kind": kind.value},
+            )
+        self._evidence.log.mac_invalid.clear()
+        self._event(
+            tx,
+            now,
+            "publication_authorisation.decided",
+            req,
+            {
+                "verdict": decision.verdict.value,
+                "authorised_action": decision.authorised_action,
+                "failed_guards": decision.failed_guards,
+                "authorisation_verdict_id": verdict_id,
+            },
+        )
         price = gate.latest_price_date if gate else None
         earliest = (
             date.fromordinal(price.toordinal() + self._cfg.price_data_lag_days) if price else None

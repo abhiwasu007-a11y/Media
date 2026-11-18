@@ -148,11 +148,17 @@ class EvidenceUseIndex(Protocol):
 class StoreMacValidator:
     """``EvidenceReader`` over the evidence database with an ``amw_app`` session only."""
 
-    def __init__(self, database: EvidenceDatabase, session: DbSession) -> None:
+    def __init__(
+        self,
+        database: EvidenceDatabase,
+        session: DbSession,
+        log_fields: Mapping[str, str] | None = None,
+    ) -> None:
         if session.role is not DbRole.APP:
             raise PermissionDeniedError("Agent 16 reads evidence as amw_app only (CCR-100)")
         self._db = database
         self._session = session
+        self.log_fields: dict[str, str] = dict(log_fields or {})
 
     def get(self, tx: TenantTransaction, evidence_id: WireId) -> EvidenceRecord | None:
         return self._db.get(self._session, tx, evidence_id)
@@ -163,7 +169,7 @@ class StoreMacValidator:
         except Exception:  # a check that cannot run is a FAIL, never a PASS (section 18)
             _LOG.warning(
                 "a16.evidence.mac_check_unavailable",
-                extra={"org_id": tx.context.org_id, "evidence_id": evidence_id},
+                extra=self.log_fields | {"org_id": tx.context.org_id, "evidence_id": evidence_id},
             )
             return False
 

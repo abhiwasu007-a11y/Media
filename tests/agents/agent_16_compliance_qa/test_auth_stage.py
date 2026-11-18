@@ -46,6 +46,7 @@ from amw_core.ids import WireId
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from tests.agents.agent_16_compliance_qa.r14_support import CODE, R14, REQUESTED
 from tests.agents.agent_16_compliance_qa.support import config, validate_against_blueprint
+from tests.fake_audit import RecordingAuditLog
 
 pytestmark = pytest.mark.integration
 R_SHA, S_SHA, T_SHA = "a" * 64, "b" * 64, "c" * 64
@@ -61,6 +62,7 @@ MACHINE = {
 }  # 66
 CONTRIB = "the 2008 gap example shows how a protective order limits the decision"
 CH = ApprovalChannel.OWNER_CHAT_OPERATOR
+AUDIT = RecordingAuditLog()
 OP = "sys_operator"
 
 
@@ -216,7 +218,7 @@ def world() -> tuple[R14, Repo, AuthorisationInput]:
 
 
 def run(h: R14, repo: Repo, req: AuthorisationInput, key: str = "idk") -> Any:
-    stage = PublicationAuthorisationStage(config(), repo, h.a16, Writer())
+    stage = PublicationAuthorisationStage(config(), repo, h.a16, Writer(), AUDIT)
     return stage.run(h.tx("agent_16"), req, datetime(2026, 1, 31, tzinfo=UTC), key)
 
 
@@ -545,7 +547,7 @@ def test_missing_gate_and_score_fail_closed() -> None:
 def test_replay_writes_the_final_row_once() -> None:
     h, repo, req = world()
     writer = Writer()
-    stage = PublicationAuthorisationStage(config(), repo, h.a16, writer)
+    stage = PublicationAuthorisationStage(config(), repo, h.a16, writer, AUDIT)
     now = datetime(2026, 1, 31, tzinfo=UTC)
     a = stage.run(h.tx("agent_16"), req, now, "idk_same")
     b = stage.run(h.tx("agent_16"), req, now, "idk_same")
@@ -564,6 +566,18 @@ def test_org_b_cannot_use_org_a_evidence() -> None:
     )
 
     verifier = OwnerEvidenceVerifier(StoreMacValidator(h.db, h.app), h.index)
-    stage = PublicationAuthorisationStage(config(), repo, verifier, Writer())
+    stage = PublicationAuthorisationStage(config(), repo, verifier, Writer(), AUDIT)
     d = stage.run(other.tx("agent_16"), req, datetime(2026, 1, 31, tzinfo=UTC), "k").decision
     assert {"G4", "G13"} <= set(d.failed_guards)
+
+
+def test_authorisation_and_mac_failure_are_audited() -> None:
+    """NF-09 and section 22: the decision and every MAC-invalid evidence row are audit events
+    (not only a log line)."""
+    h, repo, req, _, ev_id = nhr_world()
+    h.db.superuser_tamper(h.tx(), ev_id, evidence_mac=b"\x00" * 32)
+    audit = RecordingAuditLog()
+    stage = PublicationAuthorisationStage(config(), repo, h.a16, Writer(), audit)
+    stage.run(h.tx("agent_16"), req, datetime(2026, 1, 31, tzinfo=UTC), "idk-audit")
+    assert "security.evidence_mac_invalid" in audit.actions()
+    assert audit.actions()[-1] == "publication_authorisation.decided"
