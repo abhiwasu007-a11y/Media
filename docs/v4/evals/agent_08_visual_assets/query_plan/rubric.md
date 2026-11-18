@@ -1,10 +1,10 @@
-# Judge rubric — `agent_08.asset_sourcing` step `search_query_plan`
+# Judge rubric — `agent_08.asset_sourcing` step `query_plan`
 
 | Field | Value |
 |---|---|
 | Status | Draft — documentation. Software: **Planned** |
 | Owner | Agent 08 |
-| Used by | eval gate (27 §5); judge prompt `agent_08/search_query_plan_judge.v1` (pending Agent 08 build ticket) |
+| Used by | eval gate (27 §5); judge prompt `agent_08/query_plan_judge.v1` (pending Agent 08 build ticket) |
 | Scope | Subjective quality only. Status, reason codes, counts, leakage, avoid subjects and schema are checked deterministically (README §4) and are **not** judged. |
 
 The judge receives the case input, the step output and this rubric, and returns integer scores 1–5 per criterion with a one-sentence justification each. Scores below the case's `judge_min` fail the case.
