@@ -68,3 +68,9 @@ Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skelet
 | Date | Session | Work |
 |---|---|---|
 | 2026-11-18 | 1 | Phase 0 done; Phase 1: audit script (+ sudo usage fix), skeleton, ledger, CR register, audit Parts A/B/D, research wave 1 complete, Knowledge Library plan; architecture Wave A launched |
+
+## Token usage per wave (sub-agent tokens as reported by the harness; main-session usage via /cost by the owner)
+| Wave / step | Agents | Sub-agent tokens | Note |
+|---|---|---|---|
+| Phase 1 research (wave 1 + re-runs + wave 2) | 4 (Sonnet), 2 re-runs | ≈ 680k | 73.5k + 125.7k (YouTube), 154.4k (India), 97.5k + 121.3k (infra), 107.8k (prices) |
+| Wave A | 1 (Opus) | pending | |
