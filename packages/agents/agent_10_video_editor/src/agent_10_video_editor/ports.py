@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from agent_10_video_editor.inputs import AssetRecord
-from amw_core.enums import CheckVerdict, RenderStatus
+from amw_core.enums import CheckKind, CheckVerdict, RenderStatus
 from amw_core.interfaces.tenancy_context import TenantTransaction
 
 
@@ -49,15 +49,18 @@ class RenderRow:
 class QcRow:
     """One ``qc_results`` row (04 section 5.17)."""
 
+    job_id: str
     render_id: str
     task_id: str
     check_id: str
+    kind: CheckKind
     verdict: CheckVerdict
     blocking: bool
     measured_num: float | None
     measured_text: str | None
     threshold_num: float | None
     threshold_text: str | None
+    unit: str | None
     rule_id: str | None
     evidence_ref: str | None
     message: str

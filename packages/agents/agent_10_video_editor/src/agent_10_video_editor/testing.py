@@ -96,6 +96,7 @@ class MemoryBlobStorage:
         self._recorded: dict[str, str] = {}
         self.put_count = 0
         self.after_put: Callable[[str], None] | None = None
+        self.before_put: Callable[[str], None] | None = None
 
     @staticmethod
     def _owner(uri: str) -> str:
@@ -111,6 +112,8 @@ class MemoryBlobStorage:
 
     def put(self, context: TenantContext, uri: BlobUri, stream: ReadableStream) -> BlobInfo:
         self._check(context, uri, write=True)
+        if self.before_put is not None:
+            self.before_put(uri)  # a raise here leaves no file at the path (atomic publish)
         data = stream.read()
         if uri in self.blobs:
             raise InputInvalidError("write-once: blob exists")
@@ -541,6 +544,9 @@ class FakeFfmpegRunner:
         name = argv[-1]
         path = cwd / name
         self.calls.append(FakeCall("probe", tuple(argv)))
+        if name.startswith("in_"):  # a staged input asset: readable unless the test says otherwise
+            ok = path.exists() and name not in self.unreadable_inputs
+            return ProcessResult(0 if ok else 1, stdout="{}" if ok else "")
         if not path.exists() or FAKE_MAGIC not in path.read_bytes():
             return ProcessResult(1, stderr="Invalid data found when processing input")
         head = self._header(path.read_bytes())

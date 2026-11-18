@@ -81,6 +81,7 @@ from agent_10_video_editor.timeline import Timeline
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import (
+    CheckKind,
     CheckVerdict,
     CostFigureKind,
     CostOperation,
@@ -918,9 +919,11 @@ class _QcRun:
     ) -> None:
         rows = [
             QcRow(
+                job_id=self.ti.job_id,
                 render_id=payload.render_id,
                 task_id=self.ti.task_id,
                 check_id=r.check_id,
+                kind=CheckKind.DETERMINISTIC,
                 verdict=r.verdict,
                 blocking=r.blocking,
                 measured_num=float(r.measured)
@@ -931,6 +934,7 @@ class _QcRun:
                 if isinstance(r.threshold, int | float) and not isinstance(r.threshold, bool)
                 else None,
                 threshold_text=r.threshold if isinstance(r.threshold, str) else None,
+                unit=r.unit,
                 rule_id=r.details.get("rule_id"),
                 evidence_ref=evidence.report.uri,
                 message=r.message[:2000],

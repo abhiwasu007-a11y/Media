@@ -55,38 +55,21 @@ class SelfTestRecord:
 
 
 def _gen(
-    builder: ArgvBuilder, name: str, video: str, audio: str, *, extra: tuple[str, ...] = ()
+    builder: ArgvBuilder,
+    name: str,
+    video: str,
+    audio: str,
+    *,
+    extra: tuple[str, ...] = (),
+    audio_offset_s: str | None = None,
 ) -> list[str]:
+    offset = ["-itsoffset", audio_offset_s] if audio_offset_s else []
     return [
-        builder.ffmpeg_bin,
-        "-hide_banner",
-        "-nostdin",
-        "-y",
-        "-loglevel",
-        "error",
-        "-f",
-        "lavfi",
-        "-i",
-        video,
-        "-f",
-        "lavfi",
-        "-i",
-        audio,
-        "-t",
-        str(_DURATION_S),
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-ar",
-        "48000",
-        "-ac",
-        "2",
-        *extra,
-        name,
-    ]
+        builder.ffmpeg_bin, "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", video, *offset, "-f", "lavfi", "-i", audio,
+        "-t", str(_DURATION_S), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+        "-ar", "48000", "-ac", "2", *extra, name,
+    ]  # fmt: skip
 
 
 class QcSelfTest:
@@ -101,10 +84,11 @@ class QcSelfTest:
         tone = "sine=frequency=440:sample_rate=48000"
         cases: list[SelfTestCase] = []
 
-        def make(name: str, video: str, audio: str, *extra: str) -> str:
-            run_checked(
-                runner, _gen(builder, name, video, audio, extra=extra), cwd=work, limits=limits
-            )
+        def make(
+            name: str, video: str, audio: str, *extra: str, audio_offset_s: str | None = None
+        ) -> str:
+            argv = _gen(builder, name, video, audio, extra=extra, audio_offset_s=audio_offset_s)
+            run_checked(runner, argv, cwd=work, limits=limits)
             return name
 
         def audio_peak(name: str) -> float:
@@ -124,9 +108,9 @@ class QcSelfTest:
         cases.append(_case("clean.black", "PASS", _black(runner, builder, work, clean)))
         cases.append(_case("clean.freeze", "PASS", _freeze(runner, builder, work, clean)))
         cases.append(_case("clean.silence", "PASS", _silence(runner, builder, work, clean)))
-        # 2. true peak above -1 dBTP
+        # 2. true peak above -1 dBTP (both channels at 0.98 of full scale)
         hot = make(
-            "hot.mp4", busy, f"{tone},volume=6dB,alimiter=limit=1:level=disabled", "-b:a", "384k"
+            "hot.mp4", busy, "aevalsrc=exprs=0.98*sin(2*PI*440*t)|0.98*sin(2*PI*440*t):s=48000"
         )
         cases.append(
             _case(
@@ -143,23 +127,19 @@ class QcSelfTest:
         )
         cases.append(_case("black.black", "FAIL", _black(runner, builder, work, black)))
         # 4. frozen segment
-        frozen = make(
-            "frozen.mp4", f"{busy},freezeframes=first=25:last=125:replace=1", f"{tone},volume=-20dB"
-        )
+        frozen = make("frozen.mp4", "color=c=blue:size=320x180:rate=25", f"{tone},volume=-20dB")
         cases.append(_case("frozen.freeze", "FAIL", _freeze(runner, builder, work, frozen)))
         # 5. silence run
         silent = make(
             "silent.mp4", busy, f"{tone},volume=-20dB,volume=enable='between(t,1,5)':volume=0"
         )
         cases.append(_case("silent.silence", "FAIL", _silence(runner, builder, work, silent)))
-        # 6. one-frame A/V start offset (audio delayed by one frame at 25 fps = 40 ms)
-        offset = make("offset.mp4", busy, f"{tone},volume=-20dB,adelay=40|40")
+        # 6. one-frame A/V start offset (audio starts one frame, 40 ms at 25 fps, late)
+        offset = make("offset.mp4", busy, f"{tone},volume=-20dB", audio_offset_s="0.040")
         res = run_checked(runner, builder.probe_full(offset), cwd=work, limits=limits)
         probe = ProbeParser.parse(res.stdout)
-        v_start, a_start = (
-            probe.video.start_time or "0",
-            (probe.audio.start_time if probe.audio else "0") or "0",
-        )
+        v_start = probe.video.start_time or "0"
+        a_start = (probe.audio.start_time if probe.audio else "0") or "0"
         sync = qc_sync_av_container(
             start_video_s=v_start,
             start_audio_s=a_start,
@@ -174,20 +154,11 @@ class QcSelfTest:
         overlap = SrtWriter.write([Cue(1, 0, 1500, "a"), Cue(2, 1000, 2000, "b")])
         errors = SrtValidator.validate(SrtParser.parse(overlap), 5000)
         cases.append(_case("srt.overlap", "FAIL", qc_subtitles_format(errors=errors)))
-        # 8. 12 Mbps (WARN band: between the 8 Mbps floor and the 15 Mbps target)
+        # 8. 12 Mbps CBR (WARN band: between the 8 Mbps floor and the 15 Mbps target)
         rate = make(
-            "rate.mp4",
-            busy,
-            f"{tone},volume=-20dB",
-            "-b:v",
-            "12M",
-            "-minrate",
-            "12M",
-            "-maxrate",
-            "12M",
-            "-bufsize",
-            "24M",
-        )
+            "rate.mp4", busy, f"{tone},volume=-20dB",
+            "-b:v", "12M", "-minrate", "12M", "-maxrate", "12M", "-bufsize", "24M",
+        )  # fmt: skip
         res = run_checked(runner, builder.probe_full(rate), cwd=work, limits=limits)
         bitrate = ProbeParser.parse(res.stdout).video_bitrate_bps
         cases.append(
@@ -195,7 +166,7 @@ class QcSelfTest:
                 "rate.bitrate",
                 "WARN",
                 qc_video_bitrate(
-                    video_bitrate_bps=12_000_000 if bitrate else 0,
+                    video_bitrate_bps=bitrate,
                     min_bps=15_000_000,
                     max_bps=25_000_000,
                     floor_bps=8_000_000,

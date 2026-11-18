@@ -550,7 +550,10 @@ class ArgvBuilder:
         return self._detector(name, "v", f"select='gt(scene,{threshold})',showinfo")
 
     def srt_check(self, name: str) -> list[str]:
-        return [self.ffmpeg_bin, "-nostdin", "-v", "error", "-i", name, "-f", "null", "-"]
+        """18 section 7.6 ``ffmpeg -v error -i $S -f null -``; on FFmpeg 6.1.1 a subtitle-only
+        input needs an explicit subtitle encoder for the null muxer (``-c:s webvtt``)."""
+        return [self.ffmpeg_bin, "-nostdin", "-v", "error", "-i", name, "-c:s", "webvtt",
+                "-f", "null", "-"]  # fmt: skip
 
     def sample_frame(self, name: str, seek_ms: int, out_name: str) -> list[str]:
         return [

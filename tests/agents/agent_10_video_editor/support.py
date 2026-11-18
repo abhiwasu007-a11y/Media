@@ -85,6 +85,7 @@ def compile_case(i: dict[str, Any]) -> Timeline:
 import json  # noqa: E402
 from collections.abc import Callable, Sequence  # noqa: E402
 from pathlib import Path  # noqa: E402
+from typing import Protocol  # noqa: E402
 
 from agent_10_video_editor.canonical import sha256_hex  # noqa: E402
 from agent_10_video_editor.config import AgentTenConfig, Placement  # noqa: E402
@@ -114,6 +115,16 @@ COR = "cor_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e94"
 NIGHT = LocalTime.parse("SAT", "22:00")  # outside every market window of the fixture calendar
 
 
+class MediaFactory(Protocol):
+    """Generates real synthetic media at test time (never real material, never network)."""
+
+    def shot(self, label: str, duration_ms: int) -> tuple[bytes, str]: ...
+
+    def still(self, label: str) -> bytes: ...
+
+    def master(self, duration_ms: int) -> bytes: ...
+
+
 class World:
     """One tenant, one job, a tiled plan with generated (fake) assets and a passed audio master."""
 
@@ -128,6 +139,9 @@ class World:
         now: LocalTime = NIGHT,
         placement: Placement = Placement.DEV,
         org: str | None = None,
+        media: MediaFactory | None = None,
+        storage: MemoryBlobStorage | None = None,
+        script_overrides: dict[str, str] | None = None,
     ) -> None:
         self.org = org or str(ORG.new())
         self.job = str(JOB.new())
@@ -135,7 +149,7 @@ class World:
         self.attempt = str(ATTEMPT.new())
         self.cfg = config or make_config()
         self.ctx = TenantContext(org_id=self.org, actor=ActorRef("agent_10"))  # type: ignore[arg-type]
-        self.storage = MemoryBlobStorage()
+        self.storage = storage or MemoryBlobStorage()
         self.tenancy = MemoryTenancy()
         self.checkpoints = MemoryCheckpointStore()
         self.cost = MemoryCostLedger()
@@ -149,6 +163,8 @@ class World:
         self.licences = MemoryLicenceReader()
         self.scratch = tmp / "scratch"
         self.n_shots, self.shot_ms, self.chart = shots, shot_ms, chart
+        self.media = media
+        self.script_overrides = script_overrides or {}
         self.refs: dict[str, tuple[str, str]] = {}
         self.docs: dict[str, Any] = {}
         self._build()
@@ -167,14 +183,26 @@ class World:
 
     # -- documents ------------------------------------------------------------------------------
 
+    def revise_shot(self, index: int, data: bytes, ext: str = "mp4") -> None:
+        """A revision iteration: replace the asset of one shot (new asset id, new bytes) and
+        refresh the manifest document and its context ref; a new task id is allocated."""
+        entries = self.docs["agent_08.asset_sourcing.output"]["shots"]
+        entry = entries[index]
+        asset_id, uri, sha = self._asset(f"{entry['shot_id']}-rev", data, ext)
+        entry.update({"asset_id": asset_id, "asset_uri": uri, "fingerprints": {"sha256": sha}})
+        raw = json.dumps(self.docs["agent_08.asset_sourcing.output"], sort_keys=True).encode()
+        self.refs["agent_08.asset_sourcing.output"] = self.put("manifest-rev.json", raw)
+        self.task = str(TASK.new())
+        self.attempt = str(ATTEMPT.new())
+
     def put(self, name: str, data: bytes) -> tuple[str, str]:
         uri = f"amw-blob://{self.org}/jobs/{self.job}/inputs/{name}"
         info = self.storage.put_bytes(self.ctx, uri, data)
         return info.uri, info.sha256
 
-    def _asset(self, label: str, payload: bytes) -> tuple[str, str, str]:
+    def _asset(self, label: str, payload: bytes, ext: str = "png") -> tuple[str, str, str]:
         asset_id = str(ASSET.new())
-        uri, sha = self.put(f"{label}.png", payload)
+        uri, sha = self.put(f"{label}.{ext}", payload)
         self.assets.add(self.org, AssetRecord(asset_id=asset_id, uri=uri, sha256=sha))
         return asset_id, uri, sha
 
@@ -200,12 +228,21 @@ class World:
                     "segment_ids": [f"s{n + 1}"],
                 }
             )
-            asset_id, uri, sha = self._asset(sid, f"asset-{sid}".encode())
+            if self.media is not None:
+                data, ext = self.media.shot(sid, self.shot_ms)
+                asset_id, uri, sha = self._asset(sid, data, ext)
+            else:
+                asset_id, uri, sha = self._asset(sid, f"asset-{sid}".encode())
             stills: list[dict[str, Any]] = []
             if is_chart:
                 bounds = [start, *events]
                 for k, st in enumerate(bounds):
-                    a, u, h = self._asset(f"{sid}-still{k}", f"still-{sid}-{k}".encode())
+                    still_bytes = (
+                        self.media.still(f"{sid}-{k}")
+                        if self.media is not None
+                        else f"still-{sid}-{k}".encode()
+                    )
+                    a, u, h = self._asset(f"{sid}-still{k}", still_bytes)
                     stills.append(
                         {
                             "k": k,
@@ -232,6 +269,7 @@ class World:
             )
             segments[f"s{n + 1}"] = f"line number {n + 1} of the narration text"
             narration.append({"segment_id": f"s{n + 1}", "start_ms": start, "end_ms": end})
+        segments.update(self.script_overrides)
         script_sha = sha256_hex(json.dumps(segments, sort_keys=True).encode())
         self.script_sha = script_sha
         plan = {
@@ -244,7 +282,8 @@ class World:
             "hook": {"end_ms": 8000, "first_payoff_ms": 6000},
             "chapters": [{"section_id": "sec1", "start_ms": 0}],
         }
-        master_uri, master_sha = self.put("master.wav", b"RIFF-fake-master")
+        master_bytes = self.media.master(total) if self.media is not None else b"RIFF-fake-master"
+        master_uri, master_sha = self.put("master.wav", master_bytes)
         audio = {
             "master": {
                 "master_uri": master_uri,
