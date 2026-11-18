@@ -1,0 +1,21 @@
+{
+  "glyph_set_version": "1.0.0",
+  "criterion": "A glyph is neutral only if it has no arrow, no slope, no ascending or descending sequence of shapes and no up or down marker (level, symmetric or enclosing shapes such as frames, level steps, blocks and nodes).",
+  "neutral_allow_list": ["g1_level_steps", "g3_two_frames", "g4_blocks"],
+  "glyphs": [
+    {"key": "g1_level_steps", "label": "level steps outline", "ops": [
+      {"op": "rect", "box": [0, 300, 280, 400], "fill": null, "outline": "primary"},
+      {"op": "rect", "box": [360, 300, 280, 400], "fill": null, "outline": "primary"},
+      {"op": "rect", "box": [720, 300, 280, 400], "fill": null, "outline": "primary"}]},
+    {"key": "g2_arrow", "label": "rising arrow", "ops": [
+      {"op": "polygon", "points": [[500, 0], [900, 450], [600, 450], [600, 1000], [400, 1000], [400, 450], [100, 450]], "fill": "primary", "outline": null}]},
+    {"key": "g3_two_frames", "label": "two overlapping frames", "ops": [
+      {"op": "rect", "box": [50, 150, 600, 600], "fill": null, "outline": "primary"},
+      {"op": "rect", "box": [350, 250, 600, 600], "fill": null, "outline": "secondary"}]},
+    {"key": "g4_blocks", "label": "plain blocks", "ops": [
+      {"op": "rect", "box": [100, 100, 380, 380], "fill": "primary", "outline": null},
+      {"op": "rect", "box": [520, 100, 380, 380], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [100, 520, 380, 380], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [520, 520, 380, 380], "fill": "primary", "outline": null}]}
+  ]
+}
