@@ -54,6 +54,11 @@ The owner authorised me to merge PRs myself ("तुम्ही स्वतः
 - Not covered: any code PR. Code starts only after the owner's written approval of the 3A slice (D2). Every merged PR is reported in the progress update.
 - PRs merged so far: #1 (Phase 1), #2 (Wave A).
 
+### D4 (2026-11-18): maximum parallelism
+The owner found the work too slow and authorised running the maximum number of agents ("आपल्याकडे भरपूर टोकन आहेत"). This **lifts the 4-agent cap** of the token-discipline rules. The other token-discipline rules stay (brief per agent, ≤200-word returns, targeted reads).
+- The dev machine has 4 CPUs, which limits agents per workflow, so several workflows run side by side: Wave B-1 (3A slice, pool of 16) and three Wave B-2 groups (blueprints 01–03/12–15/17; shared docs and ADRs; business documents).
+- Contract needs from B-2 agents are returned as requests, not applied, so the Wave A/B-1 documents are not edited in parallel. A B-2 integrator applies them after B-1 is merged.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
