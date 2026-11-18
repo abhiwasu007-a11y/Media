@@ -8,7 +8,7 @@
 | Owner | Agent 11 Thumbnail Design |
 | Input payload schema | `agent_11.thumbnail_variants.concepts.input` 1.0.0 (JSON Schema in blueprint §7.3; variables in Inputs below; assembled by step code from the script's promise and thumbnail brief, the shot plan's subject view, the brand kit, the tenant's eligible assets and, in a revision, the previous set; never assembled by the model) |
 | Output payload schema | `agent_11.thumbnail_variants.concepts.output` 1.0.0 (= the Output JSON Schema below = the Pydantic model; registered by the blueprint, CCR-018) |
-| Rule packs injected | `rp.youtube_general` (always), `rp.finance_sebi_in` (when active for the channel), `rp.tenant_brand_safety` (when the tenant defines it) — by reference; rule IDs GLOSSARY §6.38, text 13; the TENANT-scope pack is rendered after the cache breakpoint (27 §4.2, CCR-025) |
+| Rule packs injected | `rp.youtube_general` (always), `rp.finance_sebi_in` (when active for the channel), `rp.tenant_brand_safety` (when the tenant defines it) — by reference; rule IDs GLOSSARY §6.38, text 13; the TENANT-scope pack is rendered after the cache breakpoint (27 §4.2, CCR-025): the renderer moves the `{{rule_pack:rp.tenant_brand_safety}}` token there, wherever it stands in the Rules section |
 | Eval set | [`evals/agent_11_thumbnail_design/thumbnail_concepts/`](../../evals/agent_11_thumbnail_design/thumbnail_concepts/) |
 | Config keys | `llm.agent_11.thumbnail_variants.concepts.model_tier`, `.temperature`, `.max_output_tokens`, `.timeout_ms`, `.cost_budget_micros`, `.cache_system_prompt`, `.batch_eligible`, optional `.fallback_tier` (key family `llm.<task_type>.<step>.*`, 27 §4.2, CCR-019) |
 | Deterministic pre/post checks | Pre (step code, before any model call): `a11.pre.tenant`, `a11.pre.refs` (script, verification, shot plan, brand kit, assets: org and SHA-256), `a11.pre.script_gate` (verified script version only), `a11.pre.config`, `a11.pre.budget` (S4 reservation), `a11.pre.text_options` (the options are built and filtered by code; zero eligible options means the model is not called), `a11.pre.assets` (asset eligibility). Post (after the model, not the model's job): schema parse (`AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID`, one retry with the error), guards G1 to G8 of blueprint §6.5 (ID existence, text provenance and count, template compatibility, finance imagery, face policy, rationale and injection scan, single-variable and distinctness, `NO_SAFE_CONCEPT` handling), one re-ask for failing concepts, then the code-made fallback planner. Colours, fonts, sizes, positions, pixels, contrast and file checks are made by the composer, never by the model. |
@@ -32,7 +32,7 @@ You are the concept-selection step of the Thumbnail Design stage in a video prod
 | `{{variant_count}}` | integer 1 to 3 | job input, capped by config |
 | `{{promise}}` | `{promise_statement, promise_key_terms[], working_title_local}` | script output `title_promise` |
 | `{{brief}}` | `{subject_idea, text_idea_local, must_not_promise[]}` | script output `thumbnail_brief` |
-| `{{subject_hints}}` | array of `{hint_id, intent_text, framing}` (English; at most 4; `hint_id` by position) | shot plan view `views.agent_11_subjects[]` |
+| `{{subject_hints}}` | array of `{hint_id, shot_id, shot_role, intent_text, framing}` (English; at most 4; passed through from the view, `hint_id` = `hn01…`) | shot plan view `views.agent_11_subjects[]` |
 | `{{subject_options}}` | array of `{option_id, kind, label, has_face, direction_neutral}`; `kind` is `OWNER_IMAGE`, `CODE_GLYPH` or `NONE` | asset pool and template catalogue, already filtered by code |
 | `{{text_options}}` | array of `{text_id, text, source, key_term_ids[], word_count}`; `source` is `BRIEF_TEXT`, `TITLE_SPAN` or `KEY_TERM` | text option builder, already filtered by code |
 | `{{templates}}` | array of `{template_key, is_default, text_lines_max, supports_subject_kinds[], direction_neutral}` | template catalogue |
@@ -137,7 +137,7 @@ Input:
   "promise": {"promise_statement": "You will learn how to read a trend from price structure, with the reasoning shown step by step.",
               "promise_key_terms": ["trend", "price structure"], "working_title_local": "How to read a trend from price structure"},
   "brief": {"subject_idea": "a plain schematic of level steps", "text_idea_local": "Read the trend", "must_not_promise": ["profit", "guaranteed", "secret"]},
-  "subject_hints": [{"hint_id": "h1", "intent_text": "A simple code-made schematic of level steps.", "framing": "NONE"}],
+  "subject_hints": [{"hint_id": "hn01", "shot_id": "sh01", "shot_role": "HOOK", "intent_text": "A simple code-made schematic of level steps.", "framing": "NONE"}],
   "subject_options": [
     {"option_id": "o01", "kind": "CODE_GLYPH", "label": "level steps outline", "has_face": false, "direction_neutral": true},
     {"option_id": "o02", "kind": "CODE_GLYPH", "label": "two overlapping frames", "has_face": false, "direction_neutral": true},
@@ -164,7 +164,7 @@ Output:
      "text_ids": ["t01"], "angle": "TERM_CLARITY", "hypothesis_kind": "CONTROL", "emphasis_style": "TERM_HIGHLIGHT", "accent_role": "PRIMARY",
      "rationale": "The brief's own phrase names the idea the promise states, beside the level steps outline."},
     {"concept_id": "c2", "status": "OK", "reason_code": null, "template_key": "tpl_split_left_text", "subject_option_id": "o01",
-     "text_ids": ["t03"], "angle": "PROCESS_STEPS", "hypothesis_kind": "TEXT_ANGLE", "emphasis_style": "TERM_HIGHLIGHT", "accent_role": "PRIMARY",
+     "text_ids": ["t03"], "angle": "TERM_CLARITY", "hypothesis_kind": "TEXT_ANGLE", "emphasis_style": "TERM_HIGHLIGHT", "accent_role": "PRIMARY",
      "rationale": "Only the words change; the longer option carries both promise key terms."},
     {"concept_id": "c3", "status": "OK", "reason_code": null, "template_key": "tpl_split_left_text", "subject_option_id": "o02",
      "text_ids": ["t01"], "angle": "TERM_CLARITY", "hypothesis_kind": "SUBJECT_CHOICE", "emphasis_style": "TERM_HIGHLIGHT", "accent_role": "PRIMARY",
@@ -181,7 +181,7 @@ Input:
   "call_seq": 1, "language": "en-IN", "channel_category": "education", "variant_count": 2,
   "promise": {"promise_statement": "You will learn three ways to organise a study week.", "promise_key_terms": ["study week"], "working_title_local": "Organise your study week"},
   "brief": {"subject_idea": "a tidy desk with a paper planner", "text_idea_local": "Organise your study week", "must_not_promise": ["top marks", "guaranteed"]},
-  "subject_hints": [{"hint_id": "h1", "intent_text": "A paper planner open on a tidy desk, close-up, soft daylight.", "framing": "CLOSE_UP"}],
+  "subject_hints": [{"hint_id": "hn01", "shot_id": "sh01", "shot_role": "HOOK", "intent_text": "A paper planner open on a tidy desk, close-up, soft daylight.", "framing": "CLOSE_UP"}],
   "subject_options": [
     {"option_id": "o01", "kind": "OWNER_IMAGE", "label": "planner on desk", "has_face": false, "direction_neutral": true}
   ],
