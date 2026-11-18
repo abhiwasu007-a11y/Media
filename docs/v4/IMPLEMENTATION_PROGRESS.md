@@ -21,8 +21,9 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
 | P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | Done (2026-11-18) | RESEARCH_LOG.md | official pricing/licence pages read | Blocked: openai.com, artlist.io, pond5, pexels, pixabay, shutterstock, help.elevenlabs.io, support.storyblocks.com | R7 |
 | P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
-| W-A | Architecture Wave A (foundation docs) | In progress (1 agent) | branch `claude/v4-wave-a` | — | — | R6 |
-| W-B | Architecture Wave B (17 blueprints + shared docs + ADRs) | Not started | — | — | W-A | R6 |
+| W-A | Architecture Wave A (foundation docs) | **Done** (2026-11-18); PR abhiwasu007-a11y/Media#2 | GLOSSARY_AND_IDS, 03, 04, 07, 24, 27, prompts/, evals/, CONTRACT_CHANGE_REQUESTS | schemas validated by script (2020-12 metaschema); 75 tables consistent; lead review: lag=30 d (IN-02), FIN-R13 (IN-03) + 2 cases, skeleton per D1 | — | R6 |
+| W-B1 | 3A slice (D2): ADR-001/005/007/008/009/012/013, docs 18, 13, 09, 08, 3A_SLICE_SPEC, blueprints 04–11 + 16, integrator, independent check | In progress | branch `claude/v4-wave-b1` | — | — | R6 |
+| W-B2 | Remaining blueprints 01–03, 12–15, 17 + other shared/enterprise/business docs | Not started (starts after B-1) | — | — | W-B1 | R6 |
 | W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
 | P1.6 | Technical feasibility | **Partial** (capabilities verdict done; server verdict + per-video totals REQUIRES REVIEW) | 00b_TECHNICAL_FEASIBILITY.md | every capability cites a research ID | P1.4 Part C (VPS), skeleton measurements, business plan | R3, R7 |
 
@@ -70,6 +71,17 @@ Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skelet
 | Q25 | Book licences: are the 13 PDF / 1 EPUB / 4 PPTX owned or licensed copies? Are the 1,349 extracted page images to be ingested? | The books are used **only as concept sources for original-words teaching** (directive §1B.2a). Extracted images are **excluded** from ingestion and never shown. Licence status goes into the compliance doc as an owner item. |
 | Q26 | The channel must not reveal the owner's private method beyond what the owner chooses. Which parts of `atp-private/knowledge` may appear in public videos? | Nothing from `atp-private` appears in videos by default. "Our method" topics are written only from material the owner explicitly releases per topic (S7 approval). |
 
+## Wave A open questions (provisional defaults accepted per owner rule A.9; the owner may override)
+| # | Question | Default applied |
+|---|---|---|
+| Q27 | Publish guard strictness | Strict: approval + editorial contribution + Agent 16 authorisation even for private upload (and for 3A delivery) |
+| Q28 | `FAILED` semantics | Non-terminal hand-off; exits only to DEAD_LETTER (auto) or CANCELLED (human) |
+| Q29 | Approval waits | CHECKPOINTED + `wait_reason=AWAITING_APPROVAL`, no timeout (reminders only) |
+| Q30 | Backtest success-rate / unstated sponsor status | NEEDS_HUMAN_REVIEW; doc 13 may tighten to BLOCKED via CCR |
+| Q31 | Audit chain throughput | Serialised per tenant; measure in pilot |
+| Q32 | Comment triage `UNCLASSIFIED` class | Kept (undecided comments go to a human, never dropped) |
+| Q33 | Blocked hosts for Python/UUIDv7/PostgreSQL facts | Please allow devguide.python.org, docs.python.org, www.rfc-editor.org; until then REQUIRES REVIEW |
+
 ## Session log
 | Date | Session | Work |
 |---|---|---|
@@ -79,4 +91,5 @@ Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skelet
 | Wave / step | Agents | Sub-agent tokens | Note |
 |---|---|---|---|
 | Phase 1 research (wave 1 + re-runs + wave 2) | 4 (Sonnet), 2 re-runs | ≈ 680k | 73.5k + 125.7k (YouTube), 154.4k (India), 97.5k + 121.3k (infra), 107.8k (prices) |
-| Wave A | 1 (Opus) | pending | |
+| Wave A | 1 (Opus) | 348k | 49 min |
+| Wave B-1 | 16 (Opus: ADRs, slice spec, integrator, check; Sonnet: docs + blueprints), max 4 parallel | pending | |
