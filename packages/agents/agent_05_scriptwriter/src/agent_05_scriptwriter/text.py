@@ -1,0 +1,117 @@
+"""Pure text helpers shared by the checks and the assembler (no I/O, no logging)."""
+
+import re
+import unicodedata
+from fractions import Fraction
+
+from amw_core.text_normalise import normalise_for_matching, tokenize
+
+_JOINERS = ("\u200d", "\u200c")
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.?!\u0964])(\s+)(?=[^\W\d_])")
+_WCHAR = r"(?:[^\W_]|[\u0900-\u0963\u0966-\u097f])"
+_WORD = re.compile(rf"{_WCHAR}+(?:['\u2019\-]{_WCHAR}+)*", re.UNICODE)
+_BRACKETED = re.compile(r"\([^()]*\)")
+DEVANAGARI = re.compile(r"[\u0900-\u097f]")
+
+
+def normalise(text: str) -> str:
+    """Shared normalisation, then whole words joined by single spaces (comparisons only)."""
+    return " ".join(t.text for t in tokenize(normalise_for_matching(text)))
+
+
+def words(text: str) -> list[str]:
+    return normalise(text).split()
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split at a terminator followed by whitespace and a letter (blueprint 10.6 ``Segmenter``).
+
+    The text itself is never altered except that surrounding whitespace is trimmed.
+    """
+    stripped = text.strip()
+    parts: list[str] = []
+    start = 0
+    for match in _SENTENCE_BOUNDARY.finditer(stripped):
+        parts.append(stripped[start : match.start()].strip())
+        start = match.end()
+    parts.append(stripped[start:].strip())
+    return [p for p in parts if p]
+
+
+def speech_chars(text: str) -> int:
+    """Approximate extended-grapheme count excluding whitespace (blueprint 10.6 unit note).
+
+    Combining marks and a character that follows a virama (conjuncts) join the previous cluster.
+    The exact unit **REQUIRES REVIEW (Phase 1)** once a speech rate is measured.
+    """
+    count = 0
+    joined = False
+    for ch in unicodedata.normalize("NFC", text):
+        if ch.isspace():
+            joined = False
+            continue
+        category = unicodedata.category(ch)
+        if category in ("Mn", "Mc", "Me") or ch in _JOINERS:
+            joined = unicodedata.combining(ch) == 9 or (joined and ch in _JOINERS)
+            continue
+        if joined:
+            joined = False
+            continue
+        count += 1
+    return count
+
+
+def word_count(text: str) -> int:
+    return len(text.split())
+
+
+def strip_brackets(text: str) -> str:
+    """Text with every ``( ... )`` group removed (bracketed English terms)."""
+    previous = None
+    current = text
+    while previous != current:
+        previous = current
+        current = _BRACKETED.sub(" ", current)
+    return current
+
+
+def ceil_div(numerator: int, denominator: int) -> int:
+    return -(-numerator // denominator)
+
+
+def to_fraction(value: float | int) -> Fraction:
+    """Exact fraction of a configuration number (avoids float artefacts like 240.00000000000003)."""
+    return Fraction(str(value))
+
+
+def has_devanagari(text: str) -> bool:
+    return DEVANAGARI.search(text) is not None
+
+
+def _hidden(ch: str) -> bool:
+    cp = ord(ch)
+    return (
+        unicodedata.category(ch) in ("Cf", "Co", "Cn", "Cs")
+        or cp in (0x034F, 0x0345, 0x0640)
+        or 0xFE00 <= cp <= 0xFE0F
+        or 0xE0100 <= cp <= 0xE01EF
+    )
+
+
+def invisible_characters(text: str) -> list[str]:
+    """Invisible or decorative characters that hide inside words (a joiner next to Devanagari is
+    legitimate and not reported)."""
+    found: list[str] = []
+    for i, ch in enumerate(text):
+        if not _hidden(ch):
+            continue
+        if ch in _JOINERS and (
+            (i > 0 and DEVANAGARI.match(text[i - 1]))
+            or (i + 1 < len(text) and DEVANAGARI.match(text[i + 1]))
+        ):
+            continue
+        found.append(f"U+{ord(ch):04X}")
+    return found
+
+
+__all__ = ["normalise_for_matching"]
