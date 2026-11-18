@@ -53,7 +53,7 @@ def _place(admin: Conn, table: str, row: uuid.UUID, state: str) -> None:
     with admin.transaction():
         admin.execute("SET LOCAL session_replication_role = replica")
         admin.execute(
-            f"UPDATE {table} SET state = %(s)s{extra} WHERE id = %(id)s",  # noqa: S608
+            f"UPDATE {table} SET state = %(s)s{extra} WHERE id = %(id)s",
             {"s": state, "id": row},
         )
 
@@ -94,7 +94,7 @@ def test_trigger_allows_every_rule(
     assert rule.from_state is not None
     _place(admin, table, row, rule.from_state)
     _move(admin, table, row, rule.to_state)
-    got = admin.execute(f"SELECT state FROM {table} WHERE id = %s", (row,)).fetchone()  # noqa: S608
+    got = admin.execute(f"SELECT state FROM {table} WHERE id = %s", (row,)).fetchone()
     assert got == (rule.to_state,)
 
 

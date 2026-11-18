@@ -347,7 +347,7 @@ def _place(admin: Conn, task: uuid.UUID, state: str, extra: str = "") -> None:
     with admin.transaction():
         admin.execute("SET LOCAL session_replication_role = replica")
         admin.execute(
-            f"UPDATE tasks SET state = %s, state_changed_at = now() - interval '1 hour'{extra}"  # noqa: S608
+            f"UPDATE tasks SET state = %s, state_changed_at = now() - interval '1 hour'{extra}"
             " WHERE id = %s",
             (state, task),
         )
