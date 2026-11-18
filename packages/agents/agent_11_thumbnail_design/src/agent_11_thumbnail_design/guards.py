@@ -93,9 +93,8 @@ def _g5(c: Concept, ctx: GuardContext) -> bool:
     return not pic.has_face or (ctx.faces_allowed and not ctx.finance)
 
 
-def _g6(c: Concept, ctx: GuardContext) -> bool:
+def rationale_ok(r: str, ctx: GuardContext) -> bool:
     s = ctx.step_in
-    r = c.rationale
     if len(r) > s.limits.max_rationale_chars or not r.isascii():
         return False
     if any(ch.isdigit() for ch in r) or _URL.search(r):
@@ -206,7 +205,7 @@ def _first_failure(c: Concept, idx: int, concepts: Sequence[Concept], ctx: Guard
         ("G3", _g3(c, ctx)),
         ("G4", _g4(c, ctx)),
         ("G5", _g5(c, ctx)),
-        ("G6", _g6(c, ctx)),
+        ("G6", rationale_ok(c.rationale, ctx)),
         ("G7", _g7(c, idx, concepts, ctx)),
     ]
     return next((g for g, ok in checks if not ok), None)
