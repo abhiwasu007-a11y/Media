@@ -49,11 +49,11 @@ Uses only the `budgets` / `budget_reservations` columns and enums of 04 §5.14 a
 |---|---|---|---|
 | Per video | `ORG` (or `PRODUCTION_TYPE`) / `PER_VIDEO` | cap on summed ledger cost of one job | 3A |
 | Per job | `ORG` / `PER_JOB` | cap on a non-video job (e.g. a system job) | 3C |
-| Pilot total | `ORG` / `PILOT_TOTAL` (pending CCR) | non-resetting cap across the whole pilot (D1) | 3A |
+| Pilot total | `ORG` / `PILOT_TOTAL` (CCR-035, applied) | non-resetting cap across the whole pilot (D1) | 3A |
 | Daily | `ORG` or `CHANNEL` / `DAY` | cap per calendar day in the tenant's time zone (GLOSSARY units/time zones) | 3B |
 | Monthly | `ORG` or `CHANNEL` / `MONTH` | cap per month | 3B |
 | Per production type | `PRODUCTION_TYPE` + `scope_key` / any period | cap for one type, e.g. AI B-roll heavy types | 3C |
-| Provider limit | `PROVIDER` (pending CCR) / `PILOT_TOTAL` or `MONTH` | owner's declared cap set at the provider (§8) | 3A |
+| Provider limit | `PROVIDER` (CCR-035, applied) / `PILOT_TOTAL` or `MONTH` | owner's declared cap set at the provider (§8) | 3A |
 
 `limit_minor` is set only by the owner or tenant (04: "never defaulted silently"). All values are **REQUIRES REVIEW (Phase 1): owner sets per-video, pilot, daily and monthly limits and the currency** (rule 8; open owner input A6 "budget ceiling"). The system ships with no non-zero default: a budget row with no owner-set limit means "no paid call may start".
 
@@ -167,7 +167,7 @@ D1: paid API calls start only after the owner has set spending limits at each pr
 
 | Step | Rule |
 |---|---|
-| 8.1 | For each paid provider adapter enabled in config (LLM, TTS, stock, any AI B-roll), a `budgets` row with `scope_kind = PROVIDER` (pending CCR), `scope_key = <provider>`, `limit_minor` = the cap the owner set at the provider, must exist and be `ACTIVE`. Creating it is the owner's acknowledgement that the provider-side limit is set. |
+| 8.1 | For each paid provider adapter enabled in config (LLM, TTS, stock, any AI B-roll), a `budgets` row with `scope_kind = PROVIDER` (CCR-035, applied), `scope_key = <provider>`, `limit_minor` = the cap the owner set at the provider, must exist and be `ACTIVE`. Creating it is the owner's acknowledgement that the provider-side limit is set. |
 | 8.2 | Missing or `DISABLED` row: the adapter refuses every paid call with `RESOURCE.BUDGET_EXHAUSTED` before any network request (fail closed). Free local steps are unaffected. |
 | 8.3 | Our internal pilot and per-video limits must be at or below the owner's provider limits; S4 warns when a configured limit exceeds the provider row. The owner may set them lower, never silently higher. |
 | 8.4 | Keys reach adapters only through the environment's secret mechanism; never in git, logs, ledger rows, reports or shared environment variables (D1, rule 5). Ledger and report contain provider names, not credentials or account identifiers. |
@@ -305,6 +305,8 @@ Rows end with: total, per-term split of §9 (LLM, TTS, footage, music, AI B-roll
 ## 14. Contract change requests (pending)
 
 Needed items that do not exist in Wave A. This document is written against the proposed names, marked "(pending CCR)". Filed by the integrator from the structured return, not edited here.
+
+Decisions (CONTRACT_CHANGE_REQUESTS.md, 2026-11-18): #1 and #2 = **CCR-035, approved and applied** (GLOSSARY §6.45, 04 §5.14). #3 = **CCR-036, rejected for 3A** (in 3A every paid task is treated as non-critical, §4; refile with 3C scheduling).
 
 | # | Needed | Why | Proposed change | Target doc |
 |---|---|---|---|---|
