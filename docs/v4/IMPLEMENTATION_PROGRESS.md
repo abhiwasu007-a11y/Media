@@ -20,7 +20,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | P1.4 | Repo & server audit | **Partial**: Parts A, B, D done; Part C blocked | 00_REPO_AND_SERVER_AUDIT.md | private repos inventoried read-only (counts only) | **VPS script output (A1)** | R3 |
 | P1.5 | Research log, wave 1 (§1 constraints: YouTube, server/stack, India regulatory) | Done (2026-11-18) | RESEARCH_LOG.md | 34 entries read from official pages; key phrases re-checked after the network change | Blocked hosts: github.com, copyright.gov.in, egazette.gov.in, indiacode.nic.in | R8 |
 | P1.5b | Research wave 2: vendor prices and licences (Anthropic, ElevenLabs, Storyblocks, others) | Done (2026-11-18) | RESEARCH_LOG.md | official pricing/licence pages read | Blocked: openai.com, artlist.io, pond5, pexels, pixabay, shutterstock, help.elevenlabs.io, support.storyblocks.com | R7 |
-| P1.7 | Knowledge Library ingestion plan (generic) + owner needs K1–K8 | Done (2026-11-18) | KNOWLEDGE_LIBRARY_PLAN.md | self-review | Book location (K1) | R4 |
+| P1.7 | Knowledge Library ingestion plan + owner needs | Done (2026-11-18); **K1 answered** (three private locations, §5 of the plan) | KNOWLEDGE_LIBRARY_PLAN.md | listings checked: commit 6dd8bf4 pin valid; 3 stub PDFs and a count mismatch found | K2, K9–K12; **ADR-013, agent_04 blueprint and 3A_SLICE_SPEC (Wave B-1) must be aligned to §5 after B-1 finishes** | R4 |
 | W-A | Architecture Wave A (foundation docs) | **Done and merged** (2026-11-18); PR abhiwasu007-a11y/Media#2 | GLOSSARY_AND_IDS, 03, 04, 07, 24, 27, prompts/, evals/, CONTRACT_CHANGE_REQUESTS | schemas validated by script (2020-12 metaschema); 75 tables consistent; lead review: lag=30 d (IN-02), FIN-R13 (IN-03) + 2 cases, skeleton per D1 | — | R6 |
 | W-B1 | 3A slice (D2): ADR-001/005/007/008/009/012/013, docs 18, 13, 09, 08, 3A_SLICE_SPEC, blueprints 04–11 + 16, integrator, independent check | In progress | branch `claude/v4-wave-b1` | — | — | R6 |
 | W-B2 | Remaining blueprints 01–03, 12–15, 17 + other shared/enterprise/business docs | Not started (starts after B-1) | — | — | W-B1 | R6 |
@@ -87,6 +87,14 @@ The owner authorised me to merge PRs myself ("तुम्ही स्वतः
 | Q31 | Audit chain throughput | Serialised per tenant; measure in pilot |
 | Q32 | Comment triage `UNCLASSIFIED` class | Kept (undecided comments go to a human, never dropped) |
 | Q33 | Blocked hosts for Python/UUIDv7/PostgreSQL facts | Please allow devguide.python.org, docs.python.org, www.rfc-editor.org; until then REQUIRES REVIEW |
+
+## Book-location answers (2026-11-18) — provisional defaults (details in KNOWLEDGE_LIBRARY_PLAN.md §5)
+| # | Question | Default applied |
+|---|---|---|
+| Q34 | How to split the sources | Three per-tenant collections: `pd_books`, `owner_strategies_notes` (restricted), `owner_books` |
+| Q35 | May public-domain books be quoted at length? | No: concept-only for all collections; short attributed quotes need reviewer approval |
+| Q36 | Is public-domain status verified? | No (⚖ per book/edition); treated like Q35 until verified |
+| Q37 | The 3 files of 133 bytes | Excluded until the real files are provided |
 
 ## Session log
 | Date | Session | Work |
