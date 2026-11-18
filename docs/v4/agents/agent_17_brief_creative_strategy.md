@@ -453,3 +453,293 @@ Verification: no external API fact is asserted here beyond RESEARCH_LOG PR-01..P
 
 ---
 
+## 13 Database tables
+**MVP: 3C · Tier 1. Only tables of 04_DATABASE_ARCHITECTURE.md are used; Agent 17 has no table of its own and no migration.** All access through `amw_core.tenancy` with RLS `FORCE` (04 §3).
+| Table (04 §) | Access | Use |
+|---|---|---|
+| `projects`, `jobs`, `tasks`, `task_attempts` (5.3) | read; state writes only by the orchestrator through core | context; Agent 17 never writes task state itself |
+| `production_types`, `org_production_types` (5.2) | read | `required_inputs`, formats, approvals of the type |
+| `rule_packs`, `compliance_profiles`, `compliance_profile_rule_packs` (5.2) | read | pack text and version for the prompt; served sectors |
+| `brand_kits` (5.12) | read | `is_current` kit: banned words, tone rules, logo presence |
+| `assets` (5.15) | read | client's own media inventory (`kind`, `visual_source_tier`, `depicts_real_person`, `release_ref`); never the file content |
+| `voices`, `voice_consents` (5.12) | read (state, expiry, withdrawal only) | approved voice check for `REPLICATED_LIKENESS_OR_VOICE` |
+| `approvals`, `approval_steps` (5.16) | read | `BRIEF` and `CONCEPT` decisions, `subject_sha256`, comments as client answers (S7 hands them over as `client_answers`) |
+| `scripts` (5.11) | **insert** one row per (language, duration) script, `status = DRAFT`, `created_by_task_id`, `prompt_id = agent_17/ad_script_storyboard.v1` | the script that Agent 06 extracts claims from. Agent 05 owns this table for channel scripts; Agent 17 as a second writer for ad scripts and a `format` discriminator are **pending CCR** |
+| `claims` (5.11) | none | Agent 06 writes claims; Agent 17 only hands over `claim_list`; `claims.substantiation_ref` is set downstream |
+| `memory_items` (5.10) | insert and supersede | scope `PROJECT`: `ad.brief.current`, `ad.concepts.current`, `ad.script.<language>.<duration>` (pointers to blobs, `provenance_ref` = output ref, `expires_at` required); scope `LONG_TERM` (Tier 2): `ad.client_preferences`, `ad.concept_history` (§14) |
+| `audit_log`, `cost_ledger`, `budget_reservations`, `idempotency_keys`, `checkpoints` (5.9, 5.13, 5.14, 5.7) | via core services only | audit, cost, idempotency, checkpoints |
+| `licence_ledger`, `compliance_verdicts`, `editorial_contributions`, `oauth_tokens` | **no access** | not Agent 17's; humans write `editorial_contributions` (04 trigger) |
+Write grant: only the shared `amw_app` DML on the rows above; no DDL; no approval writes. Document bodies (brief, concepts, scripts, storyboards, claim list, checklist) are write-once blobs `amw-blob://<org>/jobs/<job>/tasks/<task>/attempts/<att>/...` (03 §5.1, ADR-005), not table columns.
+
+---
+
+## 14 Memory
+**MVP: 3C: PROJECT scope only · Tier 2: client preferences and concept history (LONG_TERM).**
+| Scope (GLOSSARY §6.30) | Content | Written by / when | Read by | Expiry / review |
+|---|---|---|---|---|
+| `WORKING` | prompt variables, raw model output for the attempt | in-attempt only | the same attempt | discarded; raw output blob kept as an attempt artefact for the retention period of 04 §7 |
+| `TASK` | check results, repair round number | every task | the same task on retry | task end |
+| `PROJECT` | current brief, confirmed claim register, concept deck, approved variants, per-duration scripts (pointers + hashes) | after each task | later Agent 17 tasks and the orchestrator | `expires_at` = config `ad.memory.project_ttl_days` (REQUIRES REVIEW (22): retention) |
+| `LONG_TERM` (Tier 2) | `ad.client_preferences` (tone words the client rejected or approved, banned words the client added, preferred hook lengths), `ad.concept_history` (concept titles and angles only; no claims, no copy) | **only from human decisions** (a `CONCEPT`/`SCRIPT` approval with comments or a client edit), never from model output alone | `concept_variants` as a constraint list | `review_after` set; the client can delete (22 data requests) |
+Rules: memory is per tenant and per workspace (04 §5.10 composite FKs); no cross-client learning; nothing from one client's brief, claims or documents is used for another client, in prompts, examples or evals; the shared prompt prefix holds no tenant data; the owner's channel memory (Agents 03, 15) is a different workspace and is never read. A memory item stores no document text and no personal data of models or voice owners (references only; 22).
+
+---
+
+## 15 Upstream and downstream contracts
+**MVP: 3C · Tier 1.**
+### 15.1 Upstream (what Agent 17 consumes)
+| Producer | What | Contract | Check |
+|---|---|---|---|
+| Orchestrator (01) | Task Input for the three task types, revision routing, `iteration` | 03 §3; 24 §3.2 | S0; `PERMANENT.UNSUPPORTED_TASK` if the type is not registered for `agent_17` |
+| Client intake (S11 portal in Tier 2; the platform operator in the managed service, Tier 1) | brief text, documents, answers | text + documents in the client's tenant | `client_documents` hashes verified; document text extraction not by Agent 17 (contract request) |
+| S7 approvals | decisions `BRIEF`, `CONCEPT`; comments as answers | 03 §11.6; GLOSSARY §6.15 | state `APPROVED`, hash bound to the exact blob |
+| Brand kit (S11 to 13) | banned words, tone rules, logo and colours presence | 04 §5.12 | `is_current` |
+| Client media register (`assets`) | inventory of the client's own footage and photos | 04 §5.15 | status active; `release_ref` for people |
+| Agent 16 rule packs | `rp.advertising_asci_in`, sector packs, rule IDs `ADV-R1..R16` | 25 §4 | version recorded per call |
+### 15.2 Downstream (what Agent 17 produces)
+| Consumer | What it receives | Schema | Use |
+|---|---|---|---|
+| Orchestrator (01), S7 | readiness, questions, concept deck, script bundle as approval **subjects** (hash) | `agent_17.*.output` | routing; approval cards |
+| Agent 06 | `script` (as the persisted `scripts` row) + `claim_list` as `context_refs` purpose `PRIOR_OUTPUT` | `agent_17.ad_script_storyboard.output` | extraction and verification per ad claim; sets `claims.substantiation_ref` from `substantiation_doc_ids` (06 input change **pending CCR**) |
+| Agent 16 | `claim_list`, `label_proposal`, `rights_checklist`, `category.sector_keys`, `risk_notes` | same | ADV-R1, R5, R7, R8, R9, R16; sector-pack loading; verdicts are Agent 16's |
+| Agent 07 | spoken segments (`VOICEOVER`, `SPOKEN_BY_PRESENTER`), language, presenter kind, replicated-voice requirement | script part | voice synthesis; a `REPLICATED_LIKENESS_OR_VOICE` shot needs a `VERIFIED` voice consent |
+| Agent 09 | storyboard shots (durations, descriptions, tiers) | storyboard part | refined into the shot plan and timeline; Agent 09 may not add people or brands |
+| Agent 08 | media needs: `product_media_ref` (client first), tier per shot, no-real-person rule | storyboard part | asset sourcing; licence ledger rows |
+| Agent 10 | supers and disclaimers with their shots; ratio per storyboard | storyboard part | render per format; `qc.ad_spot` |
+| Agent 13 | indirectly: usage-rights inputs and label decision via Agent 16 | | delivery; never reads the proposal as a decision |
+| S4 (cost) | cost entries per call | 04 §5.14 | budget guard |
+No cycle: Agent 17 outputs flow forward only; revisions come back as new tasks created by the orchestrator (07 §9).
+
+---
+
+## 16 State handling and checkpoints
+**MVP: 3C · Tier 1.** Task states and transitions are 03 §11. Agent 17 only returns `SUCCEEDED`, `FAILED`, `REJECTED` (validation) or `SUSPENDED` with `wait_reason = AWAITING_BUDGET` (S4 refusal) or `DRAIN`; it never waits on a human (approvals are separate gate tasks, S7).
+| Checkpoint | After | Holds | On resume |
+|---|---|---|---|
+| C1 | S0 validation and input loading | verified input hashes, register, forbidden/approved lists, budgets | re-derive; no model call yet |
+| C2 | each model call returns | raw output blob, usage, cost entry ID | **do not call again**; continue with post-checks (no double payment) |
+| C3 | post-checks and the single repair round | check results, repair used flag | continue to the computed layer |
+| C4 | persistence | blobs written, `scripts` row, pointers | verify by idempotency key; emit output |
+Per ratio of a script task: C2 and C3 are per ratio; the locked script is taken from the first ratio's C3. Resume after `INFRASTRUCTURE.HOST_RESTART` or `WORKER_LOST` restarts from the latest checkpoint (07 §10). Idempotency keys (03 §9): LLM call = hash(task, step, ratio, prompt SHA-256, input SHA-256, repair flag); `scripts` insert = (task, ratio-set, language, duration); blob write = content hash. Concurrency: a revision of a concept never overwrites the previous blob; it creates `iteration + 1` and a superseding pointer.
+Loop caps (07 §9): clarification rounds `ad.brief.max_clarification_rounds`; revision loops per gate `limits.max_revision_loops` (3, 07 §9) set by the orchestrator; repair rounds 1 per step; LLM calls per task `max_llm_calls`.
+
+---
+
+## 17 Resource model
+**MVP: 3C · Tier 1. All figures are ESTIMATE until measured in the first eval and pilot runs (rule 4, label ESTIMATE).**
+| Item | Estimate | Basis |
+|---|---|---|
+| CPU | negligible; JSON validation and string checks | no media work |
+| Memory | under 256 MB per task | JSON documents of tens of KB; ESTIMATE |
+| Storage per ordered ad | tens to low hundreds of KB (brief, concepts, scripts, storyboards, claim list, checklist, raw outputs) | JSON; ESTIMATE |
+| DB writes per task | under 20 rows (`scripts`, `memory_items`, cost, audit, checkpoints) | ESTIMATE |
+| Tokens per call (assumed prompt sizes) | `brief_intake`: about 2,000 in / 1,500 out; `concept_variants`: about 3,000 in / 3,000 out; `ad_script_storyboard`: about 3,500 in / 2,500 out per ratio | assumed, not measured; Devanagari costs more (09 §11, REQUIRES REVIEW (Phase 1)) |
+| Cost per call at the mid tier of PR-01 (USD 2 in / 10 out per million tokens, no cache, no batch) | about USD 0.019 / 0.036 / 0.032 | arithmetic on the assumed tokens; prices PR-01; the configured model may differ |
+| Cost of one ordered ad (two intake rounds, two concept iterations, four ratios) | about USD 0.24 for LLM calls | 2 x 0.019 + 2 x 0.036 + 4 x 0.032; ESTIMATE; excludes voice, assets, render (other agents) |
+| Latency | provider-bound; **not measured** | REQUIRES REVIEW (Phase 1): p50/p95 from the first eval run |
+| Concurrency | `llm` capability concurrency set by S5/05; Agent 17 adds no extra limit; typically one or two tasks at a time (ESTIMATE) | 05 |
+| Quotas | YouTube 0 units; provider limits owner-set (D1) | |
+Caps in §16 bound the worst case. Spend is reserved before each call (S4) and stops on breach (D1).
+
+---
+
+## 18 Errors and recovery
+**MVP: 3C · Tier 1. Codes from 07 §2; policies from 07 §3.**
+| Situation | Code | Disposition | Who |
+|---|---|---|---|
+| input fails schema or version | `PERMANENT.SCHEMA_INVALID` / `SCHEMA_VERSION_UNSUPPORTED` | structured rejection, no attempt | orchestrator, L2 |
+| org mismatch between envelope, input, refs | `PERMANENT.TENANT_MISMATCH` | fail, security event | L3 security |
+| ref of another tenant | `PERMANENT.CROSS_TENANT_REF` | fail + security event; no read performed | L3 |
+| approval missing, not `APPROVED`, or hash differs | `PERMANENT.MISSING_DEPENDENCY` | fail; orchestrator re-plans the approval | L2 |
+| unsupported production type, impossible values (e.g. `variant_count` 2) | `PERMANENT.UNSUPPORTED_TASK` / `INPUT_INVALID` | fail | L2 |
+| `wpm[lang]` or another required `ad.*` value missing | `PERMANENT.CONFIG_INVALID` | fail | L3 operations |
+| LLM output not JSON | `AGENT.INVALID_JSON` | retry once with the parse error appended (`agent_parse`) | L2 after cap |
+| JSON fails the schema | `AGENT.OUTPUT_SCHEMA_INVALID` | retry once with the violations appended | L2 after cap |
+| D-check fails (claim outside the register, wrong counts, forbidden name, bad duration sum, lock changed, undeclared person) | one repair round (error appended); then `AGENT.QUALITY_REPEATED_FAILURE` | fail; the previous iteration stays valid; nothing silently edited | L3 quality |
+| model refusal `INSUFFICIENT_INPUT` | `PERMANENT.INSUFFICIENT_INPUT` | fail; orchestrator re-plans upstream (27 §4.3) | L2 |
+| refusal `RULE_WOULD_BE_BROKEN` | `SUCCEEDED` with `advisory_verdict = BLOCKED`, `violated_rule_ids` | orchestrator inserts a `SENSITIVE_CLAIM` approval for the operator; the client is told what is needed (a release, a document) by S7 | L2 |
+| refusal `OUT_OF_SCOPE` / `CONFLICTING_INSTRUCTIONS` | `PERMANENT.INPUT_INVALID` | fail | L2 |
+| refusal `UNSAFE_CONTENT` | `SUCCEEDED`, readiness `NEEDS_HUMAN_REVIEW` (brief) or verdict `NEEDS_HUMAN_REVIEW` | S7 approval `SENSITIVE_CLAIM` | L3 |
+| clarification round cap reached with blocking questions open | readiness `NEEDS_HUMAN_REVIEW` (`ROUND_CAP`) | operator contacts the client; no further automatic round | L2 |
+| spend refused by S4 | `RESOURCE.BUDGET_EXHAUSTED` | suspend `AWAITING_BUDGET`; completed work kept; no automatic raise (rule 8) | L3 finance |
+| provider 429 / 5xx / timeout / network | `TEMPORARY.RATE_LIMITED` / `UPSTREAM_5XX` / `TIMEOUT` / `NETWORK` | retry per 07 §3 (`rate_limited`, `temporary`) | L1 |
+| provider rejects the key | `PERMANENT.AUTH_INVALID` | fail | L3 |
+| provider content refusal | `PERMANENT.PROVIDER_REFUSAL` | fail (configured fallback once) | L2, L3 if compliance |
+| storage or DB unavailable | `INFRASTRUCTURE.STORAGE_UNAVAILABLE` / `DB_UNAVAILABLE`, `TEMPORARY.DB_TRANSIENT` | retry from checkpoint | L1 |
+| crash, hang, worker lost, host restart | `AGENT.CRASH`, `AGENT.HANG`, `INFRASTRUCTURE.WORKER_LOST`, `HOST_RESTART` | retry from the latest checkpoint; C2 prevents a second paid call | L1 |
+| breaker open for the provider | `INFRASTRUCTURE.CIRCUIT_OPEN` | wait | L1 |
+| deadline passed | `PERMANENT.DEADLINE_EXCEEDED` | fail | L2 |
+| emergency stop / drain | `OPERATOR_PAUSE` / `DRAIN` | checkpoint, stop claiming (07 §8) | |
+Poison input (a brief that always crashes the step) goes to the dead-letter queue after the retry caps (07 §7); `error.message` never contains brief text, claims or names (03 §6 rule 3).
+
+---
+
+## 19 Security and permissions
+**MVP: 3C · Tier 1 (client data exists from the first client). Tenant isolation controls are absolute (rule 9).**
+
+### 19.1 How this agent enforces tenant isolation
+| # | Control | Where |
+|---|---|---|
+| T1 | `org_id` comes only from the task envelope; never from brief text, a document, a model output or a client-supplied field. `TenantGuard` compares envelope, input, every `context_refs[].uri`, `prior_output_ref`, `client_documents[].storage_uri`, every loaded row and every document handle; any mismatch fails before work (`TENANT_MISMATCH` / `CROSS_TENANT_REF`) | S0 (03 §7.1), §10 row 2 |
+| T2 | all DB access through `amw_core.tenancy` (`SET LOCAL app.org_id`, explicit predicates); RLS `FORCE` is the second line; an unset context returns zero rows (04 §3, INF-11) | 08 §8 layers 1-2 |
+| T3 | **client and workspace isolation inside a tenant:** every read of brand kit, assets, voices and memory filters `workspace_id` (and `channel_id` when set); one client's media, claims, documents, concepts and preferences are never visible to another client's job | repositories |
+| T4 | storage URIs `amw-blob://<org>/...`; the org part is compared to the context before any read; blobs are write-once with SHA-256 verified on read; client documents are read as hashes and IDs, with content only where the step needs it (none of the three steps reads document bodies) | `DocStore`, 08 §8 layer 3 |
+| T5 | cache keys `amw:<org>:<area>:<key>`; the shared prompt prefix holds no tenant data; each model call carries exactly one client's data | 08 §8 layer 4 |
+| T6 | logs, metrics, traces and audit carry `org_id`, `channel_id`, `job_id`, `task_id` and hashes only; no brief text, claim, name, document, prompt or model output (canary test) | 08 §8 layer 5 |
+| T7 | the model sees no other tenant's data by construction (prompt Inputs tables list every variable); a request in model-visible text for other tenants' data is an injection case in every eval set (`UNSAFE_CONTENT` or ignored) | §26 |
+| T8 | memory and pointer rows are inserted with the job's `workspace_id`, `project_id` (tenant-composite FKs, 04 §5.10); no read of memory of another workspace; no cross-client learning (§14) | `PointerStore` |
+| T9 | a task for an org that is not `ACTIVE` fails `PERMANENT.TENANT_INACTIVE` | S0 |
+| T10 | fixtures and eval cases are fictional; no real client data enters a test (08 §8.1 item 6) | tests |
+
+### 19.2 Other controls
+- **Least privilege:** only the shared `amw_app` DML of §13; no approval, verdict or editorial writes; no credential access; the agent identity `agent_17` appears in every audit event; an agent cannot approve (08 §5.3).
+- **Personal data:** briefs may name real people (talent, staff, customers). The platform acts as a data processor for client data (IN-07; 22): names stay in the client's tenant, are not copied into memory, logs or evals, and follow the client's retention and erasure rules. Release documents and consents are referenced by ID only.
+- **Prompt injection:** brief text, answers, document titles, feedback and names are untrusted data; model output is validated by code before any effect (08 §5.3); the code, not the model, builds readiness, label proposal and checklist, so an injected "skip the risk notes" cannot change a verdict; injection cases in all three eval sets.
+- **Impersonation and deepfake:** the agent never names or describes a real person in a way that could feed a generation prompt (25 §7.2 step 4); requests for lookalikes or fabricated endorsements become `BLOCKING` risk notes and human review (ADV-R2, R5).
+- **Compliance posture:** advisory only; Agent 16 is final (Q5); the client contract places claim truth and approval with the advertiser (25 §1.2). The agent never states that an ad is compliant.
+- **Secrets:** none in the agent; the adapter holds the provider key (08 §3); no secret, client document text or private method in this repository.
+- **Required security tests:** §21 security row; 08 §8.2 items 1-8 apply.
+
+---
+
+## 20 Quality criteria
+**MVP: 3C · Tier 1. Thresholds are design defaults recalibrated at the first client pilot; the eval gate thresholds are in §26.**
+| ID | Criterion | Metric | Threshold |
+|---|---|---|---|
+| Q-1 | Quote fidelity | share of `quote` fields that are exact substrings | 100 % (blocking) |
+| Q-2 | Claim discipline | statements in scripts outside the register | 0 (blocking) |
+| Q-3 | Claim wording | share of script claims whose wording is not stronger than the register text (judge J3 plus a deterministic token check) | 100 % deterministic part; judge mean >= 4.0 |
+| Q-4 | Rights honesty | shots with a real person or third-party brand without an approved ref | 0 (blocking) |
+| Q-5 | Variants | count equals the order; angles distinct; hook overlap within limit | 100 % (blocking) |
+| Q-6 | Plan arithmetic | shot durations sum to the ordered duration; shot count and word count within bounds | 100 % after the one repair round; first-pass rate reported |
+| Q-7 | Lock identity | script identical across ratios of one task | 100 % |
+| Q-8 | Hand-off completeness | each script output has `claim_list`, `label_proposal`, `rights_checklist` | 100 % |
+| Q-9 | Question quality | questions asked on a `PRESENT` input; duplicates; over cap | 0 (blocking); judge J2 mean >= 3.5 |
+| Q-10 | Label proposal vs Agent 16 decision | share of ads where ADV-R16 fires (proposal differs from the gate) | MEASURED at the pilot; no target before |
+| Q-11 | Downstream pass | scripts passing 06 and 16 without a loop caused by Agent 17 | MEASURED; no target before the pilot |
+| Q-12 | Cost | per-task cost against `resource_budget` | within budget in 100 % of tasks |
+Quality score (100 points, §1A.7) belongs to Agent 16 on the rendered video; Agent 17 does not score.
+
+---
+
+## 21 Tests
+**MVP: 3C · Tier 1. Fakes and fixtures only (27 §8); fictional data only; markers `unit`, `integration`, `contract`, `regression`, `failure`, `performance`, `security`, `e2e`.**
+| Type | Tests |
+|---|---|
+| Unit | `ReadinessEvaluator` truth table (every branch of §6.2); `SectorMapper` (two sectors, `none`, held sector); `CodeQuestionFactory` and `QuestionMerger` (cap, dedupe, answered); `ClaimRegisterBuilder` (doc kind check); `WordBudget`/`ShotRange` (property: ranges for 6/15/30/60 s); `VariantValidator` and `ScriptValidator` (each D-check pass and fail case, including the deterministic claim scan: numbers, percentages, comparatives, superlatives, Devanagari numerals); `LabelProposalBuilder` (every row of §6.4 plus the missing-declaration row); `RightsChecklistBuilder` (every kind; evidence only from tenant rows); Jaccard overlap; lock identity |
+| Integration | repositories against Postgres with RLS (rows of another org invisible); `ScriptStore` version allocation and `UNIQUE` constraint; `PointerStore` supersede; approval hash binding; document hash verification; fake adapter end to end for each task type including a refusal and a repair round |
+| Contract | all three outputs validate against `amw.task_output` and their payload schemas; envelope org agreement; `llm_output` schemas equal the Pydantic models and the schemas in the prompt files (27 §4.4 lint); the claim list and script are accepted by the `agent_06.claim_extraction` input schema (once CCR applied); `scripts` row accepted by 04 constraints |
+| Regression | the golden datasets of §26 against the recorded adapter; any prompt or config change reruns them |
+| Failure-injection | adapter 429 / 5xx / timeout / invalid JSON / schema-invalid / provider refusal; storage unavailable between C2 and C4 (no second paid call); DB blip on `scripts` insert (idempotent retry); worker kill after C2; budget refusal (`AWAITING_BUDGET`, completed work kept); approval withdrawn while the task runs (hash mismatch fails) |
+| Performance | token and cost per task on the recorded fixtures stay within `resource_budget`; the post-check layer runs in milliseconds on the largest allowed input (60 s, 24 shots); no memory growth across 100 tasks |
+| Security | 04 §3.7 items 1-8; cross-tenant URI in `context_refs`, `prior_output_ref`, document refs: rejected before any read; org A's job cannot read org B's brand kit, assets, memory (RLS and guard both tested separately); log-leak canary (a unique string in a brief appears nowhere in logs, metrics, errors); injection corpus (leak request, "skip the claims list", fake system messages in brief, answers, titles, feedback); `error.message` leak test; no write to `approvals` or `claims` (grant test) |
+| E2E | `AD_SPOT` on fake adapters: intake round 1 (questions) -> answers -> intake round 2 `READY` -> concepts -> approval -> script for two durations and four ratios -> claim extraction on Agent 17's output (fake 06) -> label proposal and checklist present; `ECOMMERCE_PRODUCT` without a concept stage (implicit variant); `EXPLAINER_CORPORATE_TRAINING` intake only |
+Coverage and CI gates: 27 §5. The eval gate (§26) is a separate required check.
+
+---
+
+## 22 Observability
+**MVP: 3C · Tier 1.**
+| Kind | Name | Fields (no content) |
+|---|---|---|
+| Log events | `a17.task.start`, `a17.step.llm_call`, `a17.check.fail`, `a17.repair`, `a17.refusal`, `a17.task.done` | `org_id`, `channel_id`, `job_id`, `task_id`, `correlation_id`, `task_type`, `prompt_id`, `prompt_sha256`, `check_id`, `refusal_reason`, `tokens_in`, `tokens_out`, `cost_micros`, `latency_ms` |
+| Metrics | `a17_tasks_total{task,status}`, `a17_llm_calls_total{task}`, `a17_llm_tokens_total{task,dir}`, `a17_llm_cost_micros_total{task}`, `a17_check_fail_total{task,check}`, `a17_repair_total{task}`, `a17_refusal_total{task,reason}`, `a17_readiness_total{readiness}`, `a17_clarification_rounds`, `a17_label_proposal_total{decision}`, `a17_task_duration_ms{task}` | labels carry `org_id` only where the metrics store is tenant-scoped (08 §8 layer 5); no names, claims or text |
+| Traces | one span per step, per model call, per post-check group | tenant context attributes |
+| Audit events (S6, hash chain) | `a17.brief.recorded`, `a17.concepts.proposed`, `a17.script.drafted`, `a17.handoff.emitted` | actor `agent_17`, target IDs and hashes |
+| Cost | one `cost_ledger` row per model call (S4), `stage = agent_17.<task>`, `figure_kind` = ESTIMATE or MEASURED | 09 §5 |
+| Alerts | repair rate above a threshold; `QUALITY_REPEATED_FAILURE` count; refusal `UNSAFE_CONTENT` (security signal); readiness `NEEDS_HUMAN_REVIEW` waiting; clarification round cap hits; budget suspension | thresholds are config, set at the pilot |
+| Dashboards (16 Command Center, 3C) | per client: brief status, open questions, concept iterations, scripts per duration; platform: repair rate, refusal mix, cost per task | tenant-filtered by query and RLS |
+
+---
+
+## 23 Human approvals
+**MVP: 3C · Tier 1 (client approvals through the managed service with `managed_service = true`, rule 10) · Tier 2 (portal, `CLIENT_GUEST` reviewer then final approver).** Agent 17 requests no approval itself: approval gates are separate tasks (`svc_s07.request_approval`, 03 §11.6). The approvals that depend on its output:
+| Approval kind (GLOSSARY §6.15) | Workflow (24 §3.4) | Subject (hash-bound) | What the reviewer sees | Decisions route to |
+|---|---|---|---|---|
+| `BRIEF` | `client_two_step` or one step by the client; **in `AD_SPOT` this approval is not in 24 §7.3 today: pending CCR** (it is the clarification channel; `EXPLAINER_CORPORATE_TRAINING` already has it) | `brief.json` | the structured brief, questions (blocking marked), risk notes, what is still missing | `APPROVED` -> `concept_variants`; `CHANGES_REQUESTED` (answers in comments) -> `brief_intake` new round; `REJECTED` -> job `REJECTED_BY_APPROVER` |
+| `CONCEPT` | `client_two_step`, mandatory (24 §7.3) | `concepts.json` | concepts, variants, claims used (with doc status), AI elements each variant needs, talent needs, rationale | `APPROVED` (with the chosen variant IDs) -> `ad_script_storyboard`; `CHANGES_REQUESTED` -> `concept_variants` new iteration (feedback text); `REJECTED` -> `REJECTED_BY_APPROVER` |
+| `SCRIPT` and `STORYBOARD` | `client_two_step`, mandatory | script + storyboard bundle hash | script text per language and duration, storyboards per ratio, claim list with documents, disclaimers, rights checklist (open items highlighted) | `APPROVED` -> voice, shot plan; `CHANGES_REQUESTED` -> `ad_script_storyboard` new iteration; verdicts of 06/16 come before the approval card (24 §7.3 stage order) |
+| `SENSITIVE_CLAIM` | `owner_sensitive` (managed service operator) | the output containing `BLOCKING` risk notes or a `RULE_WOULD_BE_BROKEN` refusal | the quoted request, the rule, what a client must supply | operator contacts the client; a new brief round or `REJECTED_BY_APPROVER` |
+| `USAGE_RIGHTS` (record) | mandatory (24 §7.3) | the record built from `rights_checklist` and licence ledger (25 §10.2) | open and attached items; scope checks are a human step | before `FINAL_VIDEO`; not written by Agent 17 |
+Decision text of the approver is data: it reaches the model only as untrusted `client_answers` or `revision_feedback`. The decider must be a human with an active membership and the required role (04 §5.16 trigger). The platform owner is an approver for a client only when `managed_service = true`.
+
+---
+
+## 24 Deployment
+**MVP: 3C · Tier 1. Deployment unit and order: 10 §8-§9; no deployment action happens in the documentation phase.**
+| Item | Value |
+|---|---|
+| Service | runs inside the `ai_worker` of the factory's Compose project (queue `ai`, resource class `AI_IO`, capability `llm`; 10 §7); no separate container, no inbound port |
+| Package / entry | `agent_17_brief_creative_strategy`, `Agent17Stage` registered for the three task types |
+| Enablement | the agent is **disabled until the first ad client is signed** (control key `agent_enabled.agent_17`, S8); production types `AD_SPOT`, `ECOMMERCE_PRODUCT`, `EXPLAINER_CORPORATE_TRAINING` are enabled per tenant in `org_production_types`; the sector `alcohol_tobacco_surrogate` stays out of `ad.sectors.served` until the owner decides |
+| Configuration (names only; read only by `amw_core.config`; values in config files or the environment, never in code) | key families `ad.brief.*` (`max_questions`, `max_clarification_rounds`, size caps), `ad.concept.*` (`max_concepts`), `ad.variants.*` (`max_hook_overlap`), `ad.script.*` (`words_per_minute.<lang>`, `fill_min`, `fill_max`, `max_formats_per_task`), `ad.sectors.*` (`served`), `ad.memory.*` (`project_ttl_days`), `llm.agent_17.brief_intake.*`, `llm.agent_17.concept_variants.*`, `llm.agent_17.ad_script_storyboard.*`, `llm.tiers.*`, `evals.agent_17.*`, `quality.agent_17.*` |
+| Environment variable names | `AMW_AD__*`, `AMW_LLM__AGENT_17__*` (nested naming; exact convention pending `deploy/env.example` of 10 §8); the database login for `amw_app` and the LLM provider key are **secrets** supplied only through the environment's secret mechanism to the AI worker (08 §3.2); the orchestrator holds no provider key |
+| Health | worker heartbeat in `workers.heartbeat_at`; start check runs a canary of each task type on fixtures with the fake adapter; startup verifies required secrets and config (`PERMANENT.CONFIG_INVALID` if missing, including `words_per_minute` for each served language) |
+| Start order | after `postgres`, `migrate`, seed data (production types, rule packs including the advertising pack), `orchestrator`; then `ai_worker` (10 §9.1 step 5); no render-worker dependency |
+| Stop order | drain: stop claiming `ai` tasks, finish the current atomic write unit, checkpoint, exit (10 §9.2, 07 §8) |
+| Night window | not render-heavy; may run any time inside the admission rules; paid calls obey spend limits; client-facing steps are interactive; never triggered by market events |
+| Infrastructure by tier | client SLAs must not depend on capacity shared with other apps: before the first external client the platform (or its client-data workers) moves to its own server (§1C.15, 20); Agent 17 itself needs no extra capacity |
+| Migration | none of its own (no table); schemas versioned by semver (03 §2); prior outputs stay readable |
+| Rollback | outputs and prompts are immutable; rollback re-activates a previous prompt version by config and a previous output by a new pointer row plus an audit event |
+
+---
+
+## 25 Acceptance criteria
+**MVP: 3C · Tier 1. Each item is testable and maps to a test or an eval threshold; the agent is "Implemented" only when all hold (rule 6, rule 7).**
+| ID | Criterion | Evidence |
+|---|---|---|
+| AC-1 | The three task types validate input, run and return outputs that validate against `amw.task_output` and their payload schemas | contract tests |
+| AC-2 | Tenant isolation: every row of §19.1 has a passing test; no cross-tenant read in any security test | security tests |
+| AC-3 | `brief_intake` golden set passes the thresholds of `evals/.../brief_intake/README.md` §6 (mandatory items 100 %) | eval gate |
+| AC-4 | `concept_variants` golden set passes its thresholds (0 undocumented claims, 0 forbidden names) | eval gate |
+| AC-5 | `ad_script_storyboard` golden set passes its thresholds (0 unregistered claims, 0 unapproved people or brands, exact durations, lock identity) | eval gate |
+| AC-6 | Readiness, label proposal and rights checklist unit tables cover every branch of §6.2, §6.4, §6.5 | unit tests |
+| AC-7 | Agent 06 accepts the script and claim list and links `substantiation_ref` (after the CCRs are applied); Agent 16 reads label proposal and checklist | contract and E2E tests |
+| AC-8 | `AD_SPOT` E2E on fakes reaches claim extraction with round-trip clarification, concept revision and a refusal path | E2E |
+| AC-9 | Failure-injection: no second paid call after C2; budget breach suspends with work kept; repair round limited to one | failure tests |
+| AC-10 | No prompt, brief text or client data in logs, metrics, errors (canary) | security test |
+| AC-11 | Prompt lint and schema-equality checks pass (27 §4.4); all prompts released and immutable | CI |
+| AC-12 | Cost per task within `resource_budget`; recorded with `figure_kind` | performance test, ledger |
+| AC-13 | Owner or lawyer review items of §12/§26 either closed or explicitly carried (label wording, release templates, sector packs) | review record |
+| AC-14 | The first client pilot (one real ad order, client approvals, Agent 16 verdict) is completed with the measured values of SC-5, SC-9, Q-10 recorded | pilot report |
+
+---
+
+## 26 Prompt and evaluation pack
+**MVP: 3C · Tier 1. Standard: 27 §4-§6.**
+
+### 26.1 Files (versioned; all LLM steps have a prompt file and a golden dataset; there is no LLM-free step in this agent that needs a separate dataset: the deterministic computed layer is covered by the unit tables of §21)
+| Task | Prompt file | Golden dataset | Cases |
+|---|---|---|---|
+| `agent_17.brief_intake` | [`prompts/agent_17_brief_creative_strategy/brief_intake.v1.md`](../prompts/agent_17_brief_creative_strategy/brief_intake.v1.md) | [`evals/agent_17_brief_creative_strategy/brief_intake/`](../evals/agent_17_brief_creative_strategy/brief_intake/) (`README.md`, `cases.jsonl`, `rubric.md`) | 28 (3 refusal, 1 injection, 5 hard negative) |
+| `agent_17.concept_variants` | [`prompts/agent_17_brief_creative_strategy/concept_variants.v1.md`](../prompts/agent_17_brief_creative_strategy/concept_variants.v1.md) | [`evals/agent_17_brief_creative_strategy/concept_variants/`](../evals/agent_17_brief_creative_strategy/concept_variants/) | 24 (6 refusal, 1 injection, 3 hard negative) |
+| `agent_17.ad_script_storyboard` | [`prompts/agent_17_brief_creative_strategy/ad_script_storyboard.v1.md`](../prompts/agent_17_brief_creative_strategy/ad_script_storyboard.v1.md) | [`evals/agent_17_brief_creative_strategy/ad_script_storyboard/`](../evals/agent_17_brief_creative_strategy/ad_script_storyboard/) | 25 (4 refusal, 1 injection, 5 hard negative) |
+Judge prompts (planned paths, written at build time with the eval runner; never decide a verdict): `prompts/agent_17_brief_creative_strategy/brief_intake_judge.v1.md`, `concept_variants_judge.v1.md`, `ad_script_storyboard_judge.v1.md`.
+
+### 26.2 Deterministic checks (run on every case; detail in each dataset README §4)
+Brief: schema; quote substrings; document IDs; question rules; readiness (code); sector candidates; claim, person and brand minimums; AI-element expectations; rule-ID existence and flag expectations; refusal mapping; no leakage strings. Concepts: schema; counts; documented claims only; no forbidden names or banned words; angle distinctness and hook overlap; fictional-variant rules; declared AI elements; conditions notes; client-media truthfulness; script of the text. Scripts: schema; claim quote substrings; word and shot bounds; exact duration sum; no claim outside the register (including the deterministic scan); lock identity; real-person and brand refs; presenter and element declarations; product media use; disclaimers; banned words; refusal mapping.
+
+### 26.3 Judge rubric
+Per dataset `rubric.md`, integer 1-5, four criteria each: brief (completeness, question quality, faithfulness, rationale); concepts (distinctness, brief fit, producibility, rationale); scripts (hook and idea fidelity, storyboard craft, wording discipline, notes quality). `judge_min` per case `{J1: 4, J2: 3, J3: 4, J4: 3}`; refusal cases deterministic only. The judge is calibrated against a human-labelled subset (agreement within 1 point on at least 90 % of scores; design default) before use in CI.
+
+### 26.4 Pass thresholds (config `evals.agent_17.<task>.*`; design defaults, recalibrated at the first client pilot)
+| Threshold | brief_intake | concept_variants | ad_script_storyboard |
+|---|---|---|---|
+| mandatory zero-tolerance items | blocking-as-written briefs routed to human review: 0 misses; no invented quote: 100 %; false `BLOCKING` on hard negatives: 0 | undocumented claim, forbidden name or banned word: 0; counts correct: 100 % | claim outside the register: 0; unapproved real person or brand: 0; exact duration sum and lock identity: 100 % after one repair round |
+| refusal and injection cases | 100 % | 100 % | 100 % |
+| overall pass rate | >= 0.85 | >= 0.85 | >= 0.85 |
+| judge means | J1, J3 >= 4.0; J2, J4 >= 3.5 | J2, J3 >= 4.0; J1, J4 >= 3.5 | J1, J3 >= 4.0; J2, J4 >= 3.5 |
+| cost and latency | recorded; ESTIMATE until measured | same | same |
+CI fails the PR when any threshold is missed. Every case run is recorded per 27 §6.4 (prompt SHA-256, rule-pack versions, tokens, cost, latency, `figure_kind`).
+
+### 26.5 Open points (all carried, none invented)
+| Item | Needed | Blocks |
+|---|---|---|
+| Label wording per language and spoken-label rule | REQUIRES REVIEW (Phase 1): translator and lawyer sign-off (25 §6.4) | proposal text keys only |
+| Words per minute per language, fill ratios | REQUIRES REVIEW (Phase 1): measure with Agent 07 in 3B | word-budget config |
+| Ad pacing for 6 s and 60 s | REQUIRES REVIEW (Phase 1): 18 | shot-range defaults |
+| Sector rule content (health, food, financial products, education outcomes, real estate, alcohol surrogate) | REQUIRES REVIEW (Phase 1): research per 25 §5.1 | sector packs; this agent only reports the candidate |
+| Release template minimum clauses; minors, deceased persons, sensitive professions | REQUIRES REVIEW (Phase 1): lawyer (25 §7.2) | `SPECIAL_PERSON_REVIEW` default stays human review |
+| ASCI Code Chapter I | REQUIRES REVIEW (Phase 1): add a RESEARCH_LOG row (read in 25 §1.3) | citation only |
+| IN-04 effective date | the guideline is **not in force on 2026-11-18**; computed date around the end of Dec 2026; owner and lawyer confirm (25 §1.5) | the label rule is applied as the ad pack's `effective_from` allows; the proposal is advisory either way |
+| Marathi and Hindi creative quality; Devanagari token cost | REQUIRES REVIEW (Phase 1): first eval run, 09 §11 | tier choice |

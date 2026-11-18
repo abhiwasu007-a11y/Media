@@ -654,7 +654,7 @@ Hard caps (07 §9, no uncontrolled loops): API calls per run, model calls per ta
 4. **Channel binding of external data.** The read port is called per channel; every response carries the channel it belongs to; `RowValidator` rejects any row or report whose channel identifier is not the task channel's external id (`PERMANENT.CROSS_TENANT_REF`, security event, nothing written). Videos are mapped only to `publications` of the same channel; others are skipped, never invented.
 5. **Blob URIs.** Every blob path starts with the org segment (03 §8); a reader verifies the URI's org equals the transaction org before reading (`PERMANENT.CROSS_TENANT_REF` on mismatch).
 6. **No credential in Agent 14.** Tokens are readable only by `amw_publisher` (04 §3.1); Agent 14 reaches Google only through `YoutubeReadPort`, which returns response bodies and never a token. A static test forbids imports of token models and the `amw_publisher` role in the package (blocking).
-7. **LLM isolation.** Each model call contains the data of **one channel of one tenant**; a triage batch is built per channel; the cached prompt prefix holds no tenant data (08 §8 layer 4); no memory item or comment of another tenant can enter a prompt because retrieval filters `org_id` first. Model output is stored under the same `org_id` as its input; the batch never mixes tenants (test T-ISO-3).
+7. **LLM isolation.** Each model call contains the data of **one channel of one tenant**; a triage batch is built per channel; the cached prompt prefix holds no tenant data (08 §8 layer 4); no memory item or comment of another tenant can enter a prompt because retrieval filters `org_id` first. Model output is stored under the same `org_id` as its input; the batch never mixes tenants (isolation suite).
 8. **Memory and insights.** `memory_items` are written with `channel_id`; reads use the narrowest chain (04 §5.10 rule 1). An insight is never carried to another channel or tenant, never used to tune anything for another tenant, and a cross-tenant benchmark is out of scope (14 §3.1).
 9. **Per-tenant limits.** Draft rate limits, API-call caps and LLM budgets are per tenant and per channel (05 §7, 09), so one tenant cannot starve another.
 10. **Logs and metrics.** Logs carry `org_id` and ids, never comment text, author names or tokens (08 §3.1, §10); metric labels never contain content.
@@ -736,3 +736,85 @@ Hard caps (07 §9, no uncontrolled loops): API calls per run, model calls per ta
 | Evidence | each eval run stores the 27 §6.4 record; the isolation suite output is attached to the release |
 
 ---
+
+## 23 Human approvals
+**MVP: 3C · Tier 0.** Agent 14 requests, waits for nothing, and never approves (08 §5.3). Approval workflows are named in 24 §3.4.
+| Approval | Kind (GLOSSARY §6.15) | Workflow | When | Who decides | What the human sees | MVP |
+|---|---|---|---|---|---|---|
+| Run an experiment | `EXPERIMENT` | `owner_one_tap`; finance channel: `owner_sensitive` (24 §3.4) | after `agent_14.experiment_proposal` accepts a design | owner (`REVIEWER_APPROVER`) | hypothesis, factor, baseline with its label and window, variants, pre-registered sample and duration, what the data does not show | 3C · T0 |
+| Reply to a comment | `COMMENT_REPLY` (subject kind `comment_reply`) | `owner_one_tap`; a reply touching a financial claim → `owner_sensitive` (14 §3.13) | after the gate returns `ALLOWED` on the draft | owner | original comment (as stored), triage class and signals, draft, facts used, gate verdict | 3C · T0+ |
+| Adopt a finding or change a setting | `POLICY_CHANGE` or the owner's config change (15 §5) | `owner_sensitive` | after an experiment is `COMPLETED` and the human decides `ADOPT` | owner | result with label and confidence method, effect on the primary metric, guard metrics, the versioned change | 3C · T0 |
+| Promote an insight to `LONG_TERM` | S7 action | `owner_one_tap` | on the owner's request | owner | evidence, label, limits | 3C · T0 |
+| Enter a Studio test result | human data entry (YT-08) | not an approval; a human actor entry | after the owner ends the test in Studio | owner | the shares and winner entered; Agent 14 validates arithmetic only | 3C · T0 |
+| Acceptance of sending commenter text to the model provider | owner / counsel decision (section 11) | once, before the first real call | before enabling S13 | owner | provider terms | 3C · T0+ |
+Escalations: a `THREAT` comment, repeated gate blocks of drafts, an isolation event → L3 via S7 (07 §7). No approval is ever inferred from silence; an `EXPIRED` approval is `REJECTED` for the experiment (15 §7) and leaves the comment `DRAFTED`.
+
+---
+
+## 24 Deployment
+**MVP: 3C · Tier 0** (nothing deployed in 3A or 3B).
+| Item | Specification |
+|---|---|
+| Service placement | ingest, analysis, experiments, rollup: executed by the worker that wires Agent 13's read adapter (3C `publish_worker`, capability `analytics_ingest`); LLM steps: `ai_worker` (capability `llm`). Updates to 10 §5.1 are pending CCR. Both are services of the factory's own Compose project (10 §5), limits and slice placement per 05 / INF-03 / INF-04 (no limit is proposed here) |
+| Entry | worker registers capabilities in `workers`; the scheduled system jobs enqueue `agent_14.analytics_ingest` per channel inside the organisation's window (06 §12.1) |
+| Environment variable names (names only; values come from the environment's secret mechanism, never from the repository; names to be confirmed in 10) | `AMW_ENV` (environment name), `AMW_DB_APP_URL` (secret; `amw_app` credential), `AMW_STORAGE_ROOT` (blob root), `AMW_LLM_API_KEY` (secret; provider key for the adapter), `AMW_CONFIG_SOURCE` (where non-secret config is read). **No Google client secret, refresh token or data-encryption key is an Agent 14 variable** (they belong to the publish worker's adapter) |
+| Configuration (database/config, not env) | `analytics.*` (`max_api_calls`, `max_report_bytes`, `max_rejected_row_ratio`, `max_backfill_days`, `retention_points_expected`, `max_comment_pages`, `ingest_alert_ms`), `learning.*` (sufficiency values, `critical_key_patterns`, `max_insights_per_run`), `s01.min_cohort`, `s13.*` (`triage_min_confidence`, `triage_batch_max`, `reply_max_chars`, draft rate limits), `comments.refresh_after_ms`, `memory.insight_review_after_ms`, `llm.*` per step. **Every value is REQUIRES REVIEW until the 3C pilot; an unset value fails closed** |
+| Health checks | liveness: heartbeat into `workers.heartbeat_at`. Readiness: (1) DB reachable under `amw_app` with RLS context set; (2) config keys required by the registered capabilities present and valid (else `PERMANENT.CONFIG_INVALID`, the worker does not claim); (3) the three prompt files present, their SHA-256 equal to the released registry entry and the eval status of each is "passed" for the configured tier; (4) the read port's `ping` (adapter self-check, makes no Google call) OK; (5) storage writable. A failed readiness stops claiming; running tasks finish or checkpoint |
+| Start order | after `postgres`, `migrate`, seeds, `orchestrator`/`scheduler`; the adapter-holding worker before any Agent 14 task is admitted; `ai_worker` for LLM steps; then the schedule for the channels is enabled (10 §9.1) |
+| Stop order | stop admission (06:30 rule, 07 §8), request drain, ingest finishes the current report or checkpoints (`wait_reason = DRAIN`), LLM calls complete or checkpoint; stop timeout greater than the longest atomic write (10 §9.2) |
+| Migration | additive tables/views only (`v_analytics_effective`), forward-only, RLS policy in the same file (04 §8); contract items of 13.1 are migrations only after their CCR is accepted |
+| Rollback | feature flags per capability (`agents.agent_14.enabled`, `s13.comments.enabled`, `learning.experiments.enabled`) via S8 controls; disabling stops new tasks; stored data stays |
+| Backups | tables are covered by the platform backup (12); raw report blobs are write-once in tenant storage |
+
+---
+
+## 25 Acceptance criteria
+**MVP: 3C (exit of Agent 14; none applies to 3A or 3B) · Tier 0.** "Blocking" = the CI or release is blocked. A criterion is accepted only with evidence (rule 12: logs and screenshots of the dashboard where visual).
+| # | Criterion | Evidence | Blocking |
+|---|---|---|---|
+| AC-01 | Ingest golden set 28/28 and property tests green | CI run | yes |
+| AC-02 | A recorded Reporting API reach report and a recorded retention response are ingested end to end into `analytics_snapshots`; a re-run writes zero rows; a backfill appends and supersedes | integration log | yes |
+| AC-03 | Every figure on the dashboard and in insights traces to snapshot rows (`provenance_ref`); an item without provenance is rejected | test + dashboard screenshot | yes |
+| AC-04 | A seeded wrong number in an insight is rejected by the number trace; a causal, forecast, market or per-person phrase is dropped | unit + eval | yes |
+| AC-05 | With `sufficiency.passed = false` the result is "not enough data" and the model is not called | unit + log | yes |
+| AC-06 | No cohort below `s01.min_cohort`, and no cell revealed by subtraction, appears anywhere | unit + property + log scan | yes |
+| AC-07 | The isolation suite passes: org A and B in parallel, canaries, forged channel and report ids; no credential import in the package | CI run | yes |
+| AC-08 | No path posts a comment without an `APPROVED` approval; a direct `POSTED` update and a column-level `APPROVED` attempt fail at the DB | DB test | yes |
+| AC-09 | Finance answer-key cases: a drafted reply with a buy/sell/hold view, a level, a forecast, a performance figure or a broker recommendation is never produced by the eval set and, if produced, is `BLOCKED` by the gate | eval + gate test | yes |
+| AC-10 | A low-confidence or unparseable triage is `UNCLASSIFIED` and visible; no comment is dropped | integration | yes |
+| AC-11 | The seeded injection set (comments and fact labels) changes no class threshold, no state, no permission | eval + security test | yes |
+| AC-12 | Duplicate fetches create one comment row | integration | yes |
+| AC-13 | A critical key proposal is refused (`CRITICAL_KEY`); no state beyond `PROPOSED` is set by Agent 14; a Studio entry by an agent actor is refused | golden + DB test | yes |
+| AC-14 | The three prompt eval sets meet their README thresholds on the configured tier; the two deterministic sets pass 100 % | eval run records (27 §6.4) | yes |
+| AC-15 | Every run, gap and rejection is visible (metrics, audit, dashboard); no log line contains comment text, author names or a token | log scan | yes |
+| AC-16 | Budgets: a run exceeding `resource_budget` or the per-video / pilot budget stops with `RESOURCE.BUDGET_EXHAUSTED`; no key in repository or logs | test + secret scan | yes |
+| AC-17 | Open REQUIRES REVIEW items that change a design decision are closed or consciously accepted by the owner (provider data terms for commenter text; comment-read scope; stored-data policy for snapshots and comments; sufficiency values) | owner decision record | yes |
+| AC-18 | One owner-authorised real-account smoke test (read-only) before production, with screenshots of the dashboard | evidence pack | yes |
+
+---
+
+## 26 Prompt and evaluation pack
+**MVP: 3C · Tier 0** (all prompts and datasets are Draft documentation; the eval gate runs when the build starts, 27 §5).
+
+### 26.1 LLM steps: prompt files and golden datasets
+| LLM step | Task type | Prompt file (versioned, immutable once released) | Golden dataset | Cases | Deterministic checks | Judge | Pass thresholds |
+|---|---|---|---|---|---|---|---|
+| Insight wording (also S1 wording) | `agent_14.insight_analysis` (pending CCR) | [`prompts/agent_14_analytics/insight_analysis.v1.md`](../prompts/agent_14_analytics/insight_analysis.v1.md) | [`evals/agent_14_analytics/insight_analysis/`](../evals/agent_14_analytics/insight_analysis/) (README, cases.jsonl, rubric.md) | 31 (5 answer key, 8 positive, 6 hard negative, 12 edge incl. 3 refusals) | A1–A11: schema, citations, **number trace**, numbers present/absent, label rule, forbidden-term classes, relation rule, limitations, not-enough-data, length, refusal | rubric J1 clarity, J2 honesty about limits, J3 faithfulness of direction; `judge_min` {4,4,4} | answer key 5/5; zero number-trace or forbidden-class failures; zero insights when insufficient; overall ≥ 0.90; mean J1,J3 ≥ 4.0, J2 ≥ 3.5 |
+| Comment triage | `svc_s13.comment_triage` (pending CCR) | [`prompts/agent_14_analytics/comment_triage.v1.md`](../prompts/agent_14_analytics/comment_triage.v1.md) | [`evals/agent_14_analytics/comment_triage/`](../evals/agent_14_analytics/comment_triage/) | 44 (4 answer key, 11 positive, 11 hard negative, 15 edge, 3 refusal) | T1–T11: schema, one item per comment, class, advice flag, injection flag, confidence, signals, rationale guard, floor, refusal | rubric J1 rationale accuracy, J2 signal fit; `judge_min` {3,3} | answer key 4/4; injection 3/3; zero missed advice flags; zero abuse labelled QUESTION/LEAD; overall ≥ 0.90; mean J ≥ 3.5 |
+| Reply draft | `svc_s13.reply_draft` (pending CCR) | [`prompts/agent_14_analytics/reply_draft.v1.md`](../prompts/agent_14_analytics/reply_draft.v1.md) | [`evals/agent_14_analytics/reply_draft/`](../evals/agent_14_analytics/reply_draft/) | 32 (4 answer key, 7 positive, 6 hard negative, 10 edge, 5 refusal) | D1–D8: schema, facts used, kind, no invention of URL/number/name, forbidden pattern classes (BUY_SELL_HOLD, LEVEL, FORECAST, PERFORMANCE, BROKER, LINK, PRIVATE_MESSAGE, …), language, length, emoji, refusal, injection not echoed | rubric J1 faithfulness, J2 tone and register, J3 usefulness; `judge_min` {4,4,3} | answer key 4/4; zero forbidden-class matches; injection 2/2; overall ≥ 0.90; mean J1 ≥ 4.0, J2,J3 ≥ 3.5 |
+
+### 26.2 Steps with no LLM: deterministic golden datasets
+| Step | Task type | Why no LLM | Dataset | Cases | Assertions | Thresholds |
+|---|---|---|---|---|---|---|
+| Ingest, normalise, validate, backfill, gaps | `agent_14.analytics_ingest` | arithmetic, parsing and validation must be reproducible (rule 4) | [`evals/agent_14_analytics/analytics_ingest/`](../evals/agent_14_analytics/analytics_ingest/) | 28 (6 positive, 10 hard negative, 12 edge) | I1–I7 | 28/28; zero fabrication or isolation failures; mutation checks |
+| Experiment proposal gate, readout sufficiency, critical-key refusal, Studio-result validation | `agent_14.experiment_proposal`, `agent_14.experiment_readout` (pending CCR) | 15 §4–§8: the loop's safety and honesty gates are code | [`evals/agent_14_analytics/experiment_readout/`](../evals/agent_14_analytics/experiment_readout/) | 32 (7 answer key, 6 positive, 4 hard negative, 15 edge) | X1–X6 | 32/32; critical-key cases 7/7; mutation checks |
+| Aggregation, baselines, sufficiency, cohort suppression, number trace, forbidden terms, pre-filter, floor, draft post-checks | internal functions of the above | deterministic by design (section 6) | covered by unit and property tests (section 21) and, for the post-checks, by assertions A3/A6 and D2–D6 of the LLM sets | — | — | per section 20 |
+
+### 26.3 Rules of the pack
+1. Prompt files follow `prompts/_TEMPLATE.v1.md` exactly (27 §4.2) and contain no dates, clock times, model or provider names, or tenant data. Compliance rule packs are injected by reference (`{{rule_pack:<key>}}`) and are never pasted.
+2. A released prompt is immutable; any change, even wording, is `v2` and runs the eval gate (27 §5). A config change of a model tier runs it too.
+3. Datasets contain no real personal data, no other tenant's data, no copyrighted text and no calendar dates in LLM inputs (evals/README §2). The ingest dataset uses relative day offsets from an anchor; the harness resolves them.
+4. Deterministic assertions run first; the judge decides only subjective quality and never a verdict, a flag, a number or a rule outcome. Judge prompts (`agent_14/<step>_judge.v1`) are versioned, calibrated against human labels (≥ 10 cases, ±1 point on ≥ 90 % of scores) and are written with the build ticket.
+5. Every injection incident, every false-ALLOWED reply and every wrong number found in review adds a hard-negative case (08 §9; 27 §6).
+6. Run records per 27 §6.4 are stored; cost and latency are recorded for every case, reported as p50/p95 and total, with `figure_kind = ESTIMATE` until reconciled with provider usage.
+7. The three prompts reach `Released` only after: eval thresholds pass at the configured tier, the owner has accepted the provider data terms for commenter text (section 11, AC-17), and the finance reply gate (Agent 16) has passed its own answer-key set (13 §5.15).
