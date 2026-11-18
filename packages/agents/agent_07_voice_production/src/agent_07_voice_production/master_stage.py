@@ -215,7 +215,7 @@ def evaluate_master(
         gate_result(
             "qc.audio.bitrate",
             codec.bitrate_bps >= cfg.min_bitrate_bps,
-            "nominal encode bitrate at or above the spec",
+            "nominal encode rate at or above the spec (CCR-055: the measured average is in the report)",
             measured=codec.bitrate_bps,
             threshold=cfg.min_bitrate_bps,
             unit="bps",

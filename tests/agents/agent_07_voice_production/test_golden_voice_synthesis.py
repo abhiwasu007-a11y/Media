@@ -168,6 +168,42 @@ def test_case(case: dict[str, Any], tmp_path: Path) -> None:
     _check(case, world, out)
 
 
+def test_each_retried_paid_call_gets_its_own_row_and_debit(tmp_path: Path) -> None:
+    """VS-40 style: the provider returns garbage on every attempt; N calls => N rows, N debits."""
+    from amw_core.ids import Prefix, new_id
+
+    case = next(c for c in CASES if c["case_id"] == "VS-40")
+    world = build(case, tmp_path)
+    start = world.budget.remaining
+    for n in range(1, 4):
+        out = world.run(new_id(Prefix.TASK_ATTEMPT))
+        assert out.status is OutputStatus.FAILED
+        assert world.tts.invocations == n
+        assert len(world.ledger.rows) == n
+        assert out.resource_usage.provider_calls == 1  # this attempt's own call
+    per_call = world.ledger.total_micros // 3
+    assert per_call > 0
+    assert start - world.budget.remaining == 3 * per_call
+
+
+def test_a_failed_ledger_write_after_a_paid_call_fails_the_key_and_surfaces(
+    tmp_path: Path,
+) -> None:
+    case = next(c for c in CASES if c["case_id"] == "VS-01")
+    world = build(case, tmp_path)
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("ledger down")
+
+    world.ledger.record = boom  # type: ignore[method-assign]
+    out = world.run()
+    assert out.status is OutputStatus.FAILED  # never a silent success with unrecorded spend
+    assert world.tts.invocations >= 1
+    world.ledger.record = type(world.ledger).record.__get__(world.ledger)  # type: ignore[method-assign]
+    again = world.run()  # the key was failed, not left IN_PROGRESS, so a retry can proceed
+    assert again.status is OutputStatus.SUCCEEDED
+
+
 def test_dataset_is_complete() -> None:
     assert len(CASES) == 48
     assert set(NOT_RUN) <= {c["case_id"] for c in CASES}

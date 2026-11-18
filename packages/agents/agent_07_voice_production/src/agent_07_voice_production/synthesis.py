@@ -65,6 +65,19 @@ def tts_key(
     )
 
 
+def cost_key(
+    ctx: ExecContext, segment_id: str, spoken_text_sha256: str, voice_id: str, attempt_id: str
+) -> IdempotencyKey:
+    """Key of the ledger row of one paid call: the call key plus the attempt, so each retry that
+    reaches the provider again gets its own row (FR-9, Q-23). The provider call itself keeps the
+    attempt-free ``tts_key`` (a replay of a stored clip makes no call)."""
+    return make_idempotency_key(
+        ctx.org_id,
+        IdempotencyScope.TTS_SYNTHESIZE,
+        [ctx.task_id, segment_id, spoken_text_sha256, voice_id, attempt_id],
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ClipResult:
     segment_id: str
@@ -168,7 +181,7 @@ class SegmentSynthesizer:
                 cfg.idempotency_lock_ms,
             )
         if decision.action is BeginAction.RETURN_STORED:
-            return self._stored(ctx, prepared, key, decision.record.result_ref)
+            return self._stored(ctx, prepared, settings, decision.record.result_ref)
         if decision.action is BeginAction.IN_FLIGHT:
             raise LockConflictError("another attempt holds the idempotency key")
         try:
@@ -179,7 +192,11 @@ class SegmentSynthesizer:
             raise
         # FR-9, Q-23: every call that returned a response is recorded (ESTIMATE) and debited
         # before the audio is judged, so a garbage or unstorable return cannot escape the budget.
-        entry = self._record_call(ctx, prepared, settings, key, estimate)
+        try:
+            entry = self._record_call(ctx, prepared, settings, key, estimate)
+        except BaseException:
+            self._fail_key(ctx, key)  # the paid call is unrecorded: surface it, never mask it
+            raise
         self.unreturned = (entry.id, prepared.characters, estimate)
         try:
             samples = self._validate(result.audio, result.media_type, prepared)
@@ -233,7 +250,13 @@ class SegmentSynthesizer:
                     units=Decimal(prepared.characters),
                     unit_kind=CostUnitKind.CHARACTERS,
                     price_ref=cfg.price_ref,
-                    idempotency_key=key,
+                    idempotency_key=cost_key(
+                        ctx,
+                        prepared.segment_id,
+                        prepared.spoken_text_sha256,
+                        settings.voice_id,
+                        str(ctx.attempt_id),
+                    ),
                 ),
             )
             self._budget.after_call(tx, entry)
@@ -312,11 +335,12 @@ class SegmentSynthesizer:
         self,
         ctx: ExecContext,
         prepared: PreparedSegment,
-        key: IdempotencyKey,
+        settings: SynthesisSettings,
         result_ref: str | None,
     ) -> ClipResult:
         """A replay (DLQ replay, retry after output loss): the stored clip and its original ledger
         row; no provider call, no new row (NFR-2, SC-6)."""
+        key = tts_key(ctx, prepared.segment_id, prepared.spoken_text_sha256, settings.voice_id)
         if result_ref is None:
             raise CorruptedOutputError("a completed key without a stored clip")
         uri = BlobUri(result_ref)
@@ -326,14 +350,21 @@ class SegmentSynthesizer:
         data = b"".join(self._storage.get(ctx.tenant, uri, head.sha256))
         _, samples = decode_s16_bytes(data)
         with self._tenancy.transaction(ctx.tenant) as tx:
-            original = next(
-                (
-                    e
-                    for e in self._ledger.for_task(tx, ctx.task_id)
-                    if e.entry.idempotency_key == key
-                ),
-                None,
-            )
+            # the last row of this segment's calls (earlier ones are refused garbage returns)
+            matching = [
+                e
+                for e in self._ledger.for_task(tx, ctx.task_id)
+                if e.entry.attempt_id is not None
+                and e.entry.idempotency_key
+                == cost_key(
+                    ctx,
+                    prepared.segment_id,
+                    prepared.spoken_text_sha256,
+                    settings.voice_id,
+                    str(e.entry.attempt_id),
+                )
+            ]
+            original = matching[-1] if matching else None
         return ClipResult(
             prepared.segment_id,
             samples,
