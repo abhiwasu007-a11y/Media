@@ -26,7 +26,7 @@ You look at still frames sampled from a finished educational video and report tw
 |---|---|---|
 | `{{checks_requested}}` | array of check IDs | code |
 | `{{sensitive_channel}}` | boolean | active packs (code) |
-| `{{frames}}` | array of `{frame_id, t_ms, image}` (images attached by the adapter) | Agent 10 evidence; local IDs `f01…` |
+| `{{frames}}` | array of `{frame_id, t_ms, image}` (images attached by the adapter) | `frames_ref` = `agent_10.evidence_manifest` `frames[]`; local IDs `f01…` as in the manifest |
 | `{{overlay_list}}` | array of `{overlay_id, kind, region, from_ms, to_ms}` | timeline (Agent 08/09) |
 | `{{rule_pack:rp.youtube_general}}` | rule text (YTG-R2) | `rule_packs` store |
 
@@ -138,7 +138,7 @@ You never invent what is not visible and never return `NONE_FOUND` because infor
 ---
 
 ## A. Input payload schema (`agent_16.compliance_gate.frames.input` 1.0.0)
-Defined here as the step schema (GLOSSARY §2.4, CCR-018); the agent_16 blueprint §7.6 references it unchanged. Frames are sampled by Agent 10 (agent_10 §22 evidence) and read by this step only; `overlay_list` comes from the timeline (Agent 08/09).
+Defined here as the step schema (GLOSSARY §2.4, CCR-018); the agent_16 blueprint §7.6 references it unchanged. Frames are sampled by Agent 10 and listed in its evidence manifest `agent_10.evidence_manifest` 1.0.0 (agent_10 §8.3a; Agent 16 reads it as `frames_ref`, CCR-097): code copies `frame_id` and `t_ms` from the manifest's `frames[]` and attaches the blob whose `sha256` it has verified; the frames are read by this step only; `overlay_list` comes from the timeline (Agent 08/09).
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
