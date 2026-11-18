@@ -10,15 +10,11 @@ from dataclasses import replace
 
 import pytest
 
-from agent_04_research_knowledge.guards.copy_guard import CopyGuard
-from agent_04_research_knowledge.guards.text_match import (
-    dominant_script,
-    fold_text,
-    normalise_for_matching,
-)
+from agent_04_research_knowledge.guards.copy_guard import CopyGuard, words_of
 from agent_04_research_knowledge.models.enums import NoteProblem, ReliabilityTier
 from agent_04_research_knowledge.steps.assemble import enforce_pack_coverage
 from agent_04_research_knowledge.steps.notes import NoteLimits, NoteValidator
+from amw_core.text_normalise import Script, dominant_script
 from tests.agents.agent_04_research_knowledge.conftest import PROPOSED
 from tests.agents.agent_04_research_knowledge.test_guards import note
 from tests.agents.agent_04_research_knowledge.test_steps import concept_ev, vnote
@@ -38,7 +34,9 @@ HI = (
     "और यह सँभालना आसान बनाता है तथा नुकसान सीमित रखता है।"
 )
 GUARD = CopyGuard()
-ZWSP, ZWNJ, ZWJ, SHY = "​", "‌", "‍", "­"
+ZWSP, ZWNJ, ZWJ, SHY = chr(0x200B), chr(0x200C), chr(0x200D), chr(0xAD)
+CGJ, VS16, ACUTE, RLO = chr(0x34F), chr(0xFE0F), chr(0x301), chr(0x202E)
+TAGS = "".join(chr(0xE0020 + i) for i in range(3))
 
 
 def per_word(text: str, ch: str) -> str:
@@ -59,6 +57,11 @@ def caught(candidate: str, passage: str) -> bool:
         lambda t: per_word(t, ZWJ),
         lambda t: per_word(t, ZWNJ),
         lambda t: per_word(t, SHY),
+        lambda t: per_word(t, CGJ),
+        lambda t: per_word(t, VS16),
+        lambda t: per_word(t, ACUTE),
+        lambda t: per_word(t, RLO),
+        lambda t: per_word(t, TAGS),
         lambda t: t.upper(),
         lambda t: t.replace("o", "о").replace("a", "а").replace("e", "е"),
         lambda t: t.replace("o", "ο").replace("p", "р"),
@@ -71,6 +74,11 @@ def caught(candidate: str, passage: str) -> bool:
         "zwj",
         "zwnj",
         "soft-hyphen",
+        "cgj",
+        "vs16",
+        "acute",
+        "rlo",
+        "tags",
         "upper",
         "cyrillic",
         "greek",
@@ -90,9 +98,13 @@ def test_english_verbatim_copy_with_evasions_is_caught(evade) -> None:  # type: 
         lambda t: per_word(t, ZWJ),
         lambda t: per_word(t, ZWNJ),
         lambda t: per_word(t, SHY),
+        lambda t: per_word(t, CGJ),
+        lambda t: per_word(t, VS16),
+        lambda t: per_word(t, RLO),
+        lambda t: per_word(t, TAGS),
         lambda t: t.replace("।", "|").replace(".", "।"),
     ],
-    ids=["plain", "zwsp", "zwj", "zwnj", "soft-hyphen", "danda"],
+    ids=["plain", "zwsp", "zwj", "zwnj", "soft-hyphen", "cgj", "vs16", "rlo", "tags", "danda"],
 )
 def test_devanagari_verbatim_copy_with_evasions_is_caught(evade) -> None:  # type: ignore[no-untyped-def]
     assert caught(evade(MR), MR)
@@ -104,19 +116,20 @@ def test_devanagari_variant_spellings_fold_together() -> None:
     plain = HI.replace("ख़", "ख")  # nukta dropped
     chandra = HI.replace("सँभालना", "संभालना")  # chandrabindu vs anusvara
     for variant in (nukta, plain, chandra):
-        assert normalise_for_matching(variant) == normalise_for_matching(HI)
+        assert words_of(variant) == words_of(HI)
         assert caught(variant, HI)
-    assert fold_text("ँ") == "ं" and "़" not in fold_text("क़")
 
 
 def test_zero_width_characters_are_removed_not_split() -> None:
-    assert normalise_for_matching(f"st{ZWSP}op{SHY} l{ZWJ}oss") == ["stop", "loss"]
-    assert normalise_for_matching("स्टॉ‍प ल‌ॉस") == normalise_for_matching("स्टॉप लॉस")
+    assert words_of(f"st{ZWSP}op{SHY} l{ZWJ}oss") == ["stop", "loss"]
+    assert words_of("स्टॉ‍प ल‌ॉस") == words_of("स्टॉप लॉस")
 
 
 def test_script_is_decided_by_text_not_tags() -> None:
-    assert dominant_script(MR) == dominant_script(HI) == "DEVANAGARI"
-    assert dominant_script("pаss") == "LATIN"  # a Cyrillic homoglyph does not change the script
+    assert dominant_script(MR) == dominant_script(HI) is Script.DEVANAGARI
+    assert (
+        dominant_script("pаss") is Script.LATIN
+    )  # a Cyrillic homoglyph does not change the script
     res = GUARD.check(MR, MR, PROPOSED)
     assert res.skipped_reason is None and not res.passed  # even with identical text
     assert GUARD.check(HI.replace("स्टॉप लॉस", "स्टॉप-लॉस"), MR, PROPOSED).skipped_reason is None

@@ -33,8 +33,8 @@ sources before the first real library run.
 | `max_fuzzy_words` | 12 | matched words in one such segment that fail the note |
 | `max_pack_source_coverage` | 0.5 | share of one passage that all notes of the pack together may rebuild |
 
-Rules: texts are compared after one normalisation (`guards/text_match.py`: NFKC, format characters
-deleted, casefold, confusables folded, Devanagari nukta and chandrabindu canonical); the
+Rules: texts are compared after the shared `amw_core.text_normalise` (CCR-105; invisible and
+combining characters, look-alikes and Devanagari variants folded); the
 cross-language skip depends only on the actual scripts of both texts, never on language tags; each
 note is checked against every passage of the job's retrieval set; notes must be in Latin script.
 Known limit: a note written in transliteration (Latin letters) of a Devanagari passage is not

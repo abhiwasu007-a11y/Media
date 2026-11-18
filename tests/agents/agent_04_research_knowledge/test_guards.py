@@ -14,7 +14,12 @@ from agent_04_research_knowledge.errors import (
     TenantInactive,
     TenantMismatch,
 )
-from agent_04_research_knowledge.guards.copy_guard import CopyGuard, longest_shared_run
+from agent_04_research_knowledge.guards.copy_guard import (
+    CopyGuard,
+    longest_shared_run,
+    scripts_differ,
+    words_of,
+)
 from agent_04_research_knowledge.guards.restricted import (
     ApprovalView,
     ChunkMeta,
@@ -23,11 +28,6 @@ from agent_04_research_knowledge.guards.restricted import (
     release_subject_sha256,
 )
 from agent_04_research_knowledge.guards.tenant import TenantGuard
-from agent_04_research_knowledge.guards.text_match import (
-    dominant_script,
-    normalise_for_matching,
-    scripts_differ,
-)
 from agent_04_research_knowledge.models.enums import (
     DomainClass,
     GateReason,
@@ -51,6 +51,7 @@ from amw_core.enums import (
     SourceOwnership,
     VideoKind,
 )
+from amw_core.text_normalise import Script, dominant_script
 from tests.agents.agent_04_research_knowledge.conftest import (
     PROPOSED,
     World,
@@ -80,7 +81,7 @@ def note(text: str, **over: object) -> NoteCandidate:
 
 
 def test_normalise_and_longest_run() -> None:
-    assert normalise_for_matching("A Stop-Loss, ORDER!") == ["a", "stop", "loss", "order"]
+    assert words_of("A Stop-Loss, ORDER!") == ["a", "stop", "loss", "order"]
     assert longest_shared_run(["a", "b", "c", "d"], ["x", "b", "c", "y"]) == 2
     assert longest_shared_run([], ["a"]) == 0
 
@@ -101,8 +102,8 @@ def test_copy_guard_cross_language_only_when_scripts_really_differ() -> None:
     guard = CopyGuard()
     mr = "स्टॉप-लॉस म्हणजे ठरावीक पातळीवर व्यवहार बंद करणारी ऑर्डर"
     assert guard.check("a stop loss closes", mr, PROPOSED).skipped_reason == "CROSS_LANGUAGE"
-    assert dominant_script(mr) == "DEVANAGARI" and dominant_script("a stop") == "LATIN"
-    assert dominant_script("12 34") is None and not scripts_differ("12", mr)
+    assert dominant_script(mr) is Script.DEVANAGARI and dominant_script("a stop") is Script.LATIN
+    assert not scripts_differ("12", mr)
     same = guard.check(mr, mr, PROPOSED)
     assert same.skipped_reason is None and not same.passed  # same script: always checked
 

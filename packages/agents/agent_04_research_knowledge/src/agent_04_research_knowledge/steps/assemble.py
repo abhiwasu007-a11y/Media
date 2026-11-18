@@ -9,8 +9,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from agent_04_research_knowledge.errors import InsufficientInput
-from agent_04_research_knowledge.guards.copy_guard import coverage_positions
-from agent_04_research_knowledge.guards.text_match import normalise_for_matching, scripts_differ
+from agent_04_research_knowledge.guards.copy_guard import (
+    coverage_positions,
+    scripts_differ,
+    words_of,
+)
 from agent_04_research_knowledge.models.enums import (
     FACTUAL_KINDS,
     REQUIRED_NEED_KINDS,
@@ -406,13 +409,13 @@ def enforce_pack_coverage(
                 groups.setdefault(note.passage.text, []).append((ce, note))
     removed = 0
     for text, members in groups.items():
-        words = normalise_for_matching(text)
+        words = words_of(text)
         if not words:
             continue
         covers = [
             set()
             if scripts_differ(n.note.note, text)
-            else coverage_positions(normalise_for_matching(n.note.note), words, ngram_n)
+            else coverage_positions(words_of(n.note.note), words, ngram_n)
             for _, n in members
         ]
         while members and len(set().union(*covers)) / len(words) > max_coverage:

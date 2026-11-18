@@ -11,16 +11,23 @@ A note fails when ANY of four independent measures reaches its configured thresh
   ``fuzzy_edits`` substitutions, insertions or deletions): "one word changed in every eight".
 
 Every threshold is configuration (``CopyGuardSettings``, REQUIRES REVIEW owner/counsel); this
-module has none. Texts are compared through ``normalise_for_matching`` only; the decision to skip
-a pair as cross-language rests on the scripts of the actual texts (``scripts_differ``), never on
-language tags. Same-script pairs (Marathi and Hindi, English and transliterated Hindi) are always
-checked. Pure; results hold numbers only.
+module has none. Texts are compared through the shared ``amw_core.text_normalise`` only
+(CCR-105); the decision to skip a pair as cross-language rests on the scripts of the actual
+texts (``scripts_differ``), never on language tags. Same-script pairs (Marathi and Hindi,
+English and transliterated Hindi) are always checked. Pure; results hold numbers only.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agent_04_research_knowledge.guards.text_match import normalise_for_matching, scripts_differ
+from amw_core.text_normalise import (
+    Script,
+    Token,
+    dominant_script,
+    normalise_for_matching,
+    shingle_set,
+    tokenize,
+)
 
 CROSS_LANGUAGE = "CROSS_LANGUAGE"
 MIN_SHARED_WORDS = 3
@@ -47,6 +54,34 @@ class CopyResult:
     skipped_reason: str | None
     lcs_ratio: float = 0.0
     fuzzy_run: int = 0
+
+
+def tokens_of(text: str) -> tuple[Token, ...]:
+    """Whole-word tokens of ``text`` after the shared normalisation (the only tokeniser here)."""
+    return tokenize(normalise_for_matching(text))
+
+
+def words_of(text: str) -> list[str]:
+    return [t.text for t in tokens_of(text)]
+
+
+def script_of(text: str) -> Script:
+    return dominant_script(text)
+
+
+def has_letters(text: str) -> bool:
+    return any(ch.isalpha() for ch in text)
+
+
+def scripts_differ(a: str, b: str) -> bool:
+    """True only when both texts are clearly Latin or Devanagari and the scripts differ.
+
+    Decided by the characters of the texts, never by a language tag. MIXED text, text in other
+    scripts and text without letters are always checked (never skipped).
+    """
+    known = {Script.LATIN, Script.DEVANAGARI}
+    sa, sb = script_of(a), script_of(b)
+    return sa in known and sb in known and sa is not sb
 
 
 def _shingles(words: Sequence[str], n: int) -> set[tuple[str, ...]]:
@@ -136,11 +171,13 @@ class CopyGuard:
         """Compare one note with one passage. Skipped only when the scripts truly differ."""
         if scripts_differ(note, passage):
             return CopyResult(0, 0.0, True, CROSS_LANGUAGE)
-        nw, pw = normalise_for_matching(note), normalise_for_matching(passage)
+        note_tokens, passage_tokens = tokens_of(note), tokens_of(passage)
+        nw, pw = [t.text for t in note_tokens], [t.text for t in passage_tokens]
         run = longest_shared_run(nw, pw)
-        note_shingles = _shingles(nw, thresholds.ngram_n)
+        note_shingles = shingle_set(note_tokens, thresholds.ngram_n)
         containment = (
-            len(note_shingles & _shingles(pw, thresholds.ngram_n)) / len(note_shingles)
+            len(note_shingles & shingle_set(passage_tokens, thresholds.ngram_n))
+            / len(note_shingles)
             if note_shingles
             else 0.0
         )

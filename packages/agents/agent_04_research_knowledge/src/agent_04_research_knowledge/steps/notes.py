@@ -14,8 +14,9 @@ from agent_04_research_knowledge.guards.copy_guard import (
     CopyGuard,
     CopyResult,
     CopyThresholds,
+    has_letters,
+    script_of,
 )
-from agent_04_research_knowledge.guards.text_match import dominant_script
 from agent_04_research_knowledge.llm import StructuredLlmCaller
 from agent_04_research_knowledge.models.common import Refusal
 from agent_04_research_knowledge.models.enums import (
@@ -40,9 +41,7 @@ from agent_04_research_knowledge.prompts import NOTES_PROMPT_ID, PromptLoader, b
 from agent_04_research_knowledge.runtime import RunInfo
 from agent_04_research_knowledge.settings import CopyGuardSettings, NotesSettings, StepLlm
 from amw_core.enums import TimeReferenceKind
-
-NOTE_SCRIPT = "LATIN"
-"""Notes are written in English (prompt rule 2); their script must be Latin."""
+from amw_core.text_normalise import Script
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +110,7 @@ class NoteValidator:
             elif (
                 note.clarity is Clarity.AMBIGUOUS
                 or len(text) > limits.max_note_chars
-                or dominant_script(text) not in (None, NOTE_SCRIPT)
+                or (has_letters(text) and script_of(text) is not Script.LATIN)
             ):
                 # NT7: a note over the cap, or not in the note language's script (notes are
                 # English, prompt rule 2), is not acceptable; the repair-feedback enum is closed,
