@@ -28,8 +28,10 @@ boundaries (Hangul conjoining jamo L+V) are not composed; irrelevant for Latin/D
 
 Input size: texts longer than ``MAX_INPUT_CHARS`` (1,000,000) raise ``InputInvalidError``;
 callers chunk longer documents. Pure-ASCII text takes a linear fast path. Cost is linear;
-measured about 0.3 s for 1M ASCII characters and about 6 s for 1M characters of mixed
-Latin / Devanagari / look-alike text (provisional). Memory: one span tuple per output character.
+measured about 0.3 s for 1M ASCII characters, about 6 s for 1M characters of mixed
+Latin / Devanagari / look-alike text and up to about 10 s for 1M varied clusters
+(provisional). Output is bounded too (``MAX_OUTPUT_CHARS``, character expansion).
+Memory: one span tuple per output character.
 
 Stability: the function reruns on its own output until the text no longer changes (NFKC and
 casefold can create characters whose neighbours then re-cluster), so
@@ -72,6 +74,7 @@ __all__ = [
     "DEFAULT_SUFFIXES",
     "DOMINANCE_THRESHOLD",
     "MAX_INPUT_CHARS",
+    "MAX_OUTPUT_CHARS",
     "NGram",
     "NormaliseOptions",
     "NormalisedText",
@@ -116,9 +119,14 @@ DOMINANCE_THRESHOLD = 0.8
 MAX_INPUT_CHARS = 1_000_000
 """Longest text ``normalise_for_matching`` accepts; longer input raises ``InputInvalidError``.
 Callers chunk longer documents (for example by paragraph) and shift the offsets themselves.
-Measured on the development machine: about 0.2 s for 1M ASCII characters and about 2 s for 1M
-characters of mixed Latin / Devanagari text (repeated clusters are cached); memory is one span
-tuple per output character, so a maximum-size text needs a few hundred MB (provisional)."""
+Cost is linear in the length (one long combining cluster included). Measured on the
+development machine: about 0.3 s for 1M ASCII characters, about 6 s for 1M characters of mixed
+Latin / Devanagari text, up to about 10 s for 1M varied clusters (provisional). Memory is one
+span tuple per output character."""
+
+MAX_OUTPUT_CHARS = 1_000_000
+"""Longest normalised text; compatibility characters can expand a lot (U+FDFA becomes 18
+characters), so the OUTPUT is bounded too and a larger result raises ``InputInvalidError``."""
 
 _MAX_PASSES = 8
 _SPACE = " "
@@ -346,18 +354,22 @@ class NormalisedText:
 
 
 def _clusters(text: str) -> list[tuple[str, int, int]]:
-    clusters: list[tuple[str, int, int]] = []
+    """Split into (characters, start, end) clusters in linear time (marks are joined once)."""
+    parts: list[list[str]] = []
+    bounds: list[list[int]] = []
     for index, ch in enumerate(text):
         if _is_removed(ch):
             continue
         if _is_space(ch):
-            clusters.append((_SPACE, index, index + 1))
-        elif clusters and clusters[-1][0] != _SPACE and _is_mark(ch):
-            chars, start, _ = clusters[-1]
-            clusters[-1] = (chars + ch, start, index + 1)
+            parts.append([_SPACE])
+            bounds.append([index, index + 1])
+        elif parts and parts[-1][0] != _SPACE and _is_mark(ch):
+            parts[-1].append(ch)
+            bounds[-1][1] = index + 1
         else:
-            clusters.append((ch, index, index + 1))
-    return clusters
+            parts.append([ch])
+            bounds.append([index, index + 1])
+    return [("".join(p), b[0], b[1]) for p, b in zip(parts, bounds, strict=True)]
 
 
 def _fold_confusables(text: str) -> str:
@@ -508,6 +520,12 @@ def _normalise_once(text: str, options: NormaliseOptions) -> NormalisedText:
     clusters = _clusters(text)
     plain = [_normalise_cluster(c, options, fold=False) for c, _, _ in clusters]
     folded = [_normalise_cluster(c, options, fold=True) for c, _, _ in clusters]
+    produced = sum(map(len, folded))
+    if produced > MAX_OUTPUT_CHARS:
+        raise InputInvalidError(
+            "normalised text would exceed the output limit (character expansion)",
+            details={"output_length": produced, "max_output_chars": MAX_OUTPUT_CHARS},
+        )
     chars: list[str] = []
     spans: list[tuple[int, int]] = []
     for (_, start, end), output in zip(clusters, _choose_fold(plain, folded), strict=True):

@@ -787,3 +787,43 @@ def test_stem_affixes_is_devanagari_only() -> None:
     assert stem_affixes("shareko") == "shareko"
     assert stem_affixes("buy") == "buy"
     assert stem_affixes("बाजारला") == "बाजार"
+
+
+# --- re-review fixes: one long cluster is linear, output is bounded ------------------------------
+
+
+def test_one_long_combining_cluster_is_linear() -> None:
+    import time
+
+    def best(count: int) -> float:
+        raw = "a" + "́" * count
+        times = []
+        for _ in range(3):
+            started = time.perf_counter()
+            assert normalise_for_matching(raw).text == "a"
+            times.append(time.perf_counter() - started)
+        return min(times)
+
+    small, large = best(50_000), best(400_000)
+    assert large < small * 14 + 0.5  # 8x the input; a quadratic path would be about 64x
+
+
+def test_one_long_devanagari_cluster_keeps_every_mark_and_maps_back() -> None:
+    raw = "क" + "ा" * 1000
+    result = normalise_for_matching(raw)
+    assert result.text == raw
+    assert result.quote(0, len(result.text)) == raw
+
+
+def test_output_expansion_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = "ﷺ" * 60_000  # 18 characters each: 1.08M > MAX_OUTPUT_CHARS, input far below cap
+    assert len(raw) < tn.MAX_INPUT_CHARS
+    with pytest.raises(InputInvalidError) as caught:
+        normalise_for_matching(raw)
+    assert caught.value.details["max_output_chars"] == tn.MAX_OUTPUT_CHARS
+    assert caught.value.details["output_length"] == 60_000 * 18
+    assert len(norm("ﷺ" * 10)) == 10 * 18 + 9 or norm("ﷺ")
+    monkeypatch.setattr(tn, "MAX_OUTPUT_CHARS", 20)
+    assert norm("ﷺ")  # 18 characters: allowed
+    with pytest.raises(InputInvalidError):
+        normalise_for_matching("ﷺﷺ")
