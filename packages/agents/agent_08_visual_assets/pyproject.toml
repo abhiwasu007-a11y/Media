@@ -1,0 +1,15 @@
+[project]
+name = "agent-08-visual-assets"
+version = "0.0.0"
+requires-python = "==3.14.*"
+dependencies = ["amw-core"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_08_visual_assets"]
+
+[tool.uv.sources]
+amw-core = { workspace = true }

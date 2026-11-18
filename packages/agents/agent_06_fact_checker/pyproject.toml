@@ -1,0 +1,15 @@
+[project]
+name = "agent-06-fact-checker"
+version = "0.0.0"
+requires-python = "==3.14.*"
+dependencies = ["amw-core"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_06_fact_checker"]
+
+[tool.uv.sources]
+amw-core = { workspace = true }
