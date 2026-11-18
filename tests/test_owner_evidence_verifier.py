@@ -52,7 +52,9 @@ SAID = REQUESTED + timedelta(minutes=5)
 NOW = REQUESTED + timedelta(hours=1)
 SECOND = timedelta(seconds=1)
 POLICY = VerifierPolicy(
-    human_inbound_origins=frozenset({"human"}), decision_words=DEFAULT_DECISION_WORDS
+    human_inbound_origins=frozenset({"human"}),
+    owner_account_ids=frozenset({"acct-owner"}),
+    decision_words=DEFAULT_DECISION_WORDS,
 )
 SUBJECT = ids.new_id(ids.Prefix.RENDER)
 OWNER = ids.USER.new()
@@ -60,7 +62,9 @@ APPROVED = ApprovalStepState.APPROVED
 
 
 def event(uuid: str = "ev-1", **change: Any) -> SessionEvent:
-    base = SessionEvent("ses-1", uuid, "user", False, "human", "Approve R7K2 please", SAID)
+    base = SessionEvent(
+        "ses-1", uuid, "user", False, "human", "Approve R7K2 please", SAID, "acct-owner", None
+    )
     return replace(base, **change)
 
 
@@ -156,6 +160,8 @@ def test_grammar_accepts(content: str, quote: str, decision: ApprovalStepState) 
         ("tool-result role", event(role="tool"), "role_user"),
         ("assistant role", event(role="assistant"), "role_user"),
         ("synthetic event", event(is_synthetic=True), "not_synthetic"),
+        ("another account", event(sender_account="acct-guest"), "owner_account"),
+        ("child / sub-agent session", event(parent_session_id="ses-0"), "top_level_session"),
         ("quote not a substring", event(content="R7K2 approve"), "quote_verbatim"),
         ("altered timestamp", event(timestamp=SAID + SECOND), "timestamp_equal"),
     ],
@@ -279,15 +285,11 @@ def test_forged_verification_result_changes_nothing() -> None:
     row = store.record(tx, evidence())
     forged = verify_owner_event(
         event(),  # a made-up event handed to the public pure function
+        evidence=evidence(),
         evidence_id=row.id,
         purpose=RECORD,
-        bound_sha256=row.evidence_sha256,
-        session_id="ses-1",
-        event_uuid="ev-1",
         quote="Approve R7K2",
         message_at=SAID,
-        review_code="R7K2",
-        decision=APPROVED,
         not_before=REQUESTED,
         distinct_from_event_uuid=None,
         policy=POLICY,
@@ -304,21 +306,18 @@ def test_forged_verification_result_changes_nothing() -> None:
 def test_verified_value_is_immutable_and_bound() -> None:
     outcome = verify_owner_event(
         event(),
+        evidence=evidence(),
         evidence_id=ids.OWNER_EVIDENCE.new(),
         purpose=RECORD,
-        bound_sha256=evidence_sha256(evidence()),
-        session_id="ses-1",
-        event_uuid="ev-1",
         quote="Approve R7K2",
         message_at=SAID,
-        review_code="R7K2",
-        decision=APPROVED,
         not_before=REQUESTED,
         distinct_from_event_uuid=None,
         policy=POLICY,
         now=NOW,
     )
     assert isinstance(outcome, Verified)
+    assert outcome.bound_sha256 == evidence_sha256(evidence())
     with pytest.raises(dataclasses.FrozenInstanceError):
         outcome.evidence_id = ids.OWNER_EVIDENCE.new()  # type: ignore[misc]
     assert not hasattr(outcome, "__dict__")
@@ -330,15 +329,11 @@ def test_verified_value_is_immutable_and_bound() -> None:
 def test_unfetchable_event_outcome() -> None:
     outcome = verify_owner_event(
         None,
+        evidence=evidence(event_uuid="ev-9"),
         evidence_id=ids.OWNER_EVIDENCE.new(),
         purpose=RECORD,
-        bound_sha256="0" * 64,
-        session_id="ses-1",
-        event_uuid="ev-9",
         quote="q",
         message_at=SAID,
-        review_code="R7K2",
-        decision=APPROVED,
         not_before=REQUESTED,
         distinct_from_event_uuid=None,
         policy=POLICY,

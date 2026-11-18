@@ -235,11 +235,11 @@ class MemoryOwnerEvidenceStore:
 
     def _check(
         self,
+        tx: TenantTransaction,
         row: EvidenceRecord,
         purpose: str,
         event: SessionEvent | None,
         *,
-        session_id: str,
         event_uuid: str,
         quote: str,
         message_at: datetime | None,
@@ -249,28 +249,45 @@ class MemoryOwnerEvidenceStore:
     ) -> Verified | Refusal | EventUnavailable:
         outcome = verify_owner_event(
             event,
+            evidence=row.evidence,
             evidence_id=row.id,
             purpose=purpose,
-            bound_sha256=row.evidence_sha256,
-            session_id=session_id,
-            event_uuid=event_uuid,
             quote=quote,
             message_at=message_at,
-            review_code=row.evidence.review_code,
-            decision=row.evidence.parsed_decision,
             not_before=not_before,
             distinct_from_event_uuid=distinct_from,
             policy=self._policy,
             now=now,
         )
-        if isinstance(outcome, Verified) and (
-            outcome.evidence_id != row.id
-            or outcome.event_uuid != event_uuid
-            or outcome.bound_sha256 != row.evidence_sha256
-            or outcome.purpose != purpose
-        ):
-            raise InvalidTransitionError("verification is not bound to this evidence row")
+        if isinstance(outcome, Verified):
+            if (
+                outcome.evidence_id != row.id
+                or outcome.event_uuid != event_uuid
+                or outcome.bound_sha256 != row.evidence_sha256
+                or outcome.purpose != purpose
+            ):
+                raise InvalidTransitionError("verification is not bound to this evidence row")
+            if self._event_backs_other_subject(tx, row, event_uuid):
+                return Refusal("one_subject_per_message", (*outcome.checks, ("one_subject", False)))
         return outcome
+
+    def _event_backs_other_subject(
+        self, tx: TenantTransaction, row: EvidenceRecord, event_uuid: str
+    ) -> bool:
+        """One owner message verifies exactly one subject (no multi-subject format exists)."""
+        subject = (row.evidence.subject_kind, row.evidence.subject_id)
+        for (org, other_id), other in self._rows.items():
+            if org != tx.context.org_id or other_id == row.id:
+                continue
+            if other.state is EvidenceState.REFUSED:
+                continue
+            uses = {other.evidence.event_uuid, other.confirmation_event_uuid}
+            if (
+                event_uuid in uses
+                and (other.evidence.subject_kind, other.evidence.subject_id) != subject
+            ):
+                return True
+        return False
 
     def verify_recorded(
         self,
@@ -290,10 +307,10 @@ class MemoryOwnerEvidenceStore:
                 raise MissingDependencyError("superseded evidence not found")
             not_before = max(not_before, older.evidence.message_at)
         outcome = self._check(
+            tx,
             row,
             RECORD,
             self._source.fetch(e.session_id, e.event_uuid),
-            session_id=e.session_id,
             event_uuid=e.event_uuid,
             quote=e.quote,
             message_at=e.message_at,
@@ -328,10 +345,10 @@ class MemoryOwnerEvidenceStore:
     ) -> EvidenceRecord:
         row = self._move(tx, evidence_id, (EvidenceState.VERIFIED,))
         outcome = self._check(
+            tx,
             row,
             CONFIRMATION,
             self._source.fetch(session_id, event_uuid),
-            session_id=session_id,
             event_uuid=event_uuid,
             quote=quote,
             message_at=None,
