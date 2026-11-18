@@ -2,7 +2,11 @@
 name = "agent-08-visual-assets"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core"]
+dependencies = [
+    "amw-core",
+    "matplotlib==3.11.2",
+    "pillow==13.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]
