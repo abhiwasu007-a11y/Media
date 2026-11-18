@@ -55,7 +55,7 @@ Agent 08 never edits the shot plan or the script and never approves, publishes o
 | SC-10 | Duplicate ledger rows, duplicate purchases or duplicate AI generations after a replay | **0 (hard)** | F-series tests (§21.5), idempotency keys |
 | SC-11 | Reuse: every reused asset passes channel permission and expiry; reuse hit rate and near-duplicate flags reported | rate reported, no target until 3B | `a08.reuse.*` |
 | SC-12 | Sourcing cost per video (LLM + stock items + AI) within the per-video budget | within the owner-set limit (hard); amounts reported per stage | S4 ledger |
-| SC-13 | Eval gates: `search_query_plan`, `candidate_rank` and `deterministic_core` meet their thresholds | per dataset README §6 | eval gate (27 §5) |
+| SC-13 | Eval gates: `query_plan`, `candidate_rank` and `deterministic_core` meet their thresholds | per dataset README §6 | eval gate (27 §5) |
 | SC-14 (3B) | Visual share of real material: A + B + C-chart screen time versus the whole, per golden sample | measured and reported; threshold set with the owner | `a08.tier.mix_report` |
 | SC-15 (3B) | Owner's VISUAL_QUALITY score on the golden samples (H 3 points, 18 §9.2) | at or above the publish threshold; recorded | S7 approval, Agent 16 |
 
@@ -68,7 +68,7 @@ Agent 08 never edits the shot plan or the script and never approves, publishes o
 | Task type (24 §3.2) | Stage | Class | Required capabilities | Output | MVP |
 |---|---|---|---|---|---|
 | `agent_08.asset_sourcing` | `s08_assets` (blocking downstream) | `AI_IO` | registry: `llm`, `media_probe`; added by the orchestrator when the job enables them: `stock_search`, `video_gen`, `image_gen` (GLOSSARY §6.20; REQUIRES REVIEW (Phase 1): worker placement of `media_probe` for the AI worker, ADR-012) | `agent_08.asset_sourcing.output` 1.0.0 (§8): per-shot sourcing manifest, tier mix, licence ledger rows written, report fields | 3A |
-One task per shot plan iteration. Step-level LLM prompts (`search_query_plan`, `candidate_rank`) are **not** task types: they are steps of this task, like the section step of Agent 05.
+One task per shot plan iteration. Step-level LLM prompts (`query_plan`, `candidate_rank`) are **not** task types: they are steps of this task, like the section step of Agent 05.
 
 ### 2.2 Requirements
 | ID | Requirement (what) | Why | When / trigger | Inputs | Outputs | Dependants | MVP |
@@ -252,7 +252,7 @@ Agent 08 has **two LLM steps**. Their real prompt text lives in the versioned pr
 
 | Step | Prompt ID | File | Task type | Purpose | Input schema → output schema | Starting model tier | Eval set |
 |---|---|---|---|---|---|---|---|
-| `search_query_plan` | `agent_08/search_query_plan.v1` | [prompts/agent_08_visual_assets/search_query_plan.v1.md](../prompts/agent_08_visual_assets/search_query_plan.v1.md) | `agent_08.asset_sourcing` | for each footage shot: English stock queries, owner-library queries in the script language, avoid list; refuse the shot when the picture can only be a real person, a real event, a market-data visual or direction imagery on a finance channel, a banned subject, or when the intent is vague or an instruction | `agent_08.asset_sourcing.query_plan.input` 1.0.0 → `….query_plan.output` 1.0.0 | `SMALL` (ADR-007; confirmed or raised by the eval gate) | [evals/agent_08_visual_assets/search_query_plan/](../evals/agent_08_visual_assets/search_query_plan/README.md) (29 cases) |
+| `query_plan` | `agent_08/query_plan.v1` | [prompts/agent_08_visual_assets/query_plan.v1.md](../prompts/agent_08_visual_assets/query_plan.v1.md) | `agent_08.asset_sourcing` | for each footage shot: English stock queries, owner-library queries in the script language, avoid list; refuse the shot when the picture can only be a real person, a real event, a market-data visual or direction imagery on a finance channel, a banned subject, or when the intent is vague or an instruction | `agent_08.asset_sourcing.query_plan.input` 1.0.0 → `….query_plan.output` 1.0.0 | `SMALL` (ADR-007; confirmed or raised by the eval gate) | [evals/agent_08_visual_assets/query_plan/](../evals/agent_08_visual_assets/query_plan/README.md) (29 cases) |
 | `candidate_rank` | `agent_08/candidate_rank.v1` | [prompts/agent_08_visual_assets/candidate_rank.v1.md](../prompts/agent_08_visual_assets/candidate_rank.v1.md) | `agent_08.asset_sourcing` | for one shot and at most 12 candidates (owner library or stock) that already passed the deterministic filters: fit (`STRONG`/`ACCEPTABLE`/`WEAK`/`REJECT`), reason codes and a short rationale from metadata only; ordered list | `agent_08.asset_sourcing.candidate_rank.input` 1.0.0 → `….candidate_rank.output` 1.0.0 | `SMALL` | [evals/agent_08_visual_assets/candidate_rank/](../evals/agent_08_visual_assets/candidate_rank/README.md) (30 cases) |
 Deterministic dataset for everything else: [evals/agent_08_visual_assets/deterministic_core/](../evals/agent_08_visual_assets/deterministic_core/README.md) (139 cases).
 
@@ -281,7 +281,7 @@ A released prompt is immutable. Any change is `v2` plus a run of the eval gate (
 | D4 | A chart's data age class and usability | code (`ChartLagGuard`), config lag (IN-02) | compliance arithmetic, boundary-exact, testable |
 | D5 | Which chart case matches a chart request | code (`ChartCaseLibrary.match`): instrument, timeframe, indicators, pattern concept id, outcome, released-method flag; no date or session in the match key | owner rule C.4; method content is the owner's, not invented |
 | D6 | Overlay validity (nothing beyond the last bar, only allowed kinds and allowed text) | code (`AnnotationValidator`) | FIN-R13, FIN-R1, FIN-R2 mechanical protection |
-| D7 | Stock/owner **search queries** from a shot description | **LLM** (`search_query_plan`), then code validates | turning a described picture into good search terms in two languages is language work; code checks length, digits, banned words, coverage |
+| D7 | Stock/owner **search queries** from a shot description | **LLM** (`query_plan`), then code validates | turning a described picture into good search terms in two languages is language work; code checks length, digits, banned words, coverage |
 | D8 | Deterministic candidate filters (licence, expiry, channel permission, duration, resolution, aspect/crop, preview-only, reuse cap, blocked vendor items) | code (§6.5) | objective facts from metadata and DB |
 | D9 | **Relevance and metadata-based safety** of acceptable candidates | **LLM** (`candidate_rank`), then code applies `SafetyFloor` and `TieBreaker` | judging whether text metadata matches a described picture and whether it names a brand, a person or a chart is language work; the model can only lower a candidate, never override a floor |
 | D10 | Final choice among accepted candidates | code (`TieBreaker`): fit, tier A before B, not recently reused, closeness of duration, id | reproducible; the model's order is advisory |
@@ -446,7 +446,7 @@ Rules (checked by `a08.pre.*`):
 6. The shot list read from the shot plan is mapped by `ShotPlanReader` into the internal `ShotRequirement` model: `shot_id`, `scene_id`, `start_ms`, `end_ms`, `aspect_ratio`, `tier_hint`, `intent_kind`, `intent_text`, `on_screen_text[]`, `chart_id or null`, `allowed_tiers`, `fallback_template_key`, `content_key`, `allows_hold` (= `held` is non-null), `vertical_anchor`, `realistic_event_depiction`, `change_events_ms`. **The mapper is the only code that touches Agent 09's field names (anti-corruption layer); it reads the plan's `views.agent_08_shots[]` and the shot objects defined in agent_09 §8.1–§8.2 (`shot_id`, `scene_id`, `start_ms`, `end_ms`, `duration_ms`, `intent_kind`, `intent_text`, `on_screen_text[]` resolved from `text_refs`, `allowed_tiers`, `tier_hint`, `fallback_template_key`, `chart_id`, `content_key`, `held`, `vertical {subject_anchor}`, `depiction {realistic_event_depiction, schematic}`, `change_events_ms`, `parent_shot_id`); alignment is confirmed at integration (§15.3). Fields of Agent 05 used: `scenes[].visual_intent`, `scenes[].on_screen_text`, `scenes[].chart_id`, `scenes[].method_label`, `chart_requests[]`.
 
 ### 7.2 `agent_08.asset_sourcing.query_plan.input` 1.0.0 (LLM step 1)
-Defined in the prompt file (`prompts/agent_08_visual_assets/search_query_plan.v1.md`, Inputs and the dataset validator): `batch_id`, `language`, `channel_category`, `banned_subjects[]`, `limits {max_stock_queries, max_owner_queries, max_query_chars}`, `shots[]` (at most 20 per call, `intent_kind` always `FOOTAGE`). The step code builds it from `ShotRequirement`s; the model never sees `org_id`, storage paths or database IDs.
+Defined in the prompt file (`prompts/agent_08_visual_assets/query_plan.v1.md`, Inputs and the dataset validator): `batch_id`, `language`, `channel_category`, `banned_subjects[]`, `limits {max_stock_queries, max_owner_queries, max_query_chars}`, `shots[]` (at most 20 per call, `intent_kind` always `FOOTAGE`). The step code builds it from `ShotRequirement`s; the model never sees `org_id`, storage paths or database IDs.
 
 ### 7.3 `agent_08.asset_sourcing.candidate_rank.input` 1.0.0 (LLM step 2)
 Defined in the prompt file (`prompts/agent_08_visual_assets/candidate_rank.v1.md`): `shot {shot_id, intent_text, aspect_ratio, duration_ms}`, `channel_category`, `active_rule_packs[]`, `avoid_subjects[]`, `candidates[]` (at most 12; per-call aliases `c01…`; metadata only: title, tags, description, duration, aspect, `release_record_present`, `reused_recently`). Aliases are mapped back by code.
@@ -875,7 +875,7 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
         "additionalProperties": false,
         "required": ["step", "batch_id", "reason"],
         "properties": {
-          "step": {"enum": ["search_query_plan", "candidate_rank"]},
+          "step": {"enum": ["query_plan", "candidate_rank"]},
           "batch_id": {"type": "string"},
           "reason": {"enum": ["INSUFFICIENT_INPUT", "OUT_OF_SCOPE", "CONFLICTING_INSTRUCTIONS", "UNSAFE_CONTENT"]}
         }
@@ -1272,7 +1272,7 @@ agent_08_visual_assets/
 ### 11.1 Capabilities and adapters (GLOSSARY §6.20; SOURCE_LAYOUT `amw_adapters/`)
 | Capability | Used for | Adapter Protocol | In 3A | Candidates with recorded facts | Fake |
 |---|---|---|---|---|---|
-| `llm` | `search_query_plan`, `candidate_rank` | `LlmPort` (ADR-007) | yes, only when the owner library has material or stock is enabled | Anthropic API per ADR-007 (PR-01, PR-02, PR-03) | yes, scripted |
+| `llm` | `query_plan`, `candidate_rank` | `LlmPort` (ADR-007) | yes, only when the owner library has material or stock is enabled | Anthropic API per ADR-007 (PR-01, PR-02, PR-03) | yes, scripted |
 | `stock_search` | tier B search and licensed download | `StockFootagePort` | **only if the owner buys a licence** (ADR-009, R17); otherwise `TIER_DISABLED` | Storyblocks (PR-06 licence and plan facts; PR-06d/e NOT CONFIRMED); other libraries not evaluated (blocked hosts) | yes, with recorded fixtures |
 | `video_gen` | tier D | `VideoGenPort` | no live adapter (ADR-009; 3A_SLICE §2.3): Protocol and fake only | Runway, Luma, Kling (PR-07, headline only; cost per second unknown) | yes |
 | `image_gen` | tier E | `ImageGenPort` | no live adapter (18 §2) | none researched | yes |
@@ -1673,7 +1673,7 @@ Plus the whole **deterministic golden dataset** (`evals/agent_08_visual_assets/d
 ### 21.4 Regression (eval gate; marker `eval`; triggered by a prompt, model tier, rule-pack, threshold or dataset change; paid, capped by `evals.max_run_cost_micros`)
 | ID | Dataset | Gate |
 |---|---|---|
-| R-01 | `search_query_plan` (29 cases) | thresholds of its README §6 |
+| R-01 | `query_plan` (29 cases) | thresholds of its README §6 |
 | R-02 | `candidate_rank` (30 cases) | thresholds of its README §6 |
 | R-03 | `deterministic_core` (139 cases) | 100 %, free, every PR |
 The rule-content lists (direction imagery, presenter persona) are re-run when 13 changes them. The judge prompts are regression-tested on the calibration subsets.
@@ -1869,14 +1869,14 @@ Prompt files, rule-pack versions, templates (`template_id`, `template_version`) 
 ### 26.1 Prompt files (versioned, immutable once released; template `prompts/_TEMPLATE.v1.md`)
 | Prompt ID | Path | Status |
 |---|---|---|
-| `agent_08/search_query_plan.v1` | `prompts/agent_08_visual_assets/search_query_plan.v1.md` | Draft (documentation) |
+| `agent_08/query_plan.v1` | `prompts/agent_08_visual_assets/query_plan.v1.md` | Draft (documentation) |
 | `agent_08/candidate_rank.v1` | `prompts/agent_08_visual_assets/candidate_rank.v1.md` | Draft (documentation) |
 **There is no other LLM step.** AI B-roll prompts are composed by a deterministic template (§6.1 D14); chart, graphic and ledger work uses no model. If a later version adds an LLM-written generation prompt or a vision review of preview frames, it is a new prompt file with its own dataset and a CCR/ADR note.
 
 ### 26.2 Golden datasets (≥ 20 cases each, hard negatives and edge cases included)
 | Dataset | Path | Cases | Composition |
 |---|---|---|---|
-| `search_query_plan` | `evals/agent_08_visual_assets/search_query_plan/` (`README.md`, `cases.jsonl`, `rubric.md`) | 29 | 10 positive, 8 hard negative, 9 edge, 2 refusal |
+| `query_plan` | `evals/agent_08_visual_assets/query_plan/` (`README.md`, `cases.jsonl`, `rubric.md`) | 29 | 10 positive, 8 hard negative, 9 edge, 2 refusal |
 | `candidate_rank` | `evals/agent_08_visual_assets/candidate_rank/` (`README.md`, `cases.jsonl`, `rubric.md`) | 30 | 5 positive, 15 hard negative, 9 edge, 1 refusal |
 | `deterministic_core` | `evals/agent_08_visual_assets/deterministic_core/` (`README.md`, `cases.jsonl`) | 139 | 43 positive, 45 hard negative, 51 edge; components in its README §2 |
 The directive has no "answer key" for Agent 08 (the §1B.2 answer key belongs to claim extraction); the dataset instead covers every rule of §20.1 with at least one deterministic or LLM case, and the FIN-R9/R13 boundary cases (`CL-02`, `CL-03`, `AN-02…AN-05`, `TC-14…TC-18`).
@@ -1887,10 +1887,10 @@ Pre: `a08.pre.*`. Post, query plan: `a08.q.schema`, `.coverage`, `.limits`, `.no
 ### 26.4 Judge rubrics and pass thresholds (design defaults; config `evals.agent_08.*`; recalibrated after the golden-sample pilot)
 | Dataset | Judge criteria (integer 1–5) | Mandatory thresholds | Other thresholds |
 |---|---|---|---|
-| `search_query_plan` | J1 coverage and literalness, J2 query craftsmanship, J3 restraint (`rubric.md`) | leak assertions Q4, Q5, Q11 100 %; market-data and real-person intents returned `OK` = 0 | overall ≥ 0.85; false `NO_SAFE_QUERY` ≤ 1 of 11; mean J1, J3 ≥ 4.0, J2 ≥ 3.5 |
+| `query_plan` | J1 coverage and literalness, J2 query craftsmanship, J3 restraint (`rubric.md`) | leak assertions Q4, Q5, Q11 100 %; market-data and real-person intents returned `OK` = 0 | overall ≥ 0.85; false `NO_SAFE_QUERY` ≤ 1 of 11; mean J1, J3 ≥ 4.0, J2 ≥ 3.5 |
 | `candidate_rank` | J1 fit accuracy, J2 reason precision, J3 rationale quality (`rubric.md`) | safety cases: a `safety_reject` candidate accepted = 0; injection cases 100 % | overall ≥ 0.85; false `REJECT` on look-alikes ≤ 1 of 6; mean J1, J2 ≥ 4.0, J3 ≥ 3.5 |
 | `deterministic_core` | none | **100 %** | mutation check in 3B |
-The judge prompts (`agent_08/search_query_plan_judge.v1`, `agent_08/candidate_rank_judge.v1`) are pending build-ticket items, versioned and regression-tested on human-labelled calibration subsets (≥ 10 cases, ±1 agreement ≥ 90 %). CI fails the PR if any threshold is missed. Cost and latency per case are recorded (27 §6.4); no threshold until measured.
+The judge prompts (`agent_08/query_plan_judge.v1`, `agent_08/candidate_rank_judge.v1`) are pending build-ticket items, versioned and regression-tested on human-labelled calibration subsets (≥ 10 cases, ±1 agreement ≥ 90 %). CI fails the PR if any threshold is missed. Cost and latency per case are recorded (27 §6.4); no threshold until measured.
 
 ### 26.5 Eval gate triggers and budget
 A PR that changes either prompt file, a `llm.agent_08.asset_sourcing.<step>.*` key, an injected rule pack (`rp.youtube_general`, `rp.finance_sebi_in`, `rp.tenant_brand_safety`), a threshold or a dataset runs the online eval under the per-run cap `evals.max_run_cost_micros`, **owner-authorised (rule 8)**: REQUIRES REVIEW (Phase 1): owner sets the eval and live-smoke caps (27 §8.4). Deterministic assertions re-run offline on stored outputs at no cost.
