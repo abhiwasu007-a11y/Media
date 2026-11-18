@@ -27,7 +27,7 @@ FIX = Path(__file__).parent / "fixtures"
 pytestmark = pytest.mark.unit
 
 
-def test_ebur128_command_is_the_exact_18_command() -> None:
+def test_ebur128_command_is_the_18_command_plus_map() -> None:
     cmd = ebur128_command("ffmpeg", Path("/s/in.wav"))
     assert cmd == [
         "ffmpeg",
@@ -43,6 +43,13 @@ def test_ebur128_command_is_the_exact_18_command() -> None:
         "null",
         "-",
     ]
+
+
+def test_ebur128_command_measures_through_the_master_channel_map() -> None:
+    mono = ebur128_command("ffmpeg", Path("/s/in.wav"), input_channels=1)
+    assert mono[mono.index("-af") + 1] == "pan=stereo|c0=c0|c1=c0,ebur128=peak=true:framelog=quiet"
+    stereo = ebur128_command("ffmpeg", Path("/s/in.wav"), input_channels=2)
+    assert stereo[stereo.index("-af") + 1] == "ebur128=peak=true:framelog=quiet"
 
 
 def test_silencedetect_command_voice_parameters() -> None:
@@ -118,6 +125,15 @@ def test_parse_ebur128_incomplete_summary_is_agent_crash() -> None:
 def test_parse_ebur128_inf_is_unmeasurable_not_a_number() -> None:
     text = (FIX / "ebur128_tone.txt").read_text().replace("-33.8 LUFS", "-inf LUFS", 1)
     assert parse_ebur128(text).integrated_lufs is None
+
+
+def test_parse_ebur128_absolute_gate_value_is_unmeasurable() -> None:
+    """FFmpeg 6.1 prints -70.0 LUFS (not -inf) for digital silence (M2)."""
+    base = (FIX / "ebur128_tone.txt").read_text()
+    for printed in ("-70.0", "-70.4", "-99.0"):
+        text = base.replace("-33.8 LUFS", f"{printed} LUFS", 1)
+        assert parse_ebur128(text).integrated_lufs is None
+    assert parse_ebur128(base.replace("-33.8 LUFS", "-69.9 LUFS", 1)).integrated_lufs == -69.9
 
 
 def test_parse_silencedetect_recorded_output() -> None:

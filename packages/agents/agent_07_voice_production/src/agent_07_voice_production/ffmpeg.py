@@ -2,10 +2,12 @@
 
 Command construction and output parsing are pure and tested against recorded tool-output
 fixtures; the only process call is ``SubprocessRunner.run`` (an argument list, never a shell
-string: no injection surface, 19.1 control 3). The measurement commands are the exact commands of
-18 sections 7.2 and 7.5 (INF-09). The processing filters (``volume``, ``alimiter``, ``afftdn``)
-and the AAC encode options are PROPOSALS: REQUIRES REVIEW (Phase 1) - verify against the official
-FFmpeg documentation and record them in RESEARCH_LOG (blueprint 6.4, F-23).
+string: no injection surface, 19.1 control 3). The measurement commands follow 18 sections 7.2
+and 7.5 (INF-09) but are not verbatim: ``-map 0:a:0`` is added, and ebur128 runs behind the
+master's channel map when the stem is mono (see ``channel_map_filters``). The processing filters
+(``volume``, ``alimiter``, ``afftdn``) and the AAC encode options are PROPOSALS: REQUIRES REVIEW
+(Phase 1) - verify against the official FFmpeg documentation and record them in RESEARCH_LOG
+(blueprint 6.4, F-23).
 """
 
 import json
@@ -62,8 +64,21 @@ class SubprocessRunner:
 _COMMON = ("-nostats", "-hide_banner")
 
 
-def ebur128_command(ffmpeg: str, path: Path) -> list[str]:
-    """18 section 7.2, verbatim: loudness, loudness range and true peak (``peak=true``)."""
+CHANNEL_MAP_MONO_TO_STEREO = "pan=stereo|c0=c0|c1=c0"
+"""A mono stem becomes dual-mono stereo (AM-11). BS.1770 sums channel powers, so the same signal
+in two channels measures +3.01 LU: loudness is therefore always measured after this map."""
+
+
+def channel_map_filters(input_channels: int) -> list[str]:
+    return [CHANNEL_MAP_MONO_TO_STEREO] if input_channels == 1 else []
+
+
+def ebur128_command(ffmpeg: str, path: Path, *, input_channels: int | None = None) -> list[str]:
+    """18 section 7.2: loudness, loudness range and true peak (``peak=true``). With
+    ``input_channels`` the stem is measured through the master's channel map (the layout the
+    master really has), so the gain solved from it lands on the target."""
+    ebur = "ebur128=peak=true:framelog=quiet"
+    chain = ",".join([*channel_map_filters(input_channels or 0), ebur])
     return [
         ffmpeg,
         *_COMMON,
@@ -72,7 +87,7 @@ def ebur128_command(ffmpeg: str, path: Path) -> list[str]:
         "-map",
         "0:a:0",
         "-af",
-        "ebur128=peak=true:framelog=quiet",
+        chain,
         "-f",
         "null",
         "-",
@@ -147,9 +162,7 @@ def render_filter_chain(
 ) -> str:
     """Gain then limiter (6.4 step 3). A mono stem becomes dual mono (stereo master, AM-11).
     Duration is never changed: no resampling, no trim, ``latency`` compensated."""
-    chain: list[str] = []
-    if input_channels == 1:
-        chain.append("pan=stereo|c0=c0|c1=c0")
+    chain: list[str] = channel_map_filters(input_channels)
     if denoise is DenoiseMode.LIGHT:
         chain.append("afftdn=nr=6")
     chain.append(f"volume={gain_db_to_text(gain_db)}")
@@ -244,6 +257,10 @@ _SIL_START = re.compile(r"silence_start:\s*(-?\d+(?:\.\d+)?)")
 _SIL_END = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
 
 
+ABSOLUTE_GATE_LUFS = -70.0
+"""BS.1770 absolute gate: ebur128 prints ``-70.0 LUFS`` (not ``-inf``) for digital silence."""
+
+
 def _number(text: str) -> float | None:
     return None if text.endswith("inf") else float(text)
 
@@ -252,7 +269,8 @@ def parse_ebur128(stderr: str) -> Loudness:
     """Parse the ``Summary:`` block at the end of the ebur128 output (18 section 7.2).
 
     A missing summary or an unparsable value is ``AGENT.CRASH`` (18 section 7.0.3): a measurement
-    that cannot be made is never a PASS. ``-inf`` (nothing above the absolute gate) is ``None``.
+    that cannot be made is never a PASS. ``-inf``, or a loudness at or below the -70 LUFS absolute
+    gate (what FFmpeg prints for digital silence), is ``None``.
     """
     marker = stderr.rfind("Summary:")
     if marker < 0:
@@ -261,7 +279,10 @@ def parse_ebur128(stderr: str) -> Loudness:
     i_m, lra_m, peak_m = _I_RE.search(block), _LRA_RE.search(block), _PEAK_RE.search(block)
     if i_m is None or lra_m is None or peak_m is None:
         raise AgentCrashError("FFmpeg ebur128 Summary block is incomplete")
-    return Loudness(_number(i_m.group(1)), _number(peak_m.group(1)), _number(lra_m.group(1)))
+    integrated = _number(i_m.group(1))
+    if integrated is not None and integrated <= ABSOLUTE_GATE_LUFS:
+        integrated = None  # nothing above the absolute gate: not measurable (M2)
+    return Loudness(integrated, _number(peak_m.group(1)), _number(lra_m.group(1)))
 
 
 def parse_silencedetect(stderr: str, total_ms: int) -> tuple[SilenceSpan, ...]:
@@ -339,8 +360,9 @@ class FfmpegAudioTools:
             return StreamFacts(info.sample_rate_hz, info.channels, info.frames, "pcm_s16le")
         return parse_ffprobe(self._run(ffprobe_command(self.ffprobe, path)).stdout)
 
-    def loudness(self, path: Path) -> Loudness:
-        return parse_ebur128(self._run(ebur128_command(self.ffmpeg, path)).stderr)
+    def loudness(self, path: Path, *, input_channels: int | None = None) -> Loudness:
+        cmd = ebur128_command(self.ffmpeg, path, input_channels=input_channels)
+        return parse_ebur128(self._run(cmd).stderr)
 
     def silence(
         self, path: Path, total_ms: int, *, noise_db: float, min_s: float

@@ -47,11 +47,14 @@ class AgentSevenConfig(BaseModel):
     max_chars_per_request: Annotated[int, Field(ge=1)] | None = None
     clip_min_ms_per_char: Annotated[int, Field(ge=0)] | None = None
     clip_max_ms_per_char: Annotated[int, Field(ge=1)] | None = None
-    max_attempt_retries: Annotated[int, Field(ge=0, le=5)] = 2
+    max_attempt_retries: Annotated[int, Field(ge=0, le=5)] | None = None
     """In-attempt retries of a temporary provider failure (07 section 3); then the task is
-    retried by the orchestrator from its checkpoint."""
-    max_retry_after_ms: Annotated[int, Field(ge=0)] = 30_000
-    """A provider ``retry_after`` beyond this ends the attempt (``RETRY_WAIT``)."""
+    retried by the orchestrator from its checkpoint. No sourced default: required (6.5)."""
+    max_retry_after_ms: Annotated[int, Field(ge=0)] | None = None
+    """A provider ``retry_after`` beyond this ends the attempt (``RETRY_WAIT``). No sourced
+    default: required."""
+    idempotency_lock_ms: Annotated[int, Field(ge=1)] | None = None
+    """Lease of an in-flight idempotency key (03 section 9). No sourced default: required."""
     noise_floor_max_dbfs: float | None = None
     max_mark_gap_ms: Annotated[int, Field(ge=0)] | None = None
     """Largest gap between an owner recording's segment marks (F-13); unset = not checked."""
@@ -64,17 +67,19 @@ class AgentSevenConfig(BaseModel):
     sample_rate_hz: int = SPEC_SAMPLE_RATE_HZ
     min_bitrate_bps: int = SPEC_MIN_BITRATE_BPS
     max_passes: Annotated[int, Field(ge=1, le=10)] = 3
-    limiter_ceiling_dbtp: float = -1.5
-    codec_headroom_step_db: Annotated[float, Field(gt=0)] = 0.5
+    limiter_ceiling_dbtp: float | None = None
+    """Blueprint 6.5 gives no sourced value: required for the master (calibrate in 3B)."""
+    codec_headroom_step_db: Annotated[float, Field(gt=0)] | None = None
+    """Blueprint 6.5 gives no sourced value: required for the master (calibrate in 3B)."""
     max_limiter_reduction_db: Annotated[float, Field(gt=0)] | None = None
     max_silence_ms: Annotated[int, Field(ge=1)] | None = None
     denoise_mode: DenoiseMode = DenoiseMode.OFF
     music_enabled: StrictBool = False
     music_band_min_db: float = SPEC_MUSIC_BAND_DB[0]
     music_band_max_db: float = SPEC_MUSIC_BAND_DB[1]
-    pause_span_tolerance_ms: Annotated[int, Field(ge=0)] = 100
-    """A silence run inside a deliberate-pause span within this tolerance is not dead air
-    (design default, calibrate in 3B)."""
+    pause_span_tolerance_ms: Annotated[int, Field(ge=0)] | None = None
+    """A silence run inside a deliberate-pause span within this tolerance is not dead air.
+    No sourced value: required for the master (calibrate in 3B)."""
     aac_encoder: Annotated[str, Field(min_length=1, max_length=64)] = "aac"
     aac_rate_mode: Annotated[str, Field(min_length=1, max_length=16)] = "TARGET_BITRATE"
     """REQUIRES REVIEW (Phase 1): choose and pin the AAC encoder and its rate mode (F-23)."""
@@ -92,7 +97,10 @@ class AgentSevenConfig(BaseModel):
             problems.append("min_bitrate_bps must be at least 384000 (18 section 5)")
         if self.true_peak_max_dbtp > SPEC_TRUE_PEAK_MAX_DBTP:
             problems.append("true_peak_max_dbtp must be at most -1.0 (18 section 5)")
-        if self.limiter_ceiling_dbtp > self.true_peak_max_dbtp:
+        if (
+            self.limiter_ceiling_dbtp is not None
+            and self.limiter_ceiling_dbtp > self.true_peak_max_dbtp
+        ):
             problems.append("limiter_ceiling_dbtp must not exceed true_peak_max_dbtp")
         if self.music_band_min_db > self.music_band_max_db:
             problems.append("music band is empty")
@@ -118,12 +126,33 @@ class AgentSevenConfig(BaseModel):
     def require_master(self) -> None:
         if self.max_passes < 1:
             raise ConfigInvalidError("agent_07.master.max_passes must be at least 1")
+        missing = [
+            name
+            for name in (
+                "limiter_ceiling_dbtp",
+                "codec_headroom_step_db",
+                "pause_span_tolerance_ms",
+            )
+            if getattr(self, name) is None
+        ]
+        if missing:
+            raise ConfigInvalidError(
+                "required agent_07 master config keys are unset", details={"missing": missing}
+            )
 
     def require_voice(self) -> None:
         """Keys the voice step cannot run without (blueprint 6.5: unset => CONFIG_INVALID)."""
         missing = [
             name
-            for name in ("gap_ms", "trim_keep_ms", "price_micros_per_1k_chars", "price_ref")
+            for name in (
+                "gap_ms",
+                "trim_keep_ms",
+                "price_micros_per_1k_chars",
+                "price_ref",
+                "max_attempt_retries",
+                "max_retry_after_ms",
+                "idempotency_lock_ms",
+            )
             if getattr(self, name) is None
         ]
         if missing:

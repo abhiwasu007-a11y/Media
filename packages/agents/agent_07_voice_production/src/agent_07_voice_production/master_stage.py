@@ -239,6 +239,16 @@ def evaluate_master(
             threshold=0,
         )
     )
+    assert cfg.pause_span_tolerance_ms is not None  # noqa: S101 - require_master()
+    out.append(
+        gate_result(
+            "qc.audio.clipping",
+            run.master_clipping_samples == 0,
+            "no master sample at full scale",
+            measured=run.master_clipping_samples,
+            threshold=0,
+        )
+    )
     marked, longest = silence_findings(pre.silence_runs, pauses, cfg.pause_span_tolerance_ms)
     limit = cfg.max_silence_ms
     out.append(
@@ -446,6 +456,7 @@ class AudioMasterStage:
             music_offset=music,
             music_active=music is not None,
         )
+        _require_delivery_encode(run, cfg)
         integrity = [r for r in results if r.blocking and not r.gate and r.verdict is not PASS]
         if integrity:
             raise IncompleteOutputError(
@@ -461,6 +472,15 @@ class AudioMasterStage:
             "pre": _loud(pre.loudness),
             "post": _loud(run.codec.post_codec),
             "passes": run.passes,
+            "codec": {
+                "codec": run.codec.codec,
+                "profile": run.codec.profile,
+                "sample_rate_hz": run.codec.sample_rate_hz,
+                "channels": run.codec.channels,
+                "nominal_bitrate_bps": run.codec.bitrate_bps,
+                "measured_bitrate_bps": run.codec.measured_bitrate_bps,
+            },
+            "master_clipping_samples": run.master_clipping_samples,
         }
         report_uri = d.storage.blob_uri(ctx.tenant, "jobs", f"{base}/report.json")
         report_info = put_once(
@@ -482,7 +502,7 @@ class AudioMasterStage:
                 master_uri=str(master_uri),
                 sha256=info.sha256,
                 duration_ms=run.master_stream.duration_ms,
-                sample_rate_hz=48000,
+                sample_rate_hz=48000,  # verified against the measured stream, see the guard
                 channels=2,
             ),
             measurements=c.MasterMeasurements(
@@ -501,11 +521,11 @@ class AudioMasterStage:
                 denoise_mode=c.DenoiseOut(cfg.denoise_mode.value),
             ),
             codec_verification=c.CodecVerificationBlock(
-                codec="aac",
+                codec="aac",  # equal to the measured values: _require_delivery_encode
                 profile="LC",
                 sample_rate_hz=48000,
                 channels=2,
-                bitrate_bps=max(run.codec.bitrate_bps, 384_000),
+                bitrate_bps=run.codec.bitrate_bps,  # nominal rate, the gated value (CCR-055)
                 post_codec=_block(run.codec.post_codec),
             ),
             codec_profile=c.CodecProfileBlock(
@@ -513,7 +533,7 @@ class AudioMasterStage:
                 profile="LC",
                 sample_rate_hz=48000,
                 channels=2,
-                bitrate_bps=max(cfg.min_bitrate_bps, 384_000),
+                bitrate_bps=cfg.min_bitrate_bps,
                 encoder=f"{cfg.aac_encoder} ({d.backend.build()})"[:64],
                 rate_mode=cfg.aac_rate_mode,
             ),
@@ -630,6 +650,38 @@ class AudioMasterStage:
             float(s["next_gain"]),
             float(s["next_ceiling"]),
             bool(s["satisfied"]),
+        )
+
+
+def _require_delivery_encode(run: MasterRun, cfg: AgentSevenConfig) -> None:
+    """The payload reports measured codec facts; a verification encode that is not AAC-LC at the
+    delivery rate, stereo and at or above the minimum bitrate is a process-integrity failure (a
+    typed error, no payload) and is never papered over with the spec constants. The bitrate gate
+    is on the nominal rate (CCR-055); the measured average goes to the report."""
+    codec, master = run.codec, run.master_stream
+    wrong = [
+        name
+        for name, ok in (
+            ("qc.audio.codec", codec.codec == "aac" and codec.profile == "LC"),
+            (
+                "qc.audio.sample_rate",
+                master.sample_rate_hz == codec.sample_rate_hz == cfg.sample_rate_hz,
+            ),
+            ("qc.audio.channels", codec.channels == 2 == master.channels),
+            ("qc.audio.bitrate", codec.bitrate_bps >= cfg.min_bitrate_bps),
+        )
+        if not ok
+    ]
+    if wrong:
+        raise IncompleteOutputError(
+            "the verification encode is not the delivery profile",
+            details={
+                "check_ids": wrong,
+                "codec": f"{codec.codec}/{codec.profile}",
+                "sample_rate_hz": codec.sample_rate_hz,
+                "channels": codec.channels,
+                "bitrate_bps": codec.bitrate_bps,
+            },
         )
 
 

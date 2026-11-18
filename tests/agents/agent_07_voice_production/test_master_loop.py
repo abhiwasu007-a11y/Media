@@ -225,7 +225,7 @@ def test_admission_rule() -> None:
     assert not is_admitted(master, market)
     assert is_admitted(voice, market)
     assert not is_admitted(master, drain)
-    assert not is_admitted(voice, drain)
+    assert is_admitted(voice, drain)  # only HEAVY_CPU is held back (IT-05, ADR-012 3.3)
     assert not is_admitted("agent_07.other", quiet)
 
 

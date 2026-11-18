@@ -287,6 +287,6 @@ def test_consent_other_cases() -> None:
         run_consent(clone, channel=CHANNEL.new())
     with pytest.raises(PermissionDeniedError):
         run_consent(replace(clone, voice=replace(clone.voice, consent_id=None)))
-    with pytest.raises(MissingDependencyError):
+    with pytest.raises(PermissionDeniedError):  # consent_id set, row absent or RLS-hidden
         run_consent(replace(clone, consent=None))
     run_consent(bundle())  # not a clone: nothing to check

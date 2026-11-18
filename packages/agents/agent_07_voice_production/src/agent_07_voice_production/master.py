@@ -26,7 +26,11 @@ class CodecFacts:
     sample_rate_hz: int
     channels: int
     bitrate_bps: int
+    """The nominal rate the encode was asked for: what ``qc.audio.bitrate`` gates (CCR-055)."""
     post_codec: Loudness
+    measured_bitrate_bps: int | None = None
+    """The average the encode really has (ffprobe, else file size over duration); reported in
+    the stage report. The payload block cannot carry it: see CONTRACT_CHANGE_REQUESTS."""
 
 
 @runtime_checkable
@@ -45,7 +49,17 @@ class MasteringBackend(Protocol):
         denoise: DenoiseMode,
     ) -> None: ...
 
+    def measure_mapped(self, stem: Path, *, input_channels: int) -> Loudness:
+        """Loudness of the stem measured through the channel map ``render`` applies, so the gain
+        is solved against the layout the master really has (a mono stem becomes dual-mono and
+        measures +3.01 LU louder under BS.1770)."""
+        ...
+
     def analyse_master(self, path: Path) -> tuple[StreamFacts, Loudness]: ...
+
+    def count_clipping(self, path: Path) -> int:
+        """Samples of the rendered master at digital full scale (``qc.audio.clipping``)."""
+        ...
 
     def codec_verify(self, master: Path, workdir: Path, *, bitrate_bps: int) -> CodecFacts: ...
 
@@ -75,6 +89,7 @@ class MasterRun:
     codec: CodecFacts
     master_path: Path
     targets_met: bool
+    master_clipping_samples: int = 0
 
 
 def solve_gain(pre: Loudness, target_lufs: float) -> float:
@@ -118,7 +133,12 @@ def run_passes(
     """M5 to M8. ``after_pass`` runs after each pass's measurements (checkpoint, drain check)
     and before the pass is judged, so a DRAIN stops at the pass boundary (FR-20)."""
     cfg.require_master()
-    gain = solve_gain(pre.loudness, cfg.target_lufs)
+    solve_gain(pre.loudness, cfg.target_lufs)  # a silent stem is refused before any render
+    mapped = backend.measure_mapped(stem, input_channels=pre.stream.channels)
+    gain = solve_gain(mapped, cfg.target_lufs)
+    assert cfg.limiter_ceiling_dbtp is not None  # noqa: S101 - require_master()
+    step = cfg.codec_headroom_step_db
+    assert step is not None  # noqa: S101 - require_master()
     ceiling = cfg.limiter_ceiling_dbtp
     first = 1
     if resume is not None:
@@ -146,10 +166,11 @@ def run_passes(
         satisfied = peak_ok and loud_ok is not False
         next_gain, next_ceiling = gain, ceiling
         if not peak_ok:
-            next_ceiling = round(ceiling - cfg.codec_headroom_step_db, 3)
+            next_ceiling = round(ceiling - step, 3)
         if loud_ok is False and post.integrated_lufs is not None:
             next_gain = round(gain + (cfg.target_lufs - post.integrated_lufs), 3)
-        last = MasterRun(k, gain, ceiling, reduction, stream, post, codec, dst, satisfied)
+        clipped = backend.count_clipping(dst)
+        last = MasterRun(k, gain, ceiling, reduction, stream, post, codec, dst, satisfied, clipped)
         state = PassState(k, gain, ceiling, next_gain, next_ceiling, satisfied)
         if after_pass is not None:
             after_pass(state)
@@ -171,8 +192,18 @@ from agent_07_voice_production.ffmpeg import (  # noqa: E402 - after the Protoco
     parse_ffprobe,
     render_command,
 )
-from agent_07_voice_production.pcm import wav_info  # noqa: E402
+from agent_07_voice_production.pcm import count_full_scale_pcm, wav_info  # noqa: E402
 from amw_core.errors import RenderCrashError  # noqa: E402
+
+
+def _measured_bitrate(facts: StreamFacts, encoded: Path) -> int:
+    """ffprobe's reported stream ``bit_rate``; else file size over duration (still measured)."""
+    if facts.bit_rate_bps is not None:
+        return facts.bit_rate_bps
+    seconds = facts.duration_samples / facts.sample_rate_hz
+    if seconds <= 0:
+        raise RenderCrashError("the verification encode has no duration")
+    return round(encoded.stat().st_size * 8 / seconds)
 
 
 class FfmpegMasteringBackend:
@@ -214,6 +245,12 @@ class FfmpegMasteringBackend:
         )
         tmp.replace(dst)  # atomic within the scratch directory: no partial file at a final path
 
+    def measure_mapped(self, stem: Path, *, input_channels: int) -> Loudness:
+        return self._tools.loudness(stem, input_channels=input_channels)
+
+    def count_clipping(self, path: Path) -> int:
+        return count_full_scale_pcm(path)
+
     def analyse_master(self, path: Path) -> tuple[StreamFacts, Loudness]:
         info = wav_info(path)
         stream = StreamFacts(
@@ -236,7 +273,8 @@ class FfmpegMasteringBackend:
             facts.sample_rate_hz,
             facts.channels,
             bitrate_bps,
-            self._tools.loudness(decoded),  # nominal bitrate is the gate (18 7.1, CCR-055)
+            self._tools.loudness(decoded),
+            _measured_bitrate(facts, encoded),
         )
 
     def build(self) -> str:

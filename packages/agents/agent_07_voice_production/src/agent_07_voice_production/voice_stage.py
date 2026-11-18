@@ -157,6 +157,7 @@ class _Run:
 class VoiceSynthesisStage:
     def __init__(self, deps: VoiceDeps) -> None:
         self._d = deps
+        self._partial: _Partial | None = None
 
     # ---------------------------------------------------------------- entry point
 
@@ -164,7 +165,7 @@ class VoiceSynthesisStage:
         d = self._d
         started = d.clock.monotonic_ms()
         ctx: ExecContext | None = None
-        calls = 0
+        self._partial = None
         try:
             ctx = ExecContext.from_task_input(task_input, attempt_id)
             return self._run(ctx, task_input, started)
@@ -185,8 +186,12 @@ class VoiceSynthesisStage:
             exc = classify(raw)
             now = d.clock.now()
             elapsed = d.clock.monotonic_ms() - started
+            partial = self._partial or _Partial(0, 0, ())
             resource = usage(
-                provider_calls=calls, cost_micros=0, currency=d.config.currency, cost_entry_ids=()
+                provider_calls=partial.calls,
+                cost_micros=partial.cost,
+                currency=d.config.currency,
+                cost_entry_ids=partial.entries,
             )
             if isinstance(exc, BudgetExhaustedError) and ctx is not None:
                 return suspended(
@@ -414,7 +419,11 @@ class VoiceSynthesisStage:
         clips: list[PlacedClip] = []
         done: list[IdempotencyKey] = []
         for index, prep in enumerate(prepared, start=1):
-            clip = synth.synthesize(ctx, prep, settings)
+            try:
+                clip = synth.synthesize(ctx, prep, settings)
+            except BaseException:
+                self._partial = self._with_unreturned(run, synth)
+                raise
             self._account(run, clip)
             done.append(clip.idempotency_key)
             clips.append(
@@ -928,6 +937,15 @@ class VoiceSynthesisStage:
 
     # ---------------------------------------------------------------- bookkeeping
 
+    @staticmethod
+    def _with_unreturned(run: _Run, synth: SegmentSynthesizer) -> _Partial:
+        """Usage so far, including a billed call whose audio was refused (FR-9, Q-23)."""
+        calls, cost, entries = run.calls, run.cost_micros, run.cost_entry_ids
+        if synth.unreturned is not None:
+            entry_id, _chars, micros = synth.unreturned
+            calls, cost, entries = calls + 1, cost + micros, (*entries, str(entry_id))
+        return _Partial(calls, cost, entries)
+
     def _account(self, run: _Run, clip: ClipResult) -> None:
         """``calls`` counts the task's billed calls (also on a replay: the output of a replay equals
         the first run's); the harness counts adapter invocations separately."""
@@ -991,6 +1009,13 @@ class VoiceSynthesisStage:
             channel_id=ctx.channel_id,
             now=d.clock.now(),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class _Partial:
+    calls: int
+    cost: int
+    entries: tuple[str, ...]
 
 
 class _Drained(Exception):  # noqa: N818 - control flow, not an error

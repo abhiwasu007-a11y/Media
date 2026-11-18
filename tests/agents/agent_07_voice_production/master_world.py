@@ -90,6 +90,13 @@ class StubFfmpeg:
         self._gain, self._ceiling = gain_db, ceiling_dbtp
         dst.write_bytes(b"MASTER" + f"{gain_db}:{ceiling_dbtp}".encode())
 
+    def measure_mapped(self, stem: Path, *, input_channels: int) -> Loudness:
+        s = self.stem  # the stub models no channel term: the descriptor is the mapped value
+        return Loudness(s["integrated_lufs"], s["true_peak_dbtp"], s["lra_lu"])
+
+    def count_clipping(self, path: Path) -> int:
+        return 0
+
     def analyse_master(self, path: Path) -> tuple[StreamFacts, Loudness]:
         n = len(self.renders)
         for fault in self.faults:

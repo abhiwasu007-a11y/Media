@@ -25,6 +25,14 @@ CASES = [
 NOT_RUN = {
     "VS-42": "FR-19 clip reuse across iterations is a 3B optimisation (PRIOR_OUTPUT clip cache)",
 }
+# VS-46 and VS-47 are denials (ledger_rows 0) whose expected object still carries the positive
+# case's amount and characters: a copy-paste defect of the dataset (the zero-rows and zero-calls
+# assertions stay mandatory for them). Only these two IDs are excused.
+AMOUNT_COPY_PASTE_DEFECT = {"VS-46", "VS-47"}
+# VS-40 expects ``ledger_rows`` 0 for a provider call that returned garbage. FR-9 and Q-23
+# ("every paid call has a ledger row") win over the dataset: the call is recorded as an ESTIMATE
+# and debited (M1 of the PR 37 review; dataset correction filed in CONTRACT_CHANGE_REQUESTS.md).
+DATASET_CORRECTIONS = {"VS-40": {"ledger_rows": 1}}
 pytestmark = [pytest.mark.integration]
 
 
@@ -33,7 +41,7 @@ def _results(out: TaskOutput) -> dict[str, str]:
 
 
 def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
-    exp = case["expected"]
+    exp = {**case["expected"], **DATASET_CORRECTIONS.get(case["case_id"], {})}
     assert out.status.value == exp["status"]
     code = out.error.code if out.error is not None else None
     assert code == exp["error_code"]
@@ -42,11 +50,12 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
     assert world.tts.invocations == exp["network_calls"]
     assert len(world.ledger.rows) == exp.get("ledger_rows", 0)
     if "ledger_amount_micros_total" in exp:
-        # VS-46 and VS-47 are denials (ledger_rows 0) whose expected object still carries the
-        # positive case's amount and characters: a copy-paste defect of the dataset, reported to
-        # the lead. The zero-rows and zero-calls assertions above stay mandatory for them.
-        expected_total = exp["ledger_amount_micros_total"] if exp.get("ledger_rows", 0) else 0
+        defect = case["case_id"] in AMOUNT_COPY_PASTE_DEFECT
+        expected_total = 0 if defect else exp["ledger_amount_micros_total"]
         assert world.ledger.total_micros == expected_total
+    if case["case_id"] == "VS-40":  # the billed call shows in the failed task's resource usage
+        assert out.resource_usage.provider_calls == world.tts.invocations == 1
+        assert out.resource_usage.cost_estimate_micros == world.ledger.total_micros > 0
     for row in world.ledger.rows.values():
         assert row.entry.operation.value == "tts.synthesize"
         assert row.entry.unit_kind is not None
@@ -63,7 +72,7 @@ def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
     if exp.get("state") == "CHECKPOINTED":
         assert out.status is OutputStatus.SUSPENDED
     if exp.get("violations_min") and out.error is not None:
-        assert len(out.error.details.violations or ()) >= exp["violations_min"] or True
+        assert len(out.error.details.violations or ()) >= exp["violations_min"]
     if out.status is not OutputStatus.SUCCEEDED:
         assert out.payload is None
         return

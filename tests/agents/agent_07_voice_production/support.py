@@ -362,6 +362,13 @@ def config(**overrides: Any) -> AgentSevenConfig:
         "price_micros_per_1k_chars": 80_000,
         "price_ref": "fake-pricing-v0",
         "sample_max_segments": 2,
+        # fixture values (no sourced default ships: blueprint 6.5)
+        "max_attempt_retries": 2,
+        "max_retry_after_ms": 30_000,
+        "idempotency_lock_ms": 120_000,
+        "limiter_ceiling_dbtp": -1.5,
+        "codec_headroom_step_db": 0.5,
+        "pause_span_tolerance_ms": 100,
     }
     values.update(overrides)
     return AgentSevenConfig.checked(**values)

@@ -41,12 +41,11 @@ from amw_core.ids import (
 )
 from amw_core.interfaces.budget_guard import BudgetGuard, CallCheck
 from amw_core.interfaces.clock import Clock
-from amw_core.interfaces.cost_ledger import CostLedger, NewCostEntry
+from amw_core.interfaces.cost_ledger import CostEntry, CostLedger, NewCostEntry
 from amw_core.interfaces.idempotency_store import BeginAction, IdempotencyStore
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext
 
-IDEMPOTENCY_LOCK_MS = 120_000
 CLIP_MEDIA_TYPES = ("audio/wav", "audio/x-wav", "audio/wave")
 
 
@@ -116,6 +115,9 @@ class SegmentSynthesizer:
         self._config = config
         self._tools = tools
         self._sleep = sleep
+        self.unreturned: tuple[CostEntryId, int, int] | None = None
+        """(entry id, characters, micros) of a call that was billed and recorded but whose audio was
+        then refused or could not be stored; ``None`` otherwise."""
 
     # -- guards that run before any I/O -------------------------------------------------
 
@@ -143,6 +145,8 @@ class SegmentSynthesizer:
     ) -> ClipResult:
         cfg = self._config
         assert cfg.price_micros_per_1k_chars is not None  # noqa: S101 - require_voice()
+        assert cfg.idempotency_lock_ms is not None  # noqa: S101 - require_voice()
+        self.unreturned = None
         key = tts_key(ctx, prepared.segment_id, prepared.spoken_text_sha256, settings.voice_id)
         request = TtsRequest(
             text=prepared.spoken_text,
@@ -161,7 +165,7 @@ class SegmentSynthesizer:
                 request_hash,
                 ctx.task_id,
                 self._clock.now(),
-                IDEMPOTENCY_LOCK_MS,
+                cfg.idempotency_lock_ms,
             )
         if decision.action is BeginAction.RETURN_STORED:
             return self._stored(ctx, prepared, key, decision.record.result_ref)
@@ -170,11 +174,44 @@ class SegmentSynthesizer:
         try:
             self.guard(ctx, settings.provider, estimate)
             result = self._call(request, key, settings.provider)
+        except BaseException:
+            self._fail_key(ctx, key)
+            raise
+        # FR-9, Q-23: every call that returned a response is recorded (ESTIMATE) and debited
+        # before the audio is judged, so a garbage or unstorable return cannot escape the budget.
+        entry = self._record_call(ctx, prepared, settings, key, estimate)
+        self.unreturned = (entry.id, prepared.characters, estimate)
+        try:
             samples = self._validate(result.audio, result.media_type, prepared)
             clip_uri, clip_sha = self._store_clip(ctx, prepared, samples)
         except BaseException:
             self._fail_key(ctx, key)
             raise
+        with self._tenancy.transaction(ctx.tenant) as tx:
+            self._idem.complete(tx, key, clip_uri, self._clock.now())
+        self.unreturned = None
+        return ClipResult(
+            prepared.segment_id,
+            samples,
+            clip_uri,
+            clip_sha,
+            prepared.spoken_text_sha256,
+            key,
+            True,
+            prepared.characters,
+            entry.id,
+            estimate,
+        )
+
+    def _record_call(
+        self,
+        ctx: ExecContext,
+        prepared: PreparedSegment,
+        settings: SynthesisSettings,
+        key: IdempotencyKey,
+        estimate: int,
+    ) -> CostEntry:
+        cfg = self._config
         with self._tenancy.transaction(ctx.tenant) as tx:
             entry = self._ledger.record(
                 tx,
@@ -200,32 +237,22 @@ class SegmentSynthesizer:
                 ),
             )
             self._budget.after_call(tx, entry)
-            self._idem.complete(tx, key, clip_uri, self._clock.now())
-        return ClipResult(
-            prepared.segment_id,
-            samples,
-            clip_uri,
-            clip_sha,
-            prepared.spoken_text_sha256,
-            key,
-            True,
-            prepared.characters,
-            entry.id,
-            estimate,
-        )
+        return entry
 
     # -- internals --------------------------------------------------------------------
 
     def _call(self, request: TtsRequest, key: IdempotencyKey, provider: str):  # type: ignore[no-untyped-def]  # noqa: ANN202
-        attempts = self._config.max_attempt_retries + 1
+        retries, max_wait = self._config.max_attempt_retries, self._config.max_retry_after_ms
+        assert retries is not None  # noqa: S101 - require_voice()
+        assert max_wait is not None  # noqa: S101 - require_voice()
+        attempts = retries + 1
         for number in range(1, attempts + 1):
             try:
                 result = self._tts.synthesize(request, idempotency_key=key)
             except TemporaryError as exc:
                 self._breaker.record_failure(provider, OPERATION_SYNTHESIZE, exc.code)
                 if number == attempts or (
-                    exc.retry_after_ms is not None
-                    and exc.retry_after_ms > self._config.max_retry_after_ms
+                    exc.retry_after_ms is not None and exc.retry_after_ms > max_wait
                 ):
                     raise
                 self._sleep((exc.retry_after_ms or 0) / 1000)

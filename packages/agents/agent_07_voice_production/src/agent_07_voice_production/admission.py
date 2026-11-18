@@ -1,5 +1,6 @@
-"""Admission rule of ``s07_master`` (24.1, ADR-012 section 3.3): a HEAVY_CPU render task is never
-claimed in market hours or after the drain flag; ``s07_voice`` (light) is still admitted."""
+"""Admission rule of ``s07_master`` (24.1, ADR-012 section 3.3, IT-05): a HEAVY_CPU render task is
+never claimed in market hours or after the drain flag; ``s07_voice`` (light, ``AI_IO``) is
+admitted in both cases (a running voice task checkpoints at drain by itself, FR-20)."""
 
 from dataclasses import dataclass
 
@@ -14,8 +15,6 @@ class AdmissionState:
 
 
 def is_admitted(task_type: str, state: AdmissionState) -> bool:
-    if state.drain_flag:
-        return False
-    if task_type == TASK_MASTER and state.market_hours:
-        return False
-    return task_type in (TASK_VOICE, TASK_MASTER)
+    if task_type == TASK_MASTER:
+        return not (state.market_hours or state.drain_flag)
+    return task_type == TASK_VOICE

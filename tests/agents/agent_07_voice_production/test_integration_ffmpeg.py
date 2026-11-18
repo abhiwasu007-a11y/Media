@@ -124,7 +124,9 @@ def run_master(tmp: Path, stem_path: Path, **cfg: Any) -> tuple[TaskOutput, Memo
 def test_quiet_stem_is_mastered_to_the_delivery_spec(tmp_path: Path) -> None:
     stem = tmp_path / "stem.wav"
     frames = synthetic_stem(stem, amplitude=0.05)
-    out, blobs, _ = run_master(tmp_path, stem, tolerance_lu=1.0, max_silence_ms=2000)
+    # Default configuration of 3A: tolerance_lu is NOT set, so a loudness error cannot be
+    # corrected by a second pass; the first pass must land on the target by itself (B1).
+    out, blobs, _ = run_master(tmp_path, stem, max_silence_ms=2000)
     assert out.status is OutputStatus.SUCCEEDED, out.error
     assert out.payload is not None
     assert out.payload.data is not None
@@ -132,11 +134,15 @@ def test_quiet_stem_is_mastered_to_the_delivery_spec(tmp_path: Path) -> None:
     post = data["codec_verification"]["post_codec"]
     assert data["gate_verdict"] == "PASSED", data["gate_reasons"]
     assert post["true_peak_dbtp"] <= -1.0  # measured after the AAC-LC encode and decode
-    assert abs(post["integrated_lufs"] - (-14.0)) <= 1.0
+    assert data["mastering"]["passes"] == 1
+    assert abs(post["integrated_lufs"] - (-14.0)) <= 0.5  # not -11: dual-mono is measured (B1)
     assert data["measurements"]["duration_delta_samples"] == 0  # sample-exact, never resampled
     assert data["master"]["sample_rate_hz"] == 48000
     assert data["master"]["channels"] == 2
-    assert data["codec_verification"]["bitrate_bps"] >= 384_000
+    assert data["codec_verification"]["bitrate_bps"] >= 384_000  # nominal rate, gated (CCR-055)
+    report = json.loads(blobs.data[str(out.output_refs[-1].uri)])
+    assert report["codec"]["measured_bitrate_bps"] > 0  # the measured average is reported
+    assert report["master_clipping_samples"] == 0
     assert data["measurements"]["pre"]["integrated_lufs"] < -20  # the stem really was quiet
     master_uri = data["master"]["master_uri"]
     master_file = tmp_path / "master.wav"
@@ -150,12 +156,25 @@ def test_loud_stem_is_limited_below_the_ceiling(tmp_path: Path) -> None:
     stem = tmp_path / "stem.wav"
     synthetic_stem(stem, amplitude=0.98)
     out, _, _ = run_master(tmp_path, stem, tolerance_lu=2.0)
+    assert out.status is OutputStatus.SUCCEEDED, out.error
     assert out.payload is not None
     assert out.payload.data is not None
-    post = out.payload.data["codec_verification"]["post_codec"]
-    assert out.status is OutputStatus.SUCCEEDED
-    assert post["true_peak_dbtp"] <= -1.0 or out.payload.data["gate_verdict"] == "FAILED"
-    assert out.payload.data["mastering"]["passes"] <= 3
+    data = out.payload.data
+    post = data["codec_verification"]["post_codec"]
+    assert data["mastering"]["passes"] <= 3
+    # the verdict and the measurement agree: PASSED exactly when the post-codec peak fits
+    assert (post["true_peak_dbtp"] <= -1.0) == (data["gate_verdict"] == "PASSED")
+    assert post["true_peak_dbtp"] <= -1.0, post  # the ceiling step-down reaches it on this tone
+
+
+def test_silent_stem_is_refused_not_mastered(tmp_path: Path) -> None:
+    stem = tmp_path / "stem.wav"
+    write_s16(stem, array("h", bytes(2 * RATE * 3)), RATE, 1)
+    out, blobs, _ = run_master(tmp_path, stem)
+    assert out.status is OutputStatus.FAILED
+    assert out.error is not None
+    assert out.error.code == "PERMANENT.INPUT_INVALID"  # FFmpeg prints -70 LUFS, not -inf (M2)
+    assert not any(u.endswith("master.wav") for u in blobs.data)
 
 
 def test_clipped_stem_fails_the_gate_with_the_remedy_stage(tmp_path: Path) -> None:

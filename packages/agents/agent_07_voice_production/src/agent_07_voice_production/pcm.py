@@ -9,7 +9,7 @@ and true peak are never computed here: they come from FFmpeg ``ebur128`` (INF-09
 import math
 import wave
 from array import array
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,3 +125,29 @@ def trim_silence(
 
 def silence_samples(duration_ms: int, sample_rate_hz: int) -> array[int]:
     return array("h", bytes(2 * (duration_ms * sample_rate_hz // 1000)))
+
+
+def count_full_scale_pcm(path: Path) -> int:
+    """Samples at digital full scale in a 16, 24 or 32-bit PCM WAV (``qc.audio.clipping``).
+    A sample counts when it sits at the positive or negative rail of its width."""
+    info = wav_info(path)
+    width = info.sample_width
+    if width not in (2, 3, 4):
+        raise InputInvalidError("unsupported PCM width", details={"width": width})
+    with wave.open(str(path), "rb") as handle:
+        raw = handle.readframes(info.frames)
+    high, low = (1 << (8 * width - 1)) - 1, -(1 << (8 * width - 1))
+    count = 0
+    chunk = 3 * 65_536 if width == 3 else width * 65_536
+    for offset in range(0, len(raw), chunk):
+        block = raw[offset : offset + chunk]
+        values: Iterable[int]
+        if width == 3:
+            values = (
+                int.from_bytes(block[i : i + 3], "little", signed=True)
+                for i in range(0, len(block) - 2, 3)
+            )
+        else:
+            values = array("i" if width == 4 else "h", block)
+        count += sum(1 for v in values if v >= high or v <= low)
+    return count

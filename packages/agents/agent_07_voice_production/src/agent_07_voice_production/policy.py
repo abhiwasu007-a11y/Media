@@ -198,7 +198,10 @@ def check_consent(voice: ResolvedVoice, *, channel_id: ChannelId | None, now: da
         raise PermissionDeniedError("a clone without a consent", details={"reason": "no_consent"})
     consent = bundle.consent
     if consent is None:
-        raise MissingDependencyError("consent row not found")
+        # 18 section 4: a clone without a visible consent is refused, never a dependency retry.
+        raise PermissionDeniedError(
+            "the clone's consent row is not visible", details={"reason": "consent_not_found"}
+        )
     reason: str | None = None
     if consent.state is not ConsentState.VERIFIED:
         reason = f"consent_{consent.state.value.lower()}"
