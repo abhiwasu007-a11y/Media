@@ -4,16 +4,20 @@ They follow the interface docstrings exactly and partition every row by the tran
 ``org_id`` (a fake tenant boundary). Not for production use.
 """
 
-import hashlib
-import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from amw_core.enums import EvidenceState, IdempotencyStatus, InstructionSourceKind
-from amw_core.errors import IdempotencyConflictError, InputInvalidError, InvalidTransitionError
+from amw_core.enums import EvidenceState, IdempotencyStatus
+from amw_core.errors import (
+    IdempotencyConflictError,
+    InputInvalidError,
+    InvalidTransitionError,
+    MissingDependencyError,
+    PermissionDeniedError,
+)
 from amw_core.ids import (
     CHECKPOINT,
     NEVER_EXPIRING_SCOPE_PREFIXES,
@@ -28,8 +32,20 @@ from amw_core.ids import (
 )
 from amw_core.interfaces.checkpoint_store import CheckpointRecord, NewCheckpoint
 from amw_core.interfaces.idempotency_store import BeginAction, BeginDecision, IdempotencyRecord
-from amw_core.interfaces.owner_evidence import EvidenceRecord, NewEvidence, SessionEvent
+from amw_core.interfaces.owner_evidence import EvidenceRecord
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
+from amw_core.owner_evidence_verifier import (
+    RECORD,
+    EventUnavailable,
+    NewEvidence,
+    Refusal,
+    SessionEvent,
+    SessionEventSource,
+    VerifiedEvidence,
+    VerifierPolicy,
+    evidence_sha256,
+    verify_confirmation,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,28 +181,28 @@ class MemoryCheckpointStore:
         return sorted((r for r in rows if r.checkpoint.task_id == task_id), key=lambda r: r.seq)
 
 
-def evidence_sha256(evidence: NewEvidence) -> str:
-    """SHA-256 of the canonical evidence fields listed in 04 section 5.16."""
-    material = {
-        "session_id": evidence.session_id,
-        "event_uuid": evidence.event_uuid,
-        "quote": evidence.quote,
-        "message_at": evidence.message_at.isoformat(),
-        "record_kind": evidence.record_kind.value,
-        "subject_kind": evidence.subject_kind,
-        "subject_id": evidence.subject_id,
-        "review_code": evidence.review_code,
-        "parsed_decision": evidence.parsed_decision.value if evidence.parsed_decision else None,
-    }
-    canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+class MemorySessionEventSource:
+    """In-memory stand-in for the platform session event store (the real one is ticket 3A-13)."""
+
+    def __init__(self, events: Sequence[SessionEvent] = ()) -> None:
+        self._events: dict[tuple[str, str], SessionEvent] = {}
+        for event in events:
+            self.add(event)
+
+    def add(self, event: SessionEvent) -> None:
+        self._events[(event.session_id, event.event_uuid)] = event
+
+    def fetch(self, session_id: str, event_uuid: str) -> SessionEvent | None:
+        return self._events.get((session_id, event_uuid))
 
 
 class MemoryOwnerEvidenceStore:
     """Forward-only states; the replay key is unique among non-refused rows (04 section 5.16)."""
 
-    def __init__(self) -> None:
+    def __init__(self, source: SessionEventSource, policy: VerifierPolicy) -> None:
         self._rows: dict[tuple[OrgId, WireId], EvidenceRecord] = {}
+        self._source = source
+        self._policy = policy
 
     def _replay_key(self, org: OrgId, e: NewEvidence) -> tuple[Any, ...]:
         return (org, e.event_uuid, e.record_kind, e.subject_kind, e.subject_id)
@@ -217,38 +233,53 @@ class MemoryOwnerEvidenceStore:
         return row
 
     def mark_verified(
-        self,
-        tx: TenantTransaction,
-        evidence_id: WireId,
-        verifier_result: Mapping[str, Any],
-        at: datetime,
+        self, tx: TenantTransaction, evidence_id: WireId, verified: VerifiedEvidence
     ) -> EvidenceRecord:
         row = self._move(tx, evidence_id, (EvidenceState.PENDING_VERIFICATION,))
-        if row.evidence.source_kind is not InstructionSourceKind.OWNER_CHAT_MESSAGE:
-            raise InvalidTransitionError("only an owner chat message can be verified")
+        if (
+            not isinstance(verified, VerifiedEvidence)
+            or verified.purpose != RECORD
+            or verified.bound_sha256 != row.evidence_sha256
+        ):
+            raise InvalidTransitionError("verification does not belong to this evidence row")
         row = replace(
             row,
             state=EvidenceState.VERIFIED,
-            event_verified_at=at,
-            verifier_result=dict(verifier_result),
+            event_verified_at=verified.verified_at,
+            verifier_result=dict(verified.checks),
         )
         self._rows[(tx.context.org_id, evidence_id)] = row
         return row
 
     def confirm(
-        self, tx: TenantTransaction, evidence_id: WireId, confirmation: SessionEvent
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        session_id: str,
+        event_uuid: str,
+        quote: str,
+        now: datetime,
     ) -> EvidenceRecord:
         row = self._move(tx, evidence_id, (EvidenceState.VERIFIED,))
-        if confirmation.event_uuid == row.evidence.event_uuid or (
-            confirmation.timestamp <= row.evidence.message_at
-        ):
-            raise InvalidTransitionError("confirmation must be a second, later owner event")
+        outcome = verify_confirmation(
+            self._source,
+            row.evidence,
+            self._policy,
+            session_id=session_id,
+            event_uuid=event_uuid,
+            quote=quote,
+            now=now,
+        )
+        if isinstance(outcome, EventUnavailable):
+            raise MissingDependencyError("confirmation event cannot be fetched")
+        if isinstance(outcome, Refusal):
+            raise PermissionDeniedError(outcome.reason, details={"checks": dict(outcome.checks)})
         row = replace(
             row,
             state=EvidenceState.CONFIRMED,
-            confirmation_event_uuid=confirmation.event_uuid,
-            confirmation_quote=confirmation.content,
-            confirmation_message_at=confirmation.timestamp,
+            confirmation_event_uuid=outcome.event_uuid,
+            confirmation_quote=quote,
+            confirmation_message_at=outcome.event_timestamp,
         )
         self._rows[(tx.context.org_id, evidence_id)] = row
         return row

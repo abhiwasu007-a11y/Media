@@ -1,71 +1,42 @@
-"""Owner instruction evidence (04 section 5.16 ``owner_instruction_evidence``; 03 section 11.6
-rule 6; CCR-010, decision D5).
+"""Owner instruction evidence store (04 section 5.16 ``owner_instruction_evidence``; 03 section
+11.6 rule 6; CCR-010, decision D5).
 
-The operator tool (``sys_operator``) supplies only the session and event identifiers and the
-decision it read; code fetches the event from the platform's session event store
-(``SessionEventSource``) and verifies it. The operator's own text is never evidence. A human
-record (approval step, editorial contribution, HUMAN score, compliance override) may reference
-only a ``CONFIRMED`` row. Rows are append-only except the forward state changes
-``PENDING_VERIFICATION -> VERIFIED -> CONFIRMED`` or ``-> REFUSED``, each setting its columns
-once. Implementation (S7 -> 01 and the verifier): lanes; the memory fake is
-``amw_core.testing.memory.MemoryOwnerEvidenceStore``.
+Verification is code-only and lives in ``amw_core.owner_evidence_verifier``: ``mark_verified``
+accepts only a sealed ``VerifiedEvidence`` produced by ``verify_owner_event`` for this row, and
+``confirm`` fetches the confirmation event through its ``SessionEventSource`` and verifies it
+itself; no caller-built event or verifier result is ever trusted. A human record (approval step,
+editorial contribution, HUMAN score, compliance override) may reference only a ``CONFIRMED`` row.
+Rows are append-only except the forward changes ``PENDING_VERIFICATION -> VERIFIED ->
+CONFIRMED`` or ``-> REFUSED``, each setting its columns once.
+
+**Limitation:** the real session-store adapter is ticket 3A-13; until then only the in-memory
+fake exists, and 3A approvals recorded through it are not production-verified.
+Implementation (S7 -> 01): lanes; memory fake ``amw_core.testing.memory.MemoryOwnerEvidenceStore``.
 """
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
-from amw_core.enums import (
-    ApprovalStepState,
-    EvidenceRecordKind,
-    EvidenceState,
-    InstructionSourceKind,
-)
-from amw_core.ids import ActorRef, ApprovalId, JobId, OrgId, UserId, WireId
+from amw_core.enums import EvidenceState
+from amw_core.ids import OrgId, WireId
 from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.owner_evidence_verifier import (
+    NewEvidence,
+    SessionEvent,
+    SessionEventSource,
+    VerifiedEvidence,
+)
 
-
-@dataclass(frozen=True, slots=True)
-class SessionEvent:
-    """A transcript event as the platform's session event store returns it."""
-
-    session_id: str
-    event_uuid: str
-    role: str
-    is_synthetic: bool
-    inbound_origin: str
-    content: str
-    timestamp: datetime
-
-
-@runtime_checkable
-class SessionEventSource(Protocol):
-    def fetch(self, session_id: str, event_uuid: str) -> SessionEvent | None:
-        """The event, or ``None`` if it cannot be fetched (the evidence then stays pending)."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class NewEvidence:
-    """Columns the operator supplies; the quote and timestamp are copied from the fetched event."""
-
-    record_kind: EvidenceRecordKind
-    subject_kind: str
-    subject_id: WireId
-    source_kind: InstructionSourceKind
-    session_id: str
-    event_uuid: str
-    quote: str
-    message_at: datetime
-    recorded_by: ActorRef
-    on_behalf_of: UserId
-    job_id: JobId | None = None
-    approval_id: ApprovalId | None = None
-    step_no: int | None = None
-    review_code: str | None = None
-    parsed_decision: ApprovalStepState | None = None
-    supersedes_id: WireId | None = None
+__all__ = [
+    "EvidenceRecord",
+    "NewEvidence",
+    "OwnerEvidenceStore",
+    "SessionEvent",
+    "SessionEventSource",
+    "VerifiedEvidence",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +47,7 @@ class EvidenceRecord:
     state: EvidenceState
     evidence_sha256: str
     event_verified_at: datetime | None = None
-    verifier_result: Mapping[str, Any] = field(default_factory=dict)
+    verifier_result: Mapping[str, bool] = field(default_factory=dict)
     confirmation_event_uuid: str | None = None
     confirmation_quote: str | None = None
     confirmation_message_at: datetime | None = None
@@ -92,19 +63,26 @@ class OwnerEvidenceStore(Protocol):
         ...
 
     def mark_verified(
-        self,
-        tx: TenantTransaction,
-        evidence_id: WireId,
-        verifier_result: Mapping[str, Any],
-        at: datetime,
+        self, tx: TenantTransaction, evidence_id: WireId, verified: VerifiedEvidence
     ) -> EvidenceRecord:
-        """``PENDING_VERIFICATION -> VERIFIED`` after the code check passed."""
+        """``PENDING_VERIFICATION -> VERIFIED``. ``verified`` must come from
+        ``verify_recorded_evidence`` for exactly this row (bound by ``evidence_sha256``), else
+        ``InvalidTransitionError``; ``verifier_result`` is ``verified.checks``."""
         ...
 
     def confirm(
-        self, tx: TenantTransaction, evidence_id: WireId, confirmation: SessionEvent
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        session_id: str,
+        event_uuid: str,
+        quote: str,
+        now: datetime,
     ) -> EvidenceRecord:
-        """``VERIFIED -> CONFIRMED`` with a second verified owner event later than the first."""
+        """``VERIFIED -> CONFIRMED``. The store fetches the event through its own
+        ``SessionEventSource`` and verifies it with ``verify_confirmation`` (a second, distinct,
+        later owner event). Unfetchable -> ``MissingDependencyError``; a failed check ->
+        ``PermissionDeniedError`` (``details.checks``). The state is unchanged on any error."""
         ...
 
     def refuse(self, tx: TenantTransaction, evidence_id: WireId, reason: str) -> EvidenceRecord:
