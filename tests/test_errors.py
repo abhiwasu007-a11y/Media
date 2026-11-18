@@ -25,10 +25,10 @@ def test_row_matches_doc(code: str) -> None:
     _meaning, disposition, policy, breaker, escalation = DOC[code]
     spec = errors.CATALOGUE[code]
     assert spec.error_class is FailureClass(code.split(".")[0])
-    expected_kind = re.match(r"(RETRY|SUSPEND|FAIL|NO-ATTEMPT)", disposition)
+    expected_kind = re.match(r"(RETRY|SUSPEND|FAIL|NO_ATTEMPT|NO-ATTEMPT)", disposition)
     assert expected_kind is not None
     assert spec.disposition.value == expected_kind[1].replace("-", "_")
-    assert spec.retryable is (expected_kind[1] in ("RETRY", "NO-ATTEMPT"))  # 07 reading rule
+    assert spec.retryable is (expected_kind[1] in ("RETRY", "NO_ATTEMPT", "NO-ATTEMPT"))
     if spec.wait_reason is not None:
         assert f"SUSPEND:`{spec.wait_reason.value}`" in disposition
     policy_tick = re.fullmatch(r"`([a-z_]+)`", policy)

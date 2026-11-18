@@ -251,3 +251,69 @@ def test_stage_params_and_enabled_by_default() -> None:
     record = contracts.validate_production_type(_record_with(add), version="1.0.0")
     assert record.stage("s06_chart").params == {"verify_mode": "CHART_FACTS"}
     assert record.stage("a_script").enabled_by_default is False
+
+
+# --- CCR-064 / CCR-065: capabilities column and optional-stage dependencies ---------------
+
+
+def _record(stages: list[dict[str, Any]]) -> contracts.ProductionType:
+    return contracts.validate_production_type(ex.production_type(copy.deepcopy(stages)))
+
+
+def test_capabilities_parsed_from_24() -> None:
+    record = _record(LONG_FORM_V2)
+    assert {c.value for c in record.stage("s04_research").capabilities} == {"llm", "web_fetch"}
+    assert record.stage("a_script").capabilities == ()
+    assert {c.value for c in record.stage("s13_deliver").capabilities} == {"file_delivery"}
+
+
+def test_default_disabled_stages() -> None:
+    assert contracts.default_disabled(_record(LONG_FORM_V2)) == {"s12_meta"}
+    assert contracts.default_disabled(_record(SHORTS_V2)) == {"s11_thumbs"}
+
+
+def test_disabled_optional_dependency_is_dropped() -> None:
+    record = _record(LONG_FORM_V2)
+    graph = {
+        s.stage_id: s for s in contracts.materialise(record, frozenset({"s12_meta", "a_script"}))
+    }
+    assert "s12_meta" not in graph
+    assert "a_script" not in graph
+    assert "s12_meta" not in graph["s16_comp"].depends_on
+    assert graph["s07_voice"].depends_on == ("s06_verify",)
+    assert contracts.stage_ancestors(tuple(graph.values()))  # still a valid DAG
+
+
+def test_disabled_stage_is_skipped_as_alt_target() -> None:
+    stages = copy.deepcopy(LONG_FORM_V2)
+    _stage({"stages": stages}, "s11_thumbs")["required"] = False
+    graph = {
+        s.stage_id: s for s in contracts.materialise(_record(stages), frozenset({"s11_thumbs"}))
+    }
+    comp = graph["s16_comp"].gate
+    assert comp is not None
+    assert isinstance(comp.on_fail, contracts.production_type.ReviseOnFail)
+    assert comp.on_fail.alt_target_stage_ids == ("s08_assets",)
+
+
+def test_materialise_refusals() -> None:
+    record = _record(LONG_FORM_V2)
+    with pytest.raises(ValueError, match="optional"):
+        contracts.materialise(record, frozenset({"s05_script"}))
+    with pytest.raises(ValueError, match="optional"):
+        contracts.materialise(record, frozenset({"s99_unknown"}))
+    stages = copy.deepcopy(LONG_FORM_V2)
+    _stage({"stages": stages}, "s05_script")["required"] = False
+    with pytest.raises(ValueError, match="revise target"):
+        contracts.materialise(_record(stages), frozenset({"s05_script"}))
+
+
+def test_schema_version_required_on_record_and_topic() -> None:
+    doc = ex.production_type(copy.deepcopy(LONG_FORM_V2))
+    del doc["schema_version"]
+    with pytest.raises(SchemaInvalidError):
+        contracts.validate_production_type(doc)
+    topic = ex.owner_topic()
+    del topic["schema_version"]
+    with pytest.raises(SchemaInvalidError):
+        contracts.validate_owner_topic(topic)

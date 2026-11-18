@@ -5,7 +5,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, StrictBool, StringConstraints, model_validator
 
-from amw_core.contracts.common import AmwModel
+from amw_core.contracts.common import AmwModel, SchemaVersionV1
 from amw_core.enums import OwnerReferenceKind, VideoKind
 from amw_core.ids import UUID7_BODY
 
@@ -38,6 +38,7 @@ class OwnerReference(AmwModel):
 
 
 class OwnerTopic(AmwModel):
+    schema_version: SchemaVersionV1
     title: Annotated[str, StringConstraints(min_length=3, max_length=400)]
     brief: Annotated[str, StringConstraints(max_length=2000)] | None
     angle: Annotated[str, StringConstraints(max_length=500)] | None

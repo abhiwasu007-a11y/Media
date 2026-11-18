@@ -13,7 +13,7 @@ from typing import Annotated, Any, ClassVar, Literal, Self
 
 from pydantic import Field, StrictBool, StringConstraints, model_validator
 
-from amw_core.contracts.common import AmwModel, Currency, SchemaName
+from amw_core.contracts.common import AmwModel, Currency, SchemaName, SchemaVersionV1
 from amw_core.enums import (
     ApprovalKind,
     ApprovalWorkflowKey,
@@ -150,6 +150,7 @@ class Limits(AmwModel):
 
 
 class ProductionType(AmwModel):
+    schema_version: SchemaVersionV1
     key: ProductionTypeKey
     version: Annotated[int, Field(ge=1, strict=True)]
     display_name: Annotated[str, StringConstraints(min_length=1, max_length=120)]
@@ -232,3 +233,43 @@ def stage_ancestors(stages: tuple[Stage, ...]) -> dict[str, frozenset[str]]:
     for stage in stages:
         visit(stage.stage_id)
     return done
+
+
+def default_disabled(record: ProductionType) -> frozenset[str]:
+    """Optional stages that do not run unless the tenant / job enables them
+    (``enabled_by_default`` false, 24 section 3.1)."""
+    return frozenset(
+        s.stage_id for s in record.stages if not s.required and s.enabled_by_default is False
+    )
+
+
+def materialise(record: ProductionType, disabled: frozenset[str]) -> tuple[Stage, ...]:
+    """The job's graph under 24 section 3.3 rule 9 (CCR-065).
+
+    Disabled optional stages are removed and every dependency on them counts as satisfied (the
+    edge is dropped); an ``alt_target_stage_ids`` entry naming one is skipped. Disabling a
+    required or unknown stage, or a gate whose ``target_stage_id`` is disabled, is refused
+    (``ValueError``): a disabled stage is never a revise target.
+    """
+    by_id = {s.stage_id: s for s in record.stages}
+    for stage_id in disabled:
+        if stage_id not in by_id or by_id[stage_id].required:
+            raise ValueError(f"only an optional stage can be disabled: {stage_id}")
+    result: list[Stage] = []
+    for stage in record.stages:
+        if stage.stage_id in disabled:
+            continue
+        gate = stage.gate
+        if gate is not None and isinstance(gate.on_fail, ReviseOnFail):
+            on_fail = gate.on_fail
+            if on_fail.target_stage_id in disabled:
+                raise ValueError(f"gate {stage.stage_id}: revise target is disabled")
+            alts = tuple(a for a in (on_fail.alt_target_stage_ids or ()) if a not in disabled)
+            gate = gate.model_copy(
+                update={
+                    "on_fail": on_fail.model_copy(update={"alt_target_stage_ids": alts or None})
+                }
+            )
+        deps = tuple(d for d in stage.depends_on if d not in disabled)
+        result.append(stage.model_copy(update={"depends_on": deps, "gate": gate}))
+    return tuple(result)
