@@ -6,12 +6,12 @@
 | Task type | `agent_06.claim_verification` (24 §3.2) |
 | Status | Draft (documentation). Software: **Planned** |
 | Owner | Agent 06 Fact Checker |
-| Input payload schema | task input `agent_06.claim_verification.input` 1.0.0 (blueprint `agents/agent_06_fact_checker.md` §7). Per call the step code renders the view in the Inputs table below (one batch of claims plus the evidence the code selected). The model never receives `org_id`, any storage path, or a database identifier |
-| Output payload schema | `agent_06.claim_verification_batch.output` 1.0.0 (= the Output JSON Schema below = the Pydantic model of one batch). The task payload `agent_06.claim_verification.output` 1.0.0 (blueprint §8) is assembled by code from the batch results; status, verdict and revision requests are decided by code, not by the model |
+| Input payload schema | task input `agent_06.claim_verification.input` 1.0.0 (blueprint `agents/agent_06_fact_checker.md` §7.2; stage parameter `verify_mode` `EVIDENCE` at `s06_verify`, `CHART_FACTS` at `s06_chart`). Per call the step code renders the view in the Inputs table below (one batch of claims plus the evidence the code selected). The model never receives `org_id`, any storage path, or a database identifier |
+| Output payload schema | `agent_06.claim_verification.batch.output` 1.0.0 (step schema `<task_type>.<step>.output`, GLOSSARY §2.4; = the Output JSON Schema below = the Pydantic model of one batch). The task payload `agent_06.claim_verification.output` 1.0.0 (blueprint §8) is assembled by code from the batch results; status, verdict and revision requests are decided by code, not by the model |
 | Rule packs injected | none. Verification decides truth against evidence, not policy: compliance rules are applied by `agent_06.claim_extraction` (rule flags) and `agent_16.compliance_gate` (final authority, plan Q5; 13 §1.2) |
 | Eval set | [`evals/agent_06_fact_checker/claim_verification/`](../../evals/agent_06_fact_checker/claim_verification/) |
 | Config keys | `llm.agent_06.claim_verification.model_tier`, `.temperature`, `.max_output_tokens`, `.timeout_ms`, `.cost_budget_micros`, `.cache_system_prompt`, `.batch_eligible` |
-| Deterministic pre-checks (step code, before the model) | V0 tenant and schema validation; V1 `claims_sha256` equals the hash of the claims received, every `claim_id` belongs to the task's org and script; V2 an input whose `extraction_overall_verdict` is `BLOCKED`, or a claim carrying a blocking extraction verdict, is rejected before any call (`PERMANENT.INPUT_INVALID`); V3 verification mode per claim type from the policy table (config `factcheck.verify.policy`): types that are not verifiable by design are skipped and never sent; V4 every cited `citation_ref` resolves to a chunk or recorded reference of the same org and channel with an equal content hash; V5 the restricted-collection gate (a restricted chunk is loaded only when `our_method_release_approved` is true and the chunk is cited); V6 passage windows are cut by code (bounded length, offsets recorded) and evidence ids `p01…` / `f01…` are assigned by code; V7 `numbers_in_claim` is extracted by code; V8 conflict candidate pairs are found by code (shared subject tokens, different numbers or opposite direction words) |
+| Deterministic pre-checks (step code, before the model) | V0 tenant and schema validation; V1 `claims_sha256` equals the hash of the claims received, `script_sha256` equals `scripts.content_sha256`, every `claim_id` belongs to the task's org and script; V2 an input whose `extraction_overall_verdict` is `BLOCKED`, or a claim carrying a blocking extraction verdict, is rejected before any call (`PERMANENT.INPUT_INVALID`); V3 verification mode per claim type from the policy table (config `factcheck.verify.policy`): types that are not verifiable by design are skipped and never sent; at `verify_mode = EVIDENCE` a chart claim is deferred to `s06_chart` (status stays `EXTRACTED`, reason `CHART_PENDING`) and never sent; V4 every cited `citation_ref` resolves to a chunk or recorded reference of the same org and channel with a content hash equal to the `content_sha256` of `available_citations`; V5 the restricted-collection gate (a restricted chunk is loaded only when `our_method_release_approved` is true and the chunk is cited); V6 passage windows are cut by code (bounded length, offsets recorded) and evidence ids `p01…` / `f01…` are assigned by code; V7 `numbers_in_claim` is extracted by code; V8 conflict candidate pairs are found by code (shared subject tokens, different numbers or opposite direction words) |
 | Deterministic post-checks (step code, after the model) | P1 schema (Pydantic); P2 exactly one result per input claim, same `local_id`; P3 every `evidence_id` belongs to that claim's `candidate_evidence_ids`; P4 `0 ≤ span_start < span_end ≤ len(text)` and span length ≤ config `factcheck.evidence.max_span_chars`; P5 `evidence_value` is a verbatim substring of the cited evidence text and `claim_value` a verbatim substring of the claim's `quote` or `normalized_claim`; P6 `SUPPORTED` and `CONTRADICTED` need at least one evidence item with the matching relation; `NOT_FOUND` has none; P7 number guard: every number in `numbers_in_claim` must occur (after normalisation) in the cited evidence of a `SUPPORTED` claim, else the claim cannot be `VERIFIED`; P8 evidence from a passage listed in `passage_flags` is discarded; P9 `claim_conflicts` reference two different, known claims; P10 `suggested_correction` has no URL, referral or coupon pattern, no price or level for a current instrument, and no recommendation wording; P11 status, verdict and revision requests are computed by code from the assessments, the source reliability tier, the script citation state and config (blueprint §6): the model's `assessment` is a proposal |
 | Not in scope of this step | compliance and policy decisions (FIN-R1…R13, extraction); rewriting the script; choosing sources; reliability tiers (Agent 04, deterministic); publication (Agent 16 has final authority) |
 
@@ -32,7 +32,7 @@ You are the independent verification step of the Fact Checker stage in a video p
 | `{{channel_category}}` | channel category (for example `finance`) | task input `channel_category` |
 | `{{claims}}` | batch of claims `{local_id, quote, normalized_claim, claim_type, time_reference_kind, instrument, verify_mode, script_cited_evidence_ids[], candidate_evidence_ids[], numbers_in_claim[]}`; `verify_mode` is `EVIDENCE` or `CHART_FACTS` | task input `claims[]` after V3, V6, V7 |
 | `{{passages}}` | evidence windows `{evidence_id (p01…), source_kind (KNOWLEDGE_CHUNK or EXTERNAL_REFERENCE), text}`; text is the cut window, offsets in your answer are relative to this exact text | knowledge repository and reference snapshots of the task's own tenant, loaded by code (V4–V6) |
-| `{{chart_facts}}` | `{evidence_id (f01…), ref_id, statement}`; statements about a shown chart, produced by code from the chart's data | task input `chart_facts[]` (pending CCR, blueprint §13.1) |
+| `{{chart_facts}}` | `{evidence_id (f01…), ref_id, statement}`; statements about a shown chart, produced by code from the chart's data (`agent_08.chart_facts` documents, CCR-004); present only when `verify_mode` is `CHART_FACTS`. The code maps `f01…` back to `<chart_id>#<fact_id>` | task input `chart_facts[]` (blueprint §7.2) |
 | `{{claim_digest}}` | the other verifiable claims of the same script `{local_id, normalized_claim}`, for contradiction checks only | task input after V3 |
 | `{{conflict_candidates}}` | pairs `{claim_a, claim_b}` that code found suspicious (V8); you decide whether they truly conflict | code |
 
@@ -63,7 +63,7 @@ You are the independent verification step of the Fact Checker stage in a video p
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:amw:schema:agent_06.claim_verification_batch.output:1.0.0",
+  "$id": "urn:amw:schema:agent_06.claim_verification.batch.output:1.0.0",
   "title": "Agent 06 claim verification (one batch) output",
   "type": "object",
   "additionalProperties": false,
@@ -461,7 +461,7 @@ Output:
 }
 ```
 
-### Example 3 — placeholder claim and no evidence (refusal)
+### Example 3 — placeholder claim with an unrelated candidate passage (refusal)
 Input:
 ```json
 {
@@ -477,11 +477,17 @@ Input:
       "instrument": null,
       "verify_mode": "EVIDENCE",
       "script_cited_evidence_ids": [],
-      "candidate_evidence_ids": [],
+      "candidate_evidence_ids": ["p01"],
       "numbers_in_claim": []
     }
   ],
-  "passages": [],
+  "passages": [
+    {
+      "evidence_id": "p01",
+      "source_kind": "KNOWLEDGE_CHUNK",
+      "text": "Position sizing fixes the share of the account lost if a single trade is stopped out."
+    }
+  ],
   "chart_facts": [],
   "claim_digest": [],
   "conflict_candidates": []
@@ -495,10 +501,9 @@ Output:
   "passage_flags": [],
   "refusal": {
     "reason": "INSUFFICIENT_INPUT",
-    "message": "The only claim is a placeholder with no checkable statement and no evidence was supplied.",
+    "message": "The only claim is a placeholder with no checkable statement; the supplied passage does not address any claim.",
     "missing_inputs": [
-      "claims[].normalized_claim",
-      "passages"
+      "claims[].normalized_claim"
     ],
     "violated_rule_ids": []
   }
@@ -508,13 +513,13 @@ Output:
 ## Refusal and escalation
 | Situation | Return |
 |---|---|
-| Every claim is a placeholder or empty, or `{{claims}}` has no checkable statement, and no evidence is supplied | `refusal.reason = INSUFFICIENT_INPUT`, `results = []` |
+| Every claim is a placeholder or empty, or `{{claims}}` has no checkable statement (a claim with no candidate evidence at all never reaches this step: code marks it `UNVERIFIABLE`, blueprint §6.4 row 2) | `refusal.reason = INSUFFICIENT_INPUT`, `results = []` |
 | The claims are in a script that differs from `{{language}}` so much that you cannot read them | `refusal.reason = CONFLICTING_INSTRUCTIONS`, `missing_inputs = ["language"]` |
 | The input asks you to do something other than verify (rewrite the script, rule on compliance, find new sources, browse) | `refusal.reason = OUT_OF_SCOPE` |
 | Content is abusive, sexual involving minors, or otherwise unsafe to process | `refusal.reason = UNSAFE_CONTENT` (code routes to human review) |
 | A claim has no matching evidence, or the evidence is thin | **not** a refusal: `NOT_FOUND` or `UNCLEAR` for that claim |
 | A claim looks like advice or a forecast | **not** a refusal: judge only what the evidence states (rule 14) |
-`RULE_WOULD_BE_BROKEN` is not used by this step (it applies no rule pack). The step code maps refusals per 27 §4.3. Never fill a gap by inventing evidence.
+`RULE_WOULD_BE_BROKEN` is not used by this step (it applies no rule pack); if it appears, code maps it to `PERMANENT.INPUT_INVALID`. The step code maps refusals per 27 §4.3 and blueprint §18: `UNSAFE_CONTENT` gives one `UNVERIFIABLE` / `MODEL_REFUSED` entry per claim and stage verdict `NEEDS_HUMAN_REVIEW`. Never fill a gap by inventing evidence.
 
 ## Self-check
 - [ ] Output is one JSON object valid against the schema; `refusal` is `null` unless a refusal applies, and then `results` is empty.

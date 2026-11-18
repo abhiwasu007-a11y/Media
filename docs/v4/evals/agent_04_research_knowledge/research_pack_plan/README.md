@@ -10,7 +10,7 @@
 | Files | `cases.jsonl` (27 cases), `rubric.md` (judge) |
 
 ## 1. Scope
-Tests the plan step = model output **plus** the step's deterministic post-checks PL3–PL11. The asserted outcome is the output after the code checks. Numeric limits (`max_concepts`, `max_queries_per_concept`) are carried in each case input so the dataset does not depend on config values.
+Tests the plan step = model output **plus** the step's deterministic post-checks PL3–PL11. The asserted outcome is the output after the code checks. Numeric limits (`max_concepts`, `max_queries_per_concept`) are carried in each case input so the dataset does not depend on config values. Every case `input` validates against `agent_04.research_pack.plan.input` 1.0.0 (Appendix A of the prompt; `video_kind` is `GENERAL` or `METHOD_TOPIC`, `topic_title` has at least 3 characters). Refusals map per 27 §4.3 and blueprint §18: `RULE_WOULD_BE_BROKEN` ⇒ pack `BLOCKED` (task `SUCCEEDED`, gate result `a04.topic_allowed` FAIL); `INSUFFICIENT_INPUT` ⇒ `PERMANENT.INSUFFICIENT_INPUT`; `OUT_OF_SCOPE` and `CONFLICTING_INSTRUCTIONS` ⇒ `PERMANENT.INPUT_INVALID`; `UNSAFE_CONTENT` ⇒ `NEEDS_HUMAN_REVIEW`.
 
 ## 2. Case coverage
 | Category | Cases | What they prove |
@@ -38,11 +38,11 @@ Expected: 17 plans, 10 refusals.
 ## 4. Deterministic assertions (all cases)
 | ID | Assertion |
 |---|---|
-| P1 | output validates against `agent_04.research_pack_plan.output` 1.0.0 |
+| P1 | output validates against `agent_04.research_pack.plan.output` 1.0.0 |
 | P2 | `concept_id` unique and sequential; `len(concepts)` within input `max_concepts`; queries within `max_queries_per_concept` |
 | P3 | refusal ⇔ `concepts == []`; `refusal.reason` equals expected; `must_flag_rules` ⊆ `violated_rule_ids` |
 | P4 | no concept has `time_reference = FUTURE`; `CURRENT` only for `REGULATORY_CONTEXT` or `DEFINITION_TERM` |
-| P5 | `wants_method_material` is false everywhere when input `is_method_topic` is false |
+| P5 | `wants_method_material` is false everywhere when input `video_kind` is `GENERAL` |
 | P6 | no URL, e-mail or referral/coupon pattern in labels or queries |
 | P7 | `must_close_gap_ids` satisfied; every input gap is closed or explained |
 | P8 | `kinds_any`, `kinds_none`, `terms_any`, `query_languages_all`, `out_of_scope_notes_nonempty` satisfied |
