@@ -1,0 +1,115 @@
+{
+ "catalogue_version": "1.0.0",
+ "templates": [
+  {
+   "template_key": "tpl_split_left_text",
+   "version": 1,
+   "is_default": true,
+   "text_lines_max": 2,
+   "supports_subject_kinds": [
+    "CODE_GLYPH",
+    "NONE",
+    "OWNER_IMAGE"
+   ],
+   "direction_neutral": true,
+   "text_box": [
+    50,
+    150,
+    540,
+    700
+   ],
+   "subject_box": [
+    620,
+    150,
+    330,
+    700
+   ],
+   "band": null,
+   "align": "left"
+  },
+  {
+   "template_key": "tpl_centered_statement",
+   "version": 1,
+   "is_default": false,
+   "text_lines_max": 2,
+   "supports_subject_kinds": [
+    "CODE_GLYPH",
+    "NONE"
+   ],
+   "direction_neutral": true,
+   "text_box": [
+    100,
+    280,
+    800,
+    560
+   ],
+   "subject_box": [
+    420,
+    40,
+    160,
+    200
+   ],
+   "band": null,
+   "align": "center"
+  },
+  {
+   "template_key": "tpl_subject_right",
+   "version": 1,
+   "is_default": false,
+   "text_lines_max": 1,
+   "supports_subject_kinds": [
+    "CODE_GLYPH",
+    "NONE",
+    "OWNER_IMAGE"
+   ],
+   "direction_neutral": true,
+   "text_box": [
+    50,
+    250,
+    540,
+    500
+   ],
+   "subject_box": [
+    620,
+    100,
+    330,
+    800
+   ],
+   "band": null,
+   "align": "left"
+  },
+  {
+   "template_key": "tpl_full_bleed_subject_band",
+   "version": 1,
+   "is_default": false,
+   "text_lines_max": 1,
+   "supports_subject_kinds": [
+    "OWNER_IMAGE"
+   ],
+   "direction_neutral": true,
+   "text_box": [
+    50,
+    690,
+    780,
+    180
+   ],
+   "subject_box": [
+    0,
+    0,
+    1000,
+    1000
+   ],
+   "band": [
+    0,
+    660,
+    1000,
+    340
+   ],
+   "align": "left"
+  }
+ ],
+ "reserved_corner_permille": [
+  150,
+  120
+ ]
+}
