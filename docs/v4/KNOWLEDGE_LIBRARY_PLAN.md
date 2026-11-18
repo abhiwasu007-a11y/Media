@@ -4,10 +4,8 @@
 |---|---|
 | Status | Draft (documentation). Software: **Planned**. |
 | Owner | Agent 04 Research & Knowledge (directive §1B.2a). Consumers: Agent 03 (topic tree), 05 (script), 06 (verification), S2 (uniqueness). |
-| Basis | Directive §1B.2a, rule 9 (tenant isolation), §3.3 Memory. Owner note 2026-11-18: the book collection is **not** in `atp-private` or `trade-data`; the location will be provided. |
+| Basis | Directive §1B.2a, rule 9 (tenant isolation), §3.3 Memory. Owner answer to K1 (2026-11-18): the books are in three private locations, listed in §5. |
 | Scope | Generic for any tenant. First instance: platform owner → trading-education channel. |
-
-> **Fact for the owner (audit Part B.2):** `trade-data/research/books/` does contain 13 PDF, 1 EPUB and 4 PPTX files (+ extracted page images). Per your note, these are **not** treated as the library until you say otherwise (question K6 below).
 
 ## 1. Principles
 1. **Source is read-only.** The ingestion pipeline copies sources into the factory's private storage and never modifies, moves or re-commits the original location.
@@ -49,3 +47,44 @@
 | K6 | Should the 14 documents found in `trade-data/research/books/` be part of the library, or excluded? | Avoid ingesting the wrong set | Before inventory |
 | K7 | Confirm the **course glossary** (the glossary blocks in the course's chapter content) is the shared Marathi terminology source (§1B.2a) | One glossary for course and channel | Before the Agent 05 blueprint |
 | K8 | Approval to store copies of the books in the factory's private storage on the server (encrypted at rest, not in git) | Storage and DR design | Build phase |
+
+## 5. Owner answer to K1 (2026-11-18): where the books are
+All three locations are **private repositories**, read-only for the factory. Counts below come from directory listings on 2026-11-18 (file names and sizes only; no file content was read). Titles are deliberately not listed here, because this repo is public.
+
+| # | Proposed collection id | Location | What the listing shows |
+|---|---|---|---|
+| 1 | `pd_books` | `trade-data`, branch `ccr-7e74426e-fiv6z2` (**not merged to main**), folder `books/public-domain`. The owner states the origin as "trade-data M85 @ 6dd8bf4"; commit `6dd8bf4` was checked and contains this folder. | 21 PDF files + 1 plain-text file (file names date the books 1841–1930), a README and a `_proof` folder (title-page images and an index file). 18 PDFs have book-like sizes (0.9–49 MB). **3 PDFs are only 133 bytes each.** |
+| 2 | `owner_strategies_notes` | Same branch: `books/strategies` (17 per-book strategy files, README, template) and `books/notes` (20 per-book notes, a synthesis file, template). The ATP site's runtime copy of the 17 strategy files is in `atp-private`, `atp_private/chart_reader/strategies`; its listing matches the branch copy in names and sizes. | Owner-derived summaries of the books in collection 1. |
+| 3 | `owner_books` | `trade-data`, `main`, folder `research/books` (the owner-supplied books; the owner counts 30 files and keeps a README listing them) | My earlier file-tree count for this folder: 13 PDF, 1 EPUB, 4 PPTX, plus extracted page images. To be reconciled with the owner's list. |
+
+### 5.1 Findings (what the listings show, and what they do not)
+1. **Three 133-byte PDFs** are too small to be books. They may be pointer or placeholder files; this is **not verified**. The real files are needed.
+2. **Count mismatch:** the owner said 23 PDFs; the listing shows 21 PDFs + 1 text file in `books/public-domain`.
+3. **The branch is not on `main`.** The factory must read a pinned commit (`6dd8bf4`) or the owner merges the branch. A branch name can move; a commit hash cannot.
+4. **Public-domain status is the owner's statement, based on publication dates in the file names.** Copyright terms differ by country, and editions, translations and scans can carry their own rights. ⚖ Verify per book and edition.
+5. **Scan quality is unknown.** Old scanned books usually need OCR (ADR-013 criteria). One book has a plain-text edition, which needs no OCR.
+6. **Strategy files** hold rule-style summaries. In videos they can be taught only as concepts on **historical** charts (FIN-R2, FIN-R3, FIN-R13). The 17-file copy in `atp-private` sits in the owner's private method area, whose repository rules forbid copying it into any public place. **Default: the factory reads the `trade-data` branch copy (collection 2), never the `atp-private` runtime copy.** Per-topic release by the owner still applies (Q26).
+
+### 5.2 Design consequences
+- Three collections per tenant, each with its own `collection_id`: `pd_books`, `owner_strategies_notes` (restricted), `owner_books`. Every chunk keeps its citation back to the source book, chapter and page.
+- Collection 2 is a **secondary index**: a concept found there must still cite the source chunk in collection 1 or 3 (§3 guard "citation required").
+- **3A needs only a subset.** The owner gives the topic directly (D1), so Agent 04 ingests only the books that the first golden topics need; the full library can follow later.
+
+### 5.3 Updated owner needs
+| # | Status | Need |
+|---|---|---|
+| K1 | **Answered** | Location (this section). |
+| K6 | **Answered** | Yes: `research/books` is collection 3. |
+| K2 | Open | Manifest per book: edition/year, language, how acquired; for collection 3, whether each copy is owned or licensed. For collection 1, which edition/scan source. |
+| K3 | Open (default: all three collections for channel 1) | Which books are in scope or excluded. |
+| K4 | Partly answered | Old scans are likely (not verified); English text, so no Devanagari OCR is needed for these sources. |
+| K5, K7, K8 | Open | As in §4. |
+| K9 | New | The 3 files of 133 bytes and the missing 2 of the 23 PDFs. |
+| K10 | New | Merge the branch into `main`, or confirm that commit `6dd8bf4` stays reachable. |
+| K11 | New ⚖ | Per-book public-domain verification (by the owner's lawyer). |
+| K12 | New | May verified public-domain books be quoted at greater length (always attributed)? |
+
+### 5.4 Provisional defaults until the owner answers (owner rule A.9)
+- **Q34:** collections as in §5.2.
+- **Q35 / Q36:** the concept-only rule of §1 and §3 applies to **all** collections, public-domain or not. A short attributed quote still needs the human reviewer's approval. Reason: public-domain status is unverified (finding 4), and the rule keeps every video original.
+- **Q37:** the 3 stub PDFs are excluded until real files are provided.
