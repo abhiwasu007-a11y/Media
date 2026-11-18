@@ -26,6 +26,21 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | W-C | Architecture Wave C (independent verification, backlog, completion report) | Not started | — | — | W-B | R6 |
 | P1.6 | Technical feasibility | **Partial** (capabilities verdict done; server verdict + per-video totals REQUIRES REVIEW) | 00b_TECHNICAL_FEASIBILITY.md | every capability cites a research ID | P1.4 Part C (VPS), skeleton measurements, business plan | R3, R7 |
 
+## Owner decisions (binding; they amend the directive where stated)
+
+### D1 (2026-11-18): Phase 3 build order. Applies to BUILD_BACKLOG.md, the completion report, and every blueprint's MVP marking.
+Amends directive §5.7 (recommended build order) and §3.5.7 (the walking skeleton included a private upload to a test channel; **no upload in 3A**).
+
+- **3A — Video production line first.** Build only the minimum shared core needed to run it: contracts, state machine, job store, cost ledger, audit, adapters with fakes. Then Agents **04, 05, 06, 07, 08, 09, 10, 11** and the **Agent 16 QC/compliance gates**.
+  - The owner supplies the topic directly; Agents 02/03 come later.
+  - Output per run, delivered as downloadable files: final MP4 (16:9, plus a 9:16 cut where applicable), thumbnail options, SRT, the QC report with the 100-point score, and the cost per stage.
+  - **No YouTube upload and no Google OAuth in 3A.**
+- **3B — Golden samples.** Three videos on owner-given trading-education topics. The owner scores them; prompts/templates are tuned until all three reach the threshold.
+- **3C — Everything else.** Orchestrator hardening, scheduler/night window, Agent 13 publishing, 14 analytics, 02/03 strategy, tenancy UI, client portal, billing.
+- **Spend controls.** Paid API calls start only after the owner has set spending limits at each provider. The cost ledger enforces a **per-video budget and a total pilot budget, and stops on breach**.
+- **Secrets.** Keys come only through the environment's secret mechanism: never in git, logs or shared environment variables.
+- **Rendering.** In the development environment, or in the VPS night window under the §1 limits. **Never during market hours.**
+
 ## Owner inputs: status
 
 | ID | Input | Status |
