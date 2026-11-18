@@ -1,0 +1,51 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conventional Commits title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "$TITLE" | grep -Eq '^(feat|fix|docs|test|chore|refactor|ci|build|perf)(\([a-z0-9._-]+\))?!?: .+' \
+            || { echo "PR title must follow Conventional Commits: $TITLE"; exit 1; }
+
+  gates:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: amw_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AMW_TEST_DATABASE_URL: postgresql://postgres:ci@localhost:5432/amw_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: python -m pip install "uv==0.11.32"
+      - run: uv sync --all-packages
+      - name: Lint and format
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+      - name: Types (mypy strict)
+        run: uv run mypy
+      - name: Tests, contract tests, tenancy suite, coverage floor
+        run: uv run pytest --cov --cov-report=term-missing
+      - name: Secret scan
+        run: uv run python scripts/secret_scan.py

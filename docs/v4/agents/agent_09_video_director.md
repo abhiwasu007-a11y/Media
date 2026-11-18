@@ -472,7 +472,9 @@ agent_09_video_director/
 Key types (signatures in §10):
 ```python
 class VideoDirector(Protocol):
-    def run(self, task_input: TaskInput[ShotPlanInput], ctx: StepContext) -> TaskOutput[ShotPlanOutput]: ...
+    def run(
+        self, task_input: TaskInput[ShotPlanInput], ctx: StepContext
+    ) -> TaskOutput[ShotPlanOutput]: ...
     def rebase(self, plan: ShotPlan, timeline: NarrationTimeline) -> ShotPlan: ...
 ```
 Dependency injection (27 §7.1): `ShotPlanStep.__init__(self, *, llm: LlmAdapter, cost: CostGuard, storage: BlobStore, repo: PlanRepository, clock: Clock, prompts: PromptStore, config: Agent09Config)`. Only `workers/ai_worker` wires concrete objects. Pure engine classes (everything in `timeline/`, `guard.py`, `repair.py` fallback, `assemble.py`, `checks.py`) take plain data and config, hold no I/O and no clock, so they run in unit tests without fakes.
