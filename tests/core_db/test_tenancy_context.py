@@ -142,6 +142,7 @@ def test_db_errors_map_to_typed_errors(tenancy: PgTenancy, tenant_a: Tenant) -> 
     [
         ("AMW01", InvalidTransitionError),
         ("AMW02", PermissionDeniedError),
+        ("AMW03", MissingDependencyError),
         ("40001", DbTransientError),
     ],
 )
