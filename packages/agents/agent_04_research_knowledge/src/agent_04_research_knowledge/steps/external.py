@@ -115,6 +115,7 @@ class ExternalReferenceFetcher:
         normalised = normalise_url(url)
         ext_ref = make_external_ref_id(run.context.org_id, normalised)
         key = fetch_key(run.context.org_id, run.task_id, ref_id, url)
+        run.effects.append(key)
         result = self._web.fetch(
             WebFetchRequest(
                 url=url,
@@ -156,13 +157,22 @@ class ExternalReferenceFetcher:
             for piece in split_text(text, self._cfg.passage_target_chars, 0)
         ]
         run.log.info(
-            "research.external_fetch", ref_id=ref_id, status=status, bytes=len(result.content),
+            "research.external_fetch",
+            ref_id=ref_id,
+            status=status,
+            bytes=len(result.content),
             outcome="OK",
-        )  # fmt: skip
+        )
         return FetchedSource(
-            ref_id, normalised, ext_ref, FetchStatus.OK, accessed_at, result.content_sha256,
-            text, passages,
-        )  # fmt: skip
+            ref_id,
+            normalised,
+            ext_ref,
+            FetchStatus.OK,
+            accessed_at,
+            result.content_sha256,
+            text,
+            passages,
+        )
 
 
 def snapshot_document(source: FetchedSource) -> bytes:

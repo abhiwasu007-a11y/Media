@@ -2,7 +2,8 @@
 
 The model has no tools; it can only return JSON that code validates (blueprint 1.3). A parse or
 schema failure is retried once with the validation error (positions and messages only, never the
-offending text), then raises ``AGENT.INVALID_JSON`` / ``AGENT.OUTPUT_SCHEMA_INVALID`` (07 agent_parse).
+offending text), then raises ``AGENT.INVALID_JSON`` or ``AGENT.OUTPUT_SCHEMA_INVALID``
+(07 agent_parse).
 """
 
 import json
@@ -105,6 +106,7 @@ class StructuredLlmCaller:
             language=language,
         )
         response = self._llm.complete(request, idempotency_key=key)
+        run.effects.append(key)
         usage = response.usage
         with self._tenancy.transaction(run.context) as tx:
             entry = self._ledger.record(

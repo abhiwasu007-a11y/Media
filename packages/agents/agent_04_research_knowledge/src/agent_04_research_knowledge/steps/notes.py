@@ -139,6 +139,7 @@ class ValidatedNote:
     usable: bool
     exclusion_reason: ExclusionReason | None
     copy_guard: CopyGuardStatus
+    copy: CopyResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,9 +220,14 @@ class EvidenceNoter:
         rendered = self._prompts.render(self._prompts.load(NOTES_PROMPT_ID), rule_packs)
         base = self._input(concept, channel_category, rule_packs, passages, [])
         first = self._caller.call(
-            run, self._step, step_key, rendered.system, build_user_message(rendered, base),
-            EvidenceNotes, repairs=1,
-        )  # fmt: skip
+            run,
+            self._step,
+            step_key,
+            rendered.system,
+            build_user_message(rendered, base),
+            EvidenceNotes,
+            repairs=1,
+        )
         output = first.value
         if output.refusal is not None:
             result.refusal = output.refusal
@@ -248,12 +254,18 @@ class EvidenceNoter:
                 RepairItem(note_ref=n, passage_id=p, problem=pr) for n, p, pr in failing
             ]
             repaired = self._caller.call(
-                run, self._step, step_key, rendered.system,
+                run,
+                self._step,
+                step_key,
+                rendered.system,
                 build_user_message(
-                    rendered, self._input(concept, channel_category, rule_packs, passages, repair_items)
+                    rendered,
+                    self._input(concept, channel_category, rule_packs, passages, repair_items),
                 ),
-                EvidenceNotes, repairs=0, seq_start=first.last_seq + 1,
-            )  # fmt: skip
+                EvidenceNotes,
+                repairs=0,
+                seq_start=first.last_seq + 1,
+            )
             result.repaired = True
             wanted = {n for n, _, _ in failing}
             retry = tuple(n for n in repaired.value.notes if n.note_ref in wanted)
@@ -290,14 +302,19 @@ class EvidenceNoter:
                 continue
             verdict = self._validator.validate(cand, passage.text, passage.language, self._limits)
             if not verdict.passed:
-                assert verdict.problem is not None
-                failing.append((cand.note_ref, cand.passage_id, verdict.problem))
+                problem = verdict.problem or NoteProblem.AMBIGUOUS
+                failing.append((cand.note_ref, cand.passage_id, problem))
                 continue
             per_passage[cand.passage_id] = per_passage.get(cand.passage_id, 0) + 1
             accepted.append(
                 ValidatedNote(
-                    cand.note_ref, passage, cand, verdict.usable, verdict.exclusion_reason,
+                    cand.note_ref,
+                    passage,
+                    cand,
+                    verdict.usable,
+                    verdict.exclusion_reason,
                     verdict.copy_guard_status,
+                    verdict.copy,
                 )
-            )  # fmt: skip
+            )
         return accepted, failing

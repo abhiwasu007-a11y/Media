@@ -47,3 +47,5 @@ class RunInfo:
     audit: AuditSink
     counter: CallCounter
     usage: UsageTotals = field(default_factory=UsageTotals)
+    effects: list[str] = field(default_factory=list)
+    """idempotency keys of completed external effects (checkpoint ``completed_effects``)."""

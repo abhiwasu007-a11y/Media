@@ -110,6 +110,8 @@ class ResearchSettings(_Cfg):
     ingest: IngestSettings
     memory: MemorySettings
     min_tier_for_factual: ReliabilityTier
+    inline_payload_max_bytes: Pos
+    """``contracts.inline_payload_max_bytes``: larger payloads go to ``data_ref``."""
 
     def tier_scores(self) -> TierScores:
         return TierScores.from_mapping(

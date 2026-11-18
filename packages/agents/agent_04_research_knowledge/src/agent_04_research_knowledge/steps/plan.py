@@ -124,21 +124,31 @@ class ConceptPlanner:
         )
         user = build_user_message(rendered, plan_input)
         result = self._caller.call(
-            run, self._step, STEP_KEY, rendered.system, user, ResearchPlan,
+            run,
+            self._step,
+            STEP_KEY,
+            rendered.system,
+            user,
+            ResearchPlan,
             language=plan_input.video_language,
-        )  # fmt: skip
+        )
         plan = result.value
         violations = self._validator.validate(plan, plan_input)
         if violations:
             run.log.warning("research.plan_invalid", checks=[v.check for v in violations])
             hint = "; ".join(f"{v.check}: {v.detail}" for v in violations[:20])
             repair = self._caller.call(
-                run, self._step, STEP_KEY, rendered.system,
+                run,
+                self._step,
+                STEP_KEY,
+                rendered.system,
                 f"{user}\n\n<validation_error>\nYour plan failed checks: {hint}. "
                 "Return one corrected JSON object only.\n</validation_error>",
-                ResearchPlan, repairs=0, language=plan_input.video_language,
+                ResearchPlan,
+                repairs=0,
+                language=plan_input.video_language,
                 seq_start=result.last_seq + 1,
-            )  # fmt: skip
+            )
             plan = repair.value
             violations = self._validator.validate(plan, plan_input)
             if violations:

@@ -142,7 +142,7 @@ def blocked_pack(
             evidence_usable=0,
             excluded_forward_looking=0,
             excluded_copy_guard=0,
-        ),  # fmt: skip
+        ),
         provenance=Provenance(
             plan_prompt_id=plan_prompt_id,
             notes_prompt_id=notes_prompt_id,
@@ -359,12 +359,21 @@ class PackAssembler:
     @staticmethod
     def _source(s: SourceRecord) -> PackSource:
         return PackSource(
-            source_ref=s.source_ref, kind=s.kind, title=s.title, author=s.author,
-            edition=s.edition, ownership=s.ownership, reliability_tier=s.tier,
-            reliability_score=s.score, collection_key=s.collection_key,
-            external_url=s.external_url, accessed_at=s.accessed_at, fetch_status=s.fetch_status,
-            content_sha256=s.content_sha256, snapshot_ref=s.snapshot_ref,
-        )  # fmt: skip
+            source_ref=s.source_ref,
+            kind=s.kind,
+            title=s.title,
+            author=s.author,
+            edition=s.edition,
+            ownership=s.ownership,
+            reliability_tier=s.tier,
+            reliability_score=s.score,
+            collection_key=s.collection_key,
+            external_url=s.external_url,
+            accessed_at=s.accessed_at,
+            fetch_status=s.fetch_status,
+            content_sha256=s.content_sha256,
+            snapshot_ref=s.snapshot_ref,
+        )
 
     @staticmethod
     def _further_reading(

@@ -35,7 +35,7 @@ class ApprovalLookup(Protocol):
     def approval(self, approval_id: str) -> ApprovalView | None: ...
 
     def released_chunk_ids(self, approval_id: str, collection_id: str) -> frozenset[str]:
-        """Wire IDs of every chunk of the collection whose ``release_approval_id`` is the approval."""
+        """Wire IDs of the collection's chunks whose ``release_approval_id`` is the approval."""
         ...
 
 

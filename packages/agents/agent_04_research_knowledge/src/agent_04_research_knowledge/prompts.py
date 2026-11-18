@@ -139,7 +139,7 @@ class PromptLoader:
 
 
 def build_user_message(rendered: RenderedPrompt, payload: BaseModel) -> str:
-    """Tenant packs plus the step input as one delimited JSON object (instructions in it are data)."""
+    """Tenant packs plus the step input as one delimited JSON object (its text is data)."""
     data = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
     data = data.replace("</", "<\\/")
     parts = []

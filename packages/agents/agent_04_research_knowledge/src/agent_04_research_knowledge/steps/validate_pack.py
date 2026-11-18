@@ -51,7 +51,7 @@ class LibraryCitationResolver:
         self,
         library: KnowledgeLibrary,
         scope: TenantScope,
-        snapshot_reader: "SnapshotReader",
+        snapshot_reader: SnapshotReader,
     ) -> None:
         self._library, self._scope, self._reader = library, scope, snapshot_reader
 
@@ -83,7 +83,8 @@ def _result(
         check_id=check_id,
         kind=CheckKind.DETERMINISTIC,
         verdict=verdict,
-        blocking=blocking and verdict is CheckVerdict.FAIL or (blocking and verdict is CheckVerdict.PASS and not gate),
+        blocking=(blocking and verdict is CheckVerdict.FAIL)
+        or (blocking and verdict is CheckVerdict.PASS and not gate),
         rule_id=rule_id,
         measured=measured,
         threshold=threshold,
@@ -99,28 +100,46 @@ def topic_allowed_result(pack: ResearchPack) -> ValidationResult:
     if verdict.verdict is ComplianceVerdict.BLOCKED:
         rule = verdict.violated_rule_ids[0] if verdict.violated_rule_ids else None
         return ValidationResult(
-            check_id=GATE_CHECK_ID, kind=CheckKind.DETERMINISTIC, verdict=CheckVerdict.FAIL,
-            blocking=True, rule_id=rule, gate=True,
+            check_id=GATE_CHECK_ID,
+            kind=CheckKind.DETERMINISTIC,
+            verdict=CheckVerdict.FAIL,
+            blocking=True,
+            rule_id=rule,
+            gate=True,
             message="topic is a forbidden call; no research was planned",
-        )  # fmt: skip
+        )
     if verdict.verdict is ComplianceVerdict.NEEDS_HUMAN_REVIEW:
         return ValidationResult(
-            check_id=GATE_CHECK_ID, kind=CheckKind.DETERMINISTIC, verdict=CheckVerdict.WARN,
-            blocking=False, gate=True, message="topic needs human review",
-        )  # fmt: skip
+            check_id=GATE_CHECK_ID,
+            kind=CheckKind.DETERMINISTIC,
+            verdict=CheckVerdict.WARN,
+            blocking=False,
+            gate=True,
+            message="topic needs human review",
+        )
     return ValidationResult(
-        check_id=GATE_CHECK_ID, kind=CheckKind.DETERMINISTIC, verdict=CheckVerdict.PASS,
-        blocking=False, gate=True, message="topic allowed",
-    )  # fmt: skip
+        check_id=GATE_CHECK_ID,
+        kind=CheckKind.DETERMINISTIC,
+        verdict=CheckVerdict.PASS,
+        blocking=False,
+        gate=True,
+        message="topic allowed",
+    )
 
 
 def notes_refused_result(concept_id: str, refusal: Refusal) -> ValidationResult:
     rules = tuple(refusal.violated_rule_ids)
     return ValidationResult(
-        check_id="a04.notes_refused", kind=CheckKind.DETERMINISTIC, verdict=CheckVerdict.WARN,
-        blocking=False, rule_id=rules[0] if rules else None,
-        message=f"notes batch of {concept_id} refused ({refusal.reason.value}); rules: {', '.join(rules)}"[:2000],
-    )  # fmt: skip
+        check_id="a04.notes_refused",
+        kind=CheckKind.DETERMINISTIC,
+        verdict=CheckVerdict.WARN,
+        blocking=False,
+        rule_id=rules[0] if rules else None,
+        message=(
+            f"notes batch of {concept_id} refused ({refusal.reason.value}); rules: "
+            f"{', '.join(rules)}"
+        )[:2000],
+    )
 
 
 class PackValidator:
@@ -175,7 +194,9 @@ class PackValidator:
         )
         if not has_revision:
             results.append(
-                _result("a04.prior_gaps_closed", CheckVerdict.SKIPPED, "no revision", blocking=False)
+                _result(
+                    "a04.prior_gaps_closed", CheckVerdict.SKIPPED, "no revision", blocking=False
+                )
             )
         else:
             results.append(
@@ -205,7 +226,10 @@ class PackValidator:
     ) -> ValidationResult:
         bad = 0
         for src in pack.sources:
-            if src.source_ref.startswith("ksr_") and library.get_source(scope, src.source_ref) is None:
+            if (
+                src.source_ref.startswith("ksr_")
+                and library.get_source(scope, src.source_ref) is None
+            ):
                 bad += 1
             if src.snapshot_ref and storage_uri_owner(src.snapshot_ref) != org_id:
                 bad += 1
@@ -252,7 +276,8 @@ class PackValidator:
     def _restricted(pack: ResearchPack) -> ValidationResult:
         labelled = [e for e in pack.evidence if e.usable_for_script and e.method_labelled]
         ok = not labelled or (
-            pack.topic.video_kind is VideoKind.METHOD_TOPIC and bool(pack.method.release_approval_ids)
+            pack.topic.video_kind is VideoKind.METHOD_TOPIC
+            and bool(pack.method.release_approval_ids)
         )
         return _result(
             "a04.restricted_gate",
