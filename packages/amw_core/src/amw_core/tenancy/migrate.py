@@ -43,7 +43,11 @@ class Migration:
 
 
 def discover(directory: Path) -> list[Migration]:
-    """Every migration file in ``directory`` in version order; refuses gaps and duplicates."""
+    """Every migration file in ``directory`` in version order; refuses duplicates and bad names.
+
+    Gaps in the numbering are allowed on purpose: the 3A lane split reserves 0001-0049 for lane L1a
+    and 0050-0099 for lane L1b. What is refused is a *pending* file
+    numbered below the applied head."""
     found: dict[int, Migration] = {}
     for path in sorted(directory.glob("*.sql")):
         match = _NAME.fullmatch(path.name)

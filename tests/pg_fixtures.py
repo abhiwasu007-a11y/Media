@@ -135,3 +135,77 @@ def tenant_a(admin: psycopg.Connection[tuple[Any, ...]]) -> Tenant:
 @pytest.fixture
 def tenant_b(admin: psycopg.Connection[tuple[Any, ...]]) -> Tenant:
     return make_tenant(admin)
+
+
+PRODUCTION_TYPE = ("CHANNEL_LONG_FORM", 1)
+
+
+def ensure_production_type(conn: psycopg.Connection[tuple[Any, ...]]) -> None:
+    """A registry row for job foreign keys (the real records are loaded by ticket 3A-03)."""
+    conn.execute(
+        "INSERT INTO production_types (id, key, version, status, tier, record, record_sha256)"
+        " VALUES (%s, %s, %s, 'PLANNED', 'TIER_0', '{}'::jsonb, %s) ON CONFLICT DO NOTHING",
+        (new_uuid7(), *PRODUCTION_TYPE, b"\0" * 32),
+    )
+
+
+def insert_job(conn: psycopg.Connection[tuple[Any, ...]], tenant: Tenant) -> uuid.UUID:
+    """A PENDING job row inserted as the superuser (fixtures only)."""
+    ensure_production_type(conn)
+    job = new_uuid7()
+    conn.execute(
+        "INSERT INTO jobs (id, org_id, workspace_id, production_type_key, production_type_version,"
+        " language, priority, correlation_id, idempotency_key, requested_by, currency)"
+        " VALUES (%s, %s, %s, %s, %s, 'en', 2, %s, %s, 'agent_01', 'INR')",
+        (
+            job,
+            tenant.org_uuid,
+            tenant.workspace_uuid,
+            *PRODUCTION_TYPE,
+            new_uuid7(),
+            "idk_" + job.hex.ljust(64, "0"),
+        ),
+    )
+    return job
+
+
+def insert_user(
+    conn: psycopg.Connection[tuple[Any, ...]], tenant: Tenant, role: str = "REVIEWER_APPROVER"
+) -> uuid.UUID:
+    user = new_uuid7()
+    conn.execute(
+        "INSERT INTO users (id, email, display_name, status) VALUES (%s, %s, 'U', 'ACTIVE')",
+        (user, f"{user.hex}@example.invalid"),
+    )
+    conn.execute(
+        "INSERT INTO memberships (id, org_id, user_id, role, status)"
+        " VALUES (%s, %s, %s, %s, 'ACTIVE')",
+        (new_uuid7(), tenant.org_uuid, user, role),
+    )
+    return user
+
+
+def insert_task(
+    conn: psycopg.Connection[tuple[Any, ...]],
+    tenant: Tenant,
+    job: uuid.UUID,
+    task_type: str = "agent_05.script_draft",
+) -> uuid.UUID:
+    """A PENDING task row inserted as the superuser (fixtures only)."""
+    task = new_uuid7()
+    conn.execute(
+        "INSERT INTO tasks (id, org_id, job_id, task_type, agent_id, priority, resource_class,"
+        " required_capabilities, idempotency_key, payload_schema, payload_schema_version,"
+        " resource_budget, max_attempts)"
+        " VALUES (%s, %s, %s, %s, %s, 2, 'AI_IO', ARRAY['llm'], %s, %s, '1.0.0', '{}'::jsonb, 3)",
+        (
+            task,
+            tenant.org_uuid,
+            job,
+            task_type,
+            task_type.split(".", 1)[0],
+            "idk_" + task.hex.ljust(64, "0"),
+            f"{task_type}.input",
+        ),
+    )
+    return task

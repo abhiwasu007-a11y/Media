@@ -93,6 +93,9 @@ Rules:
 Lanes: Step 0 (Opus: contracts package, core Protocols, fakes; the only gate before fan-out) → L1 core integrator (Opus), L2–L7 one coder per agent package 04–09 (Sonnet), L8 blueprints 10/11/16 + a fresh reviewer each, L9 eval harness + CI (Sonnet), L10 reviewer pool, L11 research-log backfill (done early: PR #7). Each lane works in its own worktree and branch and owns only its package; shared code, contracts and DB changes only through L1; merge order Step 0 → core → agent packages. A blocked lane records its blocker here and switches to tests or evals for its package.
 Build facts: Python **3.14** (newest stable bugfix minor installable here; 3.15 only as a beta; `uuid.uuid7()` stdlib); local PostgreSQL 16 for the tenancy suite, CI uses PostgreSQL 18; GitHub Actions CI confirmed working (run on PR #10 succeeded).
 
+### Process rule R-SYNC (2026-11-18, after `main` went red when pass 3 changed the glossary)
+Contract documents drive generated code (enums, ids, schemas, graphs, error catalogue) and their parsing tests are blocking gates. **A PR that changes GLOSSARY_AND_IDS.md, 03, 07, 24 or any other contract document must regenerate the code in the same PR** (or the code sync must be merged first or together). Contract integrator passes therefore ship with a code-sync follow-up PR opened at the same time; until it merges, other PRs may see a red `main`. First occurrence: contract pass 3 (PR #30) → code sync PR #34.
+
 ## Known corrections to apply in the integrator pass
 - Agent 14 §12: the "approved projects only" restriction belongs to the `postId` filter, not `allThreadsRelatedToChannelId` (research log A14-F5).
 - Agent 13: the resumable-upload init call returns `200`, the final upload `201` (A13-F1).

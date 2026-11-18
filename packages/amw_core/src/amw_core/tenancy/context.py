@@ -25,6 +25,7 @@ from amw_core.errors import (
     DbUnavailableError,
     InputInvalidError,
     InvalidTransitionError,
+    MissingDependencyError,
     PermissionDeniedError,
     TenantInactiveError,
     TenantMismatchError,
@@ -38,6 +39,7 @@ ConnectionFactory = Callable[[], AbstractContextManager[Connection]]
 
 SQLSTATE_INVALID_TRANSITION = "AMW01"
 SQLSTATE_GUARD_REJECTED = "AMW02"
+SQLSTATE_MISSING_DEPENDENCY = "AMW03"
 
 
 class PgTenantTransaction:
@@ -83,6 +85,8 @@ def translate_db_error(exc: psycopg.Error) -> AmwError:
     state = exc.sqlstate or ""
     if state == SQLSTATE_INVALID_TRANSITION:
         return InvalidTransitionError(str(exc).split("\n", 1)[0])
+    if state == SQLSTATE_MISSING_DEPENDENCY:
+        return MissingDependencyError(str(exc).split("\n", 1)[0])
     if state in (SQLSTATE_GUARD_REJECTED, "42501"):
         return PermissionDeniedError(str(exc).split("\n", 1)[0])
     if isinstance(exc, (pg_errors.SerializationFailure, pg_errors.DeadlockDetected)):
