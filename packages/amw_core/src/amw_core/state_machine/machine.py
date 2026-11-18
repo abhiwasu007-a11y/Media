@@ -64,11 +64,18 @@ def check_task(change: TaskTransition) -> Rule:
     to = change.to_state
     if (to is TaskState.CHECKPOINTED) != (change.wait_reason is not None):
         raise InvalidTransitionError("wait_reason is set exactly when the task is CHECKPOINTED")
-    if change.transition_id is TransitionId.T05 and change.wait_reason is not WaitReason.AWAITING_BUDGET:
+    if (
+        change.transition_id is TransitionId.T05
+        and change.wait_reason is not WaitReason.AWAITING_BUDGET
+    ):
         raise InvalidTransitionError("T05 suspends with wait_reason AWAITING_BUDGET")
     if (to is TaskState.RETRY_WAIT) != (change.next_attempt_at is not None):
         raise InvalidTransitionError("next_attempt_at is set exactly for RETRY_WAIT")
-    if change.transition_id is TransitionId.T19 and change.from_state is TaskState.FAILED and not change.reason:
+    if (
+        change.transition_id is TransitionId.T19
+        and change.from_state is TaskState.FAILED
+        and not change.reason
+    ):
         raise InvalidTransitionError("cancelling a FAILED task records a reason")
     if change.transition_id in (TransitionId.T18, TransitionId.T19) and not change.reason:
         raise InvalidTransitionError("a cancellation records its reason")
@@ -101,7 +108,9 @@ class Derivation:
     to_state: JobState
 
 
-_ACTIVE = frozenset({TaskState.VALIDATING, TaskState.QUEUED, TaskState.RUNNING, TaskState.RETRY_WAIT})
+_ACTIVE = frozenset(
+    {TaskState.VALIDATING, TaskState.QUEUED, TaskState.RUNNING, TaskState.RETRY_WAIT}
+)
 
 
 def derive_job(

@@ -50,10 +50,10 @@ BEGIN
 END
 $$;
 GRANT SELECT ON memberships TO amw_sysfn;
-ALTER FUNCTION amw_user_session_org_guard() OWNER TO amw_sysfn;
-REVOKE ALL ON FUNCTION amw_user_session_org_guard() FROM PUBLIC;
 CREATE TRIGGER user_session_org_guard BEFORE INSERT OR UPDATE OF active_org_id, user_id
   ON user_sessions FOR EACH ROW EXECUTE FUNCTION amw_user_session_org_guard();
+REVOKE ALL ON FUNCTION amw_user_session_org_guard() FROM PUBLIC;
+ALTER FUNCTION amw_user_session_org_guard() OWNER TO amw_sysfn;
 
 CREATE TABLE invitations (
   id uuid PRIMARY KEY,
