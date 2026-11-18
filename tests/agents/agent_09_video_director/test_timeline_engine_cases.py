@@ -1,3 +1,4 @@
+# ruff: noqa: PT018, E501
 """R-02: the deterministic ``timeline_engine`` dataset (TE-01..TE-39) run against the engine.
 
 Table-driven from docs/v4/evals/agent_09_video_director/timeline_engine/cases.jsonl: the case's
@@ -5,17 +6,19 @@ Table-driven from docs/v4/evals/agent_09_video_director/timeline_engine/cases.js
 every function is run twice (T5).
 """
 
+import itertools
 import json
-from dataclasses import replace
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
 
-from agent_09_video_director.checks import CheckContext, check_cadence, check_transitions
 from agent_09_video_director.checks import (
+    check_cadence,
     check_interrupt_first,
     check_revision_addressed,
+    check_transitions,
     check_vertical,
 )
 from agent_09_video_director.config import Agent09Config, base_for_tests
@@ -23,8 +26,8 @@ from agent_09_video_director.contracts import (
     Anchor,
     AspectRatio,
     BrandKit,
-    HeldReason,
     Held,
+    HeldReason,
     Limits,
     NarrationTimeline,
     Section,
@@ -37,23 +40,36 @@ from agent_09_video_director.timeline.grid import build_slots, plan_chart
 from agent_09_video_director.timeline.hook import TimedSegment, analyze_hook
 from agent_09_video_director.timeline.interrupts import SlotSpan, place_interrupts
 from agent_09_video_director.timeline.jl import BoundaryInfo, JlShot, plan_jl
-from agent_09_video_director.timeline.overlays import build_chapters, plan_brand_sting, plan_end_screen
+from agent_09_video_director.timeline.overlays import (
+    build_chapters,
+    plan_brand_sting,
+    plan_end_screen,
+)
 from agent_09_video_director.timeline.rebase import rebase_shots
 from agent_09_video_director.timeline.tiers import TierShot, plan_tiers
 from agent_09_video_director.timeline.timemap import build_time_map
 from agent_09_video_director.timeline.transitions import plan_transition
-from amw_core.errors import AmwError
 from amw_core.enums import CheckVerdict
-
-from .support import EVALS, ctx_of, make_request, make_step, sample_script
+from amw_core.errors import AmwError
+from tests.agents.agent_09_video_director.support import (
+    EVALS,
+    ctx_of,
+    make_request,
+    make_step,
+    sample_script,
+)
 
 pytestmark = pytest.mark.unit
 
-CASES = [json.loads(line) for line in (EVALS / "timeline_engine/cases.jsonl").read_text().splitlines()]
+CASES = [
+    json.loads(line) for line in (EVALS / "timeline_engine/cases.jsonl").read_text().splitlines()
+]
 
 
 def base(case_input: dict[str, Any], extra: dict[str, Any] | None = None) -> Agent09Config:
-    return base_for_tests().with_overrides({**case_input.get("config_overrides", {}), **(extra or {})})
+    return base_for_tests().with_overrides(
+        {**case_input.get("config_overrides", {}), **(extra or {})}
+    )
 
 
 def grid(inp: dict[str, Any], c: Agent09Config, span: tuple[int, int] | None = None):  # type: ignore[no-untyped-def]
@@ -97,7 +113,7 @@ def te_slot_grid(case: dict[str, Any]) -> None:
     got = summarize(slots)
     assert got == {k: exp[k] for k in got}
     assert grid(inp, c) == slots  # T5
-    assert all(a.end_ms == b.start_ms for a, b in zip(slots, slots[1:], strict=False))  # T2
+    assert all(a.end_ms == b.start_ms for a, b in itertools.pairwise(slots))  # T2
     assert sum(s.end_ms - s.start_ms for s in slots) == slots[-1].end_ms - slots[0].start_ms
     assert all(s.end_ms - s.start_ms <= c.g_max_ms for s in slots if s.held is None)  # T3
 
@@ -181,7 +197,9 @@ def te_jl(case: dict[str, Any]) -> None:
          if k != "note" or a.note is not None}
         for a in got.applied
     ] == exp["applied"]  # fmt: skip
-    assert [{"boundary_ms": s.boundary_ms, "reason": s.reason} for s in got.skipped] == exp["skipped"]
+    assert [{"boundary_ms": s.boundary_ms, "reason": s.reason} for s in got.skipped] == exp[
+        "skipped"
+    ]
     assert plan_jl(shots, c, inp["hook_end_ms"], info=info) == got  # T5
 
 
@@ -195,7 +213,10 @@ def te_end_screen(case: dict[str, Any]) -> None:
             assert inp["content_end_ms"] == want["total_duration_ms"]
         else:
             assert es is not None
-            assert (es.start_ms, es.end_ms) == (want["end_screen"]["start_ms"], want["end_screen"]["end_ms"])
+            assert (es.start_ms, es.end_ms) == (
+                want["end_screen"]["start_ms"],
+                want["end_screen"]["end_ms"],
+            )
             assert es.end_ms == want["total_duration_ms"]
             assert [p.reason for p in pauses] == [p["reason"] for p in want["deliberate_pauses"]]
 
@@ -310,7 +331,12 @@ def te_vertical(case: dict[str, Any]) -> None:
 def te_chart(case: dict[str, Any]) -> None:
     inp, exp = case["input"], case["expected"]
     c = base(inp)
-    g = plan_chart(change_beats=inp["scene"]["change_beats"], t0=inp["span"]["t0_ms"], t1=inp["span"]["t1_ms"], cfg=c)
+    g = plan_chart(
+        change_beats=inp["scene"]["change_beats"],
+        t0=inp["span"]["t0_ms"],
+        t1=inp["span"]["t1_ms"],
+        cfg=c,
+    )
     assert (g.start_ms, g.end_ms) == (exp["start_ms"], exp["end_ms"])
     assert list(g.change_events_ms) == exp["change_events_ms"]
     assert g.held is not None and g.held.reason.value == exp["held"]["reason"]
@@ -330,7 +356,10 @@ def te_audio(case: dict[str, Any]) -> None:
     inp = case["input"]
     for var, want in zip(inp["variants"], case["expected"]["variants"], strict=True):
         got = plan_audio(inp["total_duration_ms"], [], Limits(**var["limits"]))
-        assert got.music.model_dump(mode="json") == {**want["music"], "offset_db_range": [-20.0, -15.0]}
+        assert got.music.model_dump(mode="json") == {
+            **want["music"],
+            "offset_db_range": [-20.0, -15.0],
+        }
         assert list(got.sfx_cues) == want["sfx_cues"]
 
 
@@ -393,16 +422,23 @@ def te_flags(case: dict[str, Any]) -> None:
     # v0: iteration 0 revision check is not computable
     r0 = check_revision_addressed(ctx_of(res, req))
     # v1: windows unset, no interrupts -> WARN; v2: windows set, no interrupts -> FAIL
-    no_int = res.plan.model_copy(update={"shots": tuple(
-        s.model_copy(update={"interrupt": None}) for s in res.plan.shots)})
+    no_int = res.plan.model_copy(
+        update={"shots": tuple(s.model_copy(update={"interrupt": None}) for s in res.plan.shots)}
+    )
     base_ctx = ctx_of(res, req)
-    unset = base_ctx.cfg.model_copy(update={"first_dropoff_start_ms": None, "first_dropoff_end_ms": None})
+    unset = base_ctx.cfg.model_copy(
+        update={"first_dropoff_start_ms": None, "first_dropoff_end_ms": None}
+    )
     r1 = check_interrupt_first(replace(base_ctx, plan=no_int, cfg=unset))
     setc = base_ctx.cfg.with_overrides(v2["config_overrides"])
     r2 = check_interrupt_first(replace(base_ctx, plan=no_int, cfg=setc))
     assert v0["iteration"] == 0 and v1["interrupts"] == [] and v2["interrupts"] == []
     for got, want in zip((r0, r1, r2), wants, strict=True):
-        assert (got.verdict.value, got.blocking, got.gate) == (want["verdict"], want["blocking"], want["gate"])
+        assert (got.verdict.value, got.blocking, got.gate) == (
+            want["verdict"],
+            want["blocking"],
+            want["gate"],
+        )
 
 
 HANDLERS["TE-30"] = te_vertical

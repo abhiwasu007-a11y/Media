@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Shared fixtures for the agent_09 tests: sample script, timeline, fake LLM, recorder."""
 
 import hashlib
@@ -48,7 +49,7 @@ WORDS = ["hands", "desk", "window", "notebook", "lamp", "plant", "shelf", "cup",
 def cfg(**over: object) -> Agent09Config:
     """Test config: the README base plus the optional keys that the sample plan needs."""
     base = base_for_tests()
-    values = {
+    values: dict[str, Any] = {
         "held_max_ms": 8000, "first_dropoff_start_ms": 8000, "first_dropoff_end_ms": 40_000,
         "midpoint_half_width_ms": 15_000, "jl_offset_ms": 400, "jl_every_nth": 1,
         "transition_max_ms": 500, "end_screen_length_ms": 20_000, "tier_e_plan_permille": 500,
@@ -71,14 +72,14 @@ def sample_script(aspect: AspectRatio = AspectRatio.LANDSCAPE) -> tuple[ScriptDo
                     text=f"narration {i}", parent_segment_ids=(f"p{i}",))
             for i, k in enumerate(kinds, start=1)
         ]  # fmt: skip
-        scenes = (
+        pscenes: tuple[Scene, ...] = (
             Scene(scene_id="sc1", segment_ids=("s1", "s2"), beat="HOOK",
                   on_screen_text=("Key idea",)),
             Scene(scene_id="sc2", segment_ids=tuple(f"s{i}" for i in range(3, 8)),
                   on_screen_text=("Habit",)),
         )  # fmt: skip
         script = ScriptDoc(script_id="scr_x", version=1, language="en-IN", aspect_ratio=aspect,
-                           scenes=scenes, segments=tuple(segs))  # fmt: skip
+                           scenes=pscenes, segments=tuple(segs))  # fmt: skip
         durs = {f"s{i}": d for i, d in enumerate([2600, 2800, 3500, 4200, 3900, 4100, 3000], 1)}
         return script, durs
     plan: list[tuple[str, str, str, SegmentKind, int]] = [
@@ -97,7 +98,7 @@ def sample_script(aspect: AspectRatio = AspectRatio.LANDSCAPE) -> tuple[ScriptDo
         Segment(segment_id=i, kind=k, scene_id=sc, section_id=sec, text=f"narration {i}")
         for i, sc, sec, k, _ in plan
     )
-    scenes = (
+    scenes: tuple[Scene, ...] = (
         Scene(scene_id="sec1.sc1", section_id="sec1", beat="HOOK", segment_ids=("s1", "s2", "s3"),
               on_screen_text=("Core idea",)),
         Scene(scene_id="sec1.sc2", section_id="sec1", segment_ids=("s4",)),
@@ -142,10 +143,10 @@ def respond(request: LlmRequest) -> str:
     data = json.loads(m.group(1))
     portrait = data["aspect_ratio"] == "9:16"
     out = []
-    for i, slot in enumerate(data["slots"]):
+    for slot in data["slots"]:
         interrupt = slot["role"] == "INTERRUPT_REQUIRED"
         device = slot["allowed_devices"][0] if interrupt and slot["allowed_devices"] else None
-        word = WORDS[(i + len(slot["slot_id"]) + int(slot["slot_id"][2:])) % len(WORDS)]
+        word = WORDS[int(slot["slot_id"][2:]) % len(WORDS)]
         kind = "FOOTAGE"
         out.append(
             {
@@ -198,9 +199,7 @@ class Recorder:
         return f"cst_{len(self.rows):04d}"
 
 
-def make_request(
-    script: ScriptDoc, durations: dict[str, int], **over: Any
-) -> ShotPlanRequest:
+def make_request(script: ScriptDoc, durations: dict[str, int], **over: Any) -> ShotPlanRequest:
     tl = timeline_for(durations)
     aspect = script.aspect_ratio
     base: dict[str, Any] = {
@@ -219,14 +218,16 @@ def make_request(
 
 
 def make_step(
-    llm: FakeLlmAdapter | None = None, config: Agent09Config | None = None, recorder: Recorder | None = None
+    llm: FakeLlmAdapter | None = None,
+    config: Agent09Config | None = None,
+    recorder: Recorder | None = None,
 ) -> tuple[ShotPlanStep, ResponderLlm, Recorder]:
     llm_ = llm or ResponderLlm()
     rec = recorder or Recorder()
     step = ShotPlanStep(
         llm=llm_, prompts=FilePromptStore(PROMPT_PATH), recorder=rec, cfg=config or cfg()
     )
-    return step, llm_, rec  # type: ignore[return-value]
+    return step, llm_ if isinstance(llm_, ResponderLlm) else ResponderLlm(), rec
 
 
 def ctx_of(res: Any, req: ShotPlanRequest, config: Agent09Config | None = None) -> Any:

@@ -165,9 +165,9 @@ class ShotPlanStep:
                 (
                     p
                     for p in prev.shots
-                    if p.scene_id == slot.scene_id
-                    and p.start_ms == slot.start_ms
-                    and p.end_ms == slot.end_ms
+                    if p.shot_id == shot_id
+                    and p.scene_id == slot.scene_id
+                    and p.segment_ids == slot.segment_ids
                 ),
                 None,
             )
