@@ -26,10 +26,10 @@ Documentation status values: **Not started** · **Draft** · **Partial (blocked)
 ## 2. Business architecture
 | File | Status |
 |---|---|
-| 19_NICHE_BENCHMARKS.md | Not started |
-| 17_BUSINESS_PLAN.md | Not started |
-| 26_GROWTH_OPPORTUNITIES.md | Not started |
-| 21_PRICING_AND_PACKAGING.md | Not started |
+| 19_NICHE_BENCHMARKS.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
+| 17_BUSINESS_PLAN.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
+| 26_GROWTH_OPPORTUNITIES.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
+| 21_PRICING_AND_PACKAGING.md | Integrated draft (lane B2-1, not independently reviewed; UNLOGGED facts and unfiled CCRs open) |
 
 ## 3. System architecture
 | File | Status |
