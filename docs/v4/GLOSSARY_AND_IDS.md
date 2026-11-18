@@ -472,13 +472,14 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `gcp_ownership` | `PLATFORM` · `CLIENT_OWNED` |
 | `google_review_status` (OAuth verification, API audit) | `NOT_STARTED` · `IN_REVIEW` · `PASSED` · `FAILED` |
 | `actor_kind` | `HUMAN` · `AGENT` · `SERVICE` · `SYSTEM` |
+| `db_role` (04 §3.1; CCR-100) | `amw_owner` · `amw_migrator` · `amw_app` · `amw_publisher` · `amw_auth` · `amw_readonly` · `amw_sysfn` · `amw_operator` · `amw_verifier` · `amw_verifier_fn` |
 | `consent_state` (voice) | `PENDING_VERIFICATION` · `VERIFIED` · `WITHDRAWN` · `EXPIRED` · `REJECTED` |
 | `voice_kind` | `PROVIDER_STOCK` · `CONSENTED_CLONE` · `HUMAN_RECORDED` |
 | `presenter_kind` (CCR-027, **provisional until the owner answers 3A R4**) | `NEUTRAL_NARRATION` (voice only, no persona, no named presenter) · `OWNER_VOICE` (the owner's own recording or a consented clone of the owner's own voice) · `SYNTHETIC_PERSONA` (a synthetic voice or face presented as a named person; blocked on finance, health and political channels by FIN-R11 / YTG-R2) |
 | `approval_channel` (CCR-010, D5) | `OWNER_CHAT_OPERATOR` (3A: the owner's chat message recorded by the operator tool, `sys_operator`, with an `owner_instruction_evidence` row) · `WEB_DASHBOARD` (3C: the owner acts in the authenticated dashboard) · `CLIENT_PORTAL` (Tier 2) |
 | `evidence_state` (CCR-010) | `PENDING_VERIFICATION` · `VERIFIED` · `CONFIRMED` · `REFUSED` (04 §5.16 `owner_instruction_evidence`) |
-| `evidence_record_kind` (CCR-010) | `STEP_DECISION` · `CONTRIBUTION` · `HUMAN_SCORE` · `COMPLIANCE_DECISION` · `OWNER_TOPIC` · `DATASET_INTAKE` · `KNOWLEDGE_RELEASE_REQUEST` |
-| `evidence_verification_kind` (CCR-059; the rule set per record kind, 03 §11.6 table) | `DECISION` (`STEP_DECISION`, `COMPLIANCE_DECISION`, `KNOWLEDGE_RELEASE_REQUEST`) · `CONTENT` (`CONTRIBUTION`, `OWNER_TOPIC`, `DATASET_INTAKE`) · `SCORE` (`HUMAN_SCORE`) |
+| `evidence_record_kind` (CCR-010) | `STEP_DECISION` · `CONTRIBUTION` · `HUMAN_SCORE` · `COMPLIANCE_DECISION` · `OWNER_TOPIC` · `DATASET_INTAKE` · `KNOWLEDGE_RELEASE_REQUEST` · `REVISION_NOTE` (CCR-089: what to change after a `CHANGES_REQUESTED`) |
+| `evidence_verification_kind` (CCR-059; the rule set per record kind, 03 §11.6 table) | `DECISION` (`STEP_DECISION`, `COMPLIANCE_DECISION`, `KNOWLEDGE_RELEASE_REQUEST`) · `CONTENT` (`CONTRIBUTION`, `REVISION_NOTE`, `OWNER_TOPIC`, `DATASET_INTAKE`) · `SCORE` (`HUMAN_SCORE`) |
 | `instruction_source_kind` (CCR-010) | `OWNER_CHAT_MESSAGE` (the only value that can back a human record) · `TOOL_RESULT` · `SUBAGENT_MESSAGE` · `NOTIFICATION` · `DOCUMENT` (refused sources, stored only on refused evidence rows for audit) |
 | `data_request_kind` / `data_request_status` | `EXPORT` · `ERASURE` / `RECEIVED` · `IN_PROGRESS` · `COMPLETED` · `REJECTED` |
 
@@ -600,6 +601,7 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `frame_finding` (CCR-069) | `WATERMARK_PRESENT` · `PRESENTER_PRESENT` · `NONE_FOUND` · `UNCERTAIN` · `NOT_EVALUATED` | `agent_16.compliance_gate.frames.output`, gate output `frame_checks[]` |
 | `score_scaling_mode` (CCR-085) | `NONE` · `PRO_RATA` | config `quality.machine_scaling` (provisional default `NONE`, owner Q-O2) |
 | `score_gate_mode` (CCR-085) | `REPORT_ONLY` · `BLOCKING` | config `quality.score_gate_mode` (provisional default `REPORT_ONLY` until the 3B judge calibration; `BLOCKING` with `NONE` is refused at startup) |
+| `placement` (CCR-098) | `DEV` (development environment) · `VPS` (factory VPS, night window only) | config `ops.placement`, from environment variable `AMW_PLACEMENT` |
 | `source_path_class` (CCR-076) | `data_pack` (the owner-approved course data pack, Q22; any other class is rejected) | `assets.attributes.source_path_class` (04 §5.15) |
 
 Rule (CCR-042): a value set read by more than one agent, by the orchestrator, by the DB or by the owner's report is listed here. A set used only inside one agent's own step payloads, and read by no other component, may stay payload-local, but it must be a closed `enum` in that payload schema and must not reuse a name listed here with other values.
