@@ -84,6 +84,7 @@ The following tables are created by 04 §9 but stay **unused in 3A**: `user_sess
 | `music` | **no live adapter in 3A**; fake only. A licensed music bed is a **precondition for 3B scoring** (D6, CCR-007): 3B is blocked until the owner chooses the licensed source. Then Agent 08 sources the bed (capability `music_search`, `MUSIC_BED` ledger rows), Agent 09 plans the cue, Agent 07 mixes it in `s07_master`. 3A technical runs use no bed (never unlicensed music) and `qc.audio.music_bed_offset` is `SKIPPED` | ADR-009, D6 | yes |
 | `image` | **no live adapter**. Thumbnails and visuals are made by code and from owner material (hierarchy §1A.1, 18 §2.1) | 18 §2 | yes |
 | `video_gen` | **no** (ADR-009: AI B-roll is 3B at the earliest and only where no real or licensed option exists) | ADR-009, PR-07 | Protocol only |
+| `web_fetch` | yes: allow-listed HTTPS GET of owner-supplied references (Agent 04), size/time/redirect caps, private-address block; not a paid adapter (CCR-063, CCR-015) | SOURCE_LAYOUT; 03 §9.2 `fetch.reference` | yes |
 | `destinations/youtube` | **no** (D1) | — | — |
 | File delivery | yes: writes the bundle through `amw_core.storage` (§4) | 24 §3.2 `agent_13.file_delivery`, capability `file_delivery` (GLOSSARY §6.20) | yes |
 
@@ -105,7 +106,7 @@ FFmpeg / ffprobe are local tools of the render worker (INF-09), not paid adapter
 | 13 | `agent_13.file_delivery`, **the only Agent 13 piece in 3A** |
 
 Limits on the 16 gates in 3A, all taken from 13:
-- `svc_s02.uniqueness_check` runs the deterministic parts (b) and (c). The cross-video part records `SKIPPED`, because there are no prior videos on the channel (13 §3.1, §13).
+- `svc_s02.uniqueness_check` runs the deterministic part (c) and records its measures; YTG-R1 (b) "no recorded human contribution" is enforced at `s16_auth` (the publish guard, 04 §5.21), not at `s02u_unique` (CCR-082). The cross-video part records `SKIPPED`, because there are no prior videos on the channel (13 §3.1, §13).
 - `agent_16.publication_authorisation`: the re-run of date checks at the real publish time (FIN-R9) is 3C (13 §1.2).
 - Task types **not** used in 3A: `agent_02.*`, `agent_03.*`, `agent_12.metadata`, `agent_13.upload_private`, `agent_13.publish`, `agent_13.verify_publication`, `agent_14.*`, `agent_17.*`, `svc_s03.*`.
 
@@ -287,7 +288,7 @@ Each provisional default below applies until it is answered (owner rule A.9).
 
 | # | Item (file) | Why it changes a 3A decision | Provisional default |
 |---|---|---|---|
-| R1 | Metadata share of the 100-point rubric without Agent 12, marked **3A-BLOCKING** (18 §9.1.7) | Without Agent 12 the ≥ 85 threshold may be out of reach | **Owner.** Follow 18 §9.2 (arithmetic corrected, CCR-058): the THUMBNAIL_METADATA D criterion stays 4 points, earned in 3A from the thumbnail and working-title checks only; total stays 100; threshold stays 85. Open owner question Q-O2 (CCR register §6): machine rows total at most 79, so ≥ 85 needs the owner's human scores; Agent 16 proposes pro-rata scaling; and whether `s16_score` blocks before the 3B judge calibration |
+| R1 | Metadata share of the 100-point rubric without Agent 12, marked **3A-BLOCKING** (18 §9.1.7) | Without Agent 12 the ≥ 85 threshold may be out of reach | **Owner.** Follow 18 §9.2 (arithmetic corrected, CCR-058): the THUMBNAIL_METADATA D criterion stays 4 points, earned in 3A from the thumbnail and working-title checks only; total stays 100; threshold stays 85. Owner question Q-O2 (CCR register §6), provisional defaults applied (CCR-085): no machine scaling (`quality.machine_scaling = NONE`); `s16_score` reports only (`quality.score_gate_mode = REPORT_ONLY`) until the 3B judge calibration; `BLOCKING` with `NONE` is refused at startup (machine rows total at most 79) |
 | R2 | Self-grant licence rows for owner-made and code-made items (18 §2.2 a; **decided, CCR-031**; package templates and fonts are tenant `assets` rows) | Every shot needs a licence-ledger row; charts and motion graphics are the main 3A visuals | Tenant-held `licences` rows with `source_type` `OWNER_MADE` / `CODE_GENERATED`, `covers_monetized_youtube = true`, as 18 states |
 | R3 | Licence check destination in 3A (18 §2.2 b) | Decides which licences pass when there is no upload | Check as if the destination were monetized YouTube (18) |
 | R4 | Presenter-kind field "neutral narration vs persona" (13 §3.2; a CCR filed by 13) | FIN-R11 / YTG-R2 must be checkable in the 3A compliance gate | **Owner** confirms. The check reads the voice record (owner voice, owner clone or neutral TTS), the `is_realistic_synthetic` asset flags and first-person identity claims in the script. No synthetic presenter asset is allowed on the finance channel in 3A |

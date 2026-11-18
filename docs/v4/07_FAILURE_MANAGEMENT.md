@@ -21,7 +21,7 @@ All numeric defaults in this document are **design defaults (ESTIMATE)**, stored
 6. Loops are impossible by construction: the orchestrator only follows registry DAGs; revisions are bounded counters; every repetition has a hard cap (§9).
 
 ## 2. Error code catalogue
-Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) if the policy allows, else `FAILED`; **SUSPEND:<reason>** → `CHECKPOINTED` (T09) with that `wait_reason`; **FAIL** → `FAILED` (T11 / T06) → `DEAD_LETTER`; **NO-ATTEMPT** → the attempt never started and is not counted.
+Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) if the policy allows, else `FAILED`; **SUSPEND:<reason>** → `CHECKPOINTED` (T09) with that `wait_reason`; **FAIL** → `FAILED` (T11 / T06) → `DEAD_LETTER`; **NO_ATTEMPT** → the attempt never started and is not counted.
 
 | Code | Meaning | Disposition | Retry policy (§3) | Breaker counts | Escalation |
 |---|---|---|---|---|---|
@@ -30,7 +30,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `TEMPORARY.RATE_LIMITED` | HTTP 429 or provider rate-limit code | RETRY (honour `retry_after_ms`) | `rate_limited` | yes | L1 |
 | `TEMPORARY.UPSTREAM_5XX` | HTTP 5xx from a provider | RETRY | `temporary` | yes | L1 |
 | `TEMPORARY.DB_TRANSIENT` | serialization failure, deadlock, connection blip | RETRY | `db` | no | L1 |
-| `TEMPORARY.LOCK_CONFLICT` | optimistic-lock mismatch on a transition (03 §11.4) | NO-ATTEMPT: re-read and re-evaluate | `caps.lock_conflict_reevaluations` | no | L1 |
+| `TEMPORARY.LOCK_CONFLICT` | optimistic-lock mismatch on a transition (03 §11.4) | NO_ATTEMPT: re-read and re-evaluate | `caps.lock_conflict_reevaluations` | no | L1 |
 | `PERMANENT.SCHEMA_INVALID` | contract or payload failed its schema | FAIL | never | no | L2 |
 | `PERMANENT.SCHEMA_VERSION_UNSUPPORTED` | version outside the supported set | FAIL | never | no | L2 |
 | `PERMANENT.INPUT_INVALID` | semantically invalid input (wrong ID prefix, impossible values) | FAIL | never | no | L2 |
@@ -65,7 +65,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 | `INFRASTRUCTURE.QUEUE_UNAVAILABLE` | queue functions unavailable | RETRY | `infra` | no | L1 → L3 |
 | `INFRASTRUCTURE.STORAGE_UNAVAILABLE` | storage backend unreachable | RETRY | `infra` | no | L1 → L3 |
 | `INFRASTRUCTURE.NETWORK_OUTAGE` | all outbound calls failing | RETRY | `infra` | yes | L1 → L3 |
-| `INFRASTRUCTURE.CIRCUIT_OPEN` | breaker for the required provider is `OPEN` | NO-ATTEMPT: stay/return to `RETRY_WAIT` until `open_until` | — | — | L1; L2 if open > `open_ms_max` |
+| `INFRASTRUCTURE.CIRCUIT_OPEN` | breaker for the required provider is `OPEN` | NO_ATTEMPT: stay/return to `RETRY_WAIT` until `open_until` | — | — | L1; L2 if open > `open_ms_max` |
 | `INFRASTRUCTURE.WORKER_LOST` | lease expired and the worker's heartbeat is stale | RETRY from checkpoint | `infra` | no | L1 |
 | `PUBLISHING.UPLOAD_INTERRUPTED` | resumable upload broke mid-transfer | RETRY by resuming the stored session (§11) | `publish_resume` | no | L1 |
 | `PUBLISHING.UPLOAD_REJECTED` | destination rejected the file/metadata | FAIL | never | no | L3 (publishing) |
@@ -80,7 +80,7 @@ Format `<CLASS>.<CODE>` (03 §6). Disposition: **RETRY** → `RETRY_WAIT` (T10) 
 
 New codes are additive and require a CCR (CONTRACT_CHANGE_REQUESTS.md).
 
-Reading the table (CCR-057): `retryable` (03 §6) is `true` for **RETRY** and **NO-ATTEMPT** codes (both come back to `RETRY_WAIT` / re-evaluation; NO-ATTEMPT consumes no attempt) and `false` for **FAIL** and **SUSPEND** codes (a suspension resumes through T15, not a retry). The disposition values are the GLOSSARY §6.52 set `error_disposition`; the policy names are `retry_policy`. In the Escalation column the first level is the level on first occurrence; a second level written `X → Y`, `Y after cap` or `Y if …` is the level after the retry cap or under the stated condition.
+Reading the table (CCR-057): `retryable` (03 §6) is `true` for **RETRY** and **NO_ATTEMPT** codes (both come back to `RETRY_WAIT` / re-evaluation; NO_ATTEMPT consumes no attempt) and `false` for **FAIL** and **SUSPEND** codes (a suspension resumes through T15, not a retry). The disposition values are the GLOSSARY §6.52 set `error_disposition`; the policy names are `retry_policy`. In the Escalation column the first level is the level on first occurrence; a second level written `X → Y`, `Y after cap` or `Y if …` is the level after the retry cap or under the stated condition.
 
 ## 3. Retry policies
 
@@ -119,7 +119,7 @@ Window interaction: if `next_attempt_at` is outside the admissible window for th
 Every `PERMANENT.*` code; `AGENT.QUALITY_REPEATED_FAILURE`; `AGENT.LOOP_CAP_EXCEEDED`; `PUBLISHING.UPLOAD_REJECTED`, `OAUTH_REVOKED`, `PROCESSING_FAILED`, `VERIFICATION_MISMATCH`, `NOT_AUTHORISED`. Suspensions (`QUOTA_EXHAUSTED`, `BUDGET_EXHAUSTED`, `DISK_FULL`) are waits, not retries, and consume no attempt.
 
 ### 3.5 Deterministic in-stage fallback (CCR-023)
-The dispositions of §2 always win; no blueprint sets a private default. A stage that has a deterministic equivalent of an LLM step (e.g. a template thumbnail layout) may use it inside the same attempt only when config `agent_NN.llm.fallback_on_unavailable` is `true` (default `false`; enabling it is an owner decision, D1), and only after `TEMPORARY.CIRCUIT_OPEN`, `PERMANENT.PROVIDER_REFUSAL`, or `AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID` after its one retry. It never applies to a suspension (`RESOURCE.BUDGET_EXHAUSTED`, `QUOTA_EXHAUSTED`, `DISK_FULL`) or to any `PERMANENT.*` input or tenancy code. The fallback is recorded as a `WARN` validation result (`blocking: false`) naming the code; it is not returned as the task error.
+The dispositions of §2 always win; no blueprint sets a private default. A stage that has a deterministic equivalent of an LLM step (e.g. a template thumbnail layout) may use it inside the same attempt only when config `agent_NN.llm.fallback_on_unavailable` is `true` (default `false`; enabling it is an owner decision, D1), and only after `INFRASTRUCTURE.CIRCUIT_OPEN`, `PERMANENT.PROVIDER_REFUSAL`, or `AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID` after its one retry. It never applies to a suspension (`RESOURCE.BUDGET_EXHAUSTED`, `QUOTA_EXHAUSTED`, `DISK_FULL`) or to any `PERMANENT.*` input or tenancy code. The fallback is recorded as a `WARN` validation result (`blocking: false`) naming the code; it is not returned as the task error.
 
 ## 4. Circuit breakers (per external provider)
 
