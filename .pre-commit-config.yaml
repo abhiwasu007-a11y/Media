@@ -11,3 +11,15 @@ repos:
         entry: python scripts/secret_scan.py
         language: system
         pass_filenames: false
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: markers
+        name: pytest markers registered
+        entry: python scripts/check_markers.py
+        language: system
+        pass_filenames: false
+        files: ^(tests/|pyproject\.toml)

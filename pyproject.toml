@@ -63,8 +63,15 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers -m 'not live'"
 markers = [
+  "unit: fast isolated test of one unit, no I/O",
+  "integration: crosses a package or process boundary (database, queue, adapter fake)",
+  "e2e: end-to-end walking-skeleton flow",
+  "failure_injection: one scenario of 07 section 12 (retries, DLQ, adapter faults)",
+  "security: secret, injection or isolation checks (08 section 8.2)",
+  "performance: latency or throughput budget check",
+  "live: opt-in live provider smoke test with a hard budget cap (27 section 8.4); skipped by default",
   "tenancy: cross-tenant isolation suite (04 section 3.7), needs PostgreSQL (AMW_TEST_DATABASE_URL)",
   "state_machine: one test per transition row of 03 section 11",
   "contract: JSON Schema / Pydantic contract compatibility",
