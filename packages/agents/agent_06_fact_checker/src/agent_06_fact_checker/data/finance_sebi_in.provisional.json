@@ -1,0 +1,885 @@
+{
+ "status": "provisional, REQUIRES REVIEW (owner/counsel): baseline lists written by the build lane from 13 section 5; the production lists are owned by 13 / S2 and the owner's lawyer",
+ "markers": {
+  "en": [
+   "will",
+   "should",
+   "likely to",
+   "going to",
+   "expected to",
+   "target",
+   "next move",
+   "again",
+   "repeat",
+   "same setup now",
+   "could"
+  ],
+  "mr": [
+   "होईल",
+   "वाढेल",
+   "पडेल",
+   "घसरेल",
+   "करेल",
+   "जाईल",
+   "येईल",
+   "लक्ष्य",
+   "पुढची चाल",
+   "पुन्हा"
+  ],
+  "hi": [
+   "होगा",
+   "बढ़ेगा",
+   "गिरेगा",
+   "करेगा",
+   "जाएगा",
+   "टार्गेट",
+   "लक्ष्य",
+   "फिर से"
+  ],
+  "hinglish": [
+   "hoga",
+   "badhega",
+   "girega",
+   "karega",
+   "jayega",
+   "target",
+   "phir se",
+   "dobara"
+  ]
+ },
+ "instruments": {
+  "en": [
+   "nifty",
+   "banknifty",
+   "bank nifty",
+   "finnifty",
+   "midcpnifty",
+   "sensex"
+  ],
+  "mr": [
+   "निफ्टी",
+   "बँकनिफ्टी",
+   "बँक निफ्टी",
+   "सेन्सेक्स"
+  ],
+  "hi": [
+   "निफ्टी",
+   "बैंक निफ्टी",
+   "बैंकनिफ्टी",
+   "सेंसेक्स"
+  ]
+ },
+ "suffixes": {
+  "en": [
+   "ing",
+   "ed"
+  ],
+  "hinglish": [],
+  "mr": [
+   "च",
+   "ही",
+   "ला",
+   "ने",
+   "चा",
+   "ची",
+   "चे",
+   "त",
+   "मध्ये",
+   "तच"
+  ],
+  "hi": [
+   "ही",
+   "को",
+   "में",
+   "का",
+   "की",
+   "के"
+  ]
+ },
+ "severity_floor": {
+  "FIN-R1": {
+   "default": "BLOCKING",
+   "QUOTED_THIRD_PARTY": "WARNING"
+  },
+  "FIN-R2": "BLOCKING",
+  "FIN-R3": "BLOCKING",
+  "FIN-R4": "BLOCKING",
+  "FIN-R5": "BLOCKING",
+  "FIN-R6": "WARNING",
+  "FIN-R7": "BLOCKING",
+  "FIN-R8": "WARNING",
+  "FIN-R9": "BLOCKING",
+  "FIN-R12": "WARNING",
+  "FIN-R13": "BLOCKING"
+ },
+ "claim_type_floor": [
+  "RECOMMENDATION",
+  "PRICE_LEVEL",
+  "FORWARD_VIEW",
+  "PERFORMANCE_CLAIM",
+  "TESTIMONIAL"
+ ],
+ "detectors": [
+  {
+   "rule_id": "FIN-R1",
+   "severity": "BLOCKING",
+   "lang": "en",
+   "groups": [
+    [
+     "buy",
+     "sell",
+     "hold",
+     "go long",
+     "go short",
+     "accumulate",
+     "book profit"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R1",
+   "severity": "BLOCKING",
+   "lang": "mr",
+   "groups": [
+    [
+     "विका",
+     "विकू",
+     "खरेदी करा",
+     "खरेदी करू",
+     "होल्ड करा"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R1",
+   "severity": "BLOCKING",
+   "lang": "hi",
+   "groups": [
+    [
+     "खरीदो",
+     "खरीदें",
+     "बेचो",
+     "बेच दो",
+     "खरीद लो",
+     "होल्ड करें"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R1",
+   "severity": "BLOCKING",
+   "lang": "hinglish",
+   "groups": [
+    [
+     "kharid",
+     "kharido",
+     "kharid lo",
+     "bech",
+     "becho",
+     "bech do",
+     "vika",
+     "hold karo",
+     "buy karo",
+     "sell karo"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R2",
+   "severity": "BLOCKING",
+   "lang": "en",
+   "groups": [
+    [
+     "entry",
+     "exit",
+     "stop-loss",
+     "stop loss",
+     "stoploss",
+     "sl",
+     "target",
+     "tgt",
+     "strike",
+     "ce",
+     "pe",
+     "call",
+     "put"
+    ]
+   ],
+   "needs_instrument": true,
+   "needs_number": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R2",
+   "severity": "BLOCKING",
+   "lang": "mr",
+   "groups": [
+    [
+     "एंट्री",
+     "एक्झिट",
+     "स्टॉपलॉस",
+     "स्टॉप लॉस",
+     "लक्ष्य",
+     "टार्गेट",
+     "स्ट्राइक",
+     "कॉल",
+     "पुट"
+    ]
+   ],
+   "needs_instrument": true,
+   "needs_number": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R2",
+   "severity": "BLOCKING",
+   "lang": "hi",
+   "groups": [
+    [
+     "एंट्री",
+     "एग्जिट",
+     "स्टॉपलॉस",
+     "स्टॉप लॉस",
+     "टार्गेट",
+     "लक्ष्य",
+     "स्ट्राइक",
+     "कॉल",
+     "पुट"
+    ]
+   ],
+   "needs_instrument": true,
+   "needs_number": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R2",
+   "severity": "BLOCKING",
+   "lang": "hinglish",
+   "groups": [
+    [
+     "entry",
+     "exit",
+     "stoploss",
+     "target",
+     "strike",
+     "ce",
+     "pe",
+     "call",
+     "put"
+    ]
+   ],
+   "needs_instrument": true,
+   "needs_number": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "WARNING",
+   "lang": "en",
+   "groups": [
+    [
+     "this week",
+     "next week",
+     "this month",
+     "tomorrow",
+     "today",
+     "tonight",
+     "right now",
+     "at the moment",
+     "for now"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "BLOCKING",
+   "lang": "en",
+   "groups": [
+    [
+     "this week",
+     "next week",
+     "this month",
+     "tomorrow",
+     "today",
+     "tonight",
+     "right now",
+     "at the moment",
+     "for now"
+    ],
+    [
+     "looks",
+     "looking",
+     "weak",
+     "strong",
+     "bullish",
+     "bearish",
+     "will",
+     "should",
+     "going to",
+     "expected",
+     "likely",
+     "rally",
+     "fall",
+     "crash",
+     "breakout",
+     "move",
+     "target"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "WARNING",
+   "lang": "mr",
+   "groups": [
+    [
+     "उद्या",
+     "आज",
+     "आजच",
+     "या आठवड्यात",
+     "पुढच्या आठवड्यात",
+     "या महिन्यात",
+     "सध्या",
+     "आत्ता"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "BLOCKING",
+   "lang": "mr",
+   "groups": [
+    [
+     "उद्या",
+     "आज",
+     "आजच",
+     "या आठवड्यात",
+     "पुढच्या आठवड्यात",
+     "या महिन्यात",
+     "सध्या",
+     "आत्ता"
+    ],
+    [
+     "कमकुवत",
+     "मजबूत",
+     "वाढेल",
+     "पडेल",
+     "घसरेल",
+     "तेजी",
+     "मंदी",
+     "दिसतोय",
+     "दिसते"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "WARNING",
+   "lang": "hi",
+   "groups": [
+    [
+     "कल",
+     "आज",
+     "इस हफ्ते",
+     "अगले हफ्ते",
+     "अभी",
+     "इस हफ़्ते"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "BLOCKING",
+   "lang": "hi",
+   "groups": [
+    [
+     "कल",
+     "आज",
+     "इस हफ्ते",
+     "अगले हफ्ते",
+     "अभी",
+     "इस हफ़्ते"
+    ],
+    [
+     "कमजोर",
+     "मजबूत",
+     "बढ़ेगा",
+     "गिरेगा",
+     "तेजी",
+     "मंदी",
+     "दिखता"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "WARNING",
+   "lang": "hinglish",
+   "groups": [
+    [
+     "kal",
+     "aaj",
+     "udya",
+     "is hafte",
+     "agle hafte",
+     "abhi"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R3",
+   "severity": "BLOCKING",
+   "lang": "hinglish",
+   "groups": [
+    [
+     "kal",
+     "aaj",
+     "udya",
+     "is hafte",
+     "agle hafte",
+     "abhi"
+    ],
+    [
+     "weak",
+     "strong",
+     "badhega",
+     "girega",
+     "tezi",
+     "mandi",
+     "dikh raha"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R4",
+   "severity": "BLOCKING",
+   "lang": "all",
+   "groups": [
+    [
+     "join me live",
+     "watch me take trades",
+     "watch me trade",
+     "live trade",
+     "live trading",
+     "live session",
+     "live market",
+     "live strategy",
+     "लाईव्ह ट्रेड",
+     "लाइव ट्रेड",
+     "live trade karo"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R5",
+   "severity": "BLOCKING",
+   "lang": "all",
+   "groups": [
+    [
+     "paid group",
+     "paid telegram",
+     "paid whatsapp",
+     "premium group",
+     "vip group",
+     "paid channel",
+     "paid membership",
+     "paid community",
+     "पेड ग्रुप",
+     "पेड टेलिग्राम"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R6",
+   "severity": "BLOCKING",
+   "lang": "en",
+   "groups": [
+    [
+     "my",
+     "our",
+     "we",
+     "i",
+     "me",
+     "students",
+     "followers",
+     "clients",
+     "members",
+     "strategy",
+     "system"
+    ],
+    [
+     "made",
+     "earned",
+     "gained",
+     "profit",
+     "profits",
+     "profitable",
+     "return",
+     "returns",
+     "returned",
+     "generated"
+    ]
+   ],
+   "needs_number": true,
+   "warn_if": [
+    "backtest",
+    "back-test",
+    "backtested",
+    "old data",
+    "historical data",
+    "paper trade",
+    "बॅकटेस्ट",
+    "बैकटेस्ट"
+   ]
+  },
+  {
+   "rule_id": "FIN-R6",
+   "severity": "BLOCKING",
+   "lang": "mr",
+   "groups": [
+    [
+     "माझ्या",
+     "माझे",
+     "आमच्या",
+     "आम्ही",
+     "मी",
+     "विद्यार्थ्यां",
+     "फॉलोअर्स",
+     "स्ट्रॅटेजी"
+    ],
+    [
+     "कमावले",
+     "कमावला",
+     "कमावली",
+     "नफा",
+     "परतावा",
+     "फायदा",
+     "मिळवले"
+    ]
+   ],
+   "needs_number": true,
+   "warn_if": [
+    "backtest",
+    "back-test",
+    "backtested",
+    "old data",
+    "historical data",
+    "paper trade",
+    "बॅकटेस्ट",
+    "बैकटेस्ट"
+   ]
+  },
+  {
+   "rule_id": "FIN-R6",
+   "severity": "BLOCKING",
+   "lang": "hi",
+   "groups": [
+    [
+     "मेरी",
+     "मेरे",
+     "हमारी",
+     "हमारे",
+     "मैंने",
+     "हमने",
+     "स्टूडेंट",
+     "स्ट्रैटेजी"
+    ],
+    [
+     "कमाया",
+     "मुनाफा",
+     "रिटर्न",
+     "फायदा"
+    ]
+   ],
+   "needs_number": true,
+   "warn_if": [
+    "backtest",
+    "back-test",
+    "backtested",
+    "old data",
+    "historical data",
+    "paper trade",
+    "बॅकटेस्ट",
+    "बैकटेस्ट"
+   ]
+  },
+  {
+   "rule_id": "FIN-R6",
+   "severity": "BLOCKING",
+   "lang": "hinglish",
+   "groups": [
+    [
+     "meri",
+     "mere",
+     "hamari",
+     "maine",
+     "humne",
+     "students",
+     "strategy"
+    ],
+    [
+     "kamaya",
+     "kamaye",
+     "profit",
+     "munafa",
+     "return",
+     "fayda"
+    ]
+   ],
+   "needs_number": true,
+   "warn_if": [
+    "backtest",
+    "back-test",
+    "backtested",
+    "old data",
+    "historical data",
+    "paper trade",
+    "बॅकटेस्ट",
+    "बैकटेस्ट"
+   ]
+  },
+  {
+   "rule_id": "FIN-R7",
+   "severity": "BLOCKING",
+   "lang": "all",
+   "groups": [
+    [
+     "my student",
+     "my students",
+     "one of my students",
+     "our students",
+     "my follower",
+     "my followers",
+     "my client",
+     "my clients",
+     "माझ्या विद्यार्थ्याने",
+     "माझ्या विद्यार्थ्यांनी",
+     "मेरे स्टूडेंट",
+     "mere student",
+     "mere followers"
+    ],
+    [
+     "turned",
+     "into",
+     "made",
+     "earned",
+     "profit",
+     "profits",
+     "lakh",
+     "crore",
+     "gained",
+     "कमावले",
+     "नफा",
+     "लाख",
+     "कोटी",
+     "मुनाफा",
+     "कमाया"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R8",
+   "severity": "BLOCKING",
+   "lang": "all",
+   "groups": [
+    [
+     "open an account",
+     "open account",
+     "open a demat",
+     "demat account",
+     "trading account",
+     "खाते उघडा",
+     "अकाउंट उघडा",
+     "खाता खोलें",
+     "account kholo"
+    ],
+    [
+     "broker",
+     "brokerage",
+     "link",
+     "referral",
+     "code",
+     "ब्रोकर",
+     "लिंक",
+     "कोड"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R8",
+   "severity": "BLOCKING",
+   "lang": "all",
+   "groups": [
+    [
+     "referral",
+     "affiliate",
+     "use my link",
+     "my link",
+     "use my code",
+     "my code",
+     "coupon code",
+     "promo code",
+     "sign up using",
+     "रेफरल",
+     "अफिलिएट",
+     "माझी लिंक",
+     "माझा कोड"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R8",
+   "severity": "BLOCKING",
+   "lang": "all",
+   "groups": [
+    [
+     "broker",
+     "brokerage",
+     "demat",
+     "ब्रोकर",
+     "डिमॅट"
+    ],
+    [
+     "<URL>",
+     "<CODE>"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R8",
+   "severity": "WARNING",
+   "lang": "all",
+   "groups": [
+    [
+     "sponsored by",
+     "sponsored",
+     "sponsor",
+     "paid partnership",
+     "in partnership with",
+     "प्रायोजित",
+     "स्पॉन्सर"
+    ]
+   ]
+  },
+  {
+   "rule_id": "FIN-R13",
+   "severity": "BLOCKING",
+   "lang": "en",
+   "groups": [
+    [
+     "should",
+     "will",
+     "going to",
+     "likely to",
+     "expected to",
+     "could",
+     "may",
+     "set to",
+     "bound to"
+    ],
+    [
+     "rally",
+     "rise",
+     "go up",
+     "go down",
+     "fall",
+     "drop",
+     "crash",
+     "break out",
+     "breakout",
+     "move higher",
+     "move lower",
+     "climb",
+     "tank",
+     "surge",
+     "reverse",
+     "bounce"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R13",
+   "severity": "BLOCKING",
+   "lang": "mr",
+   "groups": [
+    [
+     "वाढेल",
+     "वाढणार",
+     "वाढू शकतो",
+     "पडेल",
+     "पडणार",
+     "घसरेल",
+     "घसरणार",
+     "तेजी येईल",
+     "मंदी येईल",
+     "उसळी घेईल",
+     "खाली जाईल",
+     "वर जाईल"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R13",
+   "severity": "BLOCKING",
+   "lang": "hi",
+   "groups": [
+    [
+     "बढ़ेगा",
+     "बढ़ेगी",
+     "गिरेगा",
+     "गिरेगी",
+     "ऊपर जाएगा",
+     "नीचे जाएगा",
+     "उछलेगा"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  },
+  {
+   "rule_id": "FIN-R13",
+   "severity": "BLOCKING",
+   "lang": "hinglish",
+   "groups": [
+    [
+     "badhega",
+     "girega",
+     "upar jayega",
+     "neeche jayega",
+     "rally karega",
+     "uchhalega"
+    ]
+   ],
+   "needs_instrument": true,
+   "quote_warn": true
+  }
+ ]
+}

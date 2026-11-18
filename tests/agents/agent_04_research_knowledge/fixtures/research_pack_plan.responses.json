@@ -1,0 +1,1008 @@
+{
+ "AK-01": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "divergence",
+     "label_en": "divergence",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "divergence explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "DEFINITION_TERM",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "AK-02": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R1",
+     "FIN-R3"
+    ]
+   }
+  }
+ },
+ "AK-03": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R6"
+    ]
+   }
+  }
+ },
+ "AK-04": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R8"
+    ]
+   }
+  }
+ },
+ "EDGE-11": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "stop-loss",
+     "label_en": "stop-loss",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "stop-loss explained"
+      },
+      {
+       "language": "mr",
+       "purpose": "PRIMARY",
+       "text": "stop-loss explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "stop loss",
+     "label_en": "stop loss",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "stop loss explained"
+      },
+      {
+       "language": "mr",
+       "purpose": "PRIMARY",
+       "text": "stop loss explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-12": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-13": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [
+      "g1",
+      "g2"
+     ],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-14": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [
+    "gap g1 cannot be closed by research"
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-15": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": true
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-16": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "CONFLICTING_INSTRUCTIONS",
+    "violated_rule_ids": []
+   }
+  }
+ },
+ "EDGE-17": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-18": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "COMMON_MISTAKE",
+     "label": "candlestick",
+     "label_en": "candlestick",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "candlestick explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-19": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [
+    "recorded note"
+   ],
+   "refusal": null
+  }
+ },
+ "EDGE-20": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "moving average",
+     "label_en": "moving average",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "moving average explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "EDGE-25": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R7"
+    ]
+   }
+  }
+ },
+ "EDGE-27": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R3"
+    ]
+   }
+  }
+ },
+ "HN-05": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "DEFINITION_TERM",
+     "label": "stop-loss",
+     "label_en": "stop-loss",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "stop-loss explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "COMMON_MISTAKE",
+     "label": "stop loss",
+     "label_en": "stop loss",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "stop loss explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "HN-06": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "PSYCHOLOGY",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "COMMON_MISTAKE",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "HN-07": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "DEFINITION_TERM",
+     "label": "option chain",
+     "label_en": "option chain",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "option chain explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "HN-08": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "HISTORICAL_CASE",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "HN-09": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "REGULATORY_CONTEXT",
+     "label": "supporting idea first",
+     "label_en": "supporting idea first",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea first explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "CURRENT",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "DEFINITION_TERM",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "HN-10": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "risk per trade",
+     "label_en": "risk per trade",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "risk per trade explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "position sizing",
+     "label_en": "position sizing",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "position sizing explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [
+    "recorded note"
+   ],
+   "refusal": null
+  }
+ },
+ "POS-26": {
+  "output": {
+   "concepts": [
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c01",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "CORE_CONCEPT",
+     "label": "candlestick",
+     "label_en": "candlestick",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "candlestick explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    },
+    {
+     "closes_gap_ids": [],
+     "concept_id": "c02",
+     "evidence_needs": [
+      "DEFINITION"
+     ],
+     "kind": "SUB_CONCEPT",
+     "label": "supporting idea second",
+     "label_en": "supporting idea second",
+     "queries": [
+      {
+       "language": "en",
+       "purpose": "PRIMARY",
+       "text": "supporting idea second explained"
+      }
+     ],
+     "rationale": "recorded rationale",
+     "target_collection_keys": [],
+     "time_reference": "TIMELESS",
+     "wants_method_material": false
+    }
+   ],
+   "out_of_scope_notes": [],
+   "refusal": null
+  }
+ },
+ "REF-21": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [
+     "topic.title"
+    ],
+    "reason": "INSUFFICIENT_INPUT",
+    "violated_rule_ids": []
+   }
+  }
+ },
+ "REF-22": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "OUT_OF_SCOPE",
+    "violated_rule_ids": []
+   }
+  }
+ },
+ "REF-23": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R4"
+    ]
+   }
+  }
+ },
+ "REF-24": {
+  "output": {
+   "concepts": [],
+   "out_of_scope_notes": [],
+   "refusal": {
+    "message": "recorded refusal",
+    "missing_inputs": [],
+    "reason": "RULE_WOULD_BE_BROKEN",
+    "violated_rule_ids": [
+     "FIN-R5"
+    ]
+   }
+  }
+ }
+}

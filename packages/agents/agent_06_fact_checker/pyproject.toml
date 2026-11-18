@@ -2,7 +2,7 @@
 name = "agent-06-fact-checker"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core"]
+dependencies = ["amw-core", "amw-adapters"]
 
 [build-system]
 requires = ["hatchling"]
@@ -13,3 +13,4 @@ packages = ["src/agent_06_fact_checker"]
 
 [tool.uv.sources]
 amw-core = { workspace = true }
+amw-adapters = { workspace = true }
