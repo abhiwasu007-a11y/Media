@@ -147,10 +147,6 @@ class QcConfig(_Cfg):
     licence_expiry_warning_days: int | None = None
     e_share_limit_ratio: str = "0.50"
     price_data_lag_days: int | None = None
-    finance_channel: bool | None = None
-    """``None`` (default) = derive: a channel is a finance channel unless it is listed in
-    ``non_finance_channel_ids`` (the 3A channel carries ``rp.finance_sebi_in``); a bool forces."""
-    non_finance_channel_ids: tuple[str, ...] = ()
     sample_frames_per_min: Annotated[int, Field(ge=1, strict=True)] = 6
     single_pass: bool = False
     music_enabled: bool = False

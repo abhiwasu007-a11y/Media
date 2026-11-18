@@ -25,6 +25,7 @@ from agent_10_video_editor.ffmpeg import ProcessResult, RunLimits
 from agent_10_video_editor.guard import AdmissionProbe, LocalTime, TimerHandle
 from agent_10_video_editor.inputs import AssetRecord
 from agent_10_video_editor.ports import (
+    ChannelProfile,
     LicenceSnapshot,
     QcRow,
     RenderRow,
@@ -399,6 +400,17 @@ class MemoryAssetCatalog:
 
     def insert_subtitle(self, tx: TenantTransaction, asset: SubtitleAsset) -> SubtitleAsset:
         return self.subtitles.setdefault((tx.context.org_id, asset.content_sha256), asset)
+
+
+class MemoryChannelProfiles:
+    def __init__(self) -> None:
+        self.profiles: dict[tuple[str, str], ChannelProfile] = {}
+
+    def add(self, org_id: str, channel_id: str, profile: ChannelProfile) -> None:
+        self.profiles[(org_id, channel_id)] = profile
+
+    def lookup(self, tx: TenantTransaction, channel_id: str) -> ChannelProfile | None:
+        return self.profiles.get((tx.context.org_id, channel_id))
 
 
 class MemoryLicenceReader:

@@ -10,6 +10,7 @@ from agent_10_video_editor.guard import AdmissionProbe, TimerFactory
 from agent_10_video_editor.observability import MetricsSink
 from agent_10_video_editor.ports import (
     AssetCatalog,
+    ChannelProfileReader,
     LicenceReader,
     QcResultRepository,
     RenderRepository,
@@ -40,6 +41,8 @@ class StageDeps:
     assets: AssetCatalog
     qc_results: QcResultRepository
     licences: LicenceReader
+    channels: ChannelProfileReader | None = None
+    """``None`` = channel unknown = finance rules apply (CCR-128, fail closed)."""
     audit: AuditLog | None = None
     metrics: MetricsSink | None = None
     font_reader: Callable[[bytes], frozenset[int]] | None = None

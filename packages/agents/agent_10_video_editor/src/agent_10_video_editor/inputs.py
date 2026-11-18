@@ -212,7 +212,9 @@ class AssetManifest(_Model):
 
 
 class AssetRecord(_Model):
-    """One ``assets`` row as far as Agent 10 reads it (04 section 5.15)."""
+    """One ``assets`` row as far as Agent 10 reads it (04 section 5.15).
+
+    ``sha256`` is ``assets.content_sha256``: the only source of a shot's asset hash (CCR-127)."""
 
     asset_id: str
     uri: str
@@ -255,9 +257,17 @@ class NarrationSegment(_Model):
     end_ms: StrictInt
 
 
+class NarrationAsset(_Model):
+    """``narration`` of ``agent_07.voice_synthesis.output`` (agent_07 8.1); ``asset_id`` is null
+    for a SAMPLE run, which has no ``assets`` row and cannot be rendered."""
+
+    asset_id: str | None = None
+
+
 class NarrationTimeline(_Model):
     """``agent_07.voice_synthesis`` timeline (agent_07 section 8)."""
 
+    narration: NarrationAsset = NarrationAsset()
     source: Literal["PROVIDER_CLIPS", "OWNER_MARKS", "UNALIGNED"]
     language: str | None = None
     segments: tuple[NarrationSegment, ...]

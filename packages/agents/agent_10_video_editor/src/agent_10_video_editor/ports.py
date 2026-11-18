@@ -141,3 +141,31 @@ class LicenceReader(Protocol):
     ) -> LicenceSnapshot:
         """Rows with ``render_id = R OR (render_id IS NULL AND job_id = J)`` (CCR-030)."""
         ...
+
+
+FINANCE_PACK_ID = "rp.finance_sebi_in"
+FINANCE_CATEGORY = "finance"
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelProfile:
+    """``channels.category`` and the active rule packs of the channel's compliance profile
+    (04 section 5.1; the ``COMPLIANCE_PROFILE`` context ref), CCR-128."""
+
+    category: str | None
+    active_pack_ids: Sequence[str] = ()
+
+    @property
+    def is_finance(self) -> bool:
+        """Finance when the category says so or the finance pack is active; a channel with no
+        category is unknown and therefore finance (fail closed)."""
+        if self.category is None:
+            return True
+        return self.category == FINANCE_CATEGORY or FINANCE_PACK_ID in self.active_pack_ids
+
+
+@runtime_checkable
+class ChannelProfileReader(Protocol):
+    def lookup(self, tx: TenantTransaction, channel_id: str) -> ChannelProfile | None:
+        """The channel's profile in the tenant, or ``None`` when it cannot be read."""
+        ...

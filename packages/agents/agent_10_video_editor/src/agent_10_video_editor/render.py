@@ -318,7 +318,13 @@ class _RenderRun:
 
         assets = self._asset_records(loaded)
         timeline = TimelineCompiler.compile(
-            loaded.plan, loaded.manifest, assets, loaded.audio, d.cfg, payload.aspect_ratio
+            loaded.plan,
+            loaded.manifest,
+            assets,
+            loaded.audio,
+            d.cfg,
+            payload.aspect_ratio,
+            narration_asset_id=loaded.narration.narration.asset_id,
         )
         timeline_sha = TimelineHasher.timeline_sha256(timeline)
         if state.timeline_sha256 not in (None, timeline_sha):
@@ -464,6 +470,9 @@ class _RenderRun:
         ids = {o.template_asset_id for o in loaded.manifest.overlays}
         ids |= {s.asset_id for s in loaded.manifest.shots if s.asset_id}
         ids |= {f.asset_id for f in loaded.manifest.fonts}
+        ids |= {r.asset_id for s in loaded.manifest.shots for r in s.reveal_stills}
+        if loaded.narration.narration.asset_id:
+            ids.add(loaded.narration.narration.asset_id)
         with self.d.tenancy.transaction(self.ctx) as tx:
             return dict(self.d.assets.lookup(tx, sorted(ids)))
 

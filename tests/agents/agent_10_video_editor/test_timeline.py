@@ -65,6 +65,8 @@ def _doc(
     ]  # fmt: skip
     overlays = [{"overlay_id": "ov01", "kind": "LOWER_THIRD", "template_asset_id": "t1"}]
     assets = {"t1": AssetRecord(asset_id="t1", uri="amw-blob://org_x/t.png", sha256="5" * 64)}
+    for aid, sha in (("a1", "1"), ("a2", "2"), ("st0", "0"), ("st1", "1"), ("nar", "f")):
+        assets[aid] = AssetRecord(asset_id=aid, uri=f"amw-blob://org_x/{aid}.bin", sha256=sha * 64)
     if end_screen:
         overlays.append({"overlay_id": "ov02", "kind": "END_SCREEN", "template_asset_id": "t2"})
         assets["t2"] = AssetRecord(asset_id="t2", uri="amw-blob://org_x/e.png", sha256="6" * 64)
@@ -78,7 +80,13 @@ def _doc(
 def _compile(**kw: Any) -> Any:
     plan, manifest, assets = _doc(**kw)
     return TimelineCompiler.compile(
-        plan, manifest, assets, audio_master(plan.total_duration_ms), make_config(), "16:9"
+        plan,
+        manifest,
+        assets,
+        audio_master(plan.total_duration_ms),
+        make_config(),
+        "16:9",
+        narration_asset_id="nar",
     )
 
 
@@ -121,7 +129,13 @@ def test_template_mismatch_and_reveal_rules_and_missing_overlay_entry() -> None:
     no_overlay = AssetManifest.model_validate({**manifest.model_dump(), "overlays": []})
     with pytest.raises(MissingDependencyError):
         TimelineCompiler.compile(
-            plan, no_overlay, assets, audio_master(10_000), make_config(), "16:9"
+            plan,
+            no_overlay,
+            assets,
+            audio_master(10_000),
+            make_config(),
+            "16:9",
+            narration_asset_id="nar",
         )
     shifted = json.loads(manifest.model_dump_json())
     shifted["shots"][1]["reveal_stills"][1]["start_ms"] = 7001
@@ -133,6 +147,7 @@ def test_template_mismatch_and_reveal_rules_and_missing_overlay_entry() -> None:
             audio_master(10_000),
             make_config(),
             "16:9",
+            narration_asset_id="nar",
         )
     unledgered = json.loads(manifest.model_dump_json())
     unledgered["shots"][1]["reveal_stills"][1]["ledger_entry_ids"] = []
@@ -144,6 +159,7 @@ def test_template_mismatch_and_reveal_rules_and_missing_overlay_entry() -> None:
             audio_master(10_000),
             make_config(),
             "16:9",
+            narration_asset_id="nar",
         )
     assert violations_of(missing.value) == ["NO_ASSET:sh02#1"]
 
@@ -159,7 +175,13 @@ def test_tiling_errors_at_the_ends_of_the_plan() -> None:
         bad = ShotPlan.model_validate({**json.loads(plan.model_dump_json()), **patch})
         with pytest.raises(InputInvalidError) as info:
             TimelineCompiler.compile(
-                bad, manifest, assets, audio_master(10_000), make_config(), "16:9"
+                bad,
+                manifest,
+                assets,
+                audio_master(10_000),
+                make_config(),
+                "16:9",
+                narration_asset_id="nar",
             )
         assert expected in violations_of(info.value)
 
@@ -281,3 +303,42 @@ def test_segment_resume_verifier_branches() -> None:
     )
     assert missing.to_encode == (0, 1, 2)
     assert SegmentPlanner.plan([ShotFrames("a", 0, 10)], 5)[0].shot_ids == ("a",)
+
+
+# -- CCR-127: narration asset and the shot hash come from ``assets`` -----------------------------
+
+
+@pytest.mark.unit
+def test_shot_hash_is_assets_content_sha256_not_the_manifest_fingerprint() -> None:
+    plan, manifest, assets = _doc()
+    changed = {
+        **assets,
+        "a1": AssetRecord(asset_id="a1", uri="amw-blob://org_x/a1.mp4", sha256="e" * 64),
+    }
+    t = TimelineCompiler.compile(
+        plan, manifest, changed, audio_master(10_000), make_config(), "16:9",
+        narration_asset_id="nar",
+    )  # fmt: skip
+    assert t.shots[0].asset_sha256 == "e" * 64  # the manifest fingerprint says "1" * 64
+    assert [r.asset_sha256 for r in t.shots[1].reveal_steps] == ["0" * 64, "1" * 64]
+    assert t.audio.narration_asset_id == "nar"
+
+
+@pytest.mark.unit
+def test_missing_assets_row_is_a_missing_dependency() -> None:
+    plan, manifest, assets = _doc()
+    for gone in ("a1", "st1", "nar"):
+        rest = {k: v for k, v in assets.items() if k != gone}
+        with pytest.raises(MissingDependencyError) as err:
+            TimelineCompiler.compile(
+                plan, manifest, rest, audio_master(10_000), make_config(), "16:9",
+                narration_asset_id="nar",
+            )  # fmt: skip
+        expected = {"a1": "NO_ASSET:sh01", "st1": "NO_ASSET:sh02#1", "nar": "NO_ASSET:narration"}
+        assert expected[gone] in violations_of(err.value)
+    with pytest.raises(MissingDependencyError) as sample:  # SAMPLE narration has no asset row
+        TimelineCompiler.compile(
+            plan, manifest, assets, audio_master(10_000), make_config(), "16:9",
+            narration_asset_id=None,
+        )  # fmt: skip
+    assert "NO_ASSET:narration" in violations_of(sample.value)
