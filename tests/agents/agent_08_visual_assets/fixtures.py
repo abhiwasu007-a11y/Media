@@ -3,6 +3,7 @@
 # (test helpers feed dataset dicts and fakes into typed APIs; the package is strict clean)
 """Synthetic fixtures: OHLC data generated at test time (never private market data)."""
 
+import hashlib
 import json
 import random
 from contextlib import contextmanager
@@ -30,7 +31,9 @@ NOW = datetime(2026, 6, 1, tzinfo=UTC)
 PALETTE = BrandPalette("#101820", "#f2f2f2", "#2a3540", "#2ecc71", "#e74c3c", "#f1c40f", "#3498db")
 
 
-def synthetic_csv(n: int = 120, start: date = date(2025, 1, 1), seed: int = 7) -> bytes:
+def synthetic_csv(
+    n: int = 120, start: date = date(2025, 1, 1), seed: int = 7, step: int = 1
+) -> bytes:
     rnd = random.Random(seed)  # noqa: S311
     price = 100.0
     rows = ["date,open,high,low,close"]
@@ -38,7 +41,7 @@ def synthetic_csv(n: int = 120, start: date = date(2025, 1, 1), seed: int = 7) -
         o, c = price, price + rnd.uniform(-2, 2)
         h, low = max(o, c) + rnd.uniform(0, 1), min(o, c) - rnd.uniform(0, 1)
         price = c
-        rows.append(f"{start + timedelta(days=i)},{o:.2f},{h:.2f},{low:.2f},{c:.2f}")
+        rows.append(f"{start + timedelta(days=i * step)},{o:.2f},{h:.2f},{low:.2f},{c:.2f}")
     return ("\n".join(rows) + "\n").encode()
 
 
@@ -117,6 +120,50 @@ class World:
             LicenceSourceType.FONT,
         ):
             self.licences.add(lic(self.org, st))
+
+    def add_font(self) -> str:
+        """Register the DejaVu Sans file of the pinned matplotlib wheel as a brand font blob."""
+        import io
+        from pathlib import Path
+
+        import matplotlib
+
+        data = (Path(matplotlib.get_data_path()) / "fonts/ttf/DejaVuSans.ttf").read_bytes()
+        sha = hashlib.sha256(data).hexdigest()
+        uri = self.blobs.blob_uri(self.ctx, "assets", f"fonts/{sha}.ttf")
+        self.blobs.put(self.ctx, uri, io.BytesIO(data))
+        return self.assets.insert(
+            self.tx,
+            NewAsset(
+                kind=AssetKind.FONT,
+                source_type=LicenceSourceType.FONT,
+                content_sha256=sha,
+                uri=str(uri),
+                size_bytes=len(data),
+                title="font",
+            ),
+        ).asset_id
+
+    def second_tenant(self) -> World:
+        """Another org that SHARES every repository and the blob store with this one."""
+        other = World.__new__(World)
+        other.org = str(ORG.new())
+        other.ctx = TenantContext(other.org, "usr_" + str(new_id(Prefix.USER))[4:], None)
+        other.blobs, other.assets, other.licences = self.blobs, self.assets, self.licences
+        other.ledger, other.fps, other.approvals, other.audit = (
+            self.ledger,
+            self.fps,
+            self.approvals,
+            self.audit,
+        )
+        other.tx = MemoryTransaction(other.ctx)
+        for st in (
+            LicenceSourceType.CODE_GENERATED,
+            LicenceSourceType.OWNER_MADE,
+            LicenceSourceType.FONT,
+        ):
+            other.licences.add(lic(other.org, st))
+        return other
 
     def add_asset(self, kind: AssetKind, sha: str, title: str, st: LicenceSourceType) -> str:
         return self.assets.insert(

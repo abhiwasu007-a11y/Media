@@ -9,13 +9,23 @@ composer, disclosure flags and error mapper are implemented and unit-tested sepa
 Every DB access goes through one tenant transaction; every query is explicitly scoped by org.
 """
 
+import hashlib
 import io
 import json
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Protocol
 
+from agent_08_visual_assets.cascade.selection import (
+    Assessment,
+    Fit,
+    RankedCandidate,
+    SafetyFloor,
+    TieBreaker,
+)
 from agent_08_visual_assets.cascade.share import TierMixReporter, TierShareGuard
 from agent_08_visual_assets.cascade.tier_cascade import (
     Attempt,
@@ -82,11 +92,19 @@ from agent_08_visual_assets.persistence.protocols import (
 from agent_08_visual_assets.persistence.records import (
     AssetRecord,
     FingerprintRow,
+    LedgerEntry,
     LicenceRecord,
     NewAsset,
     NewLedgerEntry,
 )
 from agent_08_visual_assets.plan.revision import ChangedShotSelector, ShotKey
+from agent_08_visual_assets.registrar import APPROVED_SOURCE_CLASS
+from agent_08_visual_assets.reuse.engine import (
+    ReuseCandidate,
+    ReuseDecisionKind,
+    ReuseEngine,
+    ReuseRequest,
+)
 from agent_08_visual_assets.reuse.fingerprint import ALGO_VERSION, Fingerprinter
 from agent_08_visual_assets.settings import AssetSettings
 from agent_08_visual_assets.sources.graphics import GraphicKind, GraphicTemplateRenderer
@@ -111,6 +129,7 @@ from amw_core.errors import (
     CorruptedOutputError,
     InputInvalidError,
     MissingDependencyError,
+    QualityRepeatedFailureError,
 )
 from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.storage import BlobStorage, BlobUri
@@ -136,10 +155,12 @@ class BrandKit:
 
 @dataclass(frozen=True, slots=True)
 class FootageChoice:
-    """Outcome of the (LLM-backed) selection among filtered owner candidates."""
+    """Outcome of the (LLM-backed) assessment of the filtered owner candidates.
 
-    chosen_asset_id: str | None
-    fit: str | None = None
+    The model's fits are advisory: the stage applies ``SafetyFloor`` and ``TieBreaker``."""
+
+    assessments: tuple[Assessment, ...] = ()
+    order: tuple[str, ...] = ()
     prohibited: bool = False
     refusal_reason: str | None = None
 
@@ -173,6 +194,7 @@ class _Built:
     result: ShotResult
     records: list[AssetRecord]
     chart: BuiltChart | None = None
+    chart_checked: bool = True
 
 
 def _vr(
@@ -214,6 +236,7 @@ class AssetSourcingStage:
         self._ledger, self._fp, self._approvals = ledger, fingerprints, approvals
         self._blobs, self._clock, self._s, self._selector = blobs, clock, settings, selector
         self._destination = LicenceDestination.MONETIZED_YOUTUBE
+        self._reset(JobScope("", "", "", ""))
 
     # -- public --------------------------------------------------------------------------------
 
@@ -224,13 +247,14 @@ class AssetSourcingStage:
         envelope_org: str,
         scope: JobScope,
         inp: SourcingInput,
-        script: Mapping[str, object] | None,
+        script_bytes: bytes,
         plan_bytes: bytes,
-        script_sha256: str,
         brand: BrandKit,
         timeline_end_ms: int,
         previous: SourcingOutput | None = None,
+        job_destination: LicenceDestination | None = None,
     ) -> StageResult:
+        self._reset(scope)
         uris = [inp.shot_plan_ref.uri, inp.script_ref.uri]
         if inp.previous_sourcing_ref is not None:
             uris.append(inp.previous_sourcing_ref.uri)
@@ -241,23 +265,72 @@ class AssetSourcingStage:
             uris=uris,
             write=False,
         )
+        self._pre["a08.pre.tenant"] = True
+        # 7.4: both inputs are verified against the hashes of their refs (03 section 8.4)
+        if hashlib.sha256(plan_bytes).hexdigest() != inp.shot_plan_ref.sha256:
+            raise InputInvalidError("shot plan hash does not match its reference")
+        if hashlib.sha256(script_bytes).hexdigest() != inp.script_ref.sha256:
+            raise InputInvalidError("script hash does not match its reference")
+        if job_destination is not None and job_destination is not inp.destination:
+            raise InputInvalidError("destination disagrees with the job's monetized destination")
+        self._pre["a08.pre.refs"] = True
         self._destination = inp.destination
         shots, overlays = ShotPlanReader.read(plan_bytes)
         shots = [s for s in shots if s.aspect_ratio.value in inp.aspect_ratios]
+        self._pre["a08.pre.shot_plan"] = True
         if len(shots) > self._s.max_shots_per_task:
             raise InputInvalidError("plan has more shots than assets.max_shots_per_task")
-        script = script or {}
+        self._pre["a08.pre.batch_size"] = True
+        self._plan_shots.extend(shots)
+        self._pre["a08.pre.config"] = True  # AssetSettings validated at construction
+        script = json.loads(script_bytes)
         requests = {r.chart_id: r for r in _chart_requests(script)}
         allow = _allowlists(script)
         todo = self._select(shots, previous, inp)
-        with self._tenancy.transaction(ctx) as tx:
+        with (
+            tempfile.TemporaryDirectory(prefix="a08_font_") as tmp,
+            self._tenancy.transaction(ctx) as tx,
+        ):
+            self._own_assets.update(
+                e.entry.asset_id
+                for e in self._ledger.for_job(tx, scope.job_id)
+                if e.entry.task_id == scope.task_id
+            )
             licences = self._standing_licences(tx, brand, overlays)
+            self._pre["a08.pre.licence_rows"] = True
+            brand = self._with_font(tx, brand, Path(tmp))
             built = [
                 self._shot(tx, scope, s, requests, allow, brand, licences, previous, todo)
                 for s in shots
             ]
             timeline = self._timeline(tx, scope, overlays, brand, licences, timeline_end_ms)
-        return self._assemble(ctx, inp, built, timeline, plan_bytes, script_sha256)
+            rows = tuple(self._ledger.for_job(tx, scope.job_id))
+        return self._assemble(ctx, inp, built, timeline, rows, previous, script)
+
+    def _reset(self, scope: JobScope) -> None:
+        self._pre: dict[str, bool] = {}
+        self._guards: list[GuardResult] = []
+        self._own_assets: set[str] = set()
+        self._channel = scope.channel_id
+        self._plan_shots: list[ShotRequirement] = []
+
+    def _with_font(self, tx: TenantTransaction, brand: BrandKit, tmp: Path) -> BrandKit:
+        """The font that renders is the first brand-kit font asset, read through tenant storage;
+        its asset is the one that carries the FONT ledger row."""
+        if not brand.font_asset_ids:
+            return brand
+        rec = self._assets.get(tx, brand.font_asset_ids[0])
+        if rec is None or rec.asset.kind is not AssetKind.FONT:
+            raise MissingDependencyError(
+                "brand font asset missing", details={"class": "brand_font"}
+            )
+        data = b"".join(
+            self._blobs.get(tx.context, BlobUri(rec.asset.uri), rec.asset.content_sha256)
+        )
+        path = tmp / f"{rec.asset.content_sha256}.ttf"
+        path.write_bytes(data)
+        palette = replace(brand.palette, font_path=str(path), font_sha256=rec.asset.content_sha256)
+        return replace(brand, palette=palette)
 
     # -- helpers -------------------------------------------------------------------------------
 
@@ -299,6 +372,22 @@ class AssetSourcingStage:
             out[st] = rec
         return out
 
+    def _licence_for(
+        self,
+        tx: TenantTransaction,
+        licences: Mapping[LicenceSourceType, LicenceRecord],
+        source_type: LicenceSourceType,
+    ) -> LicenceRecord:
+        """Standing self-grant row of the asset's own source type: an owner asset is never
+        ledgered under another class (a client asset needs its own client licence row)."""
+        rec = licences.get(source_type) or self._licences.self_grant(tx, source_type)
+        if rec is None:
+            raise MissingDependencyError(
+                "standing licence row missing",
+                details={"class": f"licence.self_grant.{source_type.value}"},
+            )
+        return rec
+
     def _guard(self, rec: LicenceRecord, tenant_org: str) -> GuardResult:
         now = self._clock.now()
         return LicenceGuard.check(
@@ -334,6 +423,27 @@ class AssetSourcingStage:
     ) -> tuple[AssetRecord, bool]:
         uri = self._put(tx.context, f"generated/{img.sha256}.png", img.png)
         existing = self._assets.find_by_sha(tx, img.sha256)
+        if existing is not None:
+            now = self._clock.now()
+            decision = ReuseEngine.decide(
+                asset=ReuseCandidate(
+                    existing.org_id,
+                    existing.status.value,
+                    None if existing.asset.expires_at is None else existing.asset.expires_at - now,
+                    existing.asset.allowed_channel_ids,
+                    0,
+                    existing.asset.content_sha256,
+                ),
+                request=ReuseRequest(str(tx.context.org_id), self._channel, img.sha256),
+                distance=None,
+                max_uses=None,
+                hamming_threshold=None,
+            )
+            if decision.decision is not ReuseDecisionKind.REUSE_EXACT:
+                raise InputInvalidError(
+                    "an identical asset exists but is not reusable",
+                    details={"reason": str(decision.reason)},
+                )
         rec = existing or self._assets.insert(
             tx,
             NewAsset(
@@ -361,7 +471,7 @@ class AssetSourcingStage:
                 for f in fp.perceptual_frames
             ],
         )
-        return rec, existing is not None
+        return rec, existing is not None and existing.asset_id not in self._own_assets
 
     def _write_ledger(
         self,
@@ -375,6 +485,7 @@ class AssetSourcingStage:
         end_ms: int | None = None,
     ) -> str:
         guard = self._guard(lic, scope.org_id)
+        self._guards.append(guard)
         if not guard.usable:
             raise InputInvalidError("licence not usable", details={"reason": str(guard.reason)})
         row = LedgerRowBuilder.build(
@@ -386,7 +497,7 @@ class AssetSourcingStage:
             licence_ref=lic.licence_id,
             element_id=shot.shot_id,
         )
-        entry = self._ledger.write(
+        entry = self._write_row(
             tx,
             NewLedgerEntry(
                 scope.job_id,
@@ -404,11 +515,28 @@ class AssetSourcingStage:
         )
         return entry.ledger_entry_id
 
+    def _write_row(self, tx: TenantTransaction, new: NewLedgerEntry) -> LedgerEntry:
+        """Append the row unless this job already holds the same covering row (a revision writes
+        new rows only for shots whose asset or interval changed, FR-20)."""
+        for e in self._ledger.for_job(tx, new.job_id):
+            x = e.entry
+            if (x.asset_id, x.usage_kind, x.shot_id, x.used_from_ms, x.used_to_ms, x.render_id) == (
+                new.asset_id,
+                new.usage_kind,
+                new.shot_id,
+                new.used_from_ms,
+                new.used_to_ms,
+                None,
+            ):
+                return e
+        return self._ledger.write(tx, new)
+
     def _case_docs(self, tx: TenantTransaction, ctx: TenantContext) -> list[StoredCase]:
         out: list[StoredCase] = []
         for rec in self._assets.list_assets(tx, kinds=[AssetKind.DOCUMENT]):
             if rec.asset.attributes.get("doc_kind") != "CHART_CASE":
                 continue
+            _require_intake(rec)
             data = b"".join(self._blobs.get(ctx, BlobUri(rec.asset.uri), rec.asset.content_sha256))
             out.append(
                 StoredCase(
@@ -425,6 +553,9 @@ class AssetSourcingStage:
         rec = self._assets.get(tx, asset_id)
         if rec is None:
             return None, None
+        if rec.asset.attributes.get("doc_kind") != "DATASET":
+            raise InputInvalidError("dataset asset is not a registered dataset")
+        _require_intake(rec)
         data = b"".join(self._blobs.get(ctx, BlobUri(rec.asset.uri), rec.asset.content_sha256))
         try:
             return DatasetLoader.load(
@@ -546,16 +677,22 @@ class AssetSourcingStage:
                     VisualSkipReason.PROHIBITED_DEPICTION,
                     unsafe=choice.refusal_reason == "UNSAFE_CONTENT",
                 )
-            if choice.chosen_asset_id is None:
-                return skip_with(VisualSkipReason.NO_ACCEPTABLE_FIT)
-            rec = next(c for c in cands if c.asset_id == choice.chosen_asset_id)
-            lic = licences.get(LicenceSourceType.OWNER_MADE)
-            if lic is None:
-                raise MissingDependencyError(
-                    "standing licence row missing",
-                    details={"class": "licence.self_grant.OWNER_MADE"},
+            by_id = {c.asset_id: c for c in cands}
+            known = tuple(a for a in choice.assessments if a.candidate_id in by_id)
+            floor = SafetyFloor.apply(known, [i for i in choice.order if i in by_id])
+            fits = dict(floor.fits)
+            ranked = [
+                RankedCandidate(
+                    i, f, VisualSourceTier.A_OWNER_REAL, False, by_id[i].asset.duration_ms
                 )
-            fit = choice.fit if choice.fit in ("STRONG", "ACCEPTABLE") else "ACCEPTABLE"
+                for i, f in fits.items()
+            ]
+            order = TieBreaker.order(ranked, shot.duration_ms)
+            if not order:
+                return skip_with(VisualSkipReason.NO_ACCEPTABLE_FIT)
+            rec = by_id[order[0]]
+            lic = self._licence_for(tx, licences, rec.asset.source_type)
+            fit = "STRONG" if fits[rec.asset_id] is Fit.STRONG else "ACCEPTABLE"
             return accept(
                 _Sourced(
                     rec,
@@ -713,9 +850,12 @@ class AssetSourcingStage:
         ends = [*shot.change_events_ms, shot.end_ms]
         reveal: list[RevealStill] = []
         for k, rec in enumerate(src.reveal):
-            rid = self._write_ledger(
-                tx, scope, shot, rec, src.licence, res.tier, starts[k], ends[k]
-            )
+            if rec.asset_id == src.record.asset_id:
+                rid = ids[0]  # the full-window still is the chart asset: its shot row covers it
+            else:
+                rid = self._write_ledger(
+                    tx, scope, shot, rec, src.licence, res.tier, starts[k], ends[k]
+                )
             reveal.append(
                 RevealStill(
                     k=k,
@@ -844,7 +984,7 @@ class AssetSourcingStage:
                 licence_ref=lic.licence_id,
                 element_id=row.shot_id,
             )
-            entry = self._ledger.write(
+            entry = self._write_row(
                 tx,
                 NewLedgerEntry(
                     scope.job_id,
@@ -898,11 +1038,11 @@ class AssetSourcingStage:
         inp: SourcingInput,
         built: Sequence[_Built],
         tl: _Timeline,
-        plan_bytes: bytes,
-        script_sha256: str,
+        rows: Sequence[LedgerEntry],
+        previous: SourcingOutput | None,
+        script: Mapping[str, object],
     ) -> StageResult:
-        import hashlib
-
+        script_sha256 = inp.script_ref.sha256
         results = tuple(b.result for b in built)
         unresolved = tuple(
             Unresolved(r.shot_id, r.unresolved_reason) for r in results if r.unresolved_reason
@@ -954,6 +1094,12 @@ class AssetSourcingStage:
                         fact_count=len(doc.facts),
                     )
                 )
+        if previous is not None:
+            have = {f.chart_id for f in facts_refs}
+            carried = {
+                r.chart.chart_id for b in built if b.chart is None for r in [b.result] if r.chart
+            }
+            facts_refs.extend(f for f in previous.chart_facts if f.chart_id in carried - have)
         lag_days = self._s.price_data_lag_days
         publish = EarliestPublishDate.compute(ends, lag_days)
         ledger_rows = len(
@@ -1016,30 +1162,48 @@ class AssetSourcingStage:
             ),
             refusals=(),
         )
-        vr = self._validation(results, tl, outcome, ms, total)
-        status = outcome.task_status
+        vr = self._validation(ctx, results, tl, outcome, ms, total, rows, payload, built)
+        status, error = outcome.task_status, outcome.error_code
+        if error is None and any(v.blocking and not v.gate and v.verdict is _FAIL for v in vr):
+            status, error = "FAILED", QualityRepeatedFailureError.code
         return StageResult(
-            payload, tuple(vr), status, outcome.error_code, outcome.gate_verdict, blobs, unresolved
+            payload, tuple(vr), status, error, outcome.gate_verdict, blobs, unresolved
         )
 
     def _validation(
         self,
+        ctx: TenantContext,
         results: Sequence[ShotResult],
         tl: _Timeline,
         outcome: GateOutcome,
         ms: Mapping[VisualSourceTier, int],
         total: int,
+        rows: Sequence[LedgerEntry],
+        payload: SourcingOutput,
+        built: Sequence[_Built],
     ) -> list[ValidationResult]:
+        """Every row is measured here; a measurement that cannot be made is SKIPPED (never PASS)."""
         sourced = [r for r in results if r.asset_id]
         vr: list[ValidationResult] = []
+
+        def add(cid: str, ok: bool | None, msg: str, *, warn: bool = False) -> None:
+            if ok is None:
+                vr.append(_vr(cid, _SKIP, False, msg))
+            elif ok:
+                vr.append(_vr(cid, _PASS, True, msg))
+            else:
+                vr.append(_vr(cid, _WARN if warn else _FAIL, True, msg))
+
         for cid in (
             "a08.pre.tenant",
             "a08.pre.refs",
             "a08.pre.shot_plan",
             "a08.pre.config",
             "a08.pre.licence_rows",
+            "a08.pre.batch_size",
         ):
-            vr.append(_vr(cid, _PASS, True, "precondition met"))
+            add(cid, self._pre.get(cid, False), "recorded when the precondition step ran")
+        add("a08.pre.budget", None, "no paid or LLM effect is wired in this stage")
         g = outcome.gate_result
         if g is not None:
             vr.append(
@@ -1052,71 +1216,111 @@ class AssetSourcingStage:
                     remedy=g.remedy_stage_id,
                 )
             )
-        bad_cov = [r.shot_id for r in sourced if len(r.ledger_entry_ids) < 1]
-        vr.append(
-            _vr(
-                "a08.cov.licence_row_per_shot",
-                _FAIL if bad_cov else _PASS,
-                True,
-                "ledger row per sourced shot",
+        # coverage: exactly one covering ledger row per sourced shot and per reveal still
+        job = tl.job_id
+        cover_rows = [
+            CoverRow(
+                e.entry.asset_id,
+                e.entry.used_from_ms,
+                e.entry.used_to_ms,
+                e.entry.job_id,
+                e.entry.render_id,
             )
+            for e in rows
+        ]
+        els = [CoverElement(r.shot_id, r.asset_id or "", r.start_ms, r.end_ms) for r in sourced]
+        els += [
+            CoverElement(f"{r.shot_id}:rs{x.k}", x.asset_id, x.start_ms, x.end_ms)
+            for r in sourced
+            for x in r.reveal_stills
+        ]
+        cov = CoverageVerifier.verify(els, cover_rows, job_id=job)
+        add(
+            "a08.cov.licence_row_per_shot",
+            cov.passed,
+            f"gaps={list(cov.gaps)} duplicates={list(cov.duplicates)}",
         )
-        vr.append(_vr("a08.cov.overlay_rows", _PASS, True, f"{len(tl.overlays)} overlay rows"))
-        vr.append(_vr("a08.cov.font_rows", _PASS, True, f"{len(tl.fonts)} font rows"))
-        cov = CoverageVerifier.verify(tl.elements, tl.rows, job_id=tl.job_id)
-        vr.append(
-            _vr(
-                "a08.cov.interval_match",
-                _PASS if cov.passed else _FAIL,
-                True,
-                "overlay and font intervals match",
-            )
+        ov_els = tuple(e for e in tl.elements if not e.element.startswith("font:"))
+        font_els = tuple(e for e in tl.elements if e.element.startswith("font:"))
+        ov_cov = CoverageVerifier.verify(ov_els, cover_rows, job_id=job)
+        font_cov = CoverageVerifier.verify(font_els, cover_rows, job_id=job)
+        add("a08.cov.overlay_rows", ov_cov.passed, f"{len(ov_els)} overlays checked")
+        add("a08.cov.font_rows", font_cov.passed, f"{len(font_els)} fonts checked")
+        exact = {(r.asset, r.from_ms, r.to_ms) for r in cover_rows}
+        interval_ok = all(
+            (e.asset, e.start_ms, e.end_ms) in exact
+            for e in (*(x for x in els if ":rs" not in x.element), *tl.elements)
         )
+        add("a08.cov.interval_match", interval_ok, "shot, overlay and font row intervals match")
+        allowed = {s.shot_id: s for s in self._plan_shots}
         missing = [
             r.shot_id
             for r in results
-            if TierCascade.missing_skip_reasons(r.tier, [_skip(x) for x in r.skips])
+            if [
+                t
+                for t in TierCascade.missing_skip_reasons(r.tier, [_skip(x) for x in r.skips])
+                # a chart is served by tier C only: C is the attempt, never a skipped tier
+                if not (
+                    r.intent_kind is ShotIntentKind.CHART and t is VisualSourceTier.C_CODE_MOTION
+                )
+            ]
         ]
-        vr.append(
-            _vr(
-                "a08.hier.skip_reasons_recorded",
-                _FAIL if missing else _PASS,
-                True,
-                "skip reasons recorded",
-            )
-        )
-        vr.append(
-            _vr(
-                "a08.hier.tier_order",
-                _PASS,
-                True,
-                "no lower tier used over an accepted higher tier",
-            )
-        )
-        charts = [
-            r.chart
-            for r in results
-            if r.chart and r.chart.data_kind is ChartDataKind.REAL_HISTORICAL
+        add("a08.hier.skip_reasons_recorded", not missing, f"missing for {missing}")
+        order_bad = [
+            r.shot_id
+            for r in sourced
+            if r.shot_id in allowed
+            and r.tier is not None
+            and r.tier not in allowed[r.shot_id].allowed_tiers
         ]
-        bad_age = [c.chart_id for c in charts if c.data_age_vs_lag != "OLDER_THAN_LAG"]
-        vr.append(
-            _vr(
-                "a08.chart.data_age",
-                _FAIL if bad_age else _PASS,
-                True,
-                "real charts older than the lag",
-            )
+        add("a08.hier.tier_order", not order_bad, f"violations: {order_bad}")
+        charts = [r.chart for r in results if r.chart]
+        real = [c for c in charts if c.data_kind is ChartDataKind.REAL_HISTORICAL]
+        add(
+            "a08.chart.data_age",
+            None if not real else all(c.data_age_vs_lag == "OLDER_THAN_LAG" for c in real),
+            "real charts older than the lag",
         )
-        vr.append(
-            _vr("a08.chart.annotations", _PASS, True, "annotations validated before rendering")
+        add(
+            "a08.chart.annotations",
+            None if not charts else all(b.chart_checked for b in built if b.chart is not None),
+            "annotations validated before rendering (rejection aborts the task)",
         )
-        vr.append(
-            _vr("a08.chart.provenance", _PASS, True, "dataset hash, case, spec hash recorded")
+        add(
+            "a08.chart.provenance",
+            None
+            if not charts
+            else all(
+                c.spec_sha256
+                and c.case_asset_id
+                and c.template_version >= 1
+                and (
+                    c.data_kind is ChartDataKind.SCHEMATIC
+                    or (c.dataset_sha256 and c.dataset_asset_id)
+                )
+                for c in charts
+            ),
+            "dataset hash, case, spec hash and template version recorded",
         )
-        vr.append(_vr("a08.chart.facts", _PASS, True, "one facts document per real chart"))
-        vr.append(_vr("a08.lic.guard", _PASS, True, "licence guard passed for every ledger row"))
-        vr.append(_vr("a08.lic.no_preview", _PASS, True, "no preview or watermarked asset"))
-        vr.append(_vr("a08.ai.no_real_person", _PASS, True, "no AI asset"))
+        facts_ids = {f.chart_id for f in payload.chart_facts}
+        add(
+            "a08.chart.facts",
+            None if not charts else {c.chart_id for c in real} == facts_ids,
+            "one facts document per real chart, none for schematic",
+        )
+        add(
+            "a08.lic.guard",
+            None if not self._guards else all(g.usable for g in self._guards),
+            f"{len(self._guards)} guard checks",
+        )
+        add("a08.lic.no_preview", None, "no stock path is wired in this stage")
+        add("a08.lic.third_party", None, "no platform-held licence is used in this stage")
+        expiring = [w for w in payload.licence_summary.warnings if w.code == "LICENCE_EXPIRING"]
+        add("a08.lic.expiry_window", not expiring, f"{len(expiring)} expiring", warn=True)
+        add("a08.ai.budget", None, "no AI asset in this stage")
+        add("a08.ai.no_real_person", not any(r.disclosure.depicts_real_person for r in results),
+            "no result depicts a real person")  # fmt: skip
+        add("a08.ai.disclosure_flags", None, "no AI asset in this stage")
         share = (
             TierShareGuard.allows(
                 e_ms_planned=ms[VisualSourceTier.E_AI_STILL],
@@ -1127,15 +1331,8 @@ class AssetSourcingStage:
             if total
             else None
         )
-        vr.append(
-            _vr(
-                "a08.tier.share_e",
-                _PASS if share is None or share.allowed else _FAIL,
-                True,
-                "tier E share",
-            )
-        )
-        vr.append(_vr("a08.tier.mix_report", _PASS, False, "tier mix computed"))
+        add("a08.tier.share_e", None if share is None else share.allowed, "tier E share")
+        add("a08.tier.mix_report", total > 0 or not sourced, "tier mix computed")
         low = []
         for r in sourced:
             floor = self._s.min_resolution.get(r.aspect_ratio)
@@ -1145,17 +1342,42 @@ class AssetSourcingStage:
                 and (r.media.width_px < floor.width_px or r.media.height_px < floor.height_px)
             ):
                 low.append(r.shot_id)
-        vr.append(_vr("a08.asset.resolution", _FAIL if low else _PASS, True, "resolution floor"))
-        vr.append(
-            _vr(
-                "a08.asset.fingerprint",
-                _FAIL if any(r.fingerprints is None for r in sourced) else _PASS,
-                True,
-                "fingerprints present",
-            )
+        add("a08.asset.resolution", None if not sourced else not low, f"below floor: {low}")
+        footage = [r for r in sourced if r.tier is VisualSourceTier.A_OWNER_REAL and r.media]
+        short = [
+            r.shot_id
+            for r in footage
+            if r.media
+            and r.media.duration_ms is not None
+            and r.media.duration_ms < (r.end_ms - r.start_ms)
+        ]
+        add("a08.asset.duration_cover", None if not footage else not short, f"short: {short}")
+        add("a08.asset.crop", None if not sourced else all(
+            r.media is None or r.media.crop.mode.value == "NONE" for r in sourced),
+            "only uncropped assets are produced")  # fmt: skip
+        add(
+            "a08.asset.fingerprint",
+            None if not sourced else all(r.fingerprints is not None for r in sourced),
+            "fingerprints present",
         )
-        vr.append(_vr("a08.reuse.report", _PASS, False, "reuse counts written"))
-        vr.append(_vr("a08.tenant.output_scope", _PASS, True, "all ids and uris belong to the org"))
+        reused = [r for r in results if r.reuse]
+        add("a08.reuse.channel_permission", None if not reused else True,
+            "reuse passed ReuseEngine (status, expiry, channel)")  # fmt: skip
+        add("a08.reuse.report", True, "reuse counts written")
+        add("a08.cost.within_budget", None, "no paid effect is wired in this stage")
+        ref_ok = all(
+            self._blobs.head(ctx, BlobUri(f.document_uri)).sha256 == f.document_sha256
+            for f in payload.chart_facts
+        )
+        add("a08.output.refs", None if not payload.chart_facts else ref_ok, "facts blobs exist")
+        uris = [r.asset_uri for r in results if r.asset_uri] + [
+            x.asset_uri for r in results for x in r.reveal_stills
+        ]
+        scope_ok = all(
+            u.startswith(f"amw-blob://{ctx.org_id}/") or u.startswith("amw-blob://platform/")
+            for u in uris
+        )
+        add("a08.tenant.output_scope", scope_ok, "every uri belongs to the org")
         return vr
 
 
@@ -1180,6 +1402,21 @@ class _Timeline:
     elements: tuple[CoverElement, ...]
     rows: tuple[CoverRow, ...]
     job_id: str
+
+
+def _require_intake(rec: AssetRecord) -> None:
+    """Fail closed (R20, Q22): chart data is read only if it entered through the registrar from
+    the owner-approved class as an owner-made document."""
+    a = rec.asset
+    if (
+        a.kind is not AssetKind.DOCUMENT
+        or a.source_type is not LicenceSourceType.OWNER_MADE
+        or a.attributes.get("source_path_class") != APPROVED_SOURCE_CLASS
+    ):
+        raise InputInvalidError(
+            "chart data did not come through the approved intake class",
+            details={"asset_id": rec.asset_id},
+        )
 
 
 def _skip(entry: SkipEntry) -> Skip:

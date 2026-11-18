@@ -218,7 +218,7 @@ class ChartPath:
             facts,
             len(window_bars),
             window_bars[0].date,
-            window_bars[-1].date,
+            lag.data_end_date if lag is not None and lag.data_end_date else window_bars[-1].date,
         )
 
 

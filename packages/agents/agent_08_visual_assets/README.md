@@ -49,23 +49,34 @@ Test images are generated at test time from synthetic OHLC data, never from priv
 
 ## Status (owner vocabulary: Planned / In Development / Implemented / Tested)
 
+"Called by the stage" means the code path runs inside `AssetSourcingStage.run` in a test.
+
 | Feature | Status |
 |---|---|
-| Chart path (dataset, case match, lag guard, annotations, deterministic render) | Implemented, Tested |
-| Code graphics (tier C text card, diagram, abstract template) | Implemented, Tested |
-| Owner footage (tier A, selection through an injected `FootageSelector`) | Implemented, Tested (selector is a test fake) |
-| Licence ledger rows (shots, overlays, fonts) | Implemented, Tested |
-| Gate result and remedy stage | Implemented, Tested |
+| Chart path (dataset, case match, lag guard, annotations, deterministic render, intake class enforced on read) | Implemented, Tested (stage) |
+| Code graphics (tier C text card, diagram, abstract template) | Implemented, Tested (stage) |
+| Owner footage (tier A) with `SafetyFloor` + `TieBreaker`; selector is injected | Implemented, Tested with a scripted `FootageSelector` fake (no real model) |
+| Licence ledger rows (shots, overlays, fonts); one covering row per asset | Implemented, Tested (stage) |
+| Gate result and remedy stage | Implemented, Tested (stage) |
 | Dataset intake guard and registrar | Implemented, Tested |
-| `reveal_stills[]` with one IMAGE ledger row per still | Implemented, Tested |
-| `agent_08.chart_facts` | Implemented, Tested |
-| Fingerprints, reuse engine, tier-E guard, AI gates/composer/flags (units) | Implemented, Tested (not wired to adapters) |
+| `reveal_stills[]` (one IMAGE asset per step; the last still is the chart asset and shares its single row) | Implemented, Tested (stage) |
+| `agent_08.chart_facts` (end date = end of the last bar's period) | Implemented, Tested (stage) |
+| Validation rows of 8.3 (measured, or SKIPPED non-blocking when not measurable) | Implemented, Tested (stage) |
+| Revision carry-over (`ChangedShotSelector`; rows reused, not rewritten) | Implemented, Tested (stage) |
+| Reuse through `ReuseEngine` (exact, tenant, status, expiry, channel) | Implemented, Tested (stage; near-duplicate path unit only) |
+| Brand font read from tenant storage; the rendering font is the ledgered font asset | Implemented, Tested (stage) |
+| `AiBudgetGate`, `AiPromptComposer`, `DisclosureFlags` | Implemented, unit only (golden pack); NOT called by the stage |
+| `AdapterErrorMapper`, `CheckpointManager.resume` | Implemented, unit only (golden pack); NOT called by the stage |
 | Stock (B), AI video (D), AI still (E) acquisition | Planned |
 | `QueryPlanner` / `CandidateRanker` LLM wrappers | Planned |
 | Checkpoint persistence, budget/cost-ledger calls | Planned |
 | SQL persistence (only in-memory fakes exist) | Planned |
 | Music bed (3B) | Planned |
 | Devanagari shaping (U-13) | Open: matplotlib has no complex-script shaping; needs a shaping library and font decision |
+
+Measured numbers (package-local config, `coveragerc` in this directory; the root config does not
+measure agent packages, listed under core_needs): see the final report of the PR; command:
+`uv run pytest tests/agents/agent_08_visual_assets --cov --cov-config=packages/agents/agent_08_visual_assets/coveragerc --cov-fail-under=80`.
 
 ## Package-local formats, pending a contract decision
 

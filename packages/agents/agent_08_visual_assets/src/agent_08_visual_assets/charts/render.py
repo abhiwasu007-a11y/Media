@@ -47,9 +47,12 @@ class BrandPalette:
     accent: str
     shade: str
     font_path: str | None = None
+    """Local file of the brand font, materialised by the stage from tenant storage (never a
+    caller-supplied path); excluded from the hash, ``font_sha256`` stands for it."""
+    font_sha256: str | None = None
 
     def sha256(self) -> str:
-        data = {k: getattr(self, k) for k in self.__slots__}
+        data = {k: getattr(self, k) for k in self.__slots__ if k != "font_path"}
         return hashlib.sha256(canonical_json(data).encode("utf-8")).hexdigest()
 
 
