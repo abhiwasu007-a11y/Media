@@ -13,6 +13,7 @@ from amw_core.errors import (
     DbUnavailableError,
     InputInvalidError,
     InvalidTransitionError,
+    MissingDependencyError,
     PermissionDeniedError,
     TenantInactiveError,
     TenantMismatchError,
