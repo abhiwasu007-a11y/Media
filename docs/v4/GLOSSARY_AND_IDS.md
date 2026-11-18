@@ -160,7 +160,7 @@ Used in `source_agent`, `sender`, `receiver`, audit and transition rows.
 | `HUMAN` | user wire ID | `usr_0192…` |
 | `SYSTEM` | `sys_<name>`, name ∈ {`scheduler`, `reaper`, `dlq_handler`, `migrator`, `api`} | `sys_reaper` |
 
-Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_[0-9a-f-]{36}|sys_[a-z_]{3,32})$`.
+Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,32})$`; the exact pattern is `amw.common#/$defs/actor_ref` (03 §3.2).
 
 ### 2.4 Registry keys and derived keys
 
@@ -168,13 +168,13 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_[0-9a-f-]{36}|sys_[a-z_
 |---|---|---|
 | Task type | `<agent_id or service_id>.<snake_case>` | `agent_06.claim_extraction` |
 | Payload schema name | `<task_type>.input` / `<task_type>.output` | `agent_06.claim_extraction.output` |
-| Contract schema name | `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error` | — |
+| Contract schema name | `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control` (03); `amw.production_type` (registry record, 24 §2) | — |
 | Schema `$id` | `urn:amw:schema:<schema name>:<semver>` | `urn:amw:schema:amw.task_input:1.0.0` |
 | Production type key | `UPPER_SNAKE` (§6.48) + integer version | `CHANNEL_LONG_FORM` v1 |
 | Rule pack key | `rp.<snake_case>` (§6.37) + integer version | `rp.finance_sebi_in` v1 |
 | Rule ID | `<PACK>-R<n>` | `FIN-R6` |
-| Prompt ID | `<agent_id>/<task>.v<N>` (file `prompts/<agent_id>_<slug>/<task>.v<N>.md`) | `agent_06/claim_extraction.v1` |
-| Idempotency key | `idk_` + 64 lowercase hex = SHA-256 of the canonical key material (03 §7) | `idk_9f2c…` |
+| Prompt ID | `<agent_id>/<task>.v<N>`; file `prompts/<agent package>/<task>.v<N>.md` (package names 27 §7.2) | `agent_06/claim_extraction.v1` → `prompts/agent_06_fact_checker/claim_extraction.v1.md` |
+| Idempotency key | `idk_` + 64 lowercase hex = SHA-256 of the canonical key material (03 §9) | `idk_9f2c…` |
 | Config key | dotted snake case | `retry.temporary.max_attempts` |
 | Storage URI | 03 §8 | `amw-blob://org_…/jobs/job_…/renders/rnd_….mp4` |
 | Cache key | `amw:<org wire id>:<area>:<key>` — the org part is mandatory (§1C.1) | `amw:org_…:kb:kch_…` |
@@ -229,7 +229,7 @@ Labels for figures (rule 4, §1B): `ESTIMATE`, `MEASURED` (with date), `PROJECTI
 
 Every enum used anywhere in V4.0 is defined here. Values are exact.
 
-### 6.1 `task_state` (§3.3 state machine; transitions in 03 §9)
+### 6.1 `task_state` (§3.3 state machine; transitions in 03 §11.3)
 | Value | Meaning | Terminal |
 |---|---|---|
 | `PENDING` | Created; waiting for dependencies. | no |
@@ -244,7 +244,7 @@ Every enum used anywhere in V4.0 is defined here. Values are exact.
 | `CANCELLED` | Stopped by a recorded cancel decision. | **yes** |
 
 ### 6.2 `job_state`
-Same value set as `task_state` **without `RETRY_WAIT`** (retries are task-level only). Derivation rules: 03 §9.5.
+Same value set as `task_state` **without `RETRY_WAIT`** (retries are task-level only). Derivation rules: 03 §11.5.
 
 ### 6.3 `wait_reason` (sub-status, only when state = `CHECKPOINTED`; NULL otherwise)
 | Value | Set by | Clears when |
@@ -406,10 +406,11 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `FIN-R6` | No performance, profit or return claim. |
 | `FIN-R7` | No profit testimonial. |
 | `FIN-R8` | No broker referral/affiliate or any paid association with a SEBI-regulated entity while the owner is unregistered. |
-| `FIN-R9` | Market price data only when older than the prescribed lag (value: config `compliance.finance_sebi_in.price_data_lag_days`, **REQUIRES REVIEW (Phase 1): research IN-02**). |
+| `FIN-R9` | Market price data only when older than the prescribed lag (config `compliance.finance_sebi_in.price_data_lag_days` = **30**, applied at publish time; IN-02: SEBI circular 8 May 2026, effective 1 Jul 2026). |
 | `FIN-R10` | Every finance video carries the required disclaimer; a disclaimer never turns advice into education. |
 | `FIN-R11` | No AI presenter persona on a finance channel (§1, YT-09). |
 | `FIN-R12` | "Our method" content only on historical charts, clearly labelled, only from material the owner released (§1B.2a, Q26). |
+| `FIN-R13` | No forward-looking statement about the future direction of a named security, **even when the chart uses historical data older than the lag** (IN-03: SEBI final order of 23 Oct 2026 bars "historical data which provides future directional movement for a specified security"). |
 
 ### 6.39 `claim_type` (Agent 06)
 `FACTUAL` · `STATISTICAL` · `DEFINITION` · `HISTORICAL_MARKET` · `HYPOTHETICAL_EXAMPLE` · `RECOMMENDATION` · `FORWARD_VIEW` · `PRICE_LEVEL` · `PERFORMANCE_CLAIM` · `TESTIMONIAL` · `PROMOTION` · `QUOTED_THIRD_PARTY` · `PRODUCT_CLAIM` · `COMPARATIVE` · `OPINION`.
@@ -508,3 +509,25 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 
 ### 6.51 `refusal_reason` (LLM step refusal / escalation, 27 §4)
 `INSUFFICIENT_INPUT` · `RULE_WOULD_BE_BROKEN` · `OUT_OF_SCOPE` · `CONFLICTING_INSTRUCTIONS` · `UNSAFE_CONTENT`.
+
+### 6.52 Contract-local value sets (defined here so no document invents its own)
+| Enum | Values | Used in |
+|---|---|---|
+| `control_command` | `DRAIN` · `CANCEL` · `PAUSE` · `RESUME` | 03 §4.3 |
+| `context_ref_purpose` | `KNOWLEDGE` · `MEMORY` · `PRIOR_OUTPUT` · `BRAND_KIT` · `COMPLIANCE_PROFILE` · `RULE_PACK` · `ASSET` · `APPROVAL` · `TEMPLATE` · `CLIENT_INPUT` | 03 §3.2 |
+| `output_ref_kind` | `SCRIPT` · `AUDIO` · `VIDEO` · `IMAGE` · `SUBTITLE` · `METADATA` · `REPORT` · `DATA` · `CHECKPOINT_STATE` | 03 §5.2 |
+| `payload_ref_schema` | `amw.task_input` · `amw.task_output` · `amw.control` | 03 §4.2 |
+| `rule_flag_severity` | same as `rule_severity`: `BLOCKING` · `WARNING` | prompts, `claims.rule_flags` |
+| `gate_on_fail_action` | `REVISE` · `STOP` | 24 §3.1 |
+| `parent_input` | `NONE` · `PARENT_JOB` · `SOURCE_VIDEO` | 24 §2 |
+| `language_mode` | `SINGLE` · `MULTI` | 24 §2 |
+| `input_provider` | `OWNER` · `CLIENT` · `SYSTEM` | 24 §2 `required_inputs` |
+| `approval_workflow_key` | `owner_one_tap` · `client_two_step` · `owner_sensitive` | 24 §3.4 |
+| `data_age_vs_lag` | `OLDER_THAN_LAG` · `WITHIN_LAG` · `UNKNOWN` (`UNKNOWN` is treated as within the lag) | `agent_06.claim_extraction.input` |
+| `sebi_registration_status` | `UNREGISTERED` (v1 supports only this; values for registered intermediaries **REQUIRES REVIEW (Phase 1): owner input A6 and 13**) | `agent_06.claim_extraction.input` |
+| `citation_input_kind` | `KNOWLEDGE_CHUNK` · `EXTERNAL_REFERENCE` | `agent_06.claim_extraction.input` |
+| `eval_case_category` | `ANSWER_KEY` · `HARD_NEGATIVE` · `EDGE` · `REFUSAL` · `POSITIVE` | evals/README.md |
+| `ccr_status` | `Proposed` · `Needs owner` · `Approved` · `Rejected` · `Applied` | CONTRACT_CHANGE_REQUESTS.md |
+| `cost_unit_kind` | `characters` · `audio_ms` · `images` · `video_ms` · `render_ms` · `quota_units` · `items` · `bytes` | `cost_ledger.unit_kind`, 24 §6 |
+| `queue_name` | `light` · `ai` · `render` · `publish` | `task_queue.queue_name` |
+| `transition_id` | `T01`–`T20` (task), `J01`–`J12` (job) | 03 §11.3, §11.5 |

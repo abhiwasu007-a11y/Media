@@ -138,6 +138,7 @@ Every call is logged with the caller's actor; `amw_platform_ops_summary` calls a
 | 5.4 | task_queue | TENANT | T0 | 01 | ADR-001 neutral |
 | 5.4 | workers | GLOBAL | T0 | S5 → 01 | |
 | 5.5 | message_log | TENANT (partitioned) | T0 | 01 | |
+| 5.5 | message_receipts | TENANT (append-only) | T0 | 01 | dedupe of processed messages |
 | 5.6 | state_transitions | TENANT (partitioned) | T0 | 01 | |
 | 5.6 | state_transition_rules | GLOBAL | T0 | 01 | seed data |
 | 5.7 | dead_letter | TENANT | T0 | 01 | |
@@ -477,7 +478,9 @@ Indexes: `(queue_name, priority, scheduled_at) WHERE status = 'READY'`; `(lease_
 
 ### 5.5 Messages
 
-**message_log** — TENANT · T0 · append-only · partitioned by month on `sent_at`. Columns mirror the envelope: `id` (= `message_id`), `org_id`, `sender text`, `receiver text`, `job_id uuid NULL`, `task_id uuid NULL`, `payload_schema text`, `payload_uri text`, `payload_sha256 bytea`, `priority smallint`, `sent_at timestamptz`, `correlation_id uuid`, `schema_version text`, `processed_at timestamptz NULL` (the only column updated, once, by the receiver — implemented as a separate `message_receipts(org_id, message_id, processed_at)` insert to keep the log append-only). PK `(id, sent_at)`. Index `(org_id, task_id)`.
+**message_log** — TENANT · T0 · append-only · partitioned by month on `sent_at`. Columns mirror the envelope: `id` (= `message_id`), `org_id`, `sender text`, `receiver text`, `job_id uuid NULL`, `task_id uuid NULL`, `payload_schema text`, `payload_uri text`, `payload_sha256 bytea`, `priority smallint`, `sent_at timestamptz`, `correlation_id uuid`, `schema_version text`, `processed_at timestamptz NULL` (not stored on this table: the receiver inserts a `message_receipts` row instead, so the log stays append-only). PK `(id, sent_at)`. Index `(org_id, task_id)`.
+
+**message_receipts** — TENANT · T0 · append-only · (no `id`) PK `(org_id, message_id)`: `message_id uuid`, `receiver text`, `processed_at timestamptz NOT NULL`. Step 2 of 03 §7.1 checks this table for duplicates.
 
 ### 5.6 State history and rules
 

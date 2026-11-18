@@ -22,7 +22,7 @@
 - Location (build): `packages/amw_core/contracts/schemas/<schema name>/<semver>.json`. Each file's `$id` is `urn:amw:schema:<schema name>:<semver>`.
 - Schemas are **immutable once released**. A change is a new version file.
 - The validator resolves `$ref` only from this registry (no network fetch).
-- Contract schemas: `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`. Payload schemas: one input and one output per task type, owned by the agent blueprint.
+- Contract schemas: `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`. Registry record schema: `amw.production_type` (fields in 24 §2). Payload schemas: one input and one output per task type, owned by the agent blueprint.
 
 ### 2.2 Semantic versioning rules
 | Change | Version bump | Examples |
@@ -89,7 +89,7 @@
     "storage_uri": {
       "type": "string",
       "maxLength": 1024,
-      "pattern": "^(amw-blob://(org_[0-9a-f-]{36}|platform)/[A-Za-z0-9._/-]+|amw-entity://org_[0-9a-f-]{36}/[a-z_]+/[a-z]{3}_[0-9a-f-]{36})$"
+      "pattern": "^(amw-blob://(org_[0-9a-f-]{36}|platform)/[A-Za-z0-9._/-]+|amw-entity://(org_[0-9a-f-]{36}|platform)/[a-z_]+/[a-z]{3}_[0-9a-f-]{36})$"
     },
     "context_ref": {
       "type": "object",
@@ -429,7 +429,7 @@ Rules:
 | Step | Check | Failure code |
 |---|---|---|
 | 1 | Envelope validates against `amw.envelope` of its `schema_version` | `PERMANENT.SCHEMA_INVALID` / `PERMANENT.SCHEMA_VERSION_UNSUPPORTED` |
-| 2 | `message_id` not already processed (`message_log`) | duplicate → acknowledge, do nothing (not an error) |
+| 2 | `message_id` not already processed (`message_receipts`, 04 §5.5) | duplicate → acknowledge, do nothing (not an error) |
 | 3 | Open DB transaction, `SET LOCAL app.org_id = <envelope org>` (INF-11, 04 §3) | — |
 | 4 | Fetch `payload_ref`; SHA-256 and size match; URI org = envelope org | `PERMANENT.CROSS_TENANT_REF` (security event, L3) / `AGENT.CORRUPTED_OUTPUT` |
 | 5 | Document validates against `payload_ref.schema` + `schema_version` | `PERMANENT.SCHEMA_INVALID` |
@@ -447,6 +447,7 @@ A rejected input produces a Task Output with `status = REJECTED`, `payload = nul
 | Blob | `amw-blob://<org wire id>/<area>/<path>` | Files and JSON documents. |
 | Platform blob | `amw-blob://platform/<area>/<path>` | Platform-owned read-only material (templates, platform rule-pack text). Writable only by migrator/platform admin. |
 | Entity | `amw-entity://<org wire id>/<table>/<entity wire id>` | Pointer to a DB row. |
+| Platform entity | `amw-entity://platform/<table>/<entity wire id>` | Pointer to a platform-owned catalogue row (`org_id IS NULL`, 04 §3.5), e.g. a platform rule pack. Read-only. |
 
 Areas: `jobs/<job>/tasks/<task>/attempts/<att>/{input.json,output.json}`, `jobs/<job>/renders/`, `jobs/<job>/checkpoints/`, `assets/<ast>/`, `knowledge/<chn>/<ksr>/`, `licences/<lic>/`, `consents/<vcn>/`, `exports/<dtr>/`, `evidence/<job>/`.
 
@@ -587,10 +588,10 @@ Invalid transitions: any pair not in the table, or a valid pair whose guard fail
 | J02 | PENDING | VALIDATING | Orchestrator starts job validation: production type enabled for org; required inputs present (24); channel `CONNECTED` if a YouTube destination; compliance profile attached; budget exists | `job.validating` |
 | J03 | VALIDATING | QUEUED | Job valid; task graph materialised (T01 for all tasks) | `job.queued` |
 | J04 | VALIDATING | FAILED | Job validation failed (PERMANENT) | `job.failed` |
-| J05 | QUEUED / CHECKPOINTED | RUNNING | Any task enters `RUNNING`, `QUEUED` (after T15/T17) or `RETRY_WAIT` | `job.running` |
+| J05 | QUEUED / CHECKPOINTED | RUNNING | From `QUEUED`: the first task enters `RUNNING`. From `CHECKPOINTED`: any task leaves `CHECKPOINTED` (T15) | `job.running` |
 | J06 | QUEUED / RUNNING | CHECKPOINTED | No task in `VALIDATING`, `QUEUED`, `RUNNING`, `RETRY_WAIT`, and at least one task `CHECKPOINTED` | `job.suspended` |
-| J07 | RUNNING | COMPLETED | Every required task `COMPLETED` (or cancelled as superseded); outcome determined (`PUBLISHED` needs publication `VERIFIED`; `DELIVERED` needs delivery `VERIFIED` or `DELIVERED` per type) | `job.completed` |
-| J08 | RUNNING / CHECKPOINTED | FAILED | A required task enters `FAILED` | `job.failed` |
+| J07 | QUEUED / RUNNING | COMPLETED | Every required task `COMPLETED` (or cancelled as superseded); outcome determined (`PUBLISHED` needs publication `VERIFIED`; `DELIVERED` needs delivery `VERIFIED` or `DELIVERED` per type) | `job.completed` |
+| J08 | QUEUED / RUNNING / CHECKPOINTED | FAILED | A required task enters `FAILED` | `job.failed` |
 | J09 | FAILED | DEAD_LETTER | The failed required task enters `DEAD_LETTER` (job DLQ view points to the task's DLQ row) | `job.dead_lettered` |
 | J10 | DEAD_LETTER | RUNNING | A task of this job is replayed (T17) | `job.replayed` |
 | J11 | DEAD_LETTER | CANCELLED | Every dead-lettered task discarded (T18) and the human cancels the job | `job.cancelled` |

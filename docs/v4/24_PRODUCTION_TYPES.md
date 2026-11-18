@@ -1,0 +1,276 @@
+# 24 — Production Types Registry
+
+| Field | Value |
+|---|---|
+| Status | Draft — documentation. Software: **Planned** (every production type below has feature status **Planned**) |
+| Owner | Agent 01 (registry loader, graph execution); content owners: Agent 03 (owner channels), Agent 17 (client and ad types), S3 → 05 (dubbing) |
+| Depends on | GLOSSARY_AND_IDS.md (§6.15, 6.37, 6.48–6.50), 03_COMMUNICATION_STANDARD.md (§11), 04_DATABASE_ARCHITECTURE.md (§5.2 production_types, org_production_types), 07_FAILURE_MANAGEMENT.md (§9), 18_PRODUCTION_QUALITY_STANDARD.md and 25_ADVERTISING_COMPLIANCE.md (not yet written; values pending), RESEARCH_LOG.md (INF-09, INF-10, YT-04, YT-06, YT-08, YT-15) |
+| Directive sections covered | §3.4 (registry), §1A.1–1A.8 (sourcing, edit, audio/video spec, QC, formats), §1A.11 (AI B-roll budget), §1B.2 (finance rules), §1C.7 (rule packs), §1D (ad workflow and checks), §1E.3 (dubbing) |
+| Tier | `CHANNEL_LONG_FORM` and `SHORTS`: Tier 0 (MVP uses `CHANNEL_LONG_FORM` only). `EXPLAINER_CORPORATE_TRAINING`, `DUBBING_LOCALISATION`: Tier 1. `AD_SPOT`, `ECOMMERCE_PRODUCT`: built when the first ad client is signed (directive §5.7; plan Q17), Tier 1+. |
+
+---
+
+## 1. Purpose
+One registry defines every product the platform makes, so a new business line is configuration plus templates, not a new pipeline (§3.4). The orchestrator executes only graphs declared here (§2 of the directive: control flow in code). Each record is stored as an immutable row in `production_types` (04 §5.2), validated against the record schema `amw.production_type` 1.0.0 (§2).
+
+## 2. Registry record format (`amw.production_type` 1.0.0)
+| Field | Type | Required | Tenant-overridable | Meaning |
+|---|---|---|---|---|
+| `key` | `production_type_key` | yes | no | GLOSSARY §6.48 |
+| `version` | int ≥ 1 | yes | no | a change is a new version |
+| `display_name` | string | yes | yes (label only) | |
+| `status` | `feature_status` | yes | no | rule 7 |
+| `first_tier` | `tier` | yes | no | |
+| `destinations` | array of `destination_kind` | yes | subset only | `YOUTUBE`, `FILE_DELIVERY` |
+| `requires_channel` | bool | yes | no | job needs `channel_id` |
+| `parent_input` | `NONE` / `PARENT_JOB` / `SOURCE_VIDEO` | yes | no | Shorts may derive from a long-form job; dubbing needs a source video |
+| `duration_targets_ms` | object `{min, max}` or array of exact values | yes | within registry bounds | |
+| `aspect_ratios` | array of `aspect_ratio` | yes | subset only | |
+| `languages` | `SINGLE` / `MULTI` | yes | no | |
+| `stages` | array of Stage (§3.1) | yes | only `optional` stages may be enabled/disabled | the task graph |
+| `required_inputs` | array of `{key, description, input_schema, provided_by: OWNER/CLIENT/SYSTEM}` | yes | add only | job validation J02 |
+| `approvals` | array of `{approval_kind, workflow_key, mandatory}` | yes | add steps/approvals; never remove `mandatory` | §3.4 |
+| `templates` | array of template keys | yes | yes (tenant templates) | brand-consistent templates, content varies per video (§1A.1c) |
+| `qc_profile` | QC profile key (§5) | yes | stricter only | |
+| `rule_packs` | `{mandatory: [...], by_category: {...}}` | yes | add only | platform packs cannot be removed (§1C.7) |
+| `deliverables` | array of export preset keys (§4) | yes | add only | |
+| `cost_model` | array of cost components (§6) | yes | no | |
+| `default_price` | `{amount_minor, currency, label: PROPOSAL}` | yes | per plan (T2) | **REQUIRES REVIEW (Phase 1): 21_PRICING_AND_PACKAGING** |
+| `limits` | `{max_revision_loops}` | yes | lower only (ceiling 07 §9) | |
+
+Validation at load: schema valid; every `task_type` exists in the task-type catalogue (§3.2); the stage graph is a DAG; every gate's `on_fail` target precedes the gate; every mandatory approval has a workflow; `rp.youtube_general` is mandatory whenever `YOUTUBE` is a destination.
+
+## 3. Task graph
+
+### 3.1 Stage object
+| Field | Meaning |
+|---|---|
+| `stage_id` | unique within the record (e.g. `s06_claims`) |
+| `task_type` | canonical task type (§3.2) |
+| `required` | false = optional stage, enabled per tenant/job |
+| `resource_class` | `LIGHT` / `AI_IO` / `HEAVY_CPU` / `PUBLISH` |
+| `capabilities` | worker capabilities needed (GLOSSARY §6.20) |
+| `depends_on` | list of `stage_id` |
+| `gate` | optional `{blocking: true, on_fail: {action: REVISE, target_stage_id} | {action: STOP}}` |
+| `approval` | optional `{approval_kind, workflow_key}`; the stage is then an S7 approval gate (03 §11.6) |
+
+### 3.2 Canonical task types (names are contract-bound; payload schemas are defined in the agent blueprints)
+| Task type | Owner | Purpose |
+|---|---|---|
+| `agent_02.trend_scan` | 02 | optional topic signals with evidence |
+| `agent_03.topic_selection` | 03 | topic, angle, series slot, course-chapter pointer |
+| `agent_04.research_pack` | 04 | sources, evidence, knowledge-chunk citations |
+| `agent_05.script_draft` | 05 | scene-level script with ≥ 3 hook options (§1A.2) |
+| `agent_05.shorts_adaptation` | 05 | 9:16 script cut from a parent script |
+| `agent_06.claim_extraction` | 06 | claims + rule-pack flags (worked example: `prompts/agent_06_fact_checker/claim_extraction.v1.md`) |
+| `agent_06.claim_verification` | 06 | independent verification, contradiction detection |
+| `agent_07.voice_synthesis` | 07 | TTS or human narration intake, pronunciation dictionary |
+| `agent_07.audio_master` | 07 | loudness, clipping, silence, noise, sync |
+| `agent_08.asset_sourcing` | 08 | sourcing in hierarchy order §1A.1, licence ledger rows |
+| `agent_09.shot_plan` | 09 | scene/shot plan, timeline, pacing |
+| `agent_10.render` | 10 | FFmpeg render (resumable) |
+| `agent_10.subtitles` | 10 | SRT per language, optional burned-in captions |
+| `agent_10.technical_qc` | 10 | automated inspection (§1A.6) |
+| `agent_11.thumbnail_variants` | 11 | 3 variants (YT-08 test needs up to 3) |
+| `agent_12.metadata` | 12 | title, description, chapters, tags, SEO validation |
+| `svc_s02.uniqueness_check` | S2 → 16 | originality / inauthentic-content gate input |
+| `agent_16.compliance_gate` | 16 | rule packs, licence completeness, disclosure decision |
+| `agent_16.quality_score` | 16 | 100-point rubric (§1A.7) |
+| `svc_s07.request_approval` | S7 → 01 | human approval gate |
+| `agent_16.publication_authorisation` | 16 | final `is_final` verdict (Q5) |
+| `agent_13.upload_private` | 13 | resumable upload, `privacyStatus=private` (YT-04) |
+| `agent_13.publish` | 13 | privacy change / schedule after authorisation |
+| `agent_13.verify_publication` | 13 | read-back verification |
+| `agent_13.file_delivery` | 13 | client masters + exports |
+| `agent_14.analytics_ingest` | 14 | Analytics API + Reporting API (YT-14) |
+| `agent_17.brief_intake` | 17 | brief, clarification questions |
+| `agent_17.concept_variants` | 17 | concepts and 3–5 variants (§1D.4) |
+| `agent_17.ad_script_storyboard` | 17 | ad script and storyboard per format; claim list to 06/16 |
+| `svc_s03.translate_script` | S3 → 05 | translated script |
+| `svc_s03.dub_timing_fit` | S3 → 05 | dubbed track timing fit |
+| `svc_s03.native_speaker_qc` | S3 → 05 | human native-speaker check (approval gate) |
+A blueprint that needs another task type files a CCR (CONTRACT_CHANGE_REQUESTS.md).
+
+### 3.3 Gates and revision routing
+1. A blocking gate that returns `FAIL`/`BLOCKED` sends the job back to its `on_fail.target_stage_id` as a new iteration (new tasks, new idempotency keys), up to `limits.max_revision_loops`; then the job completes with `outcome = BLOCKED_COMPLIANCE` (03 §11.5). It is never published.
+2. `NEEDS_HUMAN_REVIEW` verdicts insert an S7 approval of kind `SENSITIVE_CLAIM` or `COPYRIGHT_DOUBT` before the job continues.
+3. A human `REJECTED` at a mandatory approval ends the job `REJECTED_BY_APPROVER`; `CHANGES_REQUESTED` routes to the stage named in the approval workflow.
+4. Gates are deterministic-first (§3.3 Quality): QC, licence completeness, schema and rule checks run before any LLM judge.
+
+### 3.4 Approval workflows (`workflow_key`)
+| Key | Steps (role per step) | Used by |
+|---|---|---|
+| `owner_one_tap` | 1: `REVIEWER_APPROVER` (the owner in Tier 0) | owner channel types |
+| `client_two_step` (T2 portal; T1 via managed service) | 1: client reviewer (`CLIENT_GUEST` or `REVIEWER_APPROVER` of the client org) → 2: client final approver (`ORG_ADMIN` or `REVIEWER_APPROVER`) | client types |
+| `owner_sensitive` | 1: `REVIEWER_APPROVER`; 2 (finance channel or financial claim): `ORG_OWNER` | `SENSITIVE_CLAIM`, `COPYRIGHT_DOUBT`, `KNOWLEDGE_RELEASE` |
+Every `FINAL_VIDEO` approval requires at least one `editorial_contributions` row for the job before it can be `APPROVED` (§1A.7; enforced again by the publish guard, 04 §5.21).
+
+## 4. Export and delivery presets
+| Preset key | Spec | Source |
+|---|---|---|
+| `yt_master_1080p` | 1920×1080 minimum, H.264 High profile, video 15–25 Mbps (target; YouTube's 1080p SDR recommendation is 8 Mbps, used as floor), constant frame rate equal to the source, closed GOP; audio AAC-LC 48 kHz stereo ≥ 384 kbps | §1A.4, §1A.5, INF-10 |
+| `yt_master_1440p` | 2560×1440 where render budget allows; H.264 High; bitrate target **REQUIRES REVIEW (18)** (YouTube's 1440p SDR recommendation 16 Mbps as floor, INF-10); audio as above | §1A.5, INF-10 |
+| `srt_per_language` | one accurate SRT per language; optional burned-in styled captions | §1A.5 |
+| `shorts_9x16` | 9:16 vertical; resolution, maximum duration and bitrate **REQUIRES REVIEW (Phase 1): official Shorts upload specs not yet in RESEARCH_LOG** | §1A.8 |
+| `thumbnail_set` | up to 3 variants for the Studio A/B test (YT-08); size/format limits **REQUIRES REVIEW (Phase 1): thumbnail spec (YT-05 records a 50 MB maximum; dimensions not yet logged)** | YT-05, YT-08 |
+| `ad_master_<ratio>_<seconds>` | one master per aspect (16:9, 9:16, 1:1, 4:5) × duration (6/15/30/60 s); codec settings as `yt_master_1080p` unless the destination spec differs; destination specs, safe zones and legal-super legibility **REQUIRES REVIEW (Phase 1): 25_ADVERTISING_COMPLIANCE + destination platform specs** | §3.4, §1D.1, §1D.4 |
+| `client_master_mezzanine` | high-bitrate master for client archives; codec **REQUIRES REVIEW (18)** | §1D.1 |
+| `dub_audio_track_<lang>` | dubbed audio track per language matching the source timeline; delivery as YouTube multi-language audio (YT-15: creator uploads own dubs; API support **NOT CONFIRMED → REQUIRES REVIEW (Phase 1)**; fallback: human-in-Studio upload step scheduled by S7) | §1E.3, YT-15 |
+| `metadata_per_language` | title, description, chapters per language | §3.2 S3 |
+
+## 5. QC profiles (values owned by 18; listed here as references)
+| Profile | Checks (all blocking unless noted) | Thresholds |
+|---|---|---|
+| `qc.long_form` | ffprobe metadata vs preset; `ebur128` integrated loudness and true peak; `blackdetect`, `freezedetect`, `silencedetect` (INF-09); A/V and subtitle sync; duration vs script; no source watermark/logo; every shot has a licence-ledger row; visual hierarchy share (AI stills never the majority of screen time, §1A.1e); visual change every 3–5 s in explanatory stretches (§1A.2; WARN until calibrated) | −14 LUFS integrated, −1 dBTP true peak, music bed −15 to −20 dB under narration, 48 kHz (§1A.4); tolerances and detector parameters **REQUIRES REVIEW (18)** |
+| `qc.shorts` | as `qc.long_form` for the vertical preset | 9:16 spec **REQUIRES REVIEW (Phase 1)** |
+| `qc.ad_spot` | as `qc.long_form` + exact duration per spot, legal super/disclaimer legibility and on-screen time, safe zones, logo and pack-shot rules, brand kit applied (§1D.4) | duration tolerance, legibility, safe zones **REQUIRES REVIEW (25)** |
+| `qc.corporate` | as `qc.long_form` | per client contract where stricter |
+| `qc.dubbing` | loudness as above; dubbed-track timing within the source segment; per-language subtitle sync | timing tolerance **REQUIRES REVIEW (18 / S3)** |
+Quality score: 100-point rubric, publish only at ≥ 85 (config `quality.publish_min_score`), any compliance failure rejects regardless of score (§1A.7).
+
+## 6. Cost model structure
+Each record lists the cost components that S4 (→ 15) estimates before admission (budget reservation, 03 T03) and records per call in `cost_ledger` (04 §5.14).
+
+| Component | Unit (`unit_kind`) | Price source |
+|---|---|---|
+| LLM per stage | tokens in / out / cached; `billing_mode` | **REQUIRES REVIEW (Phase 1): vendor prices (research wave 2, 09)** |
+| TTS | characters or `audio_ms` | **REQUIRES REVIEW (Phase 1)** |
+| Stock footage / images | `items` | **REQUIRES REVIEW (Phase 1): ADR-009** |
+| AI video B-roll | `video_ms` (budgeted per video, most expensive per second, §1A.11) | **REQUIRES REVIEW (Phase 1)** |
+| Music / SFX | `items` or subscription share | **REQUIRES REVIEW (Phase 1)** |
+| Render | `render_ms` (measured worker time) | MEASURED in pilot |
+| Storage | `bytes` × time | **REQUIRES REVIEW (Phase 1)** |
+| YouTube quota | `quota_units` (no money; capacity) | YT-02 |
+| Human review | minutes (owner / client) | ESTIMATE until the pilot measures it |
+Cost per finished video is reported per production type (§3.3 AI providers) and is ESTIMATE until measured.
+
+---
+
+## 7. Registry records
+
+### 7.1 `CHANNEL_LONG_FORM` v1 — Tier 0 (MVP)
+| Field | Value |
+|---|---|
+| destinations | `YOUTUBE` |
+| requires_channel / parent_input | true / `NONE` |
+| duration_targets_ms | from Agent 03's plan per niche benchmark (19); bounds **REQUIRES REVIEW (Phase 1): 19_NICHE_BENCHMARKS** |
+| aspect_ratios / languages | `16:9` / `SINGLE` (MVP: one language) |
+| required_inputs | topic plan entry (Agent 03, SYSTEM); channel compliance profile (SYSTEM); brand kit (OWNER, T0+; MVP uses a minimal kit); knowledge library sources for the channel (OWNER, §1B.2a) |
+| approvals | `FINAL_VIDEO` / `owner_one_tap` (mandatory, with ≥ 1 editorial contribution); `SCRIPT` / `owner_one_tap` (optional, recommended for the finance channel); `SENSITIVE_CLAIM` / `owner_sensitive` (inserted on `NEEDS_HUMAN_REVIEW`) |
+| templates | channel lower-thirds, chart templates (code-rendered from real historical data, §1A.1c, §1B.2a), end screen; brand sting only after the hook (§1A.8) |
+| qc_profile | `qc.long_form` |
+| rule_packs | mandatory `rp.youtube_general`; by category: finance → `rp.finance_sebi_in` (first channel), health → `rp.health`, kids → `rp.kids`, political/news → `rp.political_news`; tenant `rp.tenant_brand_safety` optional |
+| deliverables | `yt_master_1080p` (or `yt_master_1440p`), `srt_per_language`, `thumbnail_set`, metadata (Agent 12) |
+| cost_model | LLM (03, 04, 05, 06, 11, 12, 16), TTS or human narration, stock, AI B-roll (capped per video), music, render, storage, quota, human review |
+| default_price | n/a for the owner's own channel; client channel price **REQUIRES REVIEW (21)** |
+| limits | `max_revision_loops` 3 |
+
+Stages:
+| stage_id | task_type | req | class | depends_on | gate / approval |
+|---|---|---|---|---|---|
+| s02_trends | `agent_02.trend_scan` | no | AI_IO | — | — |
+| s03_topic | `agent_03.topic_selection` | yes | AI_IO | s02_trends (if enabled) | finance rules applied at planning (Q5) |
+| s04_research | `agent_04.research_pack` | yes | AI_IO | s03_topic | — |
+| s05_script | `agent_05.script_draft` | yes | AI_IO | s04_research | — |
+| s06_claims | `agent_06.claim_extraction` | yes | AI_IO | s05_script | blocking; on_fail REVISE → s05_script |
+| s06_verify | `agent_06.claim_verification` | yes | AI_IO | s06_claims | blocking; on_fail REVISE → s05_script |
+| a_script | `svc_s07.request_approval` | no | LIGHT | s06_verify | `SCRIPT` / `owner_one_tap` |
+| s07_voice | `agent_07.voice_synthesis` | yes | AI_IO | s06_verify, a_script | — |
+| s07_master | `agent_07.audio_master` | yes | HEAVY_CPU | s07_voice | blocking (loudness) ; on_fail REVISE → s07_voice |
+| s09_plan | `agent_09.shot_plan` | yes | AI_IO | s06_verify | — |
+| s08_assets | `agent_08.asset_sourcing` | yes | AI_IO | s09_plan | licence row per shot (blocking downstream) |
+| s10_render | `agent_10.render` | yes | HEAVY_CPU | s07_master, s08_assets | — |
+| s10_subs | `agent_10.subtitles` | yes | HEAVY_CPU | s10_render | — |
+| s10_qc | `agent_10.technical_qc` | yes | HEAVY_CPU | s10_subs | blocking; on_fail REVISE → s10_render |
+| s11_thumbs | `agent_11.thumbnail_variants` | yes | AI_IO | s09_plan | — |
+| s12_meta | `agent_12.metadata` | yes | AI_IO | s06_verify | — |
+| s02u_unique | `svc_s02.uniqueness_check` | yes | AI_IO | s10_qc | blocking; on_fail REVISE → s05_script |
+| s16_comp | `agent_16.compliance_gate` | yes | AI_IO | s02u_unique, s11_thumbs, s12_meta | blocking; on_fail REVISE → s05_script |
+| s16_score | `agent_16.quality_score` | yes | AI_IO | s16_comp | blocking (≥ 85); on_fail REVISE → s09_plan |
+| a_final | `svc_s07.request_approval` | yes | LIGHT | s16_score | `FINAL_VIDEO` / `owner_one_tap` |
+| s16_auth | `agent_16.publication_authorisation` | yes | LIGHT | a_final | blocking; on_fail STOP |
+| s13_upload | `agent_13.upload_private` | yes | PUBLISH | s16_auth | — |
+| s13_publish | `agent_13.publish` | yes | PUBLISH | s13_upload | — |
+| s13_verify | `agent_13.verify_publication` | yes | LIGHT | s13_publish | blocking; on_fail STOP (L3) |
+Post-publish (separate jobs, not in this graph): `agent_14.analytics_ingest` and Agent 15 economics run as scheduled system jobs (`NO_DELIVERABLE`). Walking-skeleton subset: 27 §9.
+
+### 7.2 `SHORTS` v1 — Tier 0 (after the MVP)
+| Field | Value |
+|---|---|
+| destinations / requires_channel | `YOUTUBE` / true |
+| parent_input | `PARENT_JOB` (optional; cut from the same research/script where it adds value, §1A.8) |
+| duration / aspect | **REQUIRES REVIEW (Phase 1): Shorts maximum duration (official source)** / `9:16` |
+| required_inputs | parent job's research pack and approved script, or a topic plan entry |
+| approvals | `FINAL_VIDEO` / `owner_one_tap` (mandatory, with ≥ 1 editorial contribution) |
+| templates | vertical captions, vertical lower-thirds |
+| qc_profile | `qc.shorts` |
+| rule_packs | as `CHANNEL_LONG_FORM` |
+| deliverables | `shorts_9x16`, `srt_per_language`, metadata; thumbnails optional (YT-05: `thumbnails.set` supports Shorts); title/thumbnail A/B test not available for Shorts (YT-08) |
+| cost_model / default_price | as long-form, shorter / **REQUIRES REVIEW (21)** |
+Stages: `agent_05.shorts_adaptation` (depends on parent script) → `agent_06.claim_extraction` (blocking) → `agent_07.voice_synthesis` → `agent_07.audio_master` → `agent_09.shot_plan` → `agent_08.asset_sourcing` → `agent_10.render` → `agent_10.subtitles` → `agent_10.technical_qc` (blocking) → `agent_12.metadata` → `svc_s02.uniqueness_check` (blocking) → `agent_16.compliance_gate` (blocking) → `agent_16.quality_score` (blocking) → `svc_s07.request_approval` (`FINAL_VIDEO`) → `agent_16.publication_authorisation` → `agent_13.upload_private` → `agent_13.publish` → `agent_13.verify_publication`. `on_fail` targets as in §7.1 with `agent_05.shorts_adaptation` in place of `agent_05.script_draft`.
+
+### 7.3 `AD_SPOT` v1 — first ad client (Tier 1+)
+| Field | Value |
+|---|---|
+| destinations | `FILE_DELIVERY` (+ `YOUTUBE` only if the client contracts upload to its own channel) |
+| requires_channel / parent_input | false / `NONE` |
+| duration_targets_ms | exact values 6000, 15000, 30000, 60000 |
+| aspect_ratios | `16:9`, `9:16`, `1:1`, `4:5` |
+| required_inputs | client brief (CLIENT); product category for sector rule packs (CLIENT); claim substantiation documents for every factual/comparative claim (CLIENT, §1D.3); product footage/photos (CLIENT, preferred, §1D.4); brand kit (CLIENT); signed releases/licences for any real person, celebrity, creator or competitor brand (CLIENT, §1D.3) |
+| approvals | `CONCEPT` / `client_two_step` (mandatory); `SCRIPT` and `STORYBOARD` / `client_two_step` (mandatory); `FINAL_VIDEO` / `client_two_step` (mandatory, logged before delivery); `USAGE_RIGHTS` record (mandatory) |
+| templates | client brand kit, pack-shot and logo templates, legal super templates |
+| qc_profile | `qc.ad_spot` |
+| rule_packs | mandatory `rp.advertising_asci_in`; by sector `rp.ad_sector_<sector>`; `rp.youtube_general` when published to YouTube; disclosure label decided by the risk test and recorded (§1D.2; IT Rules labelling) — rule content **REQUIRES REVIEW (Phase 1): IN entries for ASCI and IT Rules** |
+| deliverables | `ad_master_<ratio>_<seconds>` per ordered combination, captions, disclosure label decision record, usage-rights record; 3–5 variants for testing (§1D.4) |
+| cost_model / default_price | per spot length and variant count / **REQUIRES REVIEW (21)** |
+Stages: `agent_17.brief_intake` → `agent_17.concept_variants` → approval `CONCEPT` → `agent_17.ad_script_storyboard` → `agent_06.claim_extraction` (blocking; every claim needs substantiation) → `agent_06.claim_verification` (blocking) → approval `SCRIPT`/`STORYBOARD` → `agent_07.voice_synthesis` → `agent_07.audio_master` → `agent_09.shot_plan` → `agent_08.asset_sourcing` → `agent_10.render` (per format) → `agent_10.subtitles` → `agent_10.technical_qc` (blocking) → `agent_16.compliance_gate` (blocking; ad pack) → `agent_16.quality_score` → approval `FINAL_VIDEO` → `agent_16.publication_authorisation` → `agent_13.file_delivery` (and optionally upload/publish/verify). Agents 02, 03, 04, 05, 11, 12, 14 are not used (17 replaces 03; §3.1).
+
+### 7.4 `EXPLAINER_CORPORATE_TRAINING` v1 — Tier 1
+| Field | Value |
+|---|---|
+| destinations | `FILE_DELIVERY` and/or `YOUTUBE` (client channel) |
+| requires_channel | only for `YOUTUBE` |
+| duration / aspect | per brief, bounds **REQUIRES REVIEW (21: plan limits)** / `16:9` (others on request) |
+| required_inputs | client brief and learning objectives (CLIENT); client source documents/course material (CLIENT, into the client's own knowledge library); brand kit (CLIENT) |
+| approvals | `BRIEF` (client confirms the clarified brief), `SCRIPT` / `client_two_step`, `FINAL_VIDEO` / `client_two_step` (all mandatory) |
+| qc_profile | `qc.corporate` |
+| rule_packs | `rp.youtube_general` when published to YouTube; `rp.tenant_brand_safety`; promotional content routes to `rp.advertising_asci_in` (decision rule **REQUIRES REVIEW (25)**) |
+| deliverables | `yt_master_1080p` or `client_master_mezzanine`, `srt_per_language`; for YouTube also `thumbnail_set` and metadata |
+| default_price | **REQUIRES REVIEW (21)** |
+Stages: `agent_17.brief_intake` → approval `BRIEF` → `agent_04.research_pack` (client library only) → `agent_05.script_draft` → `agent_06.claim_extraction` → `agent_06.claim_verification` → approval `SCRIPT` → voice → master → shot plan → assets → render → subtitles → technical QC → (`agent_11.thumbnail_variants`, `agent_12.metadata` if YouTube) → `svc_s02.uniqueness_check` (YouTube only) → compliance gate → quality score → approval `FINAL_VIDEO` → authorisation → delivery or upload/publish/verify.
+
+### 7.5 `ECOMMERCE_PRODUCT` v1 — first ad client (Tier 1+)
+| Field | Value |
+|---|---|
+| destinations | `FILE_DELIVERY` |
+| duration / aspect | per order (presets of `AD_SPOT` allowed) / `9:16`, `1:1`, `4:5`, `16:9` |
+| required_inputs | product data and photos/footage (CLIENT); claims + substantiation (CLIENT); brand kit (CLIENT) |
+| approvals | `SCRIPT` / `client_two_step`, `FINAL_VIDEO` / `client_two_step` (mandatory); `USAGE_RIGHTS` record |
+| qc_profile / rule_packs | `qc.ad_spot` / `rp.advertising_asci_in` + sector packs (product videos are advertising, §1D) |
+| deliverables | `ad_master_<ratio>_<seconds>` per order |
+| default_price | **REQUIRES REVIEW (21)** |
+Stages: as `AD_SPOT` without `agent_17.concept_variants` and the `CONCEPT` approval unless ordered; `agent_08.asset_sourcing` prefers the client's own product media (§1D.4).
+
+### 7.6 `DUBBING_LOCALISATION` v1 — Tier 1
+| Field | Value |
+|---|---|
+| destinations | `YOUTUBE` (multi-language audio on the source video) and/or `FILE_DELIVERY` |
+| parent_input | `SOURCE_VIDEO` (an existing video: the tenant's own publication or a client-supplied master with rights confirmation) |
+| languages | `MULTI` (target languages per order) |
+| required_inputs | source video + transcript or script (CLIENT/SYSTEM); target languages (CLIENT); pronunciation dictionary per language (SYSTEM/CLIENT); rights confirmation for the source (CLIENT) |
+| approvals | native-speaker QC per language (`svc_s03.native_speaker_qc`, mandatory human step); `FINAL_VIDEO` / `client_two_step` or `owner_one_tap` (mandatory) |
+| qc_profile | `qc.dubbing` |
+| rule_packs | the source video's packs + `rp.youtube_general` |
+| deliverables | `dub_audio_track_<lang>`, `srt_per_language`, `metadata_per_language` |
+| default_price | **REQUIRES REVIEW (21)** |
+Stages (skips 02–05 per §3.4): `svc_s03.translate_script` → `agent_06.claim_extraction` on the translation (blocking: meaning must not change into a rule violation) → `svc_s03.native_speaker_qc` (approval) → `agent_07.voice_synthesis` → `svc_s03.dub_timing_fit` → `agent_07.audio_master` → `agent_10.subtitles` → `agent_10.technical_qc` → `agent_12.metadata` (per language) → `agent_16.compliance_gate` → approval `FINAL_VIDEO` → `agent_16.publication_authorisation` → `agent_13.upload_private`/`publish` path for audio tracks (API support REQUIRES REVIEW, see §4 `dub_audio_track_<lang>`) or `agent_13.file_delivery`.
+
+## 8. Summary
+| Key | First tier | Destinations | Mandatory approvals | Mandatory packs | Price |
+|---|---|---|---|---|---|
+| `CHANNEL_LONG_FORM` | Tier 0 (MVP) | YouTube | FINAL_VIDEO (+ editorial contribution) | youtube_general (+ category) | owner: n/a; client: REQUIRES REVIEW |
+| `SHORTS` | Tier 0 | YouTube | FINAL_VIDEO | youtube_general (+ category) | REQUIRES REVIEW |
+| `AD_SPOT` | Tier 1+ (first ad client) | File (+ YouTube) | CONCEPT, SCRIPT/STORYBOARD, FINAL_VIDEO, USAGE_RIGHTS | advertising_asci_in (+ sector) | REQUIRES REVIEW |
+| `EXPLAINER_CORPORATE_TRAINING` | Tier 1 | File / YouTube | BRIEF, SCRIPT, FINAL_VIDEO | youtube_general if YouTube; brand safety | REQUIRES REVIEW |
+| `ECOMMERCE_PRODUCT` | Tier 1+ (first ad client) | File | SCRIPT, FINAL_VIDEO, USAGE_RIGHTS | advertising_asci_in (+ sector) | REQUIRES REVIEW |
+| `DUBBING_LOCALISATION` | Tier 1 | YouTube / File | native-speaker QC, FINAL_VIDEO | source packs + youtube_general | REQUIRES REVIEW |
