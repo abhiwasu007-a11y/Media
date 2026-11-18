@@ -13,7 +13,7 @@ from functools import lru_cache
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_05_scriptwriter.errors import ConfigInvalid
-from agent_05_scriptwriter.text import normalise_for_matching
+from amw_core.text_normalise import normalise_for_matching
 
 
 class PatternRule(BaseModel):
@@ -51,9 +51,42 @@ class LexiconPack(BaseModel):
             raise ConfigInvalid(f"lexicon {self.name} has no entry for {language}") from None
 
 
+_META = set("\\[](){}|*+?.^$")
+
+
+def _norm_run(run: str) -> str:
+    """Normalise a literal run; the whitespace at its edges is kept (the normaliser trims it)."""
+    lead = run[: len(run) - len(run.lstrip())]
+    trail = run[len(run.rstrip()) :]
+    core = run.strip()
+    return lead + (normalise_for_matching(core).text if core else "") + (trail if core else "")
+
+
+def normalise_pattern(pattern: str) -> str:
+    """Normalise the literal runs of a regex with the shared function (escapes and operators are
+    kept), so lexicon entries and scanned text meet in the same form."""
+    out: list[str] = []
+    run: list[str] = []
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\" or ch in _META:
+            if run:
+                out.append(_norm_run("".join(run)))
+                run = []
+            out.append(pattern[i : i + 2] if ch == "\\" else ch)
+            i += 2 if ch == "\\" else 1
+        else:
+            run.append(ch)
+            i += 1
+    if run:
+        out.append(_norm_run("".join(run)))
+    return "".join(out)
+
+
 @lru_cache(maxsize=2048)
 def compiled(pattern: str) -> re.Pattern[str]:
-    return re.compile(pattern, re.IGNORECASE | re.UNICODE)
+    return re.compile(normalise_pattern(pattern), re.IGNORECASE | re.UNICODE)
 
 
 def any_match(patterns: Sequence[str], text: str) -> bool:

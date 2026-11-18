@@ -72,8 +72,42 @@ def test_language_check_flags_hidden_format_characters() -> None:
 def test_normalisation_keeps_an_offset_map() -> None:
     from agent_05_scriptwriter.text import normalise_for_matching
 
-    n = normalise_for_matching(f"B{ZWSP}uy")
-    assert n.text == "Buy" and n.offsets == (0, 2, 3)
+    n = normalise_for_matching(f"B{ZWSP}uy now")
+    assert n.text == "buy now"
+    assert n.quote(0, 3) == f"B{ZWSP}uy"
+
+
+CGJ, VS16, ACUTE, RLO, TAG_A = "\u034f", "\ufe0f", "\u0301", "\u202e", "\U000e0061"
+
+
+@pytest.mark.parametrize("hidden", [CGJ, VS16, ACUTE, ZWSP, SHY, ZWJ, RLO, TAG_A])
+def test_hidden_characters_inside_words_do_not_evade_fin_r1_r13_r6_and_near_copy(
+    hidden: str,
+) -> None:
+    from agent_05_scriptwriter.checks.near_copy import check_sentence
+    from agent_05_scriptwriter.settings import NearCopySettings
+
+    assert "FIN-R1" in sp.SCANNERS.fin_ids(f"Bu{hidden}y NIF{hidden}TY now.", "en-IN")
+    assert "FIN-R13" in sp.SCANNERS.fin_ids(f"NIF{hidden}TY wi{hidden}ll go up next.", "en-IN")
+    assert sp.SCANNERS.forward_ids(f"NIF{hidden}TY wi{hidden}ll go up next.", "en-IN", "X") == [
+        "FIN-R13"
+    ]
+    assert "FIN-R6" in sp.SCANNERS.fin_ids(f"20% pro{hidden}fit with this.", "en-IN")
+    thresholds = NearCopySettings(ngram_n=4, max_overlap_ratio=0.5, max_common_run_chars=60)
+    source = "a momentum tool compares recent gains with recent losses over a lookback window"
+    copied = source.replace("momentum", f"mom{hidden}entum").replace("recent", f"rec{hidden}ent")
+    assert check_sentence(copied, [source], thresholds).violation
+
+
+def test_marathi_return_claim_survives_zwj_zwnj_and_hidden_marks() -> None:
+    for hidden in (ZWNJ, ZWJ, CGJ, VS16, TAG_A):
+        assert sp.SCANNERS.fin_ids(f"या पद्धतीने 40% न{hidden}फा कमावला.", "mr-IN") == ["FIN-R6"]
+
+
+def test_bidi_override_and_tag_characters_are_flagged_by_the_language_check() -> None:
+    for hidden in (RLO, TAG_A, CGJ, VS16):
+        kinds = [v["kind"] for v in check_language(f"B{hidden}uy", "en-IN", [], [], [])]
+        assert "INVISIBLE_CHARACTER" in kinds
 
 
 def test_forward_statement_is_caught_on_every_surface() -> None:
