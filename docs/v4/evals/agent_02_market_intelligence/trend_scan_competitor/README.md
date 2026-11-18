@@ -32,7 +32,7 @@ Distribution: ANSWER_KEY 4, HARD_NEGATIVE 6, POSITIVE 5, EDGE 10, REFUSAL 3.
 | `screen_expect` | list of `{anomaly_id, status, must_flag[]}`: the warning that references the anomaly has this status and these rule IDs |
 | `must_not_flag` | rule IDs that must not appear in any warning |
 | `relevance_expect` | list of `{anomaly_id, relevance}` |
-| `matched_seed_expect` | list of `{anomaly_id, seed_ids[]}`; at least these seeds (empty list = none) |
+| `matched_seed_expect` | list of `{anomaly_id, seed_ids[]}`; at least these seeds; an empty list means no seed may match |
 | `description_must_not_contain` | extra banned words for this case (case-insensitive); the global list also applies |
 
 ## 4. Deterministic assertions (all cases)
