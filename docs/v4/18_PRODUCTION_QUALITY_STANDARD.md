@@ -30,6 +30,8 @@ How to read the markers. **3A / 3B / 3C** = build phase (owner decision D1). **T
 | 4 | `D_AI_VIDEO` | AI text/image-to-video clips, short B-roll only where real footage does not exist | `AI_GENERATED` | disclosure decision recorded (YT-06/07); never a real identifiable person or fabricated real event; budgeted per video (§2.4) |
 | 5 | `E_AI_STILL` | AI stills with pan/zoom/parallax; last resort | `AI_GENERATED` | never the majority of screen time (check `qc.visual.tier_share_e`) |
 
+Charts (CCR-045): a chart that the code renders from real historical data is tier `C_CODE_MOTION`, `source_type = CODE_GENERATED`, `asset_kind = CHART`; the dataset it is drawn from is an `OWNER_MADE` asset (`kind = DOCUMENT`). Tier `A_OWNER_REAL` covers chart material the owner made himself (e.g. his own screen recording).
+
 Agent 08 sources in this order; falling to a lower rank requires a recorded reason (`qc_results.message` of the sourcing task) saying why every higher rank had no usable item. Agent 09 plans so that rank 4–5 usage stays inside the limits of §2.4.
 
 ### 2.2 Per-shot licence record (what must exist for every shot)
@@ -56,6 +58,8 @@ Notes: (a) The ledger requires a `licence_id` for every row (04 §5.15), so owne
 | `qc.visual.ai_disclosure_recorded` | every `D_AI_VIDEO` / `E_AI_STILL` asset with `is_realistic_synthetic = true` has a disclosure record in the Agent 08 manifest; the `disclosure_decision` itself is checked by Agent 16 at `s16_comp`, which runs after `s10_qc` (CCR-055) | present | yes | 3A (decision made by Agent 16) |
 | `qc.visual.chart_data_age` | every chart asset of a finance channel has `assets.attributes.data_end_date` older than `compliance.finance_sebi_in.price_data_lag_days` (30; FIN-R9, IN-02) at delivery time. This is the measured re-check of the `CONSTRAINT` that `s06_claims` assumed (CCR-004, `data_age_basis`); the stricter result wins and `s16_comp` re-checks it | all older | yes | 3A (finance channel) |
 | `qc.visual.no_synthetic_presenter` | finance channel: no AI presenter persona shot (FIN-R11); verified from asset metadata + LLM-judge frame sample | none | yes | 3A (finance channel); method **REQUIRES REVIEW (Phase 1): frame-sampling procedure agreed with 13** |
+
+Judged parts of these checks (CCR-058): the LLM-judge frame sample of `qc.visual.no_synthetic_presenter`, the visual watermark judge (§7.10) and `edit.promise_alignment` / `edit.hook.beat_content` run in **Agent 16** (`s16_comp` / `s16_score`), the only post-render stage with a judge; Agent 10 (no LLM) runs the deterministic parts and exports the sampled frames as `IMAGE` output refs.
 
 ### 2.4 Cost guard
 AI video is the most expensive item per second (§1A.11). The per-video AI-B-roll budget is a `PER_VIDEO` budget scope enforced by the cost ledger (D1: breach stops paid calls). Amount: **REQUIRES REVIEW (Phase 1)**.
@@ -351,7 +355,7 @@ D = DETERMINISTIC, J = LLM_JUDGE, H = HUMAN. In each dimension: machine part = D
 | **THUMBNAIL_METADATA (10)** | 3 thumbnail variants present, size/format within the thumbnail spec, text contrast/legibility, title length per spec (spec **REQUIRES REVIEW (Phase 1)**: YT-05 logs a 50 MB maximum; dimensions and title limits not yet logged), chapters valid (3C) | D | 4 |
 | | promise alignment (script = title = thumbnail), click-worthiness without clickbait | J | 4 |
 | | owner pick and veto | H | 2 |
-| | *3A provisional default:* the 2 points normally earned by metadata (chapters/tags/SEO validation) are awarded from the deterministic thumbnail and working-title criteria (D 4 → 6); all other points as shown | — | — |
+| | *3A provisional default (arithmetic corrected, CCR-058):* the D criterion stays **4** points; in 3A its metadata part (chapters valid, 3C) is replaced by the thumbnail and working-title checks, so the 4 D points are earned from thumbnails and the working title only; the dimension stays 10 and the total stays 100 | — | — |
 | **COMPLIANCE (5)** | `agent_16.compliance_gate` verdict `ALLOWED` for every mandatory rule pack; licence completeness PASS; disclosure decision recorded; disclaimer present on finance (FIN-R10 — exact text **REQUIRES REVIEW (Phase 1): 13**) | D | 5 |
 A human reviewer may only record a compliance concern as a `NEEDS_HUMAN_REVIEW` / override action in the compliance flow, not as a score.
 

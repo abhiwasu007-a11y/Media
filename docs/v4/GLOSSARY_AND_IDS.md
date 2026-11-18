@@ -172,7 +172,7 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 |---|---|---|
 | Task type | `<agent_id or service_id>.<snake_case>` | `agent_06.claim_extraction` |
 | Payload schema name | `<task_type>.input` / `<task_type>.output` | `agent_06.claim_extraction.output` |
-| Step schema name (CCR-018) | `<task_type>.<step>.input` / `<task_type>.<step>.output`, one pair per LLM step inside a task type; `<step>` is snake case and equals the prompt's `<task>` part where a prompt exists | `agent_09.shot_plan.direction.output` |
+| Step schema name (CCR-018) | `<task_type>.<step>.input` / `<task_type>.<step>.output`, one pair per LLM step inside a task type; `<step>` is a short snake-case step key declared in the blueprint and used unchanged in the prompt header, the `llm.<task_type>.<step>.*` config keys and the eval folder | `agent_09.shot_plan.direction.output` |
 | Agent document schema (CCR-018) | `<agent_id>.<snake_case>`: a blob document owned by one agent that is not a task payload (e.g. a script document, a pronunciation dictionary) | `agent_05.script_document` |
 | External reference ID (CCR-044) | `ext_` + 24 lowercase hex = the first 24 hex characters of SHA-256 over the canonical `{"org_id": …, "url": <normalised URL>}`; the org part makes the ID tenant-specific; never a primary key | `ext_3f9a…` |
 | Contract schema name | `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`, `amw.owner_topic` (03; CCR-006); `amw.production_type` (registry record, 24 §2) | — |
@@ -475,6 +475,8 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `voice_kind` | `PROVIDER_STOCK` · `CONSENTED_CLONE` · `HUMAN_RECORDED` |
 | `presenter_kind` (CCR-027, **provisional until the owner answers 3A R4**) | `NEUTRAL_NARRATION` (voice only, no persona, no named presenter) · `OWNER_VOICE` (the owner's own recording or a consented clone of the owner's own voice) · `SYNTHETIC_PERSONA` (a synthetic voice or face presented as a named person; blocked on finance, health and political channels by FIN-R11 / YTG-R2) |
 | `approval_channel` (CCR-010, D5) | `OWNER_CHAT_OPERATOR` (3A: the owner's chat message recorded by the operator tool, `sys_operator`, with an `owner_instruction_evidence` row) · `WEB_DASHBOARD` (3C: the owner acts in the authenticated dashboard) · `CLIENT_PORTAL` (Tier 2) |
+| `evidence_state` (CCR-010) | `PENDING_VERIFICATION` · `VERIFIED` · `CONFIRMED` · `REFUSED` (04 §5.16 `owner_instruction_evidence`) |
+| `evidence_record_kind` (CCR-010) | `STEP_DECISION` · `CONTRIBUTION` · `HUMAN_SCORE` · `COMPLIANCE_DECISION` · `OWNER_TOPIC` · `DATASET_INTAKE` · `KNOWLEDGE_RELEASE_REQUEST` |
 | `instruction_source_kind` (CCR-010) | `OWNER_CHAT_MESSAGE` (the only value that can back a human record) · `TOOL_RESULT` · `SUBAGENT_MESSAGE` · `NOTIFICATION` · `DOCUMENT` (refused sources, stored only on refused evidence rows for audit) |
 | `data_request_kind` / `data_request_status` | `EXPORT` · `ERASURE` / `RECEIVED` · `IN_PROGRESS` · `COMPLETED` · `REJECTED` |
 

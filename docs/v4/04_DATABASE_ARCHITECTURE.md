@@ -875,7 +875,7 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | allowed_channel_ids | uuid[] | yes | NULL = all channels of this org (reuse engine channel permission) |
 | expires_at | timestamptz | yes | licence expiry copy |
 | status | enum(asset_status) | no | |
-| attributes | jsonb | yes | CCR-032; documented keys only: `tags[]`, `description`, `language` (BCP 47; required for `SUBTITLE`), `data_start_date`, `data_end_date`, `bars_count`, `instrument`, `timeframe`, `dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`, `method_content`, `release_approval_id`, `prompt_sha256`, `provider_request_id`, `source_path_class` (dataset intake, 3A_SLICE_SPEC R20); other keys by CCR |
+| attributes | jsonb | yes | CCR-032; documented keys only: `tags[]`, `description`, `language` (BCP 47; required for `SUBTITLE`), `data_start_date`, `data_end_date`, `bars_count`, `instrument`, `timeframe`, `dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`, `method_content`, `release_approval_id`, `prompt_sha256`, `provider_request_id`, `source_path_class` (dataset intake, 3A_SLICE_SPEC R20), `label_free` (boolean: the image carries no text or logo, usable under thumbnail text; set by Agent 08); other keys by CCR |
 
 **asset_fingerprints** — TENANT · T0+ · Std: `asset_id` TFK → assets, `algo enum(fingerprint_algo)`, `algo_version smallint NOT NULL DEFAULT 1` (CCR-032: version of the hash definition; only equal versions are compared), `value bytea`, `frame_ms bigint NULL`. Index `(org_id, algo, value)`. Matching runs only inside one tenant (S2 uniqueness, reuse engine).
 
@@ -895,6 +895,7 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | managed_service | boolean | no | true only when the client contracted managed service (rule 10) |
 | requested_by | text | no | actor ref |
 | decided_at / expires_at | timestamptz | yes | |
+| review_code | text | no | CCR-010: short code shown to the owner for this approval, derived from the approval ID, `subject_sha256` and a random nonce; `UNIQUE (org_id, review_code)`; the owner's message must contain it |
 Index `(org_id, state, kind)`. The decision record (who, channel, evidence) is on `approval_steps`; the approval's final `state` is derived from its steps (03 §11.6).
 Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in one of two forms. (a) `subject_kind = 'knowledge_source'`, `subject_id` = the source: the whole source (3A default). (b) `subject_kind = 'knowledge_release'`, `subject_id` = the `knowledge_collections` row, `subject_sha256` = SHA-256 of the canonical JSON `{"topic_title": …, "collection_key": …, "chunk_ids": [sorted kch wire IDs]}`: the listed chunks for that topic only. A chunk is covered when the approval is `APPROVED` and the chunk is the subject source's or is listed and the recomputed hash matches. `subject_kind = 'asset'` releases one asset (e.g. a chart case) with `subject_sha256` = the asset's content hash.
 
@@ -912,7 +913,7 @@ Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in on
 | approval_channel | enum(approval_channel) | yes | CCR-010; required (CHECK) once the step is decided; no default (fail closed) |
 | recorded_by | text | yes | actor ref that wrote the decision: the deciding `usr_` itself (`WEB_DASHBOARD`, `CLIENT_PORTAL`) or `sys_operator` (`OWNER_CHAT_OPERATOR`) |
 | evidence_id | uuid | yes | TFK → owner_instruction_evidence; required when `approval_channel = 'OWNER_CHAT_OPERATOR'` |
-Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_contributions` and HUMAN `quality_scores`): an `agent_NN` / `svc_sNN` actor can never write a human row. A `usr_` actor writes only its own decision. `sys_operator` may write a human row only with `approval_channel = 'OWNER_CHAT_OPERATOR'` and an `evidence_id` that references an `owner_instruction_evidence` row of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, whose `on_behalf_of` equals the row's human field (`decided_by`, `contributor_user_id`, or the user of `scorer_ref`), and whose `subject_kind`/`subject_id` match the row's subject; the human must still hold an `ACTIVE` membership with the required role. The operator is never the approver.
+Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_contributions` and HUMAN `quality_scores`): an `agent_NN` / `svc_sNN` actor can never write a human row. A `usr_` actor writes only its own decision. `sys_operator` may write a human row only with `approval_channel = 'OWNER_CHAT_OPERATOR'` and an `evidence_id` that references an `owner_instruction_evidence` row of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, whose `on_behalf_of` equals the row's human field (`decided_by`, `contributor_user_id`, or the user of `scorer_ref`), whose `subject_kind`/`subject_id` (and `approval_id`/`step_no`, `parsed_decision` = the step's decision) match the row, and whose `state = 'CONFIRMED'`; the human must still hold an `ACTIVE` membership with the required role. The operator is never the approver. **Every human-originated row needs evidence of its channel** (CCR-010): `approval_channel` is mandatory on every human row of `approval_steps`, `editorial_contributions`, HUMAN `quality_scores` and human `compliance_verdicts` overrides; in 3A the only accepted channel is `OWNER_CHAT_OPERATOR` (config `approvals.accepted_channels`; `WEB_DASHBOARD` is accepted only once the authenticated dashboard exists, 3C, and then the `usr_` session is the evidence).
 
 **editorial_contributions** — TENANT · T0 · Std
 | Column | Type | Null | Constraint / note |
@@ -928,24 +929,33 @@ Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_c
 | target_ref | text | yes | script segment / shot / thumbnail |
 Index `(org_id, job_id)`.
 
-**owner_instruction_evidence** — TENANT · T0 · append-only · Std (CCR-010, decision D5; prefix `oie`)
-One row per owner instruction that the operator tool was asked to record, including refused attempts (kept for audit).
+**owner_instruction_evidence** — TENANT · T0 · append-only with controlled state changes · Std (CCR-010, decision D5; prefix `oie`)
+One row per owner instruction that the operator tool was asked to record, including refused attempts (kept for audit). The evidence is **bound to the platform's own session event record**, never to text that the operator (an LLM) supplies: the operator gives only the session and event identifiers and the decision it read; code fetches the event from the session event store and verifies it.
 | Column | Type | Null | Constraint / note |
 |---|---|---|---|
 | job_id | uuid | yes | TFK → jobs |
-| subject_kind / subject_id | text / uuid | no | what the instruction is about (same vocabulary as `approvals.subject_kind`) |
-| subject_review_code | text | yes | the short code shown to the owner for the subject (so the owner's message can name it unambiguously) |
-| source_kind | enum(instruction_source_kind) | no | only `OWNER_CHAT_MESSAGE` may back a human row; the other values are stored only for refused attempts |
-| quote | text | no | the owner's words, verbatim (≤ 4000 chars) |
-| message_at | timestamptz | no | timestamp of the owner's message |
-| session_ref | text | no | link to the session in which the owner wrote it |
+| approval_id / step_no | uuid / int | yes | TFK → approvals; the step the instruction decides |
+| record_kind | enum(evidence_record_kind) | no | what the instruction creates (GLOSSARY §6.44) |
+| subject_kind / subject_id | text / uuid | no | what the instruction is about (vocabulary of `approvals.subject_kind`) |
+| review_code | text | yes | the approval's `review_code` (§5.16 `approvals`); required for `STEP_DECISION`, `CONTRIBUTION`, `HUMAN_SCORE` of an approval subject |
+| parsed_decision | enum(approval_step_state) | yes | for `STEP_DECISION`: the decision the operator read; must match the code check below |
+| source_kind | enum(instruction_source_kind) | no | only `OWNER_CHAT_MESSAGE` may reach `VERIFIED`; other values are stored only on `REFUSED` rows |
+| session_id / event_uuid | text / text | no | the session and the transcript event of the owner's message, as the platform's session event store names them |
+| quote | text | no | the owner's words as copied from the fetched event (≤ 4000 chars) |
+| message_at | timestamptz | no | the fetched event's timestamp |
+| state | enum(evidence_state) | no | `PENDING_VERIFICATION` → `VERIFIED` → `CONFIRMED`, or → `REFUSED` |
+| event_verified_at | timestamptz | yes | when the code check passed |
+| verifier_result | jsonb | yes | the code check's result (each test with pass/fail; IDs and hashes only, no extra text) |
+| confirmation_event_uuid / confirmation_quote / confirmation_message_at | text / text / timestamptz | yes | the owner's reply to the echo: a **second** human event, verified the same way, with `confirmation_message_at > message_at` |
 | recorded_by | text | no | actor ref (`sys_operator`) |
 | on_behalf_of | uuid | no | FK → users: the owner |
-| evidence_sha256 | bytea | no | SHA-256 of the canonical `{quote, message_at, session_ref, subject_kind, subject_id}` |
-| refused_reason | text | yes | set when the operator refused to record (ambiguous message, not owner-authored, wrong source); a refused row backs nothing |
-| owner_confirmed_at / confirmation_quote / confirmation_message_at | timestamptz / text / timestamptz | yes | the owner's reply to the echo (03 §11.6 rule 6) |
+| evidence_sha256 | bytea | no | SHA-256 of the canonical `{session_id, event_uuid, quote, message_at, record_kind, subject_kind, subject_id, review_code, parsed_decision}` |
+| refused_reason | text | yes | set with `state = REFUSED` (ambiguous message, not owner-authored, event not found, check failed); a refused row backs nothing |
 | supersedes_id | uuid | yes | TFK → owner_instruction_evidence (a correction never edits a row) |
-Append-only (rule 7) with one exception: the trigger allows a single UPDATE that sets the three confirmation fields from NULL, and nothing else. Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
+Keys: `UNIQUE (org_id, event_uuid, record_kind, subject_kind, subject_id) WHERE state <> 'REFUSED'` (one owner message backs one record of each kind per subject: replay check). Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
+**Code check (`VERIFIED`)**, run by the operator tool's verifier in code, never by the model: the event fetched by `session_id` + `event_uuid` exists; its role is `user`; it is not synthetic; its inbound origin is the human user (not a peer session, a notification, a tool result, a scheduled message or a document); `quote` is a verbatim substring of the event content; `message_at` equals the event timestamp; the content contains the `review_code` (where required) and a decision word from the per-language list (config `approvals.owner_chat.decision_words.<lang>`) that maps to `parsed_decision`; the event is later than the approval request (`approvals.created_at`) and than any evidence it supersedes. A row whose event cannot be fetched stays `PENDING_VERIFICATION` and can never back a record.
+**Two-phase rule:** a human record (§5.16, §5.17) may reference only a `CONFIRMED` row: `VERIFIED` plus a verified confirmation event. A slow confirmation leaves the approval `PENDING` (03 §11.6); it never makes a decision final.
+**Append-only exception:** the trigger allows only the forward state changes above, each setting its own columns once (`event_verified_at`, `verifier_result`; then the confirmation fields; or `refused_reason`); nothing else is ever updated or deleted.
 
 ### 5.17 Quality, QC and compliance
 
@@ -958,7 +968,7 @@ Append-only (rule 7) with one exception: the trigger allows a single UPDATE that
 |---|---|---|---|
 | job_id | uuid | no | TFK → jobs |
 | subject_kind / subject_id / subject_sha256 | text / uuid / bytea | no | |
-| rule_pack_id | uuid | no | FK → rule_packs |
+| rule_pack_id | uuid | yes | FK → rule_packs; NULL only for an overall or authorisation row (`rule_id IS NULL AND is_final`; CHECK, CCR-010) |
 | rule_pack_version | int | no | |
 | rule_id | text | yes | NULL = pack-level / overall verdict |
 | verdict | enum(compliance_verdict) | no | |
@@ -1063,7 +1073,7 @@ Updated only through `amw_quota_reserve/release` (§3.6). Per-tenant attribution
 | verification_details | jsonb | yes | compared fields (privacy, title, disclosure flag) |
 | idempotency_key | text | no | scope `upload.youtube` / `delivery.file`; `UNIQUE (org_id, idempotency_key)` |
 Keys: partial `UNIQUE (org_id, channel_id, render_sha256) WHERE destination_kind = 'YOUTUBE' AND state <> 'FAILED'` (duplicate prevention).
-**Publish guard trigger** (on insert and on any change of `state` to `UPLOADING`, `SCHEDULED` or `PUBLISHED`): the approval is `APPROVED`, of kind `FINAL_VIDEO` or `PUBLISH`, with `subject_sha256 = render_sha256`; at least one `editorial_contributions` row exists for the job; the authorisation verdict is final `ALLOWED` for the same subject hash; `contains_synthetic_media` is not null for `YOUTUBE`. The quality threshold (≥ 85, config) is checked by Agent 16 before it writes the authorisation verdict. This enforces "never publish an unapproved video" (rule 5) in the DB as well as in code.
+**Publish guard trigger** (on insert and on any change of `state` to `UPLOADING`, `SCHEDULED` or `PUBLISHED`): the approval is `APPROVED`, of kind `FINAL_VIDEO` or `PUBLISH`, with `subject_sha256 = render_sha256`; at least one `editorial_contributions` row exists for the job **bound to this approval** (`editorial_contributions.approval_id = publications.approval_id`, CCR-010); the authorisation verdict is final `ALLOWED` for the same subject hash; `contains_synthetic_media` is not null for `YOUTUBE`. The quality threshold (≥ 85, config) is checked by Agent 16 before it writes the authorisation verdict. This enforces "never publish an unapproved video" (rule 5) in the DB as well as in code.
 Also kids handling: **REQUIRES REVIEW (Phase 1): verify the YouTube "made for kids" status field on the official `videos` resource page before adding a column.**
 
 ### 5.22 Analytics and learning loop

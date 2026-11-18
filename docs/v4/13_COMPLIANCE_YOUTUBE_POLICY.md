@@ -36,7 +36,7 @@ Stage names are the canonical task types of 24 §3.2. "Gate" = `agent_16.complia
 | `agent_06.claim_extraction` | Tags every claim with `claim_type`, `time_reference_kind` and `rule_flags` (GLOSSARY §6.39, 6.41, `rule_flag_severity`). Blocking | 3A |
 | `agent_06.claim_verification` | Verifies factual claims; does not decide policy | 3A |
 | `agent_10.technical_qc` | Deterministic extraction of the chart/price dates actually rendered (input to FIN-R9) | 3A |
-| `svc_s02.uniqueness_check` | Input to YTG-R1 (originality) | 3C |
+| `svc_s02.uniqueness_check` | Input to YTG-R1 (originality) | 3A (deterministic parts b, c); 3C (cross-video part) (CCR-058) |
 | `agent_12.metadata` | Title/description/tags are checked by the same rules (a title can itself be a call) | 3C |
 | `agent_16.compliance_gate` | Evaluates all active packs on script, claims, render metadata, thumbnails, metadata; records one verdict row per pack and per failed rule | 3A |
 | `agent_16.publication_authorisation` | Final verdict (`is_final`); re-runs the date-dependent checks at the real publish time (FIN-R9) | 3C (no upload in 3A, D1) |
