@@ -1136,8 +1136,8 @@ CI fails the PR if any threshold is missed. Recording fields per case per run (2
 ### 26.5 Coverage summary
 | Dataset | Cases | Categories |
 |---|---|---|
-| `voice_synthesis` | 44 | positive paths of the three voice kinds; hard negatives (look-alikes that must pass); denials (consent, licence, script gate, budget, breaker, tenant); edge cases (empty and markup text, long sentence, Devanagari boundaries, duplicate sentences, replay); voice sample |
-| `audio_master` | 32 | loud, quiet and on-target stems; peaky and clipped stems; silent and mono-edge stems; codec headroom step-down; pass cap; music (3B); tenancy; admission |
+| `voice_synthesis` | 48 | positive paths of the three voice kinds; hard negatives (look-alikes that must pass); denials (consent and its channel scope, licence, script gate, budget, breaker, tenant); edge cases (empty and markup text, long sentence, Devanagari boundaries, duplicate sentences, replay); voice sample |
+| `audio_master` | 34 | loud, quiet and on-target stems; peaky and clipped stems; silent and mono-edge stems; codec headroom step-down; pass cap; gate-result flags and remedy stage; music (3B); tenancy; admission; unparsable FFmpeg output |
 
 ### 26.6 Revisit
 When a concrete adapter exists, recorded provider fixtures (redacted, 27 §8.2) are added as extra cases; when the 3B listening test changes the dictionary or style map, the affected cases are re-run; when a LLM step is ever added (§5.2), it gets a prompt file per 27 §4 and a ≥ 20-case judged dataset in this folder.
