@@ -1,4 +1,4 @@
-"""``ChartLagGuard`` and ``EarliestPublishDate``: the SEBI price-data lag arithmetic (FIN-R9, IN-
+"""``ChartLagGuard`` and ``EarliestPublishDate``: price-data lag arithmetic (FIN-R9, IN-02).
 
 Pure date arithmetic in UTC calendar days (blueprint 6.4(4)). ``data_end_date`` is the last
 calendar date the last bar can cover (daily: its date; weekly: start + 6 days; monthly: start +

@@ -1,4 +1,4 @@
-"""``agent_08.asset_sourcing.output`` 1.0.0 (blueprint 8.2) and ``agent_08.chart_facts`` 1.0.0 (8
+"""Output payload ``agent_08.asset_sourcing.output`` 1.0.0 (8.2) and ``agent_08.chart_facts`` (8.5).
 
 Pydantic models equal to the JSON Schemas of the blueprint (contract tests assert it both ways,
 27 section 4.4). Every field is required; nullable ones carry ``None`` explicitly.

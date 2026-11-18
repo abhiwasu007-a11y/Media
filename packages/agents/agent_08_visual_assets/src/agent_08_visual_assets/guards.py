@@ -1,4 +1,4 @@
-"""``TenantGuard``: agreement of organisation ids, URI ownership, path safety (blueprint 10.1, 19
+"""``TenantGuard``: org id agreement, URI ownership and path safety (blueprint 10.1, 19.1).
 
 Pure. ``evaluate`` returns a decision (used by the golden dataset and by the security event
 emitter); ``check_task`` raises the matching ``amw_core`` error. A foreign id and a missing id

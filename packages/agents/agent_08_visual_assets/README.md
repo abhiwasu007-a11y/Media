@@ -46,3 +46,42 @@ Test images are generated at test time from synthetic OHLC data, never from priv
 - Music bed sourcing (3B), checkpoint persistence through `CheckpointStore`, budget/cost-ledger calls,
   idempotency-store use for paid effects, observability, near-duplicate calibration (3B).
 - Persistence is behind Protocols with in-memory fakes only (`testing/memory.py`); no SQL yet.
+
+## Status (owner vocabulary: Planned / In Development / Implemented / Tested)
+
+| Feature | Status |
+|---|---|
+| Chart path (dataset, case match, lag guard, annotations, deterministic render) | Implemented, Tested |
+| Code graphics (tier C text card, diagram, abstract template) | Implemented, Tested |
+| Owner footage (tier A, selection through an injected `FootageSelector`) | Implemented, Tested (selector is a test fake) |
+| Licence ledger rows (shots, overlays, fonts) | Implemented, Tested |
+| Gate result and remedy stage | Implemented, Tested |
+| Dataset intake guard and registrar | Implemented, Tested |
+| `reveal_stills[]` with one IMAGE ledger row per still | Implemented, Tested |
+| `agent_08.chart_facts` | Implemented, Tested |
+| Fingerprints, reuse engine, tier-E guard, AI gates/composer/flags (units) | Implemented, Tested (not wired to adapters) |
+| Stock (B), AI video (D), AI still (E) acquisition | Planned |
+| `QueryPlanner` / `CandidateRanker` LLM wrappers | Planned |
+| Checkpoint persistence, budget/cost-ledger calls | Planned |
+| SQL persistence (only in-memory fakes exist) | Planned |
+| Music bed (3B) | Planned |
+| Devanagari shaping (U-13) | Open: matplotlib has no complex-script shaping; needs a shaping library and font decision |
+
+## Package-local formats, pending a contract decision
+
+No contract names are claimed for these.
+
+- Dataset: UTF-8 CSV, header `date,open,high,low,close` (extra columns ignored); ISO dates strictly
+  ascending; decimal prices only (no empty cell, NaN or infinity); high/low consistent with open/close.
+- Chart case: JSON object `{case_id, data_kind (REAL_HISTORICAL|SCHEMATIC), instrument|null, timeframe
+  (1D|1W|1M), dataset_asset_id|null, window{first_bar_index,last_bar_index}|null, indicators[]
+  (SMA_n, EMA_n, RSI_n), pattern_concept_ids[], outcome (WORKED|FAILED|BOTH|NOT_APPLICABLE),
+  annotations[] {kind, bar|from_bar|to_bar, text, price, extend_right}, method_content,
+  release_approval_id|null, template_id, schematic_points[]|null}`. Bar numbers are dataset bar indexes.
+
+## Eval packs query_plan and candidate_rank: plumbing only
+
+Replayable with a pass: **0 of 29** (query_plan) and **0 of 30** (candidate_rank). Their `expected` blocks
+are case summaries that do not validate against the prompt output schema, so a recorded replay fails
+the schema assertion. The pass rate is **not asserted**. `test_eval_packs.py` checks only that the runner
+evaluates every case and fails if the replayable count changes from these numbers.
