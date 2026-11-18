@@ -2,7 +2,7 @@
 name = "agent-04-research-knowledge"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core"]
+dependencies = ["amw-core", "amw-adapters"]
 
 [build-system]
 requires = ["hatchling"]
@@ -13,3 +13,14 @@ packages = ["src/agent_04_research_knowledge"]
 
 [tool.uv.sources]
 amw-core = { workspace = true }
+amw-adapters = { workspace = true }
+
+# Package coverage (run: uv run pytest tests/agents/agent_04_research_knowledge
+#   --cov=agent_04_research_knowledge --cov-config=packages/agents/agent_04_research_knowledge/pyproject.toml)
+[tool.coverage.run]
+branch = true
+source = ["agent_04_research_knowledge"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

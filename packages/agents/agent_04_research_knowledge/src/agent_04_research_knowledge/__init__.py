@@ -1,1 +1,1 @@
-"""agent_04_research_knowledge: see docs/v4/SOURCE_LAYOUT.md and 27 section 7."""
+"""Agent 04 Research & Knowledge (blueprint docs/v4/agents/agent_04_research_knowledge.md)."""

@@ -1,0 +1,152 @@
+"""Payload-local enums of Agent 04 (blueprint 6.3, 6.5, 7, 8; not Wave A enums, GLOSSARY 6)."""
+
+from enum import StrEnum
+
+
+class ReliabilityTier(StrEnum):
+    A_PRIMARY = "A_PRIMARY"
+    B_PUBLISHED = "B_PUBLISHED"
+    C_SECONDARY = "C_SECONDARY"
+    D_UNVERIFIED = "D_UNVERIFIED"
+
+    @property
+    def rank(self) -> int:
+        """0 = best (A) ... 3 = worst (D)."""
+        return ("A_PRIMARY", "B_PUBLISHED", "C_SECONDARY", "D_UNVERIFIED").index(self.value)
+
+
+class DomainClass(StrEnum):
+    OFFICIAL = "OFFICIAL"
+    REPUTABLE_SECONDARY = "REPUTABLE_SECONDARY"
+
+
+class Coverage(StrEnum):
+    SOURCED = "SOURCED"
+    PARTIAL = "PARTIAL"
+    UNSOURCED = "UNSOURCED"
+
+
+class GapReason(StrEnum):
+    NO_SOURCE_FOUND = "NO_SOURCE_FOUND"
+    ONLY_RESTRICTED_NOT_RELEASED = "ONLY_RESTRICTED_NOT_RELEASED"
+    ONLY_EXCLUDED_FORWARD_LOOKING = "ONLY_EXCLUDED_FORWARD_LOOKING"
+    ONLY_LOW_RELIABILITY = "ONLY_LOW_RELIABILITY"
+    COPY_GUARD_REMOVED = "COPY_GUARD_REMOVED"
+    PRIOR_GAP_NOT_CLOSED = "PRIOR_GAP_NOT_CLOSED"
+
+
+class InputGapReason(StrEnum):
+    UNSOURCED = "UNSOURCED"
+    CONTRADICTED = "CONTRADICTED"
+    UNVERIFIABLE = "UNVERIFIABLE"
+    NEEDS_SUBSTANTIATION = "NEEDS_SUBSTANTIATION"
+
+
+class ConceptKind(StrEnum):
+    CORE_CONCEPT = "CORE_CONCEPT"
+    SUB_CONCEPT = "SUB_CONCEPT"
+    COMMON_MISTAKE = "COMMON_MISTAKE"
+    PSYCHOLOGY = "PSYCHOLOGY"
+    HISTORICAL_CASE = "HISTORICAL_CASE"
+    DEFINITION_TERM = "DEFINITION_TERM"
+    REGULATORY_CONTEXT = "REGULATORY_CONTEXT"
+
+
+class StatementKind(StrEnum):
+    DEFINITION = "DEFINITION"
+    MECHANISM = "MECHANISM"
+    PRINCIPLE = "PRINCIPLE"
+    EXAMPLE_HISTORICAL = "EXAMPLE_HISTORICAL"
+    EXAMPLE_HYPOTHETICAL = "EXAMPLE_HYPOTHETICAL"
+    STATISTIC = "STATISTIC"
+    COMMON_MISTAKE = "COMMON_MISTAKE"
+    CAVEAT = "CAVEAT"
+
+
+FACTUAL_KINDS = frozenset(
+    {StatementKind.DEFINITION, StatementKind.MECHANISM, StatementKind.STATISTIC}
+)
+"""Kinds that need the reliability floor (6.3)."""
+REQUIRED_NEED_KINDS = frozenset(
+    {
+        StatementKind.DEFINITION,
+        StatementKind.MECHANISM,
+        StatementKind.PRINCIPLE,
+        StatementKind.STATISTIC,
+    }
+)
+"""Evidence needs that a SOURCED concept must have met (6.5)."""
+
+
+class ConceptTimeReference(StrEnum):
+    HISTORICAL = "HISTORICAL"
+    CURRENT = "CURRENT"
+    TIMELESS = "TIMELESS"
+
+
+class QueryPurpose(StrEnum):
+    PRIMARY = "PRIMARY"
+    SYNONYM = "SYNONYM"
+    TRANSLATION = "TRANSLATION"
+    EXAMPLE = "EXAMPLE"
+
+
+class Relevance(StrEnum):
+    RELEVANT = "RELEVANT"
+    TANGENTIAL = "TANGENTIAL"
+    IRRELEVANT = "IRRELEVANT"
+    INJECTION_SUSPECTED = "INJECTION_SUSPECTED"
+
+
+class Clarity(StrEnum):
+    CLEAR = "CLEAR"
+    PARTIAL = "PARTIAL"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class ExcludedReason(StrEnum):
+    FORWARD_LOOKING = "FORWARD_LOOKING"
+    RECOMMENDATION = "RECOMMENDATION"
+    PERFORMANCE_CLAIM = "PERFORMANCE_CLAIM"
+    PROMOTION = "PROMOTION"
+
+
+class ExclusionReason(StrEnum):
+    FORWARD_LOOKING = "FORWARD_LOOKING"
+    COPY_GUARD = "COPY_GUARD"
+    LOW_RELIABILITY = "LOW_RELIABILITY"
+    INJECTION_SUSPECTED = "INJECTION_SUSPECTED"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class NoteProblem(StrEnum):
+    COPY_OVERLAP = "COPY_OVERLAP"
+    NUMBER_NOT_IN_PASSAGE = "NUMBER_NOT_IN_PASSAGE"
+    URL_OR_QUOTE = "URL_OR_QUOTE"
+    AMBIGUOUS = "AMBIGUOUS"
+
+
+class CopyGuardStatus(StrEnum):
+    PASSED = "PASSED"
+    SKIPPED_CROSS_LANGUAGE = "SKIPPED_CROSS_LANGUAGE"
+
+
+class FetchStatus(StrEnum):
+    OK = "OK"
+    UNREACHABLE = "UNREACHABLE"
+
+
+class GateReason(StrEnum):
+    NOT_METHOD_TOPIC = "NOT_METHOD_TOPIC"
+    RELEASE_MISSING = "RELEASE_MISSING"
+    RELEASE_NOT_APPROVED = "RELEASE_NOT_APPROVED"
+    RELEASE_WRONG_KIND = "RELEASE_WRONG_KIND"
+    RELEASE_NOT_COVERING = "RELEASE_NOT_COVERING"
+
+
+class IngestSourceStatus(StrEnum):
+    """Output enum of ``agent_04.knowledge_ingest.output`` (subset of knowledge_source_status)."""
+
+    INGESTING = "INGESTING"
+    INDEXED = "INDEXED"
+    FAILED = "FAILED"
