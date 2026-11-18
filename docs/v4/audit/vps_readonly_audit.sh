@@ -11,11 +11,19 @@
 # Usage:
 #   bash vps_readonly_audit.sh                      # snapshot only (~1–2 min)
 #   bash vps_readonly_audit.sh --sample 60          # snapshot + 60 min sampling, every 30 s
-#   bash vps_readonly_audit.sh --sample 400 60      # snapshot + 400 min sampling, every 60 s
-#   nohup bash vps_readonly_audit.sh --sample 400 60 >/dev/null 2>&1 &   # run in background
+#   bash vps_readonly_audit.sh --sample 1440 60     # snapshot + 24 h sampling, every 60 s
 #
-# Optional: `sudo bash vps_readonly_audit.sh` adds process names on ports,
-# firewall status, Docker disk usage and kernel OOM history. It is still read-only.
+# Root gives the full picture (process names on ports, firewall status, Docker
+# disk usage, kernel OOM history). It is still read-only. Background runs cannot
+# prompt for a password, so use ONE of these:
+#   a) as root, without sudo:
+#        nohup bash vps_readonly_audit.sh --sample 1440 60 > amw_audit_run.log 2>&1 &
+#   b) as a sudo user: cache the password first, then run non-interactively:
+#        sudo -v && nohup sudo -n bash vps_readonly_audit.sh --sample 1440 60 > amw_audit_run.log 2>&1 &
+#      (`sudo -n` fails instead of hanging if the cached credential has expired.)
+# Reports go to $OUT_DIR, default $HOME. Under sudo, $HOME is root's, so reports
+# land in /root/amw_audit_*. Set OUT_DIR to choose another directory, e.g.
+#   sudo -n env OUT_DIR=/home/<user> bash vps_readonly_audit.sh
 # =============================================================================
 set -u
 
