@@ -61,8 +61,8 @@ def test_report_counts_per_agent() -> None:
 
 
 def git(cwd: Path, *args: str) -> None:
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+    subprocess.run(  # noqa: S603
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],  # noqa: S607
         cwd=cwd,
         check=True,
         capture_output=True,

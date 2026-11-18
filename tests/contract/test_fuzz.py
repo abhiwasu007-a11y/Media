@@ -207,7 +207,7 @@ def model_accepts(model: type[BaseModel], doc: dict[str, Any]) -> bool:
 def test_model_and_schema_agree(
     name: str, make: Callable[[], dict[str, Any]], model: type[BaseModel], version: str
 ) -> None:
-    rng = random.Random(f"{SEED}:{name}:{make().get('status', '')}")
+    rng = random.Random(f"{SEED}:{name}:{make().get('status', '')}")  # noqa: S311 - test seed
     accepted = rejected = stricter = 0
     for round_no in range(ROUNDS):
         doc = make() if round_no == 0 else mutate(make(), rng)
