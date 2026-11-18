@@ -107,7 +107,7 @@ def validate_error(doc: Any, *, version: str | None = None) -> ErrorObject:
 
 
 def validate_owner_topic(doc: Any, *, version: str | None = None) -> OwnerTopic:
-    """``amw.owner_topic`` has no ``schema_version`` field: pass the registered version."""
+    """``amw.owner_topic`` (03 section 3.4; ``schema_version`` required since CCR-067)."""
     return _validate("amw.owner_topic", OwnerTopic, doc, version)
 
 

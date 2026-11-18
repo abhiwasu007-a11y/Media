@@ -174,7 +174,7 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 | Payload schema name | `<task_type>.input` / `<task_type>.output` | `agent_06.claim_extraction.output` |
 | Step schema name (CCR-018) | `<task_type>.<step>.input` / `<task_type>.<step>.output`, one pair per LLM step inside a task type; `<step>` is a short snake-case step key declared in the blueprint and used unchanged in the prompt header, the `llm.<task_type>.<step>.*` config keys and the eval folder | `agent_09.shot_plan.direction.output` |
 | Agent document schema (CCR-018) | `<agent_id>.<snake_case>`: a blob document owned by one agent that is not a task payload (e.g. a script document, a pronunciation dictionary) | `agent_05.script_document` |
-| External reference ID (CCR-044) | `ext_` + 24 lowercase hex = the first 24 hex characters of SHA-256 over the canonical `{"org_id": …, "url": <normalised URL>}`; the org part makes the ID tenant-specific; never a primary key | `ext_3f9a…` |
+| External reference ID (CCR-044) | `ext_` + 24 lowercase hex = the first 24 hex characters of SHA-256 over the canonical `{"org_id": …, "url": <normalised URL>}`; the org part makes the ID tenant-specific; never a primary key. **URL normalisation** (CCR-066), applied in this order: scheme must be `https` (lowercase); host lowercased and IDNA-encoded (punycode), trailing dot removed; port `443` removed; fragment removed; percent-encodings of unreserved characters (RFC 3986: `A–Z a–z 0–9 - . _ ~`) decoded and all remaining percent-encodings uppercased; dot-segments (`.`/`..`) removed; an empty path becomes `/`; any other trailing slash is kept as given; query parameters sorted by name, then by value, keeping duplicates and empty values; nothing else is removed or rewritten | `ext_3f9a…` |
 | Contract schema name | `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control`, `amw.owner_topic` (03; CCR-006); `amw.production_type` (registry record, 24 §2) | — |
 | Schema `$id` | `urn:amw:schema:<schema name>:<semver>` | `urn:amw:schema:amw.task_input:1.0.0` |
 | Production type key | `UPPER_SNAKE` (§6.48) + integer version | `CHANNEL_LONG_FORM` v1 |
@@ -466,6 +466,7 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `auth_provider` | `LOCAL_PASSWORD` · `GOOGLE` · `SAML` (Tier 3) · `OIDC` (Tier 3) |
 | `channel_platform` | `YOUTUBE` |
 | `channel_status` | `DRAFT` · `CONNECTED` · `NEEDS_REAUTH` · `PAUSED` · `DISCONNECTED` |
+| `audience_kind` (CCR-081) | `GENERAL` · `KIDS` (the channel-setup decision of 13 §3.7, made by a human; NULL = not decided) |
 | `oauth_token_status` | `ACTIVE` · `REFRESH_FAILED` · `REVOKED` · `EXPIRED` |
 | `data_key_status` | `ACTIVE` · `RETIRED` · `DESTROYED` |
 | `gcp_ownership` | `PLATFORM` · `CLIENT_OWNED` |
@@ -477,6 +478,7 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `approval_channel` (CCR-010, D5) | `OWNER_CHAT_OPERATOR` (3A: the owner's chat message recorded by the operator tool, `sys_operator`, with an `owner_instruction_evidence` row) · `WEB_DASHBOARD` (3C: the owner acts in the authenticated dashboard) · `CLIENT_PORTAL` (Tier 2) |
 | `evidence_state` (CCR-010) | `PENDING_VERIFICATION` · `VERIFIED` · `CONFIRMED` · `REFUSED` (04 §5.16 `owner_instruction_evidence`) |
 | `evidence_record_kind` (CCR-010) | `STEP_DECISION` · `CONTRIBUTION` · `HUMAN_SCORE` · `COMPLIANCE_DECISION` · `OWNER_TOPIC` · `DATASET_INTAKE` · `KNOWLEDGE_RELEASE_REQUEST` |
+| `evidence_verification_kind` (CCR-059; the rule set per record kind, 03 §11.6 table) | `DECISION` (`STEP_DECISION`, `COMPLIANCE_DECISION`, `KNOWLEDGE_RELEASE_REQUEST`) · `CONTENT` (`CONTRIBUTION`, `OWNER_TOPIC`, `DATASET_INTAKE`) · `SCORE` (`HUMAN_SCORE`) |
 | `instruction_source_kind` (CCR-010) | `OWNER_CHAT_MESSAGE` (the only value that can back a human record) · `TOOL_RESULT` · `SUBAGENT_MESSAGE` · `NOTIFICATION` · `DOCUMENT` (refused sources, stored only on refused evidence rows for audit) |
 | `data_request_kind` / `data_request_status` | `EXPORT` · `ERASURE` / `RECEIVED` · `IN_PROGRESS` · `COMPLETED` · `REJECTED` |
 
@@ -562,7 +564,7 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `ccr_status` | `Proposed` · `Needs owner` · `Approved` · `Rejected` · `Applied` | CONTRACT_CHANGE_REQUESTS.md |
 | `cost_unit_kind` | `characters` · `audio_ms` · `images` · `video_ms` · `render_ms` · `quota_units` · `items` · `bytes` | `cost_ledger.unit_kind`, 24 §6 |
 | `cost_operation` (CCR-057; closed list of adapter operation names) | `llm.completion` · `llm.count_tokens` · `llm.batch` (3C) · `tts.synthesize` · `tts.list_voices` · `stock.search` · `stock.license` · `music.search` · `music.license` · `image.generate` · `video.generate` · `web.fetch` · `render.ffmpeg` · `delivery.file` · `storage.bytes` · `youtube.quota`. A `cost_ledger` row is written for every operation that costs money or consumes quota; free operations write none | `cost_ledger.operation`, adapter fakes |
-| `error_disposition` (CCR-057) | `RETRY` · `SUSPEND` · `FAIL` · `NO_ATTEMPT` (written `NO-ATTEMPT` in 07 §2) | 07 §2 |
+| `error_disposition` (CCR-057) | `RETRY` · `SUSPEND` · `FAIL` · `NO_ATTEMPT` (one spelling everywhere, CCR-062) | 07 §2 |
 | `retry_policy` (CCR-057) | `temporary` · `rate_limited` · `db` · `resource` · `agent` · `agent_parse` · `infra` · `publish_resume` | 07 §3.3, config `retry.<policy>.*` |
 | `queue_name` | `light` · `ai` · `render` · `publish` | `task_queue.queue_name` |
 | `transition_id` | `T01`–`T20` (task), `J01`–`J12` (job) | 03 §11.3, §11.5 |
@@ -590,5 +592,14 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `reuse_kind` | `EXACT` · `NEAR_DUPLICATE` | `agent_08.asset_sourcing.output` |
 | `crop_mode` | `NONE` · `CENTER_CROP` · `ANCHOR_CROP` | `agent_08.asset_sourcing.output`, `agent_10.render.input` |
 | `subject_anchor` | `CENTER` · `UPPER_THIRD` · `LOWER_THIRD` · `LEFT` · `RIGHT` | `agent_09.shot_plan.output` `vertical`, `agent_08.asset_sourcing.output` |
+| `compliance_judge_finding` (CCR-069) | `VIOLATION` · `NO_VIOLATION` · `UNCERTAIN` | `agent_16.compliance_gate.policy.output` |
+| `paraphrase_decision` (CCR-069) | `OWN_WORDS` · `CLOSE_PARAPHRASE` · `UNCERTAIN` | `agent_16.compliance_gate.paraphrase.output` |
+| `text_item_surface` (CCR-069) | `SCRIPT_SEGMENT` · `ON_SCREEN_TEXT` · `THUMBNAIL_TEXT` · `TITLE` · `DESCRIPTION` | `agent_16.compliance_gate.policy.input`, metric label `surface` |
+| `cross_video_status` (CCR-069) | `COMPARED` · `SKIPPED` · `NOT_BUILT` | `svc_s02.uniqueness_check.output` |
+| `authorised_action` (CCR-069) | `DELIVERY` (3A) · `UPLOAD_PRIVATE` · `PUBLISH` (3C) | `agent_16.publication_authorisation.*` |
+| `frame_finding` (CCR-069) | `WATERMARK_PRESENT` · `PRESENTER_PRESENT` · `NONE_FOUND` · `UNCERTAIN` · `NOT_EVALUATED` | `agent_16.compliance_gate.frames.output`, gate output `frame_checks[]` |
+| `score_scaling_mode` (CCR-085) | `NONE` · `PRO_RATA` | config `quality.machine_scaling` (provisional default `NONE`, owner Q-O2) |
+| `score_gate_mode` (CCR-085) | `REPORT_ONLY` · `BLOCKING` | config `quality.score_gate_mode` (provisional default `REPORT_ONLY` until the 3B judge calibration; `BLOCKING` with `NONE` is refused at startup) |
+| `source_path_class` (CCR-076) | `data_pack` (the owner-approved course data pack, Q22; any other class is rejected) | `assets.attributes.source_path_class` (04 §5.15) |
 
 Rule (CCR-042): a value set read by more than one agent, by the orchestrator, by the DB or by the owner's report is listed here. A set used only inside one agent's own step payloads, and read by no other component, may stay payload-local, but it must be a closed `enum` in that payload schema and must not reuse a name listed here with other values.

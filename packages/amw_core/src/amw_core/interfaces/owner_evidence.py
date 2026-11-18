@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from amw_core.enums import EvidenceState
+from amw_core.enums import EvidenceRecordKind, EvidenceState, QualityDimension
 from amw_core.ids import OrgId, WireId
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.owner_evidence_verifier import NewEvidence, SessionEvent, SessionEventSource
@@ -83,6 +83,34 @@ class OwnerEvidenceStore(Protocol):
         runs the same check: a second, distinct, later owner event with the same review code and
         the same decision. Unfetchable -> ``MissingDependencyError``; a failed check ->
         ``PermissionDeniedError`` (``details.checks``). The state is unchanged on any error."""
+        ...
+
+    def authorise_human_score(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        subject_kind: str,
+        subject_id: WireId,
+        dimension: QualityDimension,
+        points: int,
+    ) -> None:
+        """The DB human-row trigger for a HUMAN ``quality_scores`` row (CCR-060): the evidence is
+        ``CONFIRMED``, kind ``HUMAN_SCORE``, same subject, and ``points`` is an integer equal to
+        ``claimed_scores[dimension]``; else ``PermissionDeniedError``."""
+        ...
+
+    def authorise_content(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        record_kind: EvidenceRecordKind,
+        subject_kind: str,
+        subject_id: WireId,
+        text: str,
+    ) -> None:
+        """The trigger for a CONTENT record (e.g. ``editorial_contributions.description``, a topic
+        title): ``CONFIRMED``, same kind and subject, ``text`` a non-empty verbatim substring of
+        the evidence quote; else ``PermissionDeniedError``."""
         ...
 
     def refuse(self, tx: TenantTransaction, evidence_id: WireId, reason: str) -> EvidenceRecord:
