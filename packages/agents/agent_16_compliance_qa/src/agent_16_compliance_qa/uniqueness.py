@@ -15,6 +15,7 @@ from typing import Final
 from pydantic import Field
 
 from agent_16_compliance_qa.base import Model, worst
+from agent_16_compliance_qa.textnorm import normalise_for_matching
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import CheckKind, CheckVerdict, ComplianceVerdict
 from amw_core.errors import CrossTenantRefError
@@ -48,7 +49,9 @@ class Thresholds(Model):
 
 
 def _norm(text: str) -> str:
-    return _WS.sub(" ", text.strip().casefold())
+    """The shared matching seam (zero-width, compatibility and look-alike characters folded,
+    review minor 6); ``{slot}`` placeholders survive it unchanged."""
+    return _WS.sub(" ", normalise_for_matching(text).strip())
 
 
 def _pattern(template_text: str) -> re.Pattern[str]:

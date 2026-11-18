@@ -24,6 +24,7 @@ from agent_16_compliance_qa.config import Lexicon
 from agent_16_compliance_qa.judge.frames import apply_frames
 from agent_16_compliance_qa.judge.models import (
     FramesOutput,
+    ItemClaim,
     ParaphraseInput,
     ParaphraseOutput,
     PolicyInput,
@@ -32,6 +33,7 @@ from agent_16_compliance_qa.judge.models import (
 )
 from agent_16_compliance_qa.judge.paraphrase import QuotationApproval, apply_paraphrase
 from agent_16_compliance_qa.judge.quality import apply_quality
+from agent_16_compliance_qa.prefilter import select_rules
 from agent_16_compliance_qa.scoring.rubric import Criterion
 from amw_core.enums import ApprovalChannel, ApprovalState, ComplianceVerdict, QualityDimension
 from amw_evals.adapter import FakeAdapter, LlmResponse
@@ -42,6 +44,7 @@ from tests.agents.agent_16_compliance_qa.support import (
     REPO,
     case_ids,
     cases,
+    config,
     evidence_mapping,
 )
 
@@ -106,8 +109,77 @@ def recorded_policy(case: dict[str, Any], all_clean: bool = False) -> dict[str, 
 def run_policy(case: dict[str, Any], reply: dict[str, Any]) -> tuple[ComplianceVerdict, Any]:
     inp = PolicyInput.model_validate(case["input"])
     check = post_check(inp, PolicyOutput.model_validate(reply))
-    results = evaluate_policy(inp, check, LEX, {})
+    lex = config().prefilter_lexicon(case["input"]["language"])
+    results = evaluate_policy(inp, check, lex, {})
     return policy_verdict(results), (check, results)
+
+
+def prefiltered(case: dict[str, Any]) -> dict[str, Any]:
+    """The case as the gate builds it (review M5): the REAL pre-filter (configured lexicons,
+    merged per item) selects the items and their ``rules_to_check``; an item without a signal
+    is not sent. The dataset's own ``rules_to_check`` are not used here."""
+    inp = case["input"]
+    lex = config().prefilter_lexicon(inp["language"])
+    active = frozenset(inp["active_rule_ids"])
+    items = []
+    for it in inp["items"]:
+        claims = [ItemClaim.model_validate(c) for c in it["claims"]]
+        rules = select_rules(it["text"], it["named_instruments"], claims, lex, active)
+        if rules:
+            items.append(it | {"rules_to_check": list(rules)})
+    return case | {"input": inp | {"items": items}}
+
+
+PREFILTER_GAPS = {
+    "EDGE-R6-04": "a percentage / money amount with no first- or second-person subject is not a "
+    "blueprint 6.2 signal; REQUIRES REVIEW (Phase 1): owner decides whether to widen the rule",
+}
+
+
+@pytest.mark.parametrize("case", CG, ids=case_ids(CG))
+def test_compliance_gate_case_through_the_prefilter(case: dict[str, Any]) -> None:
+    """End to end as in production: pre-filter -> recorded judge reply -> post-check ->
+    algebra. An item the pre-filter drops is never judged, so the verdict comes from what the
+    pre-filter sent (nothing sent and no refusal => ALLOWED)."""
+    if case["case_id"] in PREFILTER_GAPS:
+        pytest.xfail(PREFILTER_GAPS[case["case_id"]])
+    e = case["expected"]
+    pc = prefiltered(case)
+    if not pc["input"]["items"]:
+        assert e["refusal_reason"] or "ALLOWED" in e["verdict_in"], "pre-filter dropped it"
+        return
+    verdict, (check, _) = run_policy(pc, recorded_policy(pc))
+    if e["refusal_reason"] is None:
+        assert verdict.value in e["verdict_in"]
+        found = {k[1] for k, f in check.findings.items() if f.finding == "VIOLATION"}
+        sent = {r for i in pc["input"]["items"] for r in i["rules_to_check"]}
+        assert set(e["violation_required"]) & sent <= found
+
+
+@pytest.mark.parametrize("case_id", sorted(PREFILTER_GAPS))
+def test_listed_prefilter_gaps_are_real(case_id: str) -> None:
+    """A listed gap must still be a gap (remove it from the list once the lexicon covers it)."""
+    case = next(c for c in CG if c["case_id"] == case_id)
+    pc = prefiltered(case)
+    if pc["input"]["items"]:
+        verdict, _ = run_policy(pc, recorded_policy(pc))
+        assert verdict.value not in case["expected"]["verdict_in"]
+
+
+def test_prefilter_detects_marathi_hindi_and_hinglish() -> None:
+    """The mr / hi lexicons are real words (provisional), not English copies."""
+    lex = config().prefilter_lexicon("mr-IN")
+    active = frozenset({"FIN-R1", "FIN-R2", "FIN-R3", "FIN-R5", "FIN-R13", "YTG-R7"})
+    assert "FIN-R1" in select_rules("हा शेअर आत्ताच खरेदी करा", (), (), lex, active)
+    assert "FIN-R1" in select_rules("यह शेयर अभी खरीदो", (), (), lex, active)
+    assert "FIN-R1" in select_rules("Ye share abhi kharid lo", (), (), lex, active)
+    assert "FIN-R5" in select_rules("आमच्या ग्रुप मध्ये या", (), (), lex, active)
+    assert "YTG-R7" in select_rules("चला मुलांनो", (), (), lex, active)
+    assert {"FIN-R3", "FIN-R13"} <= set(
+        select_rules("निफ्टी उद्या वाढेल", ("निफ्टी",), (), lex, active)
+    )
+    en_only = config().lexicon("mr-IN")
+    assert "buy" not in en_only.imperative_verbs  # not a copy of the English lexicon
 
 
 @pytest.mark.parametrize("case", CG, ids=case_ids(CG))

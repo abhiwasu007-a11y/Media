@@ -65,6 +65,17 @@ class Lexicon(Model):
     live_format_terms: tuple[str, ...]
 
 
+_LEXICON_FIELDS: tuple[str, ...] = (
+    "future_markers",
+    "imperative_verbs",
+    "level_words",
+    "promotion_words",
+    "group_words",
+    "identity_markers",
+    "child_markers",
+    "person_markers",
+    "live_format_terms",
+)
 _REQUIRED: Mapping[str, str] = {
     "quality.publish_min_score": "publish_min_score",
     "quality.machine_scaling": "machine_scaling",
@@ -181,6 +192,20 @@ class Agent16Config(Model):
         if lex is None:
             raise ConfigInvalidError(f"no pre-filter lexicon configured for {language!r}")
         return lex
+
+    def prefilter_lexicon(self, language: str) -> Lexicon:
+        """The lexicon the pre-filter applies to EVERY item (review M5): the video language's
+        lexicon (required) merged with every other configured lexicon, so a code-mixed item
+        (Hinglish, an English sentence in a Marathi video, a Devanagari title) is matched by the
+        words of its own language, not by the video's tag. Merging only adds judge work."""
+        own = self.lexicon(language)
+        merged: dict[str, list[str]] = {f: list(getattr(own, f)) for f in _LEXICON_FIELDS}
+        for key in sorted(self.lexicons):
+            lex = self.lexicons[key]
+            for f in _LEXICON_FIELDS:
+                merged[f] += [w for w in getattr(lex, f) if w not in merged[f]]
+        versions = "+".join(sorted({own.version, *(x.version for x in self.lexicons.values())}))
+        return Lexicon.model_validate({"version": versions, **merged})
 
     def step(self, name: str) -> LlmStepConfig:
         cfg: LlmStepConfig | None = getattr(self, name)

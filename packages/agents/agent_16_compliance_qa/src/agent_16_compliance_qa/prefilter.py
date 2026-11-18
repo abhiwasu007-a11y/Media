@@ -11,6 +11,7 @@ from typing import Final
 
 from agent_16_compliance_qa.config import Lexicon
 from agent_16_compliance_qa.judge.models import ItemClaim
+from agent_16_compliance_qa.textnorm import normalise_for_matching
 
 _CLAIM_RULES: Final[Mapping[str, tuple[str, ...]]] = {
     "RECOMMENDATION": ("FIN-R1",),
@@ -20,13 +21,15 @@ _CLAIM_RULES: Final[Mapping[str, tuple[str, ...]]] = {
     "TESTIMONIAL": ("FIN-R7",),
     "PROMOTION": ("FIN-R8",),
 }
-_NUMBER = re.compile(r"\d")
-_MONEY_OR_PCT = re.compile(r"\d\s*%|%\s*\d|₹|\$|\brs\.?\s*\d|\d+\s*(?:lakh|crore)", re.IGNORECASE)
+_NUMBER = re.compile(r"[0-9]")
+_MONEY_OR_PCT = re.compile(
+    r"[0-9]\s*%|%\s*[0-9]|₹|\$|\brs\.?\s*[0-9]|[0-9]+\s*(?:lakh|crore|लाख|कोटी|करोड)",
+    re.IGNORECASE,
+)
 _URL = re.compile(r"https?://|www\.|\?ref=|utm_", re.IGNORECASE)
-
-
-def _norm(text: str) -> str:
-    return unicodedata.normalize("NFC", text).casefold()
+_norm = normalise_for_matching
+"""Every lexicon, number and money test runs on the normalised text (review B2); the money and
+number patterns see ASCII digits only because the seam maps every decimal digit."""
 
 
 def contains_any(text: str, words: Iterable[str]) -> bool:
@@ -57,6 +60,7 @@ def select_rules(
 ) -> tuple[str, ...]:
     """Rule IDs (sorted) the item must be judged against; empty = not a judge candidate."""
     instruments = [n for n in named_instruments if n]
+    text = _norm(text)
     rules: set[str] = set()
     for c in claims:
         rules.update(c.rule_flags)

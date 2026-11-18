@@ -135,7 +135,7 @@ class GateDecision(Model):
 def _local_items(
     inputs: GateInputs, packs: LoadedPacks, cfg: Agent16Config
 ) -> tuple[list[PolicyItem], dict[str, str]]:
-    lexicon = cfg.lexicon(inputs.language)
+    lexicon = cfg.prefilter_lexicon(inputs.language)
     active = packs.active_rule_ids
     items: list[PolicyItem] = []
     refs: dict[str, str] = {}
@@ -256,7 +256,9 @@ class ComplianceGate:
             check = post_check(batch, out)
             quote_failures += check.quote_failures
             injection += [refs[i] for i in check.injection_items]
-            for r in evaluate_policy(batch, check, self._cfg.lexicon(inp.language), severities):
+            for r in evaluate_policy(
+                batch, check, self._cfg.prefilter_lexicon(inp.language), severities
+            ):
                 judged.append(
                     r.model_copy(update={"item_refs": tuple(refs.get(i, i) for i in r.item_refs)})
                 )

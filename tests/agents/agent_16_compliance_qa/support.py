@@ -41,11 +41,67 @@ EN_LEXICON: dict[str, Any] = {
     ],
     "level_words": ["target", "stop", "strike", "level"],
     "promotion_words": ["link", "code", "broker", "sponsor", "sponsored", "open an account"],
-    "group_words": ["group", "membership", "tips", "daily calls"],
+    "group_words": ["group", "membership", "members", "tips", "daily calls", "alerts"],
     "identity_markers": ["i am", "your host"],
     "child_markers": ["nursery", "cartoon", "kids", "children", "little friends"],
     "person_markers": ["i", "my", "you", "your", "we", "our", "students"],
     "live_format_terms": ["live trading", "live session", "live"],
+}
+
+# PROVISIONAL, REQUIRES REVIEW (Phase 1): Marathi / Hindi / Hinglish completeness and wording
+# must be confirmed by the owner or a linguist (OI-6). Real words of each language, not copies of
+# the English lexicon (review M5); config in production (compliance.prefilter.lexicon.<lang>).
+MR_LEXICON: dict[str, Any] = {
+    "version": "lex.mr.provisional.1",
+    "future_markers": ["होईल", "वाढेल", "जाईल", "उद्या", "पुढच्या आठवड्यात", "लवकरच", "नक्की"],
+    "imperative_verbs": [
+        "खरेदी करा",
+        "विकत घ्या",
+        "विका",
+        "होल्ड करा",
+        "एन्ट्री घ्या",
+        "बाहेर पडा",
+        "टाळा",
+    ],
+    "level_words": ["टार्गेट", "लक्ष्य", "स्टॉप लॉस", "स्ट्राइक", "पातळी", "लेव्हल"],
+    "promotion_words": ["लिंक", "कोड", "ब्रोकर", "प्रायोजित", "खाते उघडा"],
+    "group_words": ["ग्रुप", "समूह", "सदस्यत्व", "टिप्स", "रोजचे कॉल"],
+    "identity_markers": ["मी आहे", "तुमचा होस्ट", "मार्गदर्शक", "निवेदक", "सूत्रसंचालक"],
+    "child_markers": ["मुलांसाठी", "मुलांनो", "बालगीत", "कार्टून", "बालमित्र"],
+    "person_markers": ["मी", "माझा", "माझे", "आम्ही", "तुम्ही", "आमचे", "विद्यार्थी"],
+    "live_format_terms": ["लाइव्ह ट्रेडिंग", "लाइव्ह"],
+}
+HI_LEXICON: dict[str, Any] = {
+    "version": "lex.hi.provisional.1",
+    "future_markers": [
+        "होगा",
+        "बढ़ेगा",
+        "जाएगा",
+        "अगले हफ्ते",
+        "जल्द",
+        "hoga",
+        "badhega",
+        "jayega",
+        "pakka",
+    ],
+    "imperative_verbs": [
+        "खरीदो",
+        "खरीदें",
+        "बेचो",
+        "बेचें",
+        "होल्ड करो",
+        "kharid lo",
+        "khareedo",
+        "becho",
+        "le lo",
+    ],
+    "level_words": ["टारगेट", "लक्ष्य", "स्टॉप लॉस", "स्ट्राइक", "स्तर", "लेवल"],
+    "promotion_words": ["लिंक", "कोड", "ब्रोकर", "प्रायोजित", "खाता खोलें"],
+    "group_words": ["ग्रुप", "सदस्यता", "टिप्स", "रोज़ के कॉल"],
+    "identity_markers": ["मैं हूँ", "आपका होस्ट"],
+    "child_markers": ["बच्चों", "बच्चो", "बाल गीत", "कार्टून"],
+    "person_markers": ["मैं", "मेरा", "मेरे", "हम", "आप", "हमारा", "छात्र", "maine", "mera"],
+    "live_format_terms": ["लाइव ट्रेडिंग", "लाइव"],
 }
 
 BASE_CONFIG: dict[str, Any] = {
@@ -62,8 +118,8 @@ BASE_CONFIG: dict[str, Any] = {
     "uniqueness.cross_video.skip_below_prior_count": 3,
     "agent_16.llm.fallback_on_unavailable": False,
     "compliance.prefilter.lexicon.en": EN_LEXICON,
-    "compliance.prefilter.lexicon.mr": EN_LEXICON | {"version": "lex.mr.test.1"},
-    "compliance.prefilter.lexicon.hi": EN_LEXICON | {"version": "lex.hi.test.1"},
+    "compliance.prefilter.lexicon.mr": MR_LEXICON,
+    "compliance.prefilter.lexicon.hi": HI_LEXICON,
 }
 for _step in (
     "compliance_gate.policy",

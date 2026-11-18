@@ -547,3 +547,53 @@ def test_prefilter_signals_select_rules_and_never_clear() -> None:
     assert "FIN-R1" not in set(select_rules("Buy this now", (), (), lex, frozenset(YTG)))
     assert contains_any("मंजूर आहे", ["मंजूर"]) and not contains_any("x", ["", "y"])
     assert quote_verified("abc", "xabcx") and not quote_verified(None, "abc")
+
+
+def _silent(_: Any) -> PolicyOutput:
+    return PolicyOutput(findings=(), frame_tests=(), injection_suspected=(), refusal=None)
+
+
+EVASIONS = [
+    "B\u200buy this stock now",  # zero-width space
+    "\uff42\uff55\uff59 this stock now",  # full-width
+    "bu\u00ady this stock now",  # soft hyphen
+    "b\u057dy this stock now",  # Armenian look-alike u
+    "bu\u0443 this stock now",  # Cyrillic look-alike y
+    "\U0001d41b\U0001d42e\U0001d432 this stock now",  # mathematical bold
+    "B\u200du\u2060y this stock now",  # zero-width joiner + word joiner
+    "Join our gr\u200boup for daily c\u200balls",
+    "\ufeffSELL this stock now",
+]
+
+
+@pytest.mark.parametrize("text", EVASIONS)
+def test_prefilter_evasions_reach_the_judge_and_a_silent_judge_never_allows(text: str) -> None:
+    """Review B2: with a silent judge (no finding = doubt) every evasion still reaches the judge
+    and the gate verdict is NEEDS_HUMAN_REVIEW, never ALLOWED."""
+    calls = Calls(_silent)
+    item = SourceItem(ref="x1", surface="SCRIPT_SEGMENT", text=text)
+    d = gate(calls).evaluate(clean_inputs(items=[item]))
+    assert any(i.text == text for b in calls.batches for i in b.items)
+    assert d.verdict is not ComplianceVerdict.ALLOWED
+
+
+def test_devanagari_digits_and_nukta_are_matched() -> None:
+    from agent_16_compliance_qa.prefilter import select_rules
+    from agent_16_compliance_qa.textnorm import normalise_for_matching as norm
+
+    assert norm("१२३") == "123" and norm("क़") == norm("क") and norm("सँ") == norm("सं")
+    assert norm(norm("\uff42\u200b\uff55y")) == norm("\uff42\u200b\uff55y") == "buy"
+    lex = config().prefilter_lexicon("mr-IN")
+    rules = select_rules("मी १८% कमावले", (), (), lex, frozenset({"FIN-R6", "FIN-R7"}))
+    assert set(rules) == {"FIN-R6", "FIN-R7"}
+    assert "FIN-R2" in select_rules(
+        "NIFTY टार्गेट २४,५००", ("NIFTY",), (), lex, frozenset({"FIN-R2"})
+    )
+
+
+def test_uniqueness_masked_identity_ignores_zero_width_characters() -> None:
+    from agent_16_compliance_qa.uniqueness import Segment, masked_identical
+
+    template = [Segment(section_role="HOOK", text="Today we learn {topic} in five steps.")]
+    script = [Segment(section_role="HOOK", text="To\u200bday we le\u00adarn gaps in five steps.")]
+    assert masked_identical(script, template)
