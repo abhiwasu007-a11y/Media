@@ -11,7 +11,7 @@
 | Shared docs referenced by name/§ only | agent_09_video_director.md (§6.6 tier plan, §8.1–§8.2 shot plan and `views.agent_08_shots[]`; written in parallel, alignment confirmed at integration), 18_PRODUCTION_QUALITY_STANDARD.md §2 (hierarchy, per-shot licence record, sourcing checks), §7.9–§7.10, §13; 13_COMPLIANCE_YOUTUBE_POLICY.md §1.3, §5 (FIN-R9, FIN-R12, FIN-R13), YTG-R6; 09_COST_AND_BUDGET.md; 08_SECURITY.md §3, §5.3, §8; 3A_SLICE_SPEC.md §2.3, §3, §12 (R2, R3, R17); ADR-005 (storage), ADR-007 (LLM routing), ADR-009 (visual and music sourcing), ADR-012 (worker placement); agent_05_scriptwriter.md (`chart_requests`, `scenes[].visual_intent`), agent_06_fact_checker.md (D3 chart data age) |
 | Facts cited | RESEARCH_LOG IN-02 (30-day price-data lag), IN-03 (no direction for a named security, even on historical data), PR-06 / PR-06d/e (Storyblocks plans and licence; monetization and whitelisting NOT CONFIRMED), PR-07 (other vendors, headline only), YT-06 / YT-07 (synthetic-media disclosure), PR-01 / PR-02 / PR-03 (models, batch and caching, API vs subscription), INF-03 / INF-04 (resource caps), INF-09 (FFmpeg QC filters), INF-10 (YouTube bitrate floors), INF-11 (RLS) |
 | Marking | Every section states its **MVP** in the first line: 3A / 3B / 3C (owner build stages of D1) and Tier 0–3 (GLOSSARY §6.47) |
-| Conventions | Every contract item this blueprint needed is decided in CONTRACT_CHANGE_REQUESTS.md (§5, "Resolved for blueprint 08") and is used here under its real name; no `(pending CCR)` marker remains. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. `3A-BLOCKING` marks an item that changes a 3A design decision. Config key names are registered through the registry of 18 §13 (CCR-019). No private method, book, course or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config and the SEBI price-data lag filter, which is a compliance filter and never part of chart reading. |
+| Conventions | Every contract item this blueprint needed is decided in CONTRACT_CHANGE_REQUESTS.md (§5, "Resolved for blueprint 08") and is used here under its real name; no pending-contract marker remains. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. `3A-BLOCKING` marks an item that changes a 3A design decision. Config key names are registered through the registry of 18 §13 (CCR-019). No private method, book, course or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config and the SEBI price-data lag filter, which is a compliance filter and never part of chart reading. |
 
 ---
 
@@ -62,7 +62,7 @@ Agent 08 never edits the shot plan or the script and never approves, publishes o
 ---
 
 ## 2 Functional requirements
-**MVP: each row states its own stage. Tier 0 unless stated.**
+**MVP: 3A for every row unless the row states 3B or 3C (FR-08/FR-09 live adapters, FR-23 music). Tier 0 unless stated.**
 
 ### 2.1 Task type
 | Task type (24 §3.2) | Stage | Class | Required capabilities | Output | MVP |
@@ -260,7 +260,7 @@ Agent 08 has **two LLM steps**. Their real prompt text lives in the versioned pr
 |---|---|---|---|---|---|---|---|
 | `query_plan` | `agent_08/query_plan.v1` | [prompts/agent_08_visual_assets/query_plan.v1.md](../prompts/agent_08_visual_assets/query_plan.v1.md) | `agent_08.asset_sourcing` | for each footage shot: English stock queries, owner-library queries in the script language, avoid list; refuse the shot when the picture can only be a real person, a real event, a market-data visual or direction imagery on a finance channel, a banned subject, or when the intent is vague or an instruction | `agent_08.asset_sourcing.query_plan.input` 1.0.0 → `….query_plan.output` 1.0.0 | `SMALL` (ADR-007; confirmed or raised by the eval gate) | [evals/agent_08_visual_assets/query_plan/](../evals/agent_08_visual_assets/query_plan/README.md) (29 cases) |
 | `candidate_rank` | `agent_08/candidate_rank.v1` | [prompts/agent_08_visual_assets/candidate_rank.v1.md](../prompts/agent_08_visual_assets/candidate_rank.v1.md) | `agent_08.asset_sourcing` | for one shot and at most 12 candidates (owner library or stock) that already passed the deterministic filters: fit (`STRONG`/`ACCEPTABLE`/`WEAK`/`REJECT`), reason codes and a short rationale from metadata only; ordered list | `agent_08.asset_sourcing.candidate_rank.input` 1.0.0 → `….candidate_rank.output` 1.0.0 | `SMALL` | [evals/agent_08_visual_assets/candidate_rank/](../evals/agent_08_visual_assets/candidate_rank/README.md) (30 cases) |
-Deterministic dataset for everything else: [evals/agent_08_visual_assets/deterministic_core/](../evals/agent_08_visual_assets/deterministic_core/README.md) (139 cases).
+Deterministic dataset for everything else: [evals/agent_08_visual_assets/deterministic_core/](../evals/agent_08_visual_assets/deterministic_core/README.md) (184 cases).
 
 ### 5.1 What both prompts have in common (summary; the files are normative)
 - **Role boundary.** Each prompt names what the model may not decide: tier, licence, price, purchase, download, compliance verdict. Output is one JSON object that validates against the schema in the file (which equals the Pydantic model, 27 §4.4) and includes the `refusal` object (27 §4.3).
@@ -303,7 +303,7 @@ A released prompt is immutable. Any change is `v2` plus a run of the eval gate (
 | D20 | Ledger rows of the overlay track and brand fonts | code (`TimelineLedgerPlanner`, `LedgerRowBuilder`) | 18 §2.2 any-track rule; CCR-031 |
 
 ### 6.2 Why the split
-- Safety and compliance arithmetic (lag, overlays, licences, spend, tenancy) is deterministic, unit-tested and measured by `deterministic_core` (139 cases). A model's wrong answer can cost relevance, never a licence or a compliance rule: `SafetyFloor` forces `REJECT` on any reject-class reason code and `a08.r.*` rejects ordering errors.
+- Safety and compliance arithmetic (lag, overlays, licences, spend, tenancy) is deterministic, unit-tested and measured by `deterministic_core` (184 cases). A model's wrong answer can cost relevance, never a licence or a compliance rule: `SafetyFloor` forces `REJECT` on any reject-class reason code and `a08.r.*` rejects ordering errors.
 - The two language steps are small, bounded and cheap (starting tier `SMALL`, ADR-007) and run only for footage shots that reach tier A/B. A text-only run (charts, graphics) uses no model.
 - Candidate review uses metadata only. Looking at the pixels (preview frames) is not in v1: it would add a vision call per candidate and a new failure mode; it is a 3B option and, if added, a new prompt version with its own cases (candidate_rank README §8). The human final approval (S7) and `qc.watermark.visual` (18 §7.10) are the visual backstops.
 
@@ -1504,12 +1504,13 @@ agent_08_visual_assets/
 ├── protocol.py                # AssetSourcingStage Protocol (stage interface)
 ├── models/                    # Pydantic models = the JSON Schemas of §7, §8 and the two prompt files
 │   ├── task_input.py  task_output.py  shot_requirement.py  shot_result.py
-│   ├── query_plan.py  candidate_rank.py  chart.py  licence.py  enums.py   # payload-local enums: skip/unresolved reasons, warnings
+│   ├── query_plan.py  candidate_rank.py  chart.py  licence.py  enums.py   # mirrors of the GLOSSARY §6.52 value sets (visual_skip_reason, shot_unresolved_reason, sourcing_warning, ...)
 ├── stage.py                   # AssetSourcingStage: orchestrates S0…S8 (§16), checkpoints, validation
 ├── plan/
 │   ├── shot_plan_reader.py    # ShotPlanReader (anti-corruption mapper, Agent 09 output -> ShotRequirement)
 │   ├── script_context.py      # ScriptContextReader (chart_requests, on_screen_text allowlists, method labels)
-│   └── intent.py              # IntentClassifier (D1)
+│   ├── intent.py              # IntentClassifier (D1)
+│   └── revision.py            # ChangedShotSelector (FR-20)
 ├── cascade/
 │   ├── tier_cascade.py        # TierCascade (D2), skip-reason bookkeeping, hierarchy re-check
 │   ├── selection.py           # SafetyFloor, TieBreaker, CandidateFilters (D8-D10)
@@ -1519,12 +1520,14 @@ agent_08_visual_assets/
 │   ├── stock.py               # StockSource (tier B): search, filter, license, download
 │   ├── graphics.py            # GraphicTemplateRenderer (tier C: kinetic text, diagram, title card)
 │   ├── ai_video.py            # AiVideoSource, AiBudgetGate, AiPromptComposer (tier D)
-│   └── image.py               # ImageGenSource (tier E)
+│   ├── image.py               # ImageGenSource (tier E)
+│   └── music.py               # MusicSource (3B, capability music_search; fake only in 3A)
 ├── charts/
 │   ├── dataset.py             # DatasetLoader (hash check, bar parsing), BarSeries
 │   ├── lag.py                 # ChartLagGuard, EarliestPublishDate
 │   ├── cases.py               # ChartCaseLibrary (match), ChartCase
 │   ├── spec.py                # ChartSpecBuilder, ChartSpecHasher
+│   ├── facts.py               # ChartFactsBuilder (agent_08.chart_facts)
 │   ├── annotations.py         # AnnotationValidator
 │   └── render.py              # ChartRenderer (deterministic), RevealSequence
 ├── llm/
@@ -1535,6 +1538,7 @@ agent_08_visual_assets/
 │   ├── resolver.py            # LicenceResolver (self-grant rows, vendor licences)
 │   ├── guard.py               # LicenceGuard, LicenceWarning
 │   ├── ledger.py              # LedgerRowBuilder, LedgerWriter, CoverageVerifier
+│   ├── timeline.py            # TimelineLedgerPlanner (overlay TEMPLATE rows, whole-timeline FONT rows)
 │   └── disclosure.py          # DisclosureFlags
 ├── reuse/
 │   ├── fingerprint.py         # Fingerprinter, FingerprintDHash, hamming()
@@ -1544,7 +1548,8 @@ agent_08_visual_assets/
 │   ├── licences.py            # LicenceRepository (read only)
 │   ├── ledger.py              # LicenceLedgerRepository (only module that writes licence_ledger)
 │   └── fingerprints.py        # FingerprintRepository
-├── registrar.py               # AssetRegistrar (library code for owner material, datasets, chart cases; called by the app, not a task)
+├── gate.py                    # GateRouter (gate result and remedy stage, §18)
+├── registrar.py               # AssetRegistrar (library code for owner material, datasets, chart cases; called by the app, not a task) and SourceIntakeGuard (R20)
 ├── budget.py                  # BudgetGate (S4 reservations, cost rows)
 ├── checkpoint.py              # CheckpointManager
 ├── memory.py                  # SourcingMemory (memory_items TASK scope)
@@ -1557,6 +1562,7 @@ agent_08_visual_assets/
 | Protocol | Provided by | Used by | Notes |
 |---|---|---|---|
 | `LlmPort` | `amw_adapters/llm` | `QueryPlanner`, `CandidateRanker` | `complete(request, idempotency_key) -> LlmResult`; cost capture and S4 reservation inside the wrapper (ADR-007) |
+| `MusicPort` | `amw_adapters/music` | `MusicSource` (3B) | `search(request) -> list[MusicItem]`, `license_and_download(item_id, idempotency_key) -> DownloadResult`; capability `music_search`; fake only until the owner's licensed-source decision (D6, CCR-007) |
 | `StockFootagePort` | `amw_adapters/stock_footage` | `StockSource` | `search(query, filters) -> list[VendorItem]`, `license_and_download(item_id, idempotency_key) -> DownloadResult`, `terms_snapshot() -> TermsSnapshot`; never returns a preview as a download |
 | `VideoGenPort` | `amw_adapters/video_gen` | `AiVideoSource` | `generate(prompt, duration_ms, aspect, idempotency_key) -> GenResult`; fake only in 3A |
 | `ImageGenPort` | `amw_adapters/image` | `ImageGenSource` | fake only in 3A/3B |
@@ -1588,7 +1594,13 @@ agent_08_visual_assets/
 | `LicenceResolver`, `LicenceGuard`, `DisclosureFlags` | read licences, D11, YT-06/07 flags | yes (repository injected) |
 | `LedgerRowBuilder`, `LedgerWriter`, `CoverageVerifier` | rows, writes (idempotent), coverage rule of 18 §7.9 | builder and verifier yes |
 | `Fingerprinter`, `ReuseEngine`, `ReusePolicy` | §6.9–§6.10 | yes (hash, distance); engine reads repositories |
-| `AssetRegistrar` | owner material and data intake (human actor) | no |
+| `AssetRegistrar` | owner material and data intake (human actor, operator tool) | no |
+| `SourceIntakeGuard` | dataset intake limits of R20: actor, operator tool, source class, read-only | yes |
+| `ChartFactsBuilder` | chart facts from the dataset window (§6.4(9)) | yes |
+| `TimelineLedgerPlanner` | rows for overlay intervals and whole-timeline fonts | yes |
+| `GateRouter` | gate result, `gate_verdict`, remedy stage or owner-material failure (§18) | yes |
+| `ChangedShotSelector` | which shots a revision iteration re-sources (FR-20) | yes |
+| `MusicSource` (3B) | music bed search, licensed download, registration | no (I/O) |
 | `BudgetGate` | reservation, cost rows, refusal to `RESOURCE.BUDGET_EXHAUSTED` | no |
 | `CheckpointManager`, `SourcingMemory` | checkpoints and TASK memory | no |
 | `AdapterErrorMapper` | provider outcome to a 07 code | yes |
@@ -1597,7 +1609,7 @@ agent_08_visual_assets/
 ---
 
 ## 10 Function-level specification
-**MVP: 3A. Each signature is the Protocol-level contract; Pydantic types come from `models/`. Exceptions are the typed errors of `errors.py` mapped to 07 §2 (§18). Every function logs through `amw_core.observability` with `org_id`, `correlation_id`, `job_id`, `task_id`, `attempt_id`, `actor = agent_08` and never logs content (§22). "Tests" cite IDs of §21 and case prefixes of the deterministic dataset.**
+**MVP: 3A (3B for `MusicSource` and the live AI adapters) · Tier 0. Each signature is the Protocol-level contract; Pydantic types come from `models/`. Exceptions are the typed errors of `errors.py` mapped to 07 §2 (§18). Every function logs through `amw_core.observability` with `org_id`, `correlation_id`, `job_id`, `task_id`, `attempt_id`, `actor = agent_08` and never logs content (§22). "Tests" cite IDs of §21 and case prefixes of the deterministic dataset.**
 
 ### 10.1 Orchestration and guards
 | Function | Signature | Side effects | Exceptions | Validation | Tests |
@@ -1605,6 +1617,7 @@ agent_08_visual_assets/
 | `AssetSourcingStage.run` | `run(task: TaskInput, ctx: TenantContext) -> TaskOutput` | DB writes, blob writes, adapter calls, checkpoints, cost rows, audit | any `AgentError` subclass | §7.4 first | I-01…I-12, F-*, E-01 |
 | `TenantGuard.check_task` | `check_task(task, ctx, uris: Sequence[str], write: bool) -> None` | security event on violation | `TenantMismatch`, `CrossTenantRef`, `InputInvalid`, `PermissionDenied` | org IDs equal; URI org equals context or `platform` (read-only); no `..`/absolute segments; ID prefixes | S-01…S-04, `TG-*` |
 | `TenantGuard.entity_not_visible` | `entity_not_visible(kind: str, wire_id: str) -> MissingDependency` | audit event with caller org only | — | message identical for foreign and missing IDs | S-03, `TG-08` |
+| `GateRouter.route` | `route(unresolved: Sequence[Unresolved], script_stage_id: str) -> GateOutcome` | none | none | no unresolved shot → gate `PASS`; any owner-material reason (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`) → task `FAILED` `PERMANENT.MISSING_DEPENDENCY` (no gate result); otherwise gate `FAIL` with `remedy_stage_id = script_stage_id` if a `DATA_WITHIN_LAG` shot is present, else `s09_plan` (§18) | `GR-01…GR-10`, I-13 |
 | `CheckpointManager.save` | `save(step_key: str, state: StepState, completed_effects: Sequence[str], progress: Decimal) -> CheckpointRef` | `checkpoints` row (`is_latest`), state blob | `StorageUnavailable`, `TransientDb` | state is JSON, hashed; `seq` monotone | I-03, F-06 |
 | `CheckpointManager.resume` | `resume() -> StepState or None` | none | hash verified | `CorruptedOutput` | F-06, `CR-*` |
 | `BudgetGate.reserve` | `reserve(kind: Literal["llm","stock","ai_video","ai_still"], amount_micros: int, idem: IdempotencyKey) -> Reservation` | S4 reservation (`budget_reservations`) | `BudgetExhausted` -> `RESOURCE.BUDGET_EXHAUSTED` | amount ≥ 0; currency matches; checks per-video and pilot rows (D1) | I-07, F-08 |
@@ -1635,12 +1648,13 @@ agent_08_visual_assets/
 | `AnnotationValidator.validate` | `validate(spec: ChartSpec, last_bar_index: int, allow: Allowlist) -> None` | none | `AnnotationRejected` (-> shot unresolved, check `a08.chart.annotations` FAIL) | §6.4(5) | `AN-01…AN-07` |
 | `ChartSpecHasher.hash` | `hash(spec: ChartSpec) -> Sha256` | none | none | canonical JSON (sorted keys, no whitespace) | `CH-01…CH-05` |
 | `ChartRenderer.render` | `render(spec: ChartSpec) -> RenderedChart` | none (bytes returned) | `RenderFailed` -> `AGENT.CRASH` | deterministic; stripped metadata; text shaping for Devanagari | U-12, U-13 |
+| `ChartFactsBuilder.build` | `build(chart_kind, timeframe, window: BarSeries) -> ChartFacts` | none (the stage writes the document blob) | none | facts `f01…f04` of §6.4(9); `SCHEMATIC` returns no document; decimals only, half-up rounding | `CF-01…CF-05`, U-24 |
 
 ### 10.4 Footage tiers (A, B)
 | Function | Signature | Side effects | Exceptions | Validation | Tests |
 |---|---|---|---|---|---|
 | `QueryPlanner.plan` | `plan(shots: Sequence[ShotRequirement], ctx) -> dict[ShotId, QueryPlan]` | LLM call(s), cost rows, memory write | `InvalidJson`, `OutputSchemaInvalid`, `BudgetExhausted`, provider errors | batch ≤ `assets.llm.query_plan.batch_shots`; post-checks `a08.q.*` (coverage, limits, digits, banned, status consistency, injection scan); the code adds the mandatory avoid subjects | U-14, I-05, R-01 |
-| `OwnerLibrarySource.search` | `search(plan: QueryPlan, shot, ctx) -> list[Candidate]` | DB read | `TransientDb` | tenant and channel predicates; keyword match over `assets.title` and attributes (pending CCR); §6.5 filters | U-15, S-07 |
+| `OwnerLibrarySource.search` | `search(plan: QueryPlan, shot, ctx) -> list[Candidate]` | DB read | `TransientDb` | tenant and channel predicates; keyword match over `assets.title` and `assets.attributes` (`tags[]`, `description`; CCR-032); §6.5 filters | U-15, S-07 |
 | `StockSource.search` | `search(plan: QueryPlan, shot, ctx) -> list[Candidate]` | adapter search (bounded by `assets.max_search_requests_per_shot`), cache write | provider errors, `CircuitOpen` | queries contain no tenant data; results filtered by §6.5; preview-only dropped | U-16, F-05 |
 | `CandidateRanker.rank` | `rank(shot, cands: Sequence[Candidate], ctx) -> RankResult` | LLM call, cost row | as `plan` | ≤ 12 candidates; aliases mapped; post-checks `a08.r.*`; `SafetyFloor` then `TieBreaker` | U-17, I-06, R-02 |
 | `StockSource.acquire` | `acquire(item: Candidate, shot, ctx) -> AcquiredAsset` | S4 reservation, licensed download (idempotency `stock.license`), blob write, probe, fingerprints, `assets` insert, cost row (when the plan charges per item) | `BudgetExhausted`, `CandidateGone` (dropped, not an error), provider errors, `CorruptedOutput` | download only through the licensed path; size and type limits; probe success; hash recorded; no preview | I-06, F-07 |
@@ -1660,15 +1674,18 @@ agent_08_visual_assets/
 |---|---|---|---|---|---|
 | `LicenceResolver.resolve` | `resolve(source_type: str, ctx, vendor: str or None) -> LicenceHandle` | DB read | `MissingDependency` (names the missing standing row) | the tenant's own self-grant row for `OWNER_MADE`, `CODE_GENERATED`, `FONT`; vendor licences by key | U-18, I-10 |
 | `LicenceGuard.check` | `check(lic: LicenceHandle, dest: Destination, tenant: TenantRef, now: datetime, warn_window_days: int) -> GuardResult` | none | none | §6.6 | `LG-01…LG-12` |
-| `LedgerRowBuilder.build` | `build(shot, asset, lic, job_id, task_id) -> LedgerRow` | none | `MissingDependency` (no licence) | `usage_kind` by tier (`SHOT`, `IMAGE`, `AI_OUTPUT`, `FONT`/`TEMPLATE` whole-render), interval from the shot, `render_id` NULL at sourcing | `LB-01…LB-06` |
-| `LedgerWriter.write` | `write(row: LedgerRow, idem: IdempotencyKey) -> LedgerEntryId` | append-only insert (the 04 insert guard runs again in the DB), `idempotency_keys` | `GuardViolation` (DB trigger) -> `AGENT.QUALITY_REPEATED_FAILURE` after cap, `TransientDb` | key `db.output` natural key `[task_id, "licence_ledger:" + shot_id]` | I-02, F-02 |
-| `CoverageVerifier.verify` | `verify(elements, rows) -> CoverageResult` | none | none | one row must cover each element (18 §7.9) | `CV-01…CV-05` |
+| `LedgerRowBuilder.build` | `build(element, asset, lic, job_id, task_id) -> LedgerRow` | none | `MissingDependency` (no licence) | `usage_kind` by tier (`SHOT`, `IMAGE`, `AI_OUTPUT`, `TEMPLATE` for an overlay interval, `FONT` whole-timeline, `MUSIC_BED` in 3B), interval from the shot or overlay (whole timeline for font and music), `shot_id` = the shot or overlay id (NULL for font and music), `render_id` NULL at sourcing; `LedgerRowBuilder.build(element, asset, lic, job_id, task_id)` | `LB-01…LB-06` |
+| `LedgerWriter.write` | `write(row: LedgerRow, idem: IdempotencyKey) -> LedgerEntryId` | append-only insert (the 04 insert guard runs again in the DB), `idempotency_keys` | `GuardViolation` (DB trigger) -> `AGENT.QUALITY_REPEATED_FAILURE` after cap, `TransientDb` | key `db.output` natural key `[task_id, "licence_ledger:" + shot_id]` and the table key `UNIQUE NULLS NOT DISTINCT (org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)` (04 §5.15, CCR-030) | I-02, F-02 |
+| `CoverageVerifier.verify` | `verify(elements, rows) -> CoverageResult` | none | none | one row must cover each element (shots, overlays, fonts); a row covers when `asset_id` matches, the interval covers, and `render_id = R` or (`render_id IS NULL` and `job_id = J`) (18 §7.9, CCR-030) | `CV-01…CV-05` |
 | `FingerprintDHash.compute` | `compute(grid: LumaGrid9x8) -> bytes` | none | `InputInvalid` | §6.10 | `FP-01…FP-07` |
 | `Fingerprinter.fingerprint` | `fingerprint(blob, kind) -> FingerprintSet` | probe and frame sampling | `RenderFailed`, `InputInvalid` | n frames from config; stills 1 | U-19 |
 | `ReuseEngine.lookup` | `lookup(req: ReuseRequest, ctx) -> ReuseDecision` | DB reads | `TransientDb` | §6.9; tenant predicate always | `RE-01…RE-10`, S-08 |
 | `AssetRepository.insert` | `insert(asset: NewAsset, ctx) -> AssetId` | `assets` insert (`UNIQUE (org_id, content_sha256)` makes it idempotent: a conflict returns the existing row) | `TransientDb`, `CheckViolation` -> `InputInvalid` | `visual_source_tier` set for VIDEO/IMAGE/CHART; `licence_id` set unless owner/code | I-02 |
 | `AssetRegistrar.register_owner_asset` | `register_owner_asset(file: BlobRef, meta: OwnerMeta, actor: UserRef, ctx) -> AssetId` | blob, probe, fingerprints, `assets` insert (`source_type OWNER_MADE`), audit row | `InputInvalid`, `PermissionDenied` | human actor required; hash; size and type limits; people present ⇒ `release_ref` required or flagged | I-11, S-09 |
-| `AssetRegistrar.register_dataset` / `register_chart_case` | `(file, meta, actor, ctx) -> AssetId` | as above, `kind = DOCUMENT`; extracts `data_start_date`, `data_end_date`, bars count into attributes (pending CCR) | `InputInvalid` | dataset schema (decimal OHLC, ISO dates, ascending); case schema (bar indexes, allowed annotation kinds); `method_content` ⇒ release approval id | I-11, U-06 |
+| `AssetRegistrar.register_dataset` / `register_chart_case` | `(file, meta, actor, ctx) -> AssetId` | as above, `kind = DOCUMENT`; extracts `data_start_date`, `data_end_date`, bars count and `instrument` into `assets.attributes` (CCR-032) and records `source_path_class` | `InputInvalid`, `PermissionDenied` | `SourceIntakeGuard.check` first (below); dataset schema (decimal OHLC, ISO dates, ascending); case schema (bar indexes, allowed annotation kinds); `method_content` ⇒ release approval id | I-11, I-15, U-06 |
+| `SourceIntakeGuard.check` | `check(actor: ActorRef, via_operator_tool: bool, source_class: str, access: Literal["READ","WRITE"]) -> IntakeDecision` | audit row (accepted or rejected) | `PermissionDenied`, `InputInvalid` | actor is human and the call comes through the operator tool (D5); `source_class` is the owner-approved `data_pack` (Q22); access is read-only; the Trade research folders and any other class are rejected; accepted class stored in `assets.attributes.source_path_class` (3A_SLICE R20) | `SI-01…SI-06`, I-15, S-09 |
+| `TimelineLedgerPlanner.plan` | `plan(overlays: Sequence[OverlayRequirement], brand_fonts: Sequence[AssetRef], timeline_end_ms: int) -> list[PlannedRow]` | none | `MissingDependency` (overlay without a registered template asset; brand kit without a font), `InputInvalid` (overlay beyond the timeline end) | rows in plan order then brand-kit font order; overlay rows `TEMPLATE` with `shot_id` = overlay id; font rows `FONT`, interval 0 to the timeline end, `shot_id` NULL (CCR-031) | `OV-01…OV-05`, I-14 |
+| `ChangedShotSelector.select` | `select(previous: Sequence[ShotKey], current: Sequence[ShotKey], hint_ids: Sequence[str]) -> Selection` | none | none | a shot is re-sourced when it is new, or its `content_key`, interval or aspect differs; a hint can only add shots of the current plan | `RV-01…RV-06`, I-03 |
 
 ### 10.7 LLM wrappers, memory, assembly
 | Function | Signature | Side effects | Exceptions | Validation | Tests |
@@ -1692,16 +1709,17 @@ agent_08_visual_assets/
 | `stock_search` | tier B search and licensed download | `StockFootagePort` | **only if the owner buys a licence** (ADR-009, R17); otherwise `TIER_DISABLED` | Storyblocks (PR-06 licence and plan facts; PR-06d/e NOT CONFIRMED); other libraries not evaluated (blocked hosts) | yes, with recorded fixtures |
 | `video_gen` | tier D | `VideoGenPort` | no live adapter (ADR-009; 3A_SLICE §2.3): Protocol and fake only | Runway, Luma, Kling (PR-07, headline only; cost per second unknown) | yes |
 | `image_gen` | tier E | `ImageGenPort` | no live adapter (18 §2) | none researched | yes |
+| `music_search` | 3B: music-bed search and licensed download for the plan's music request | `MusicPort` | **no**: the `music` adapter is fake-only in 3A (D6: no 3B scoring without a licensed bed; the owner chooses the licensed source) | none researched (PR-07: headline only) | yes |
 | `media_probe` | probing and frame sampling for fingerprints | `MediaProbePort` over FFmpeg tools (INF-09) | yes | FFmpeg | yes (canned `MediaInfo` and grids) |
 | (none) | charts, text cards, diagrams | `RasterPort` internal | yes | pinned rasteriser and text shaper (27 §3, REQUIRES REVIEW (Phase 1)) | n/a |
 
 ### 11.2 LLM use
-- **Two steps, one task type.** `llm.agent_08.asset_sourcing.query_plan.*` and `llm.agent_08.asset_sourcing.candidate_rank.*`: `model_tier`, `temperature`, `max_output_tokens`, `timeout_ms`, `cost_budget_micros`, `cache_system_prompt`, `batch_eligible` (27 §4.2; key family registration pending CCR because 27 §4.2 keys are per task type and this task has two steps). Starting tier `SMALL` for both (ADR-007 §2.4: classification-like, short, metadata only); a change of tier is a config change that triggers the eval gate; `MID` is tried only if the datasets fail at `SMALL`.
-- **Prompt caching.** The system prompt and rule-pack text form a stable prefix; shot and candidate data follow it; the shared prefix holds no tenant data (08 §8 layer 4).
+- **Two steps, one task type.** `llm.agent_08.asset_sourcing.query_plan.*` and `llm.agent_08.asset_sourcing.candidate_rank.*`: `model_tier`, `temperature`, `max_output_tokens`, `timeout_ms`, `cost_budget_micros`, `cache_system_prompt`, `batch_eligible` (27 §4.2; the family `llm.<task_type>.<step>.*` with `.fallback_tier` is registered, CCR-019; one step name `query_plan` is used for prompt, schema, config keys and eval keys). Starting tier `SMALL` for both (ADR-007 §2.4: classification-like, short, metadata only); a change of tier is a config change that triggers the eval gate; `MID` is tried only if the datasets fail at `SMALL`.
+- **Prompt caching (CCR-025).** The cached prefix is the system text plus the PLATFORM rule packs (`rp.youtube_general`, `rp.finance_sebi_in`) only; a TENANT pack (`rp.tenant_brand_safety`) is placed after the cache breakpoint, together with the shot and candidate data; the shared prefix therefore holds no tenant data (08 §8 layer 4, rule 9).
 - **Batch** off in 3A (runs are owner-triggered); the query-plan step could use it in 3C for night-window runs (ADR-007 §2.6).
 - **Call bounds.** `query_plan`: `ceil(N_footage_shots / assets.llm.query_plan.batch_shots)` calls; `candidate_rank`: at most one call per footage shot that has at least one candidate after the filters; plus at most one repair call each (`agent_parse`, 07 §3.3). `resource_budget.max_llm_calls` is set to `2 × (batches + shots_with_candidates)` by the orchestrator from the shot count; breach is `AGENT.LOOP_CAP_EXCEEDED` (07 §9).
 - **Outbound data.** Only `intent_text`, `on_screen_text`, candidate metadata and the rule-pack text, and only to the tenant's own calls after the owner accepted the provider terms (one decision shared with Agents 04 and 06, 3A-BLOCKING in their blueprints). No script narration, no org or channel names, no IDs.
-- **Failure handling** uses existing codes: 429 → `TEMPORARY.RATE_LIMITED`; 5xx → `TEMPORARY.UPSTREAM_5XX`; timeout → `TEMPORARY.TIMEOUT`; 401/403 → `PERMANENT.AUTH_INVALID`; safety refusal → `PERMANENT.PROVIDER_REFUSAL`; parse or schema failure → `AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID` with one repair; breaker open → `INFRASTRUCTURE.CIRCUIT_OPEN`. **No non-LLM fallback exists for footage ranking**: if the LLM cannot be used for the whole attempt, footage tiers A and B are not skipped silently; the task retries or suspends per 07. A deliberate configuration `assets.llm.enabled = false` makes tiers A and B `TIER_DISABLED` (charts and graphics only), recorded in every shot's `skips`.
+- **Failure handling** uses existing codes: 429 → `TEMPORARY.RATE_LIMITED`; 5xx → `TEMPORARY.UPSTREAM_5XX`; timeout → `TEMPORARY.TIMEOUT`; 401/403 → `PERMANENT.AUTH_INVALID`; safety refusal → `PERMANENT.PROVIDER_REFUSAL`; parse or schema failure → `AGENT.INVALID_JSON` / `AGENT.OUTPUT_SCHEMA_INVALID` with one repair; breaker open → `INFRASTRUCTURE.CIRCUIT_OPEN`. **No non-LLM fallback exists for footage ranking** (the 07 §3.5 key `agent_08.llm.fallback_on_unavailable` therefore stays `false`; §5.1): if the LLM cannot be used for the whole attempt, footage tiers A and B are not skipped silently; the task retries or suspends per 07. A deliberate configuration `assets.llm.enabled = false` makes tiers A and B `TIER_DISABLED` (charts and graphics only), recorded in every shot's `skips`.
 - **Cost capture.** Every call writes one `cost_ledger` row (`operation = llm.completion`, tokens, `billing_mode`, `figure_kind = ESTIMATE`, `price_ref`), idempotency scope `llm.call` (task, `step_key`, `call_seq`). Prices come from 09 and PR-01/PR-02; none is written here.
 
 ### 11.3 Stock, AI video and AI still use (all through S4, rule 8)
@@ -1720,11 +1738,12 @@ agent_08_visual_assets/
 |---|---|---|---|---|---|---|
 | LLM provider (via `LlmPort`) | API key from the secret mechanism; no scopes | per ADR-007 / 09 | mapped in §11.2 | retry per 07; no second provider in 3A | PR-01 (models and prices), PR-02 (batch, caching), PR-03 (API billed separately) | 3A |
 | Stock library API (candidate: Storyblocks, ADR-009) | **REQUIRES REVIEW (Phase 1): API existence for the purchased plan, authentication, scopes** | **REQUIRES REVIEW (Phase 1)** | **REQUIRES REVIEW (Phase 1)**; mapped generically by `AdapterErrorMapper` (429 → `TEMPORARY.RATE_LIMITED`, 5xx → `TEMPORARY.UPSTREAM_5XX`, 401/403 → `PERMANENT.AUTH_INVALID`, 404 on download → candidate dropped) | tier C graphics; owner library | PR-06: plans and prices; Individual/Small Business: $20k indemnity and 1 YouTube channel; Business: $1M indemnity, multiple channels, client work; **PR-06d/e NOT CONFIRMED**: monetized-YouTube coverage and channel whitelisting not in the licence text | 3A (only if bought) |
-| Free libraries (Pexels/Pixabay-type) | n/a | n/a | n/a | n/a | **none recorded** (hosts blocked, RESEARCH_LOG wave 2); per-clip licence record rule of §1A.1b stands: `FREE_STOCK`, `indemnification = false`, `terms_ref` + `terms_sha256` snapshot at download | not enabled until the terms are recorded |
-| Music / SFX libraries | — | — | — | no music bed (ADR-009) | PR-07: Epidemic Sound FAQ headline only; Artlist not evaluated | 3C, out of this agent's 3A scope |
+| Free libraries (Pexels/Pixabay-type) | n/a | n/a | n/a | n/a | **none recorded** (hosts blocked, RESEARCH_LOG RV-06 and the wave-2 blocked-host list); per-clip licence record rule of §1A.1b stands: `FREE_STOCK`, `indemnification = false`, `terms_ref` + `terms_sha256` snapshot at download | not enabled until the terms are recorded |
+| Music libraries (capability `music_search`) | **REQUIRES REVIEW (Phase 1)**: owner's licensed-source decision (D6) | **REQUIRES REVIEW (Phase 1)** | **REQUIRES REVIEW (Phase 1)** | no music bed in 3A (ADR-009) | PR-07: Epidemic Sound FAQ headline only; Artlist not evaluated | 3B (after D6; fake only in 3A) |
+| SFX libraries | — | — | — | no SFX | — | 3C, out of scope here |
 | AI video providers (candidates Runway, Luma, Kling) | **REQUIRES REVIEW (Phase 1)** | **REQUIRES REVIEW (Phase 1)** | **REQUIRES REVIEW (Phase 1)**; refusals map to `PERMANENT.PROVIDER_REFUSAL`, handled per shot (§6.7) | tier E or unresolved | PR-07: Runway "from $12/month"; Luma Plus $30/mo (10,000 credits, "Commercial use"), Pro $90, Ultra $300; Kling price not in HTML; **unit cost per second unknown** | 3B |
 | Local media tools (FFmpeg/ffprobe) | none; run in-process under limits | per-file size, duration, frame count caps in config | non-zero exit → `RenderFailed` (→ `AGENT.CRASH` retry) or candidate invalid | n/a | INF-09 (filters exist); INF-10 (YouTube bitrate floors) | 3A |
-| Owner datasets and chart cases | local files registered through `AssetRegistrar`; no external API | `assets.chart.max_dataset_bars` | schema errors → `PERMANENT.INPUT_INVALID` | n/a | IN-02, IN-03 for the rules that apply | 3A |
+| Owner datasets and chart cases | local files registered through `AssetRegistrar` by the operator tool, from the owner-approved course `data_pack` only, read-only (3A_SLICE R20); no external API | `assets.chart.max_dataset_bars` | schema errors → `PERMANENT.INPUT_INVALID` | n/a | IN-02, IN-03 for the rules that apply | 3A |
 
 **Adapter enablement checklist (no adapter goes live without all of it recorded in RESEARCH_LOG):** official API documentation URL and date; authentication and scopes; rate limits and quotas; error codes and their mapping; commercial-use and third-party/client-use terms of the purchased plan; monetized-YouTube coverage; indemnification; terms snapshot procedure; cost model and unit; owner-set provider spending limit and the matching `budgets` row (D1); recorded-fixture refresh procedure (27 §8.2).
 
@@ -1739,38 +1758,41 @@ agent_08_visual_assets/
 | `assets` (§5.15) | TENANT | candidates, reuse lookups, dataset and chart-case reads | INSERT new assets (`status ACTIVE`); UPDATE only `status`, `expires_at` (when a licence expiry copy changes) | `AssetRepository` is the only writer; `UNIQUE (org_id, content_sha256)` gives idempotent registration |
 | `asset_fingerprints` (§5.15, T0+) | TENANT | near-duplicate lookup (within the tenant) | INSERT `SHA256` and `PERCEPTUAL_FRAME` rows | never queried without `org_id`; index `(org_id, algo, value)` |
 | `licences` (§5.15) | SHARED-CATALOGUE | the tenant's own rows and platform-held rows | **none** | tenant self-grant and vendor rows are created and activated by the owner's onboarding and Agent 16 flows, not by Agent 08 (§13.3) |
-| `licence_ledger` (§5.15) | TENANT, append-only | coverage verification, reuse counts | INSERT one row per shot plus whole-render rows | `LicenceLedgerRepository`; DB insert guard re-checks state, third-party permission and monetized coverage |
+| `licence_ledger` (§5.15) | TENANT, append-only | coverage verification, reuse counts | INSERT one row per shot, per overlay interval, per brand font and (3B) per music bed | `LicenceLedgerRepository`; DB insert guard re-checks state, third-party permission and monetized coverage |
 | `cost_ledger`, `budgets`, `budget_reservations` (§5.14) | TENANT | budget state through S4 | cost rows and reservations through `amw_core.cost` | agent has no direct DML on `budgets` |
 | `checkpoints` (§5.7), `idempotency_keys` (§5.9) | TENANT | resume | via `amw_core` | scopes `llm.call`, `stock.license`, `media.generate`, `db.output` |
 | `memory_items` (§5.10) | TENANT | CHANNEL preferences (read), TASK memory | TASK-scope pointers | §14 |
 | `brand_kits` (§5.12) | TENANT | palette, fonts, lower-third and template refs | none | |
 | `scripts` (§5.11) | TENANT | `chart_requests`, scenes (through the output blob) | none | |
-| `approvals` (§5.16) | TENANT | state of a `KNOWLEDGE_RELEASE` row for method charts | none | read-only |
+| `approvals` (§5.16) | TENANT | state of a `KNOWLEDGE_RELEASE` row with `subject_kind = asset` for method chart cases (`subject_id` = case asset, `subject_sha256` = case hash) | none | read-only |
 | `rule_packs`, `compliance_profiles`, `compliance_profile_rule_packs` (§5.2) | SHARED / TENANT | active packs and versions | none | |
-| `jobs`, `projects`, `channels`, `tasks` (§5.3, §5.1) | TENANT | job and channel context | none (orchestrator) | |
+| `jobs`, `projects`, `channels`, `tasks` (§5.3, §5.1) | TENANT | job and channel context, `jobs.monetized_destination` | none (orchestrator) | |
 | `audit_log` (§5.13) | TENANT | none | through `amw_core.audit` only | no direct DML |
 | `renders` (§5.18) | TENANT | none | none | `render_id` is NULL at sourcing (§13.2) |
 | `knowledge_*`, `claims`, `citations`, `oauth_tokens`, `approvals` writes, `budgets` writes | — | never | never | outside this agent's role |
 DB role `amw_app` (`NOBYPASSRLS`, not superuser; 04 §3.1); no `TRUNCATE`, no DDL.
 
-### 13.2 Licence ledger at sourcing time
-`licence_ledger.render_id` is nullable (04) and no render exists when Agent 08 runs: rows are written with `render_id = NULL`, `job_id`, `asset_id`, `licence_id`, `usage_kind`, `used_from_ms`/`used_to_ms` (the shot's interval on the render timeline), `source_url`/`vendor_item_id` (stock), `expiry_at`, `client_permission_ref` (when the licence is platform-held and the tenant is another org), `recorded_by = agent_08`. 18 §7.9's reference query joins on `l.render_id = :render_id`, which would find no row. **Pending CCR (3A-BLOCKING):** match on `job_id` and the interval (and, for revision loops, on the sourcing `task_id`), and add nullable `licence_ledger.task_id` and `licence_ledger.shot_id` so that rows of earlier iterations are traceable and never counted as current. Until decided, the QC check for 3A is evaluated by `CoverageVerifier` at sourcing and re-evaluated by Agent 10 with the same rule.
+### 13.2 Licence ledger at sourcing time (decided, CCR-030)
+`licence_ledger.render_id` is nullable (04) and no render exists when Agent 08 runs: rows are written with `render_id = NULL`, `job_id`, `task_id` (the writing task), `shot_id` (the plan shot or overlay id; NULL for font and music rows), `asset_id`, `licence_id`, `usage_kind`, `used_from_ms`/`used_to_ms` (the element's interval on the render timeline; font and music rows cover the whole timeline), `source_url`/`vendor_item_id` (stock), `expiry_at`, `client_permission_ref` (when the licence is platform-held and the tenant is another org), `recorded_by = agent_08`, inside the task's `db.output` transaction. The row key is `UNIQUE NULLS NOT DISTINCT (org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)`, so a replay writes nothing twice and a revision iteration (a new task) appends new rows without touching earlier ones. 18 §7.9 matches a row to a timeline element of render R of job J when `asset_id` matches, the interval covers the element, and `render_id = R` **or** (`render_id IS NULL` and `job_id = J`); rows of earlier iterations whose asset or interval no longer appears in the render are simply not matched. `CoverageVerifier` evaluates the same rule at sourcing and Agent 10 re-evaluates it as `qc.licence.completeness`.
 
-### 13.3 Owner-made and code-generated items: self-grant rows (decision proposed here; 18 §2.2 note (a), ADR-009 §2.2)
+### 13.3 Owner-made and code-generated items: self-grant rows (decided, CCR-031/039; 18 §2.2 note (a), ADR-009 §2.2)
 `licence_ledger.licence_id` is NOT NULL and 18 §7.9's query treats a missing licence as a failure, so this blueprint uses **tenant-held standing licence rows**, not a nullable `licence_id`:
-- one row per tenant for each of `source_type` `OWNER_MADE`, `CODE_GENERATED` and `FONT` (and `CLIENT_SUPPLIED` at Tier 1): `org_id = tenant`, `vendor = the tenant`, `licence_name = "self-grant"`, `covers_monetized_youtube = true`, `third_party_permission = PERMITTED`, `indemnification` NULL, `state = ACTIVE`, `terms_ref` = a fixed internal statement, `verified_by` = the owner's user;
+- one row per tenant for each of `source_type` `OWNER_MADE`, `CODE_GENERATED` and `FONT` (and `CLIENT_SUPPLIED` at Tier 1): `org_id = tenant`, `vendor = the tenant`, `licence_key = "self_grant.<source_type>"`, `licence_name = "self-grant"`, `covers_monetized_youtube = true`, `third_party_permission = PERMITTED`, `indemnification` NULL, `starts_at` = the onboarding time, `expires_at` NULL, `state = ACTIVE`, `terms_ref` = a fixed internal statement and `terms_sha256` = the SHA-256 of that statement, `verified_by` = the owner's user, `verified_at` = the confirmation time;
 - created and activated by an **owner action** at onboarding (a human actor; an agent never certifies its own rights); Agent 08 only reads them. If a row is missing, the task fails `PERMANENT.MISSING_DEPENDENCY` naming the row class (L2; the owner confirms once);
-- this resolves 18's REQUIRES REVIEW (a) in favour of self-grant rows and means ADR-009's pending CCR "nullable `licence_ledger.licence_id`" is **not needed** (contract request to ADR-009 and 18);
+- this resolves 18's REQUIRES REVIEW (a) in favour of self-grant rows; a nullable `licence_ledger.licence_id` is **not needed** and was rejected (CCR-039); package templates and glyph sets are registered once per tenant as `assets` (`TEMPLATE`, `CODE_GENERATED`) by the shared registry in `amw_core`, and brand fonts are `FONT` assets (OFL allowed, licence text recorded, 3A_SLICE R21) (CCR-031);
 - 3A: who creates the rows (the owner through an onboarding step, a seed in the walking skeleton) is **3A-BLOCKING**: it must be decided before the first ledger row can be written.
 
-### 13.4 Pending contract items (filed in the structured return; this blueprint is written against the proposed names)
-| # | Item | Why | Status |
-|---|---|---|---|
-| P1 | `assets.attributes jsonb` (nullable; documented keys: `tags[]`, `description`, `data_start_date`, `data_end_date`, `bars_count`, `instrument`, `timeframe`, `dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`, `method_content`, `release_approval_id`, `prompt_sha256`, `provider_request_id`) | 18 §2.3 `qc.visual.chart_data_age` needs per-asset chart dates; owner-library search needs tags; reuse key needs `spec_sha256`; provenance of AI assets | pending CCR |
-| P2 | `asset_fingerprints.algo_version smallint` | the perceptual-hash definition may change; old rows must stay comparable | pending CCR |
-| P3 | `licence_ledger.task_id uuid null`, `licence_ledger.shot_id text null` and 18 §7.9 matching without `render_id` | §13.2 | pending CCR (3A-BLOCKING) |
-| P4 | config keys `assets.*` and `llm.agent_08.asset_sourcing.<step>.*` in the registry | 18 §13 | pending CCR |
-| P5 | `AssetRegistrar` entry point (owner intake of footage, datasets, chart cases) | no task type exists for intake | REQUIRES REVIEW (Phase 1): app/S8 design |
+### 13.4 Contract items (all decided; CONTRACT_CHANGE_REQUESTS.md §5 "Resolved for blueprint 08")
+| # | Item | Decision |
+|---|---|---|
+| P1 | `assets.attributes jsonb` documented keys | APPROVED (04 §5.15; CCR-032): `tags[]`, `description`, `data_start_date`, `data_end_date`, `bars_count`, `instrument`, `timeframe`, `dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`, `method_content`, `release_approval_id`, `prompt_sha256`, `provider_request_id`, plus `language`, `label_free`, `source_path_class` |
+| P2 | `asset_fingerprints.algo_version smallint NOT NULL DEFAULT 1` | APPROVED (CCR-032) |
+| P3 | `licence_ledger.task_id`, `licence_ledger.shot_id`, matching without `render_id`, replay-safe key | APPROVED (CCR-030, CCR-032) |
+| P4 | config keys `llm.agent_08.asset_sourcing.query_plan.*` and `.candidate_rank.*`, `assets.*`, `memory.task_ttl_ms` | APPROVED (CCR-019); one step name `query_plan` |
+| P5 | dataset and owner-material intake | 3A_SLICE_SPEC R20 (CCR-043): operator tool on the owner's instruction (D5), course `data_pack` only (Q22), read-only (FR-21) |
+| P6 | self-grant rows; overlay track and fonts | APPROVED (CCR-031); `licence_id` stays NOT NULL (CCR-039 rejected) |
+| P7 | `jobs.monetized_destination` | APPROVED (CCR-028) |
+| P8 | chart facts; chart asset kind and tier; chart-case approval subject | APPROVED (CCR-004, CCR-045, CCR-012) |
 
 ---
 
@@ -1779,7 +1801,7 @@ DB role `amw_app` (`NOBYPASSRLS`, not superuser; 04 §3.1); no `TRUNCATE`, no DD
 | Scope | What | Written by | Read by | Lifetime |
 |---|---|---|---|---|
 | `WORKING` | candidate lists, sampled frames, rendered bytes, prompts in flight | Agent 08 process | same attempt | the attempt; never persisted |
-| `TASK` | `a08.query_plans` (validated plans per batch, pointer to a blob), `a08.rank_results` (validated rankings per shot), `a08.reuse_decisions` | Agent 08 (`SourcingMemory`) | the next attempt of the same task | `expires_at` required (config `memory.task_ttl_ms`); lets a retry skip paid LLM calls already made |
+| `TASK` | `a08.query_plans` (validated plans per batch, pointer to a blob), `a08.rank_results` (validated rankings per shot), `a08.reuse_decisions` | Agent 08 (`SourcingMemory`) | the next attempt of the same task | `expires_at` required (config `memory.task_ttl_ms`, registered, CCR-019); lets a retry skip paid LLM calls already made |
 | `PROJECT` | none | — | — | — |
 | `CHANNEL` | `a08.visual_preferences` (preferred and avoided subjects), `a08.avoid_assets` (vendor items and assets the owner rejected) | the owner through the app (3C); never by Agent 08 on its own initiative | Agent 08 | `review_after` set |
 | `LONG_TERM` | none (the knowledge library is Agent 04's; Agent 08 never reads `knowledge_*`) | — | — | — |
@@ -1793,10 +1815,10 @@ Rules: memory holds pointers and IDs, never title, description or on-screen text
 ### 15.1 Upstream (who feeds Agent 08)
 | Source | Content | Binding | Notes |
 |---|---|---|---|
-| Orchestrator (Agent 01) | Task Input (§7.1) and `context_refs` | 03 §3 | creates the task after `s09_plan`; sets `destination`, aspects, switches, `resource_budget` |
-| Agent 09 `agent_09.shot_plan` | `views.agent_08_shots[]` and shot objects: `shot_id`, intervals, `intent_kind`, `intent_text`, `on_screen_text[]`, `allowed_tiers`, `fallback_template_key`, `chart_id`, `content_key`, `held`, `vertical`, `depiction`, `change_events_ms` | agent_09 §8.1–§8.2, §6.6 (written in parallel; confirmed at integration) | `ShotPlanReader` is the only code touching its field names |
+| Orchestrator (Agent 01) | Task Input (§7.1) and `context_refs` | 03 §3 | creates the task after `s09_plan` (24 §7.1a/§7.2a); sets `destination` from `jobs.monetized_destination`, `script_stage_id`, aspects, switches, `resource_budget` |
+| Agent 09 `agent_09.shot_plan` | `views.agent_08_shots[]`, shot objects (`shot_id`, intervals, `intent_kind`, `intent_text`, `on_screen_text[]`, `allowed_tiers`, `fallback_template_key`, `chart_id`, `content_key`, `held`, `vertical`, `depiction`, `change_events_ms`) and `overlays[]` (`overlay_id`, `kind`, `start_ms`, `end_ms`, `template_ref`); in 3B `audio_plan.music` | agent_09 §8.1–§8.2, §6.6, §15 (the consumed fields are listed in the "Agent 08" row of agent_09 §15, R08 m4) | `ShotPlanReader` is the only code touching its field names |
 | Agent 05 script output | `chart_requests[]`, `scenes[]` (`visual_intent`, `on_screen_text`, `chart_id`, `method_label`) | agent_05 §8.2, §8.3 | allowlists for on-screen text; the script gives intent, Agent 08 gives sources (agent_05 §1 scope) |
-| Agent 06 | none directly; chart-data-age constraint (§15.3 item 3) | agent_06 D3; agent_05 pending item | Agent 06 judged the script before Agent 08 runs |
+| Agent 06 | at `s06_claims`: the chart-data-age constraint (`chart_data_refs` item, `data_age_vs_lag = OLDER_THAN_LAG`, `data_age_basis = CONSTRAINT`); at `s06_chart` (after this stage): reads the `agent_08.chart_facts` documents | agent_06 D3; CCR-004 | Agent 06 judged the script before Agent 08 runs; chart claims carry `CHART_PENDING` until `s06_chart` |
 | Brand kit (S11 → 13) | palette, fonts, lower-third and template refs | 04 §5.12 | read-only |
 | Compliance profile and rule packs | active packs and versions (`rp.youtube_general`, `rp.finance_sebi_in`, tenant packs) | 04 §5.2 | |
 | Owner library, datasets, chart cases | `assets` rows registered by `AssetRegistrar` | §13 | tenant- and channel-scoped |
@@ -1805,22 +1827,25 @@ Rules: memory holds pointers and IDs, never title, description or on-screen text
 ### 15.2 Downstream (who consumes Agent 08)
 | Consumer | Uses | Contract |
 |---|---|---|
-| Agent 10 `render` | per shot: `asset_uri`, `media` (size, duration, `source_in_ms`, crop), reveal sequences, `usage_kind`; licence rows | manifest §8.2; Agent 10 never re-sources and fails `PERMANENT.MISSING_DEPENDENCY` for a shot without an asset |
-| Agent 10 `technical_qc` | `qc.licence.completeness` (18 §7.9), `qc.licence.expiry_window`, `qc.visual.tier_share_e`, `qc.visual.tier_mix_report`, `qc.visual.chart_data_age`, `qc.watermark.provenance` (needs `vendor_item_id` rows) | database + manifest |
+| Agent 10 `render` (`s10_render`; depends on `s08_assets` and `s06_chart`) | per shot: `asset_uri`, `media` (size, duration, `source_in_ms`, crop), reveal sequences, `usage_kind`; per overlay: `template_asset_id`; licence rows | manifest §8.2; Agent 10 never re-sources and fails `PERMANENT.MISSING_DEPENDENCY` for a shot without an asset; it writes no ledger rows (CCR-031) |
+| Agent 10 `technical_qc` | `qc.licence.completeness` (18 §7.9; shots, overlays and fonts), `qc.licence.expiry_window`, `qc.visual.tier_share_e`, `qc.visual.tier_mix_report`, `qc.visual.chart_data_age`, `qc.watermark.provenance` (needs `vendor_item_id` rows); its gate may route `REVISE → s10_render` with alternative target `s08_assets` | database + manifest |
 | Agent 16 `compliance_gate` | licence completeness and validity (YTG-R6), disclosure inputs (`is_realistic_synthetic`, `depicts_real_person`, AI asset list), FIN-R9 / FIN-R12 / FIN-R13 evidence (per-chart dates, dataset hashes, `method_content`), presenter-persona check inputs (FIN-R11) | manifest + `assets` |
 | Agent 16 `quality_score` | VISUAL_QUALITY D inputs (tier mix, resolution, charts from real data) and COMPLIANCE D input | manifest |
+| Agent 06 `s06_chart` | `agent_08.chart_facts` documents (one per real chart, `output_refs`) | §8.5; evidence `source_ref = <chart_id>#<fact_id>` |
+| Agent 07 `s07_master` (3B) | `music_beds[]` and the music asset for the mix; the `MUSIC_BED` row is Agent 08's | CCR-007; none in 3A |
 | S2 uniqueness | `asset_fingerprints` (tenant-scoped) | 04 §5.15 |
 | S4 / Agent 15 | cost rows of stock and AI | 04 §5.14 |
-| Agent 11 | may read tenant assets (stills, chart stills) for thumbnails; writes its own licence rows | 04 §5.15 |
+| Agent 11 (`s11_thumbs`, depends on `s09_plan` and `s08_assets`) | may read tenant assets (stills, chart stills, `label_free` images) for thumbnails; writes its own ledger rows (thumbnail elements, no interval); a thumbnail-only revision never re-runs Agent 08 | 04 §5.15; CCR-031 |
 | S7 / report | tier mix, earliest compliant publish date, downgrade and expiry warnings, owner footage wishlist (suggestion S-2) | manifest |
 
-### 15.3 Contract rules and open alignments
+### 15.3 Contract rules and decided alignments
 1. Agent 08 and Agent 09 communicate only through the shot plan blob and the manifest; neither imports the other (27 §7.1).
-2. Revision loops (`s16_score on_fail REVISE → s09_plan`, `s16_comp REVISE → s05_script`): a new iteration of `s08_assets` receives `previous_sourcing_ref` and `changed_shot_ids` (FR-20); unchanged shots keep their asset and ledger row.
-3. **Chart-data-age hand-off (3A-BLOCKING; same item as agent_05's pending data-age row).** At `s06_claims` no chart exists yet, so Agent 06's D3 cannot see a data end date. Proposal from Agent 08's side: a `REAL_HISTORICAL` chart request is treated by Agent 06 as an `OLDER_THAN_LAG` **constraint**, which Agent 08 satisfies or fails (`DATA_WITHIN_LAG`, `NO_CHART_CASE`) and which `qc.visual.chart_data_age` and Agent 16 re-verify at delivery time. The integrator decides.
-4. **Unresolved shots.** 24 §7.1 gives `s08_assets` no `on_fail` target. Proposal: a failed `s08_assets` is routed to `s09_plan` (REVISE) for reasons a new plan could fix (`NO_SOURCE_IN_ANY_TIER`, `NO_TEMPLATE_CONTENT`: a different shot design) and to a human/DLQ stop for owner-material reasons (`NO_DATASET`, `NO_CHART_CASE`, `DATA_WITHIN_LAG`, `METHOD_NOT_RELEASED`, missing standing licence row). Until decided, every unresolved task is `FAILED` `PERMANENT.MISSING_DEPENDENCY` → DLQ with `details.unresolved_shots` (contract request).
-5. **Tier of code-rendered real charts.** 18 §2.1 puts "real charts rendered from real historical data" under rank 1 (`A_OWNER_REAL`, `OWNER_MADE`) and "charts … generated by code" under rank 3; Agent 05 Q-08 and 3A_SLICE R2 treat charts as `C_CODE_MOTION`/`CODE_GENERATED`. This blueprint uses the latter (§6.4(8)); a clarification in 18 is requested; no behaviour changes for the E-share rule.
-6. Field names of the shot plan and the vertical (9:16) reframing contract are Agent 09's (agent_09 §8.2); this blueprint consumes them through the `ShotRequirement` of §7.1(6). Items to confirm at integration: (a) a code-rendered real chart is listed under `C_CODE_MOTION` in `allowed_tiers` (agent_09 §6.6 leaves `A_OWNER_REAL` open for charts; §6.4(8) here decides `C_CODE_MOTION`); (b) the number of reveal stills equals `len(change_events_ms) + 1`; (c) the tier-C `fallback_template_key` of a footage shot renders an abstract template with no words.
+2. Revision loops (24 §7.1a/§7.2a): the gate of `s08_assets` routes `REVISE → s09_plan` (alt `s05_script` / `s05_shorts`); `s10_qc` (alt `s08_assets`), `s16_comp` (alt `s08_assets`) and `s16_score` can also route back. The target and every dependent stage re-run as a new iteration (24 §3.3 rule 5). A new iteration of `s08_assets` receives `previous_sourcing_ref` and `changed_shot_ids` (FR-20); unchanged shots keep their asset and ledger row.
+3. **Chart data age (decided, CCR-004).** At `s06_claims` a `REAL_HISTORICAL` chart request is an `OLDER_THAN_LAG` constraint; Agent 08 meets it or fails the shot `DATA_WITHIN_LAG`; `qc.visual.chart_data_age` and `s16_comp` re-check the measured end date; the stricter value wins. Claims about what a chart shows are verified at `s06_chart` from the `agent_08.chart_facts` documents (§8.5).
+4. **Unresolved shots (decided, CCR-003).** Plan-fixable reasons (`NO_SOURCE_IN_ANY_TIER`, `NO_TEMPLATE_CONTENT`, `UNSAFE_CONTENT`, `DATA_WITHIN_LAG`) are reported as a failed gate result (`SUCCEEDED` task, `remedy_stage_id`, §18); owner-material reasons (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`) fail the task `PERMANENT.MISSING_DEPENDENCY` with `details.unresolved_shots[{shot_id, reason}]` (§18). The orchestrator reads `shot_unresolved_reason` from the manifest or the error details.
+5. **Tier of code-rendered real charts (decided, CCR-045).** `assets.kind = CHART`, `visual_source_tier = C_CODE_MOTION`, `source_type = CODE_GENERATED`; 18 §2.1 is aligned; the dataset is an `OWNER_MADE` `DOCUMENT` asset.
+6. Field names of the shot plan and the vertical (9:16) reframing contract are Agent 09's (agent_09 §8.2); this blueprint consumes them through the `ShotRequirement` of §7.1(6). Alignment to confirm by the contract test C-02: (a) a code-rendered real chart is listed under `C_CODE_MOTION` in `allowed_tiers`; (b) the number of reveal stills equals `len(change_events_ms) + 1`; (c) the tier-C `fallback_template_key` of a footage shot renders an abstract template with no words.
+7. **Overlay track, fonts and music (decided, CCR-031, CCR-007).** Agent 08 writes the `TEMPLATE` rows per overlay interval and the whole-timeline `FONT` rows at sourcing; Agent 10 writes none; Agent 07 writes the `VOICE` rows; Agent 11 writes thumbnail rows. Music sourcing and its `MUSIC_BED` rows are Agent 08's from 3B; the cue plan is Agent 09's and the mix is Agent 07's.
 
 ---
 
@@ -1840,12 +1865,12 @@ Agent 08 is stateless between attempts: a new attempt reads the latest checkpoin
 |---|---|---|---|
 | S0 | `s0_validated` | pre-checks, shot plan mapped, IDs allocated | — |
 | S1 | `s1_classified` | intents classified, chart requests matched to cases, lag results, standing licence rows resolved | — |
-| S2 | `s2_charts` | each chart asset registered (one checkpoint per chart) | `db.output:asset:<shot_id>` |
+| S2 | `s2_charts` | each chart asset registered and its chart-facts document written (one checkpoint per chart) | `db.output:asset:<shot_id>`, `db.output:chart_facts:<chart_id>` |
 | S3 | `s3_queries_<k>` | each validated query-plan batch | `llm.call:<call_seq>` |
 | S4 | `s4_footage_<shot_id>` | each footage shot resolved: ranked, acquired, registered (one checkpoint per shot, so a paid license or download is never repeated) | `llm.call:…`, `stock.license:<vendor_item_id>`, `db.output:asset:<shot_id>` |
 | S5 | `s5_graphics` | all tier C graphics rendered and registered | `db.output:asset:<shot_id>` |
 | S6 | `s6_ai_<shot_id>` | each AI generation, before and after the paid call is reconciled | `media.generate:<shot_id>` |
-| S7 | `s7_ledger` | ledger rows written (per shot, idempotent) | `db.output:ledger:<shot_id>` |
+| S7 | `s7_ledger` | ledger rows written (per shot, per overlay, per font; idempotent) | `db.output:ledger:<shot_id>`, `db.output:ledger:<overlay_id>`, `db.output:ledger:font:<asset_id>` |
 | S8 | `s8_assembled` | manifest, report and validation results persisted | `db.output:manifest` |
 `progress_ratio` = completed shots / total shots. Checkpoints are written before `SUSPENDED`/`DRAIN` returns.
 
@@ -1865,7 +1890,7 @@ Agent 08 is stateless between attempts: a new attempt reads the latest checkpoin
 ### 17.1 Resource drivers
 | Resource | Driver | Cap / control (config key; value) | Class |
 |---|---|---|---|
-| CPU | chart and graphic rasterisation (bursts), ffprobe, frame sampling for fingerprints, hashing | concurrency 1 per worker by default (`assets.render_concurrency`); factory slice weights and caps (INF-03, INF-04; values from the audit, REQUIRES REVIEW (Phase 1)); class `AI_IO` as in 24; if 3B shows heavy CPU, a CCR changes the class | `AI_IO` |
+| CPU | chart and graphic rasterisation (bursts), ffprobe, frame sampling for fingerprints, hashing | concurrency 1 per worker by default (`assets.render_concurrency`); factory slice weights and caps (INF-03, INF-04; values from the audit, REQUIRES REVIEW (Phase 1)); class `AI_IO` as in 24: light media work (probes, frame sampling, chart and graphic rasterisation) is not rendering (ADR-012 §3.3, 3A_SLICE R22, CCR-056): any time in the development environment, on the VPS only in the night window; if 3B measures heavy CPU, the class is changed through the register | `AI_IO` |
 | Memory | dataset bars in memory, one frame grid at a time, one rendered image | `assets.chart.max_dataset_bars`; frames sampled and discarded one at a time; no video decoded fully | — |
 | Disk and storage | downloaded stock clips, owner footage references, rendered stills, reveal sequences, manifest | write-once blobs under `assets/<ast>/`; footprint per video = Σ asset bytes (**REQUIRES REVIEW (Phase 1)**: MEASURED in 3B); `RESOURCE.DISK_FULL` suspends (07) | — |
 | Network | stock search and download, AI generation, LLM | host allowlists per adapter; per-shot request caps (`assets.max_search_requests_per_shot`); download size cap (`assets.max_download_bytes`) | — |
@@ -1907,7 +1932,8 @@ A run with charts, graphics and owner footage and no LLM enabled costs **0** in 
 | write to a platform URI | `PermissionDenied` | `PERMANENT.PERMISSION_DENIED` | FAIL, L3 | reject, security event | S-04 |
 | tenant not active | `TenantInactive` | `PERMANENT.TENANT_INACTIVE` | FAIL | reject | F-01 |
 | shot plan, script, dataset, chart case, brand kit or standing licence row missing | `MissingDependency` | `PERMANENT.MISSING_DEPENDENCY` | FAIL (L2) | name the missing class in `details` (no content); owner supplies it; DLQ replay | F-14 |
-| one or more shots `UNRESOLVED` (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`, `DATA_WITHIN_LAG`, `NO_TEMPLATE_CONTENT`, `NO_SOURCE_IN_ANY_TIER`) | `UnresolvedShots` | `PERMANENT.MISSING_DEPENDENCY` | FAIL (L2) | output blob keeps the partial manifest for the report; `details.unresolved_shots[{shot_id, reason}]`; routing proposal in §15.3(4) | I-01, F-14 |
+| shots `UNRESOLVED` for a plan-fixable reason (`NO_SOURCE_IN_ANY_TIER`, `NO_TEMPLATE_CONTENT`, `UNSAFE_CONTENT`, `DATA_WITHIN_LAG`) and no owner-material reason | none (not an error: a failed gate result) | none; task `SUCCEEDED` (03 §5.3 rule 4, CCR-001) | gate `on_fail` `REVISE → s09_plan`, alt `s05_script` / `s05_shorts` (24 §7.1a/§7.2a, CCR-003); counted per gate per job (24 §3.3) | return the failed gate result `a08.cov.all_shots_resolved` (`gate: true`, `blocking: true`, `FAIL`, `remedy_stage_id = s09_plan`, or `script_stage_id` when a `DATA_WITHIN_LAG` shot exists), `gate_verdict = FAILED`, `next_action CONTINUE` with reason `gate FAILED: a08.cov.all_shots_resolved`; the manifest keeps every sourced shot and its ledger rows and lists the unresolved ones with their `shot_unresolved_reason` | I-13, `GR-02…GR-07` |
+| one or more shots `UNRESOLVED` for an owner-material reason (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`), alone or with other reasons | `UnresolvedShots` | `PERMANENT.MISSING_DEPENDENCY` | FAIL (L2); not a gate result (24 §7.1a) | output blob keeps the partial manifest for the report; `details.unresolved_shots[{shot_id, reason}]`; the owner supplies the material (dataset, chart case or release) and the DLQ entry is replayed | I-01, F-14, `GR-08…GR-10` |
 | lag configured below the platform minimum; enabled adapter without licence row or provider budget row; prompt hash mismatch; undeclared prompt variable; adapter enabled without a recorded fixture set | `ConfigInvalid` | `PERMANENT.CONFIG_INVALID` | FAIL, L3 | fail at the start of the attempt | F-13, U-20 |
 | provider key rejected | `AuthInvalid` | `PERMANENT.AUTH_INVALID` | FAIL, L3 | no retry | F-04 |
 | provider 429 / 5xx / timeout / network | `RateLimited`, `Upstream5xx`, `TemporaryTimeout`, `TemporaryNetwork` | `TEMPORARY.*` | RETRY (policy) | honour `retry_after_ms`; checkpoint kept | F-05, `EM-01…EM-07` |
@@ -1918,16 +1944,16 @@ A run with charts, graphics and owner footage and no LLM enabled costs **0** in 
 | model JSON unparseable | `InvalidJson` | `AGENT.INVALID_JSON` | RETRY once with the parse error | one repair, then DLQ | F-03 |
 | parsed output fails schema, missing shot or candidate, invented candidate id, bad order | `OutputSchemaInvalid` | `AGENT.OUTPUT_SCHEMA_INVALID` | RETRY once | same | F-03 |
 | provider safety refusal on text steps | `ProviderRefusal` | `PERMANENT.PROVIDER_REFUSAL` | FAIL | no fallback provider in 3A | F-03 |
-| provider refusal on an AI generation for one shot | `ProviderRefusal` (caught per shot) | — (no task failure) | skip reason `PROVIDER_REFUSED`; cascade continues; the task fails only if the shot ends `UNRESOLVED` | F-09 |
-| model refusal `INSUFFICIENT_INPUT` on every footage batch with no tier C result | `RefusalInsufficientInput` | `PERMANENT.INSUFFICIENT_INPUT` | FAIL | orchestrator re-plans upstream (27 §4.3) | F-03 |
-| stock item gone or corrupt download or probe failure | `CandidateGone`, `CorruptedOutput` | none for a dropped candidate; `AGENT.CORRUPTED_OUTPUT` if the stored output hash mismatches | candidate dropped (`CANDIDATE_INVALID`), next candidate; bounded by `assets.max_candidates_per_shot` | F-07 |
+| provider refusal on an AI generation for one shot | `ProviderRefusal` (caught per shot) | none (no task failure) | continue the cascade | skip reason `PROVIDER_REFUSED`; the shot ends `UNRESOLVED` only if no tier is left, which is then a gate result (§18 first rows) | F-09 |
+| model refusal of a step call (`INSUFFICIENT_INPUT`, `OUT_OF_SCOPE`, `CONFLICTING_INSTRUCTIONS`, `UNSAFE_CONTENT`) | `RefusalInsufficientInput` (task-level condition only) | `PERMANENT.INSUFFICIENT_INPUT` only when **every** footage shot of the task is refused and no tier-C result exists; otherwise none | declared item-level mapping (27 §4.3, CCR-023): FAIL (orchestrator re-plans upstream, 27 §4.3) only under the task-level condition | shot-level skip reasons of §5.1 and a `WARN` result `a08.q.refusal` / `a08.r.refusal` (`blocking: false`); a refusal is never a `PASS`; `UNSAFE_CONTENT` is surfaced to Agent 16 via `refusals[]` | F-03, `TC-24…TC-27` |
+| stock item gone or corrupt download or probe failure | `CandidateGone`, `CorruptedOutput` | none for a dropped candidate; `AGENT.CORRUPTED_OUTPUT` if the stored output hash mismatches | candidate dropped, next candidate (RETRY of the output only for a stored-output hash mismatch) | skip reason `CANDIDATE_INVALID`; bounded by `assets.max_candidates_per_shot` | F-07 |
 | ledger insert rejected by the DB guard (state, permission, monetized coverage) | `GuardViolation` | `AGENT.QUALITY_REPEATED_FAILURE` after the capped attempts | FAIL (L3) | the shot is not marked sourced; this should not happen because `LicenceGuard` runs first | F-02 |
 | a blocking `a08.*` check fails on every allowed attempt | `QualityRepeatedFailure` | `AGENT.QUALITY_REPEATED_FAILURE` | FAIL (L3) | | F-15 |
 | any cap reached (LLM calls, candidates, search requests, repair attempts, AI retries) | `LoopCapExceeded` | `AGENT.LOOP_CAP_EXCEEDED` | FAIL (L3) | | F-15 |
 | unhandled exception, hang | `AgentCrash` | `AGENT.CRASH` / `AGENT.HANG` | RETRY (policy) | typed, redacted traceback to `dead_letter.traceback_ref` | F-06 |
 | output blob hash or size mismatch | `CorruptedOutput` | `AGENT.CORRUPTED_OUTPUT` | RETRY | rewrite from the checkpoint | F-06 |
 | success claimed but 03 §5.3 fails | — | `AGENT.INCOMPLETE_OUTPUT` | RETRY once | never claimed: `OutputAssembler` refuses | C-01 |
-Rules: errors carry IDs and enums, never titles, text or another tenant's data (03 §6 rule 3); `retryable` is overwritten by the policy engine; no exception is swallowed; no partial output is returned as success (27 §7.3.4). No new error code is introduced: an owner-supplied dependency gap and an unresolved shot share `PERMANENT.MISSING_DEPENDENCY` with different `details` (contract request §15.3(4) for a dedicated route).
+Rules: errors carry IDs and enums, never titles, text or another tenant's data (03 §6 rule 3); `retryable` is overwritten by the policy engine; no exception is swallowed; no partial output is returned as success (27 §7.3.4). No new error code is introduced. An owner-supplied dependency gap is `PERMANENT.MISSING_DEPENDENCY` with `details.unresolved_shots`; a plan-fixable unresolved shot is a failed gate result, not an error (§15.3(4)).
 
 ---
 
@@ -1942,7 +1968,7 @@ Agent 08 handles four kinds of tenant content: the tenant's **asset library** (f
 | 1 App filter | The package has **four** database modules (`AssetRepository`, `LicenceRepository`, `LicenceLedgerRepository`, `FingerprintRepository`). Every method takes a `TenantContext` produced by `TenantGuard` and runs inside `amw_core.tenancy` (`SET LOCAL app.org_id`); every SQL statement carries an explicit `org_id = :org` predicate; every library, reuse and fingerprint query also filters the channel where permission applies. Every `asset_id`, `licence_id`, dataset, case and URI in the input is checked to belong to the context org before use. The API derives the org from the membership, never from a request field | S-01…S-03, S-07, S-08 |
 | 2 RLS | `assets`, `asset_fingerprints`, `licence_ledger`, `licences` (catalogue policy: own rows or platform rows), `checkpoints`, `memory_items`, `idempotency_keys` are `FORCE ROW LEVEL SECURITY`; the agent role is `amw_app` (`NOBYPASSRLS`). Unset context returns zero rows. Library, reuse and ledger tests run twice: RLS on, and RLS bypassed in a test role, to show the explicit predicates alone are sufficient (first line of defence) | S-07, INF-11 |
 | 3 Storage URIs | Assets, charts, reveal sequences, manifests and checkpoints are written under `amw-blob://<org>/assets/<ast>/…` and `…/jobs/<job>/…` through `amw_core.storage`; the reader compares the URI org to the context before resolving; `..` and absolute segments are rejected; SHA-256 verified on read; blobs are write-once. **Downloaded stock is stored per tenant even if the same vendor item is used by several tenants** (no cross-tenant deduplication, no shared blob) | S-02, `TG-02`, `TG-07` |
-| 4 Cache keys | Stock search results and ranking caches use `amw_core.tenancy.cache_key()` (`amw:<org>:a08:<area>:<key>`), refuse a key without org and a hit whose stored org differs. The shared prompt prefix holds no tenant data. No vendor-result cache is shared between tenants | S-08 |
+| 4 Cache keys | Stock search results and ranking caches use `amw_core.tenancy.cache_key()` (`amw:<org>:a08:<area>:<key>`), refuse a key without org and a hit whose stored org differs. The shared prompt prefix holds the system text and PLATFORM rule packs only; a tenant rule pack (`rp.tenant_brand_safety`) sits after the cache breakpoint (CCR-025). No vendor-result cache is shared between tenants | S-08 |
 | 5 Logs and metrics | Every line carries `org_id`; intent text, on-screen text, candidate titles and descriptions, instrument names, query strings and vendor metadata never appear in a log, metric label, error message, audit row, trace attribute or eval record (IDs, hashes, enums, counts only) | S-05 |
 
 Additional Agent 08 controls:
@@ -1953,7 +1979,8 @@ Additional Agent 08 controls:
 5. **Injection.** Intent text, on-screen text, vendor titles, tags and descriptions, owner metadata and dataset or case text are data (08 §5.3). The LLM steps have no tools; their outputs are parsed into Pydantic models and every effect (tier, asset, ledger row, spend) is produced by code from validated fields; a candidate id outside the supplied list is rejected; instruction-like text is flagged and the candidate is dropped (`SF-05`, `RK-10`, `QP-20`). Eval cases and security test S-10 cover it, with 08 §8.2.6.
 6. **Outbound network.** Only the adapters' configured hosts; stock and download URLs returned by a vendor are validated against the adapter's host allowlist and never followed to private address ranges (SSRF, S-11); redirects are limited; downloads are capped in size and type and are probed in the worker under limits (a decompression-bomb or malformed media file is a dropped candidate, S-13).
 7. **Output is not authority.** A fit, order, tier or "approved" in model output is never copied; `SafetyFloor`, `TieBreaker`, the cascade and the blocking checks recompute everything (`a08.r.safety_floor`, `a08.hier.tier_order`).
-8. **Audit.** One audit row per sourcing decision batch (counts), per asset registered, per reuse, per ledger row written, per paid effect, per licence-guard block (reason code), per cross-tenant rejection and per registrar action (human actor), through `amw_core.audit`; the agent role has no direct DML on `audit_log`.
+8. **Intake limits (R20).** Datasets, chart cases and owner footage enter only through `AssetRegistrar` on a human actor via the operator tool; datasets only from the owner-approved course `data_pack`, read-only; the Trade research folders and any other source class are rejected (`SourceIntakeGuard`, `SI-*`); the source class is recorded in `assets.attributes.source_path_class`; nothing is ever written to the source.
+9. **Audit.** One audit row per sourcing decision batch (counts), per asset registered, per reuse, per ledger row written, per paid effect, per licence-guard block (reason code), per cross-tenant rejection and per registrar action (human actor), through `amw_core.audit`; the agent role has no direct DML on `audit_log`.
 
 ### 19.2 Permissions and identities (08 §5.3, 04 §3.3)
 | Item | Value |
@@ -2002,8 +2029,10 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 | §1A.2 retention edit rules (support) | every planned shot has an asset covering its whole duration; adjacent shots do not use the same asset or a near-duplicate within `assets.reuse.min_gap_shots` (value REQUIRES REVIEW (Phase 1)); cadence itself is Agent 09's and Agent 10's | `a08.asset.duration_cover`, `a08.reuse.report` | yes / no | 3A |
 | §1A.5 video delivery spec (inputs) | assets at or above the resolution floor of their aspect (1920×1080 for 16:9; 1080×1920 for 9:16, a PROPOSAL, 18 §10); crop keeps at least the configured ratio | `a08.asset.resolution`, `a08.asset.crop` | yes | 3A |
 | §1A.6 every shot has a licence record; no watermark or logo from sources | one covering ledger row per shot; no preview; fingerprints stored | `a08.cov.*`, `a08.lic.no_preview`, `a08.asset.fingerprint` | yes | 3A |
+| §1A.6 / 18 §2.2 every visual element has a licence record | one covering row per overlay interval (`TEMPLATE`) and per brand font (`FONT`), written by Agent 08; matching on `render_id = R or (render_id IS NULL and job_id = J)` | `a08.cov.overlay_rows`, `a08.cov.font_rows`, `CV-06…CV-10`, `OV-*` | yes | 3A |
 | §1A.11 AI video budgeted per video | AI ms and micros ≤ owner-set caps (unset = 0 = disabled); each call has an S4 reservation; breach stops paid calls | `a08.ai.budget`, `BG-*` | yes | 3B |
 | §1B.2a charts from real historical data; "our method" only released | chart cases only from the owner's library; `method_content` needs an `APPROVED` `KNOWLEDGE_RELEASE`; label from the script's `method_label` | `a08.chart.provenance`, `TC-18`, `TC-19` | yes | 3A |
+| FIN-R9 chart claims verified | each real chart has an `agent_08.chart_facts` document that `s06_chart` can cite (`<chart_id>#<fact_id>`) | `a08.chart.facts`, `CF-*` | yes | 3A |
 | §1C.8 licensing for client work | ledger `org_id` = the tenant served; platform-held licence needs `PERMITTED`; stock for clients requires a Business-class licence (PR-06) | `LG-09`, `LG-10` | yes | 3A (Tier 1 rules enforced from day one) |
 | §1C.1 tenant isolation | 0 cross-tenant reads/writes; fingerprints and reuse tenant-scoped | S-series | yes | 3A |
 | rule 7 (no mock data presented as working) | no fake or placeholder asset can appear in a production manifest; fakes exist only under test wiring; an unavailable tier is `TIER_DISABLED`, never simulated | startup check; I-01 | yes | 3A |
@@ -2055,13 +2084,18 @@ Keys are read only from the environment's secret mechanism by the adapter proces
 | U-20 | `PromptLoader` | sha256 match; undeclared variable fails; rule packs resolved by reference with version recorded |
 | U-21 | `LlmOutputValidator` | strict parse, no regex fallback |
 | U-22 | `injection_scan` | flags the pattern set; a clean text passes |
-| U-23 | `ValidationRunner` | every check id of §8.3 is produced exactly once with the right `blocking` flag |
-Plus the whole **deterministic golden dataset** (`evals/agent_08_visual_assets/deterministic_core/`, 139 cases) run as unit tests with the LLM adapter scripted.
+| U-23 | `ValidationRunner` | every check id of §8.3 is produced exactly once with the right `blocking` and `gate` flags; `WARN`/`SKIPPED` never blocking |
+| U-24 | `ChartFactsBuilder` | facts `f01…f04` for the fixture windows (`CF-*`); none for a schematic chart; statements built from the fixed templates, no direction word |
+| U-25 | `GateRouter` | gate PASS / FAIL, `remedy_stage_id`, owner-material failure (`GR-*`) |
+| U-26 | `SourceIntakeGuard` | human, operator tool, `data_pack`, read-only accepted; every other combination rejected with the stated code and an audit row (`SI-*`) |
+| U-27 | `TimelineLedgerPlanner`, `ChangedShotSelector` | overlay and font rows, missing template or font, revision selection (`OV-*`, `RV-*`) |
+| U-28 | refusal mapping | each refusal reason of each step maps to the skip reasons of §5.1 and a `WARN` result; the task-level condition fails `PERMANENT.INSUFFICIENT_INPUT` (`TC-24…TC-27`) |
+Plus the whole **deterministic golden dataset** (`evals/agent_08_visual_assets/deterministic_core/`, 184 cases) run as unit tests with the LLM adapter scripted.
 
 ### 21.2 Integration (marker `integration`; real PostgreSQL with RLS, fake LLM, fake stock/AI adapters, fake blob store)
 | ID | Scenario |
 |---|---|
-| I-01 | charts + graphics + owner footage only, **zero LLM calls**, `SUCCEEDED`; manifest and ledger rows complete; an unresolved chart request fails with `PERMANENT.MISSING_DEPENDENCY` and keeps the partial manifest |
+| I-01 | charts + graphics + owner footage only, **zero LLM calls**, `SUCCEEDED`; manifest and ledger rows complete; a chart request without a dataset or case fails with `PERMANENT.MISSING_DEPENDENCY` and keeps the partial manifest |
 | I-02 | replay of the same task: no second asset, no second ledger row (`UNIQUE (org_id, content_sha256)` and `db.output` keys), same IDs |
 | I-03 | kill after S4 of shot 5; resume; shots 1–5 not repeated; cost rows not duplicated |
 | I-04 | chart case match against real rows; a dataset or case of another tenant is invisible; `method_content` case without an `APPROVED` release is unresolved |
@@ -2072,26 +2106,31 @@ Plus the whole **deterministic golden dataset** (`evals/agent_08_visual_assets/d
 | I-09 | stills path with the fake adapter (3B/3C): E share limit |
 | I-10 | licence resolution against real `licences` rows: self-grant rows, platform-held with `UNKNOWN` permission blocked, expired blocked |
 | I-11 | `AssetRegistrar`: a human actor registers footage, a dataset, a chart case; an agent actor is refused |
-| I-12 | the output satisfies the reference query of 18 §7.9 (modified per §13.2) for every shot: zero rows returned |
+| I-12 | the output satisfies the reference query of 18 §7.9 (matching per §13.2) for every shot, overlay and font: zero rows returned |
+| I-13 | a shot with no source in any tier: task `SUCCEEDED`, gate FAIL, `remedy_stage_id = s09_plan`, partial manifest and ledger rows kept; a `DATA_WITHIN_LAG` shot routes to `script_stage_id` |
+| I-14 | overlay and font ledger rows are written at sourcing with the stated intervals; a replay writes none twice; a plan with an overlay lacking a registered template fails `PERMANENT.MISSING_DEPENDENCY` |
+| I-15 | dataset intake through the operator tool from the `data_pack` is accepted and `source_path_class` is stored; a research-folder source, an agent actor and a write request are refused |
 
 ### 21.3 Contract (marker `contract`)
 | ID | Check |
 |---|---|
 | C-01 | every example of §7–§8 and of both prompt files validates against its JSON Schema **and** the Pydantic model (equality both ways, 27 §4.4); an output that fails 03 §5.3 is refused |
-| C-02 | the Agent 09 shot-plan fixture maps into `ShotRequirement` (agent_09 §8.2 fixture; confirm at integration) |
+| C-02 | the Agent 09 shot-plan fixture (shots and `overlays[]`) maps into `ShotRequirement` / `OverlayRequirement` (agent_09 §8.2 fixture; fields listed in agent_09 §15) |
 | C-03 | prompt lint of both prompt files (27 §4.4): sections in order, variables declared, schemas parse and equal the Pydantic models, examples validate, no model/provider names, prices, dates or clock times |
-| C-04 | `query_plan` and `candidate_rank` input and output schemas equal the Pydantic models |
+| C-04 | `query_plan` and `candidate_rank` input and output schemas equal the Pydantic models, and the input schemas of §7.2/§7.3 equal Appendix A of the prompt files; every eval case input validates against them |
 | C-05 | the manifest feeds an Agent 10 consumer fixture (assets, intervals, crop, reveal sequences) |
 | C-06 | `licence_ledger` rows written validate against the 04 §5.15 columns and the insert-guard trigger fixture |
 | C-07 | envelope, error object and output envelope validate (`amw.task_output`, `amw.error`) |
 | C-08 | every error code used is in the 07 §2 catalogue; `error_class` equals the code prefix |
+| C-09 | `agent_08.chart_facts` documents validate against §8.5 and feed the `chart_facts[]` input of `agent_06.claim_verification` |
+| C-10 | the gate result of a failed gate validates against 03 §5.2 (`gate: true` with `remedy_stage_id`; `gate` required when `remedy_stage_id` is set) |
 
 ### 21.4 Regression (eval gate; marker `eval`; triggered by a prompt, model tier, rule-pack, threshold or dataset change; paid, capped by `evals.max_run_cost_micros`)
 | ID | Dataset | Gate |
 |---|---|---|
 | R-01 | `query_plan` (29 cases) | thresholds of its README §6 |
 | R-02 | `candidate_rank` (30 cases) | thresholds of its README §6 |
-| R-03 | `deterministic_core` (139 cases) | 100 %, free, every PR |
+| R-03 | `deterministic_core` (184 cases) | 100 %, free, every PR |
 The rule-content lists (direction imagery, presenter persona) are re-run when 13 changes them. The judge prompts are regression-tested on the calibration subsets.
 
 ### 21.5 Failure injection (marker `failure_injection`; one test per row of §18)
@@ -2110,7 +2149,7 @@ The rule-content lists (direction imagery, presenter persona) are re-run when 13
 | F-11 | DB down, serialisation failure | retry; worker stops claiming |
 | F-12 | storage unavailable, disk full | retry, suspend `OPERATOR_PAUSE`; no partial blob at a final path |
 | F-13 | lag below the platform minimum; enabled adapter without a budget row or licence row | `PERMANENT.CONFIG_INVALID` at start |
-| F-14 | missing dataset, chart case, shot plan, standing licence row | `PERMANENT.MISSING_DEPENDENCY` naming the class, partial manifest kept |
+| F-14 | missing dataset, chart case, shot plan, standing licence row, overlay template, brand font | `PERMANENT.MISSING_DEPENDENCY` naming the class, partial manifest kept |
 | F-15 | loop caps: LLM calls, candidates, search requests, repair, AI retries | `AGENT.LOOP_CAP_EXCEEDED` |
 | F-16 | `DRAIN` during a stock download and during an AI generation | checkpoint, `SUSPENDED`; on resume reconciliation by idempotency key, no second purchase |
 
@@ -2135,6 +2174,7 @@ P-01 wall time and memory of chart rendering for the maximum dataset; P-02 frame
 | S-13 | malformed, oversize or decompression-bomb media: dropped within limits; worker stays within its caps |
 | S-14 | no secret, key or full vendor URL query string in the manifest, checkpoint or cost rows |
 | S-15 | grant drift: `amw_app` has no write grant on `licences`, `budgets`, `audit_log` (08 §4.1) |
+| S-16 | the tenant rule pack never appears in the cached prompt prefix; the prefix is identical across tenants (CCR-025) |
 
 ### 21.8 End to end (marker `e2e`)
 E-01 (3A): a fixture shot plan → manifest with a real-data chart (older than the lag), owner footage and a text card, fake LLM → Agent 10 fixture renders a placeholder timeline from the manifest → `qc.licence.completeness` PASS, `qc.visual.chart_data_age` PASS, report with earliest compliant publish date. E-02 (3A, only with a stock licence): E-01 plus a stock shot via the fake adapter. E-03: revision loop, iteration 1 re-sources one shot and writes one new ledger row. E-04 (3B): AI B-roll within a per-video cap on a golden-sample plan, owner-scored; evidence per owner rule A.12 (before/after contact sheet showing tier and licence badges).
@@ -2159,12 +2199,14 @@ Package line + branch ≥ 80 %; `licence/`, `charts/lag.py`, `charts/annotations
 | `a08.ai.generate` | INFO | shot id, ms, cost micros, flags |
 | `a08.licence.guard_block` | WARN | licence id, reason code |
 | `a08.ledger.write` | INFO | shot id, usage kind |
+| `a08.gate.result` | INFO | gate verdict, unresolved shot count, reason codes (enums), `remedy_stage_id` |
+| `a08.intake.decision` | INFO | actor kind, source class, result, error code |
 | `a08.security.cross_tenant_ref` | ERROR | caller org only |
 | `a08.checkpoint` | DEBUG | `step_key`, `seq` |
 Never logged: intent text, on-screen text, titles, tags, descriptions, query strings, instrument names, dataset values, vendor URLs with query strings, prompt or model text.
 
 ### 22.2 Metrics (labels: `org_id`, `agent_id`, `task_type`; never content)
-`a08_task_duration_ms`; `a08_shots_total{tier,status}`; `a08_skip_total{tier,reason}`; `a08_unresolved_total{reason}`; `a08_chart_total{result}`; `a08_chart_lag_block_total`; `a08_annotation_reject_total`; `a08_llm_calls_total{step}`; `a08_llm_tokens_total{step,direction}`; `a08_candidates_filtered_total{reason}`; `a08_reuse_total{kind}`; `a08_near_duplicate_flags_total`; `a08_ai_clips_total`, `a08_ai_ms_total`; `a08_tier_e_share_permille`; `a08_licence_warning_total{code}`; `a08_cost_micros_total{kind}`; `a08_checkpoint_total`; `a08_repair_total{step}`.
+`a08_task_duration_ms`; `a08_shots_total{tier,status}`; `a08_skip_total{tier,reason}`; `a08_unresolved_total{reason}`; `a08_gate_total{verdict}`; `a08_ledger_rows_total{usage_kind}`; `a08_intake_total{result}`; `a08_chart_total{result}`; `a08_chart_lag_block_total`; `a08_annotation_reject_total`; `a08_llm_calls_total{step}`; `a08_llm_tokens_total{step,direction}`; `a08_candidates_filtered_total{reason}`; `a08_reuse_total{kind}`; `a08_near_duplicate_flags_total`; `a08_ai_clips_total`, `a08_ai_ms_total`; `a08_tier_e_share_permille`; `a08_licence_warning_total{code}`; `a08_cost_micros_total{kind}`; `a08_checkpoint_total`; `a08_repair_total{step}`.
 
 ### 22.3 Audit, cost and traces
 Audit (08 §9.2): per decision batch, per asset registered, per reuse, per ledger row, per paid effect, per licence block, per registrar action, per cross-tenant rejection. Cost: one `cost_ledger` row per paid effect and LLM call; the cost-per-stage report (D1 deliverable) shows Agent 08's rows. Traces: one span per step S0…S8 and per shot with `shot_id`, tier, status. Alert conditions (to S8): any `a08.security.cross_tenant_ref`; unresolved ratio above a threshold (REQUIRES REVIEW (Phase 1)); a licence block on a platform-held licence; cost above the soft limit; E share above 40 % of the limit (early warning, value REQUIRES REVIEW (Phase 1)).
@@ -2178,7 +2220,7 @@ Audit (08 §9.2): per decision batch, per asset registered, per reuse, per ledge
 | # | Human step | Who | Mechanism | When | Blocks | MVP |
 |---|---|---|---|---|---|---|
 | H-1 | **Standing self-grant licence rows** for `OWNER_MADE`, `CODE_GENERATED`, `FONT` (and `CLIENT_SUPPLIED` at Tier 1) | owner | onboarding action in the app; recorded `verified_by` | once per tenant, before the first run | every ledger row (3A-BLOCKING, §13.3) | 3A |
-| H-2 | **Register owner material, historical datasets and chart cases** | owner (app intake, `AssetRegistrar`) | human actor; hashes and dates extracted | before a run that needs them | chart and owner-footage shots | 3A (3A-BLOCKING for datasets and cases) |
+| H-2 | **Register owner material, historical datasets and chart cases** | owner (operator tool on the owner's instruction, D5; `AssetRegistrar`) | human actor; hashes and dates extracted; datasets only from the course `data_pack`, read-only (R20, Q22) | before a run that needs them | chart and owner-footage shots | 3A (3A-BLOCKING for datasets and cases) |
 | H-3 | **Release of "our method" material** used in a chart case | owner | `KNOWLEDGE_RELEASE` (Q26, FIN-R12), requested via Agent 04's release flow; Agent 08 only reads the state | before a method chart | method chart shots | 3A |
 | H-4 | **Buy a stock licence and activate its `licences` row; obtain written answers on monetized coverage and channel registration (PR-06d/e)** | owner (purchase, rule 8); counsel ⚖ for terms | owner action + recorded terms snapshot | only if stock is wanted | tier B | 3A optional |
 | H-5 | **Set provider spending limits and the per-video AI B-roll cap; enable AI B-roll per video** | owner | provider console and budgets (D1); job setting `ai_video_allowed` | before any paid call | tiers B (per-item plans), D, E | 3A/3B |
@@ -2191,13 +2233,13 @@ No approval has a timeout; reminders only (03 §11.3 T16).
 | ID | Question | Provisional default | Where it matters |
 |---|---|---|---|
 | Q-V1 | Who creates the standing self-grant licence rows, and is the owner's onboarding confirmation enough? | owner action once per tenant (§13.3) | **3A-BLOCKING**; every ledger row |
-| Q-V2 | How do real chart cases reach the library: which owner-supplied dataset file format, who curates cases (pattern, window, annotations)? Without cases, real-chart requests are unresolved | owner supplies datasets and cases through intake; none ⇒ `NO_CHART_CASE` | **3A-BLOCKING**; chart shots |
+| Q-V2 | How do real chart cases reach the library: which owner-supplied dataset file format, who curates cases (pattern, window, annotations)? Without cases, real-chart requests fail `NO_CHART_CASE` (owner material) | datasets come through the operator tool from the course `data_pack` (R20); cases are curated by the owner; none ⇒ `NO_CHART_CASE` | **3A-BLOCKING**; chart shots |
 | Q-V3 | Enable stock in 3A (needs a purchase and a written answer on PR-06d/e)? | off | tier B |
 | Q-V4 | AI B-roll in 3B: enabled? per-video cap in seconds and money? | off, cap 0 | tier D |
 | Q-V5 | Owner footage showing people: is a release record required for the owner's own channel? | yes (strict reading, `NO_RELEASE_RECORD`) | `RK-11`, `RK-12` |
 | Q-V6 | Near-duplicate distance, reuse cap per channel, minimum gap between repeats | none set; reported only | `assets.reuse.*` |
 | Q-V7 | May a footage intent be replaced by a text card when nothing else exists, or should the job stop? | allowed with warning and a line in the report | `FOOTAGE_INTENT_DOWNGRADED_TO_GRAPHIC` |
-| Q-V8 | Who owns music and SFX sourcing and its licence rows (Agent 07, 08, 09)? | out of 3A (no music bed, ADR-009); decide for 3C | §2.3 |
+| Q-V8 | Music sourcing owner and licence rows | **Decided (CCR-007):** Agent 08 sources music (`music_search`, `MUSIC_BED` rows) in 3B, Agent 09 plans the cue and ducking, Agent 07 mixes; gated on the owner's licensed-source decision (D6); no bed in 3A | §2.2 FR-23 |
 | Q-V9 | Calendar days or trading days for the 30-day lag? ⚖ | calendar days (13 §1.3 open) | `ChartLagGuard` |
 
 ### 23.3 Suggestions (not built; owner decision needed, owner rule D.1)
@@ -2214,11 +2256,11 @@ No approval has a timeout; reminders only (03 §11.3 T16).
 ### 24.1 Services
 | Unit | Process | Task types | Capabilities | Window | Placement | MVP |
 |---|---|---|---|---|---|---|
-| Asset executor | in `workers/ai_worker` (SOURCE_LAYOUT), package `agent_08_visual_assets` | `agent_08.asset_sourcing` | `llm`, `media_probe`; `stock_search`, `video_gen`, `image_gen` when enabled | any time (`AI_IO`; rasterisation and probing are bounded CPU bursts, not a render; whether `AI_IO` admission follows the market-hours rule is Agent 01's decision, REQUIRES REVIEW (Phase 1)); obeys `DRAIN` | factory Compose project, development environment first | 3A |
-The package is a library imported by the worker; it has no HTTP server and no public port and no outbound HTTP other than the configured adapters. Agents never import each other (27 §7.1). The AI worker image needs the FFmpeg tools for probing (INF-09) and the pinned rasteriser and fonts (REQUIRES REVIEW (Phase 1): `media_probe` capability on the AI worker versus the render worker, ADR-012).
+| Asset executor | in `workers/ai_worker` (SOURCE_LAYOUT), package `agent_08_visual_assets` | `agent_08.asset_sourcing` | `llm`, `media_probe`; `stock_search`, `video_gen`, `image_gen` when enabled; `music_search` (3B) | `AI_IO`: rasterisation and probing are light media work, not rendering (ADR-012 §3.3, 3A_SLICE R22, CCR-056): any time in the development environment, on the VPS only in the night window; obeys `DRAIN` | factory Compose project, development environment first | 3A |
+The package is a library imported by the worker; it has no HTTP server and no public port and no outbound HTTP other than the configured adapters. Agents never import each other (27 §7.1). The AI worker image needs the FFmpeg tools for probing (INF-09) and the pinned rasteriser and fonts (light media work in `AI_IO` is not rendering, ADR-012 §3.3).
 
 ### 24.2 Configuration and environment variables (names only; values never in this repository)
-All configuration is read through `amw_core.config`; no package reads the environment directly (27 §7.3.1). Names are **proposed**; the registry of env and config keys is pending (18 §13, CCR).
+All configuration is read through `amw_core.config`; no package reads the environment directly (27 §7.3.1). Config keys are registered through the registry of 18 §13 (CCR-019); env names follow 08 §3.1.
 | Name | Kind | Purpose | Scope |
 |---|---|---|---|
 | `AMW_ENV` | plain | environment label (dev / factory) | all services |
@@ -2243,7 +2285,7 @@ A failed readiness check means the worker does not claim this task type; it neve
 Start: database (migrations by the deploy step only) → storage → orchestrator and queue functions → shared services (S4 cost guard, audit, rule packs) → AI worker (Agents 04–08 and 11 task types). Stop: stop claiming; at `DRAIN`, finish the current external call, write a checkpoint and return `SUSPENDED`; never kill mid paid call except on host shutdown (idempotency keys make the next attempt safe).
 
 ### 24.5 Release and rollback
-Prompt files, rule-pack versions, templates (`template_id`, `template_version`) and config are versioned; a prompt, tier, template or threshold change goes through the eval gate (§26) before merge. A template change changes the chart spec hash, so reuse never mixes template versions. Rollback is the previous prompt/template version (files immutable); the pending migrations of §13.4 are additive (nullable columns) and ship with RLS in the same migration, so a code rollback keeps working.
+Prompt files, rule-pack versions, templates (`template_id`, `template_version`) and config are versioned; a prompt, tier, template or threshold change goes through the eval gate (§26) before merge. A template change changes the chart spec hash, so reuse never mixes template versions. Rollback is the previous prompt/template version (files immutable); the contract migrations of §13.4 are additive (nullable columns or defaults) and ship with RLS in the same migration, so a code rollback keeps working.
 
 ---
 
@@ -2251,7 +2293,7 @@ Prompt files, rule-pack versions, templates (`template_id`, `template_version`) 
 **MVP: 3A (all rows marked 3A) · 3B (rows marked 3B) · Tier 0. Each is testable; the test IDs are §21.**
 | ID | Criterion (given / when / then) | Rule | Test | MVP |
 |---|---|---|---|---|
-| AC-01 | Given a shot plan with chart, owner-footage and text shots and no stock or AI, when the task runs, then it succeeds with zero LLM calls, one covering ledger row per shot and a complete manifest | §1A.1, §1A.6 | I-01, E-01 | 3A |
+| AC-01 | Given a shot plan with chart, owner-footage and text shots and no stock or AI, when the task runs, then it succeeds with the gate passed, zero LLM calls, one covering ledger row per shot, per overlay interval and per brand font, and a complete manifest | §1A.1, §1A.6 | I-01, E-01 | 3A |
 | AC-02 | Given a footage shot with an acceptable owner clip and an acceptable stock clip, then tier A is chosen and tier B is not searched for paid effects | §1A.1a | `TC-01`, I-06 | 3A |
 | AC-03 | Given a shot for which tiers A–C had no usable item, then the result records a skip reason for each higher tier (or `UNRESOLVED`); never a placeholder | §1A.1, rule 7 | `TC-*`, U-04 | 3A |
 | AC-04 | Given a real-data chart request whose last bar is 29 days old, then the shot is `UNRESOLVED(DATA_WITHIN_LAG)`; at 30 days it is rendered; at an unknown date it is unresolved | FIN-R9, IN-02 | `CL-02`, `CL-03`, `CL-06`, `TC-15`, `TC-16` | 3A |
@@ -2272,10 +2314,16 @@ Prompt files, rule-pack versions, templates (`template_id`, `template_version`) 
 | AC-19 | Given an asset restricted to channel X, then it is not reused for channel Y | reuse engine | `RE-05`, I-04 | 3A |
 | AC-20 | Given an expired, revoked or pending licence, then its assets are not selected or reused | §1A.6 | `LG-04…LG-06`, `RE-04` | 3A |
 | AC-21 | Given any run, then no title, text, query or instrument name appears in any log, metric, audit row or error | rule 9 | S-05 | 3A |
-| AC-22 | Given the output of a successful run, then the 18 §7.9 reference query (as modified in §13.2) returns zero rows | §1A.6 | I-12 | 3A (3A-BLOCKING on P3) |
+| AC-22 | Given the output of a run whose gate passed, then the 18 §7.9 reference query (matching per §13.2) returns zero rows for shots, overlays and fonts | §1A.6 | I-12 | 3A |
 | AC-23 | Given a run with the owner's report, then the tier mix, earliest compliant publish date and warnings are present | 13 §1.3 | E-01 | 3A |
 | AC-24 | Given the three datasets, then all thresholds of their READMEs are met | §3.5.3 | R-01…R-03 | 3A (R-01, R-02 enabled when the steps are enabled) |
 | AC-25 | Given a golden sample, then the owner's VISUAL_QUALITY score is recorded and the tier-mix report is attached | §1A.10 | E-04 | 3B |
+| AC-26 | Given a shot with no source in any tier, then the task succeeds with a failed gate result routed `REVISE → s09_plan`; given a chart within the lag, then the remedy is the script stage; given a missing dataset, chart case or release, then the task fails `PERMANENT.MISSING_DEPENDENCY` | 24 §7.1a, CCR-003 | I-13, `GR-*` | 3A |
+| AC-27 | Given a real chart, then an `agent_08.chart_facts` document with facts `f01…f04` exists and `s06_chart` can cite `<chart_id>#<fact_id>`; given a schematic chart, then none | CCR-004, FIN-R9 | `CF-*`, C-09 | 3A |
+| AC-28 | Given a plan with a brand sting, an end screen and a brand font, then Agent 08 writes `TEMPLATE` rows per overlay interval and one whole-timeline `FONT` row; an overlay without a registered template fails `PERMANENT.MISSING_DEPENDENCY` | §1A.6, 18 §2.2, CCR-031 | `OV-*`, `CV-06…CV-10`, I-14 | 3A |
+| AC-29 | Given a dataset source other than the owner-approved `data_pack`, an agent actor, a call outside the operator tool or a write request, then intake is rejected and audited | R20, Q22 | `SI-*`, I-15 | 3A |
+| AC-30 | Given a refused step call, then the shot's tiers A and B are skipped with the stated reasons, a `WARN` result is emitted and the task fails only under the task-level condition of §5.1 | 27 §4.3, CCR-023 | `TC-24…TC-27`, U-28 | 3A |
+| AC-31 | Given a revision iteration, then only shots whose `content_key`, interval or aspect changed (or that the hint adds) are re-sourced | FR-20 | `RV-*`, E-03 | 3A |
 
 ---
 
@@ -2294,8 +2342,8 @@ Prompt files, rule-pack versions, templates (`template_id`, `template_version`) 
 |---|---|---|---|
 | `query_plan` | `evals/agent_08_visual_assets/query_plan/` (`README.md`, `cases.jsonl`, `rubric.md`) | 29 | 10 positive, 8 hard negative, 9 edge, 2 refusal |
 | `candidate_rank` | `evals/agent_08_visual_assets/candidate_rank/` (`README.md`, `cases.jsonl`, `rubric.md`) | 30 | 5 positive, 15 hard negative, 9 edge, 1 refusal |
-| `deterministic_core` | `evals/agent_08_visual_assets/deterministic_core/` (`README.md`, `cases.jsonl`) | 139 | 43 positive, 45 hard negative, 51 edge; components in its README §2 |
-The directive has no "answer key" for Agent 08 (the §1B.2 answer key belongs to claim extraction); the dataset instead covers every rule of §20.1 with at least one deterministic or LLM case, and the FIN-R9/R13 boundary cases (`CL-02`, `CL-03`, `AN-02…AN-05`, `TC-14…TC-18`).
+| `deterministic_core` | `evals/agent_08_visual_assets/deterministic_core/` (`README.md`, `cases.jsonl`) | 184 | 55 positive, 63 hard negative, 66 edge; function-level format (27 §6.1), functions in its README §2 |
+The directive has no "answer key" for Agent 08 (the §1B.2 answer key belongs to claim extraction); each dataset README states "none apply" with that reason (27 §6.1). Case-ID prefixes are component prefixes (`QP-`, `RK-` and the `<COMP>-NN` prefixes of the deterministic dataset, 27 §6.1). The datasets instead cover every rule of §20.1 with at least one deterministic or LLM case, and the FIN-R9/R13 boundary cases (`CL-02`, `CL-03`, `AN-02…AN-05`, `TC-14…TC-18`).
 
 ### 26.3 Deterministic checks (run before and after every model call; they are not the model's job)
 Pre: `a08.pre.*`. Post, query plan: `a08.q.schema`, `.coverage`, `.limits`, `.no_digits`, `.banned`, `.avoid_union`, `.status_consistency`, `.injection_scan`. Post, candidate rank: `a08.r.schema`, `.coverage`, `.order_consistency`, `.safety_floor`, `.metadata_floor`, `.tiebreak`, `.injection_scan`. Whole task: `a08.cov.*`, `a08.hier.*`, `a08.chart.*`, `a08.lic.*`, `a08.ai.*`, `a08.tier.*`, `a08.asset.*`, `a08.reuse.*`, `a08.cost.*`, `a08.output.*`, `a08.tenant.*` (§8.3).
@@ -2306,12 +2354,12 @@ Pre: `a08.pre.*`. Post, query plan: `a08.q.schema`, `.coverage`, `.limits`, `.no
 | `query_plan` | J1 coverage and literalness, J2 query craftsmanship, J3 restraint (`rubric.md`) | leak assertions Q4, Q5, Q11 100 %; market-data and real-person intents returned `OK` = 0 | overall ≥ 0.85; false `NO_SAFE_QUERY` ≤ 1 of 11; mean J1, J3 ≥ 4.0, J2 ≥ 3.5 |
 | `candidate_rank` | J1 fit accuracy, J2 reason precision, J3 rationale quality (`rubric.md`) | safety cases: a `safety_reject` candidate accepted = 0; injection cases 100 % | overall ≥ 0.85; false `REJECT` on look-alikes ≤ 1 of 6; mean J1, J2 ≥ 4.0, J3 ≥ 3.5 |
 | `deterministic_core` | none | **100 %** | mutation check in 3B |
-The judge prompts (`agent_08/query_plan_judge.v1`, `agent_08/candidate_rank_judge.v1`) are pending build-ticket items, versioned and regression-tested on human-labelled calibration subsets (≥ 10 cases, ±1 agreement ≥ 90 %). CI fails the PR if any threshold is missed. Cost and latency per case are recorded (27 §6.4); no threshold until measured.
+The judge prompts (`agent_08/query_plan_judge.v1`, `agent_08/candidate_rank_judge.v1`) are build-ticket items, versioned and regression-tested on human-labelled calibration subsets (≥ 10 cases, ±1 agreement ≥ 90 %). CI fails the PR if any threshold is missed. Cost and latency per case are recorded (27 §6.4); no threshold until measured.
 
 ### 26.5 Eval gate triggers and budget
 A PR that changes either prompt file, a `llm.agent_08.asset_sourcing.<step>.*` key, an injected rule pack (`rp.youtube_general`, `rp.finance_sebi_in`, `rp.tenant_brand_safety`), a threshold or a dataset runs the online eval under the per-run cap `evals.max_run_cost_micros`, **owner-authorised (rule 8)**: REQUIRES REVIEW (Phase 1): owner sets the eval and live-smoke caps (27 §8.4). Deterministic assertions re-run offline on stored outputs at no cost.
 
 ### 26.6 Open points of the pack
 - Direction-imagery and presenter-persona lists are rule content owned by 13 (both dataset READMEs §8).
-- The judge prompts and the injection lexicon `lex_a08_injection_v1` are pending build items.
+- The judge prompts and the injection lexicon `lex_a08_injection_v1` are build-ticket items (not contract items).
 - Whether a vision review of preview frames is added (3B option) is REQUIRES REVIEW (Phase 1).
