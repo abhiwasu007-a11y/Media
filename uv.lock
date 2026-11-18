@@ -10,6 +10,7 @@ members = [
     "agent-07-voice-production",
     "agent-08-visual-assets",
     "agent-09-video-director",
+    "agent-10-video-editor",
     "amw-adapters",
     "amw-core",
     "amw-evals",
@@ -84,6 +85,17 @@ dependencies = [
 requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
 
 [[package]]
+name = "agent-10-video-editor"
+version = "0.0.0"
+source = { editable = "packages/agents/agent_10_video_editor" }
+dependencies = [
+    { name = "amw-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+
+[[package]]
 name = "amw-adapters"
 version = "0.0.0"
 source = { editable = "packages/amw_adapters" }
@@ -135,6 +147,7 @@ dependencies = [
     { name = "agent-07-voice-production" },
     { name = "agent-08-visual-assets" },
     { name = "agent-09-video-director" },
+    { name = "agent-10-video-editor" },
     { name = "amw-adapters" },
     { name = "amw-core" },
     { name = "amw-evals" },
@@ -160,6 +173,7 @@ requires-dist = [
     { name = "agent-07-voice-production", editable = "packages/agents/agent_07_voice_production" },
     { name = "agent-08-visual-assets", editable = "packages/agents/agent_08_visual_assets" },
     { name = "agent-09-video-director", editable = "packages/agents/agent_09_video_director" },
+    { name = "agent-10-video-editor", editable = "packages/agents/agent_10_video_editor" },
     { name = "amw-adapters", editable = "packages/amw_adapters" },
     { name = "amw-core", editable = "packages/amw_core" },
     { name = "amw-evals", editable = "packages/amw_evals" },
