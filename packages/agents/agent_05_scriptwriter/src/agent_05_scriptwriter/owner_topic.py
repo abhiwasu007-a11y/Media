@@ -43,7 +43,7 @@ def script_draft_input_from_owner_topic(
     return ScriptDraftInput(
         topic=topic_from_owner_topic(owner),
         video_kind=owner.video_kind.value,
-        language=owner.language,
+        language=owner.language,  # type: ignore[arg-type]
         channel_category=channel_category,
         owner_sebi_registration="UNREGISTERED",
         active_rule_packs=list(active_rule_packs),
