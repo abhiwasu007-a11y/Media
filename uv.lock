@@ -12,6 +12,7 @@ members = [
     "agent-09-video-director",
     "amw-adapters",
     "amw-core",
+    "amw-evals",
     "amw-media-factory",
     "amw-orchestrator",
 ]
@@ -113,6 +114,17 @@ requires-dist = [
 ]
 
 [[package]]
+name = "amw-evals"
+version = "0.0.0"
+source = { editable = "packages/amw_evals" }
+dependencies = [
+    { name = "jsonschema" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "jsonschema", specifier = ">=4.23" }]
+
+[[package]]
 name = "amw-media-factory"
 version = "0.0.0"
 source = { virtual = "." }
@@ -125,6 +137,7 @@ dependencies = [
     { name = "agent-09-video-director" },
     { name = "amw-adapters" },
     { name = "amw-core" },
+    { name = "amw-evals" },
     { name = "amw-orchestrator" },
 ]
 
@@ -149,6 +162,7 @@ requires-dist = [
     { name = "agent-09-video-director", editable = "packages/agents/agent_09_video_director" },
     { name = "amw-adapters", editable = "packages/amw_adapters" },
     { name = "amw-core", editable = "packages/amw_core" },
+    { name = "amw-evals", editable = "packages/amw_evals" },
     { name = "amw-orchestrator", editable = "packages/amw_orchestrator" },
 ]
 
@@ -160,6 +174,7 @@ dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov", specifier = ">=5" },
     { name = "ruff", specifier = ">=0.8" },
+    { name = "types-jsonschema", specifier = ">=4.23" },
     { name = "types-jsonschema", specifier = ">=4.26.0.20261006" },
 ]
 
