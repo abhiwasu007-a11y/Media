@@ -39,6 +39,7 @@ agent-09-video-director = { workspace = true }
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["docs"]
 target-version = "py314"
 src = ['packages/amw_core/src', 'packages/amw_adapters/src', 'packages/amw_orchestrator/src', 'packages/agents/agent_04_research_knowledge/src', 'packages/agents/agent_05_scriptwriter/src', 'packages/agents/agent_06_fact_checker/src', 'packages/agents/agent_07_voice_production/src', 'packages/agents/agent_08_visual_assets/src', 'packages/agents/agent_09_video_director/src']
 
