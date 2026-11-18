@@ -7,13 +7,14 @@ from scripts.secret_scan import scan
 
 def test_detects_private_key(tmp_path: Path) -> None:
     f = tmp_path / "a.txt"
-    f.write_text("-----BEGIN PRIVATE KEY-----\nabc\n", encoding="utf-8")
+    f.write_text("-----BEGIN " + "PRIVATE KEY-----\nabc\n", encoding="utf-8")
     assert scan(f)
 
 
 def test_detects_assigned_secret(tmp_path: Path) -> None:
     f = tmp_path / "b.py"
-    f.write_text('API_KEY = "abcdefghijklmnopqrstuvwxyz012345"\n', encoding="utf-8")
+    fake_value = "abcdefghijklmnopqrstuvwxyz" + "012345"
+    f.write_text(f'API_KEY = "{fake_value}"\n', encoding="utf-8")
     assert scan(f)
 
 
