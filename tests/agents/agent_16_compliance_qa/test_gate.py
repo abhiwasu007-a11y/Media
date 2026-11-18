@@ -618,21 +618,9 @@ EVASIONS = [
     "b u y this stock now",
     "B_U_Y this stock now",
     "join our g-r-o-u-p today",
-    *(
-        pytest.param(
-            text,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="core_need CCR-110: amw_core.text_normalise does not fold this look-alike "
-                "(CCR-105 forbids a private fold)",
-            ),
-        )
-        for text in (
-            "b\u057dy this stock now",  # Armenian seh (u)
-            "b\u057ey this stock now",  # Armenian vo (look-alike of u)
-            "bu\u13a9 this stock now",  # Cherokee yu (look-alike of Y)
-        )
-    ),
+    "b\u057dy this stock now",  # Armenian seh (u), CCR-110
+    "b\u057ey this stock now",  # Armenian vo (look-alike of u), CCR-110
+    "bu\u13a9 this stock now",  # Cherokee gi (look-alike of Y), CCR-110
 ]
 
 

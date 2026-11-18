@@ -264,6 +264,10 @@ _CONFUSABLES: dict[str, str] = {
     "\u1d21": "w",
     "\u028f": "y",
     "\u1d22": "z",
+    # Armenian / Cherokee look-alikes (CCR-110, PROVISIONAL, REQUIRES REVIEW: owner / linguist)
+    "\u057d": "u",  # ARMENIAN SMALL LETTER SEH
+    "\u057e": "u",  # ARMENIAN SMALL LETTER VO
+    "\u13a9": "y",  # CHEROKEE LETTER GI (looks like Y)
 }
 
 # Two-part Devanagari independent vowels -> the single code point (curated subset of the
