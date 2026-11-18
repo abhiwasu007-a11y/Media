@@ -41,6 +41,7 @@ class Accepted(Model):
 class ResumeState(Model):
     """Checkpoint state after each accepted batch (FR-19): a kill never repeats a call."""
 
+    input_sha256: str = ""
     batches: dict[str, tuple[Accepted, ...]] = Field(default_factory=dict)
     refusal: Refusal | None = None
 
@@ -100,8 +101,11 @@ def run_direction(
     aspect_fallback: Callable[[DirectionSlot], Direction] | None = None,
     resume: ResumeState | None = None,
     checkpoint: Callable[[ResumeState], None] | None = None,
+    input_sha256: str = "",
 ) -> DirectionResult:
-    state = resume or ResumeState()
+    if resume is not None and resume.input_sha256 != input_sha256:
+        resume = None  # stale checkpoint: inputs or config changed, discard (blueprint 16 rule 1)
+    state = resume or ResumeState(input_sha256=input_sha256)
     accepted: dict[str, Accepted] = {}
     refusal: Refusal | None = state.refusal
     hits_total: dict[str, int] = {}

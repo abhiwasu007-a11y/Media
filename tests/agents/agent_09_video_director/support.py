@@ -196,7 +196,7 @@ class Recorder:
 
     def record(self, response: LlmResponse, idempotency_key: str) -> str:
         self.rows.append((idempotency_key, response.usage.amount_micros))
-        return f"cst_{len(self.rows):04d}"
+        return str(new_id(Prefix.COST_ENTRY))
 
 
 def make_request(script: ScriptDoc, durations: dict[str, int], **over: Any) -> ShotPlanRequest:
@@ -212,6 +212,8 @@ def make_request(script: ScriptDoc, durations: dict[str, int], **over: Any) -> S
                           lower_third_template_ref="template:lt"),
         "channel_category": "finance", "limits": Limits(ai_still_allowed=True),
         "max_calls": 50, "max_cost_micros": 10**9, "worst_case_call_micros": 1000,
+        "rule_packs": {"rp.youtube_general": "YT RULES", "rp.finance_sebi_in": "FIN RULES"},
+        "rule_pack_versions": {"rp.youtube_general": "1", "rp.finance_sebi_in": "1"},
     }  # fmt: skip
     base.update(over)
     return ShotPlanRequest(**base)
@@ -242,3 +244,88 @@ def ctx_of(res: Any, req: ShotPlanRequest, config: Agent09Config | None = None) 
         accepted=res.accepted, slot_ids=list(res.accepted), banned_subjects=req.banned_subjects,
         jl_eligible_count=3,
     )  # fmt: skip
+
+
+# ---------------------------------------------------------------- plans built from case input
+def synth_shot(i: int, start: int, end: int, **kw: Any) -> Any:
+    from agent_09_video_director.contracts import (
+        Depict,
+        Framing,
+        IntentKind,
+        Motion,
+        Origin,
+        Shot,
+        Transition,
+        TransitionKind,
+    )
+
+    base: dict[str, Any] = {
+        "shot_id": f"sh{i:02d}", "seq": i, "scene_id": "sc", "section_id": None, "start_ms": start,
+        "end_ms": end, "duration_ms": end - start, "segment_ids": ("s1",),
+        "intent_kind": IntentKind.FOOTAGE, "intent_text": "hands on a desk",
+        "framing": Framing.CLOSE_UP, "motion": Motion.STATIC, "allowed_tiers": (Tier.C,),
+        "tier_hint": Tier.B, "fallback_template_key": "tpl", "explanatory": True, "held": None,
+        "change_events_ms": (), "interrupt": None,
+        "transition_in": Transition(kind=TransitionKind.CUT, duration_ms=0), "cut_offset_ms": 0,
+        "jl_kind": None, "chart_id": None, "text_refs": (),
+        "depiction": Depict(realistic_event_depiction=False, schematic=False),
+        "origin": Origin.MODEL, "content_key": "0" * 64, "vertical": None, "parent_shot_id": None,
+    }  # fmt: skip
+    base.update(kw)
+    return Shot(**base)
+
+
+def synth_ctx(
+    shots: list[Any],
+    *,
+    config: Agent09Config,
+    aspect: AspectRatio = AspectRatio.LANDSCAPE,
+    hook: tuple[int, int] = (0, 0),
+    overlays: tuple[Any, ...] = (),
+    chapters: tuple[Any, ...] = (),
+    pauses: tuple[Any, ...] = (),
+    script: ScriptDoc | None = None,
+    spans: dict[str, tuple[int, int]] | None = None,
+    limits: Limits | None = None,
+    iteration: int = 0,
+) -> Any:
+    """A CheckContext whose plan is built from the given parts (never edited from a sample)."""
+    from agent_09_video_director.assemble import derive_holds
+    from agent_09_video_director.checks import CheckContext
+    from agent_09_video_director.contracts import (
+        AudioPlan,
+        HookFacts,
+        MusicPlan,
+        ShotPlan,
+        Stats,
+        TierBudget,
+    )
+    from agent_09_video_director.timeline.timemap import TimeMap
+
+    end = shots[-1].end_ms
+    es = config.end_screen_length_ms or 0
+    plan = ShotPlan(
+        script_id="scr_x", script_version=1, script_sha256=SHA_A, language="en-IN", aspect_ratio=aspect,
+        iteration=iteration, narration_timeline_sha256="b" * 64, content_end_ms=end,
+        total_duration_ms=end + es,
+        hook=HookFacts(end_ms=hook[0], first_payoff_ms=hook[1], segment_ids=("s1",)),
+        shots=tuple(shots), overlays=overlays,
+        audio_plan=AudioPlan(music=MusicPlan(bed="NONE", start_ms=None, end_ms=None),
+                             deliberate_pauses=pauses),
+        chapters=chapters, deliberate_hold=derive_holds(shots), interrupts=(), jl_cuts=(),
+        tier_budget=TierBudget(worst_case_e_share_permille=0, e_limit_permille=0,
+                               ai_video_allowed_ms=0, ai_video_limit_ms=0),
+        stats=Stats(slot_count=len(shots), llm_slot_count=0, fallback_count=0, repaired_count=0,
+                    change_events_total=len(shots), max_gap_ms=0, min_gap_ms=0),
+    )  # fmt: skip
+    sc = script or ScriptDoc(script_id="scr_x", version=1, language="en-IN", aspect_ratio=aspect,
+                             scenes=(), segments=())  # fmt: skip
+    tm = TimeMap(order=tuple(spans or {}), spans=spans or {"s1": (0, end)})
+    return CheckContext(
+        plan=plan,
+        script=sc,
+        tm=tm,
+        cfg=config,
+        limits=limits or Limits(),
+        channel_category="finance",
+    )

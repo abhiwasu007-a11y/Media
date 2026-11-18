@@ -651,4 +651,26 @@ def run_all(c: CheckContext) -> list[ValidationResult]:
     """The 24 checks in blueprint order plus the sub-result ``a09.q.vertical.safe_zone``."""
     results = [fn(c) for fn in ALL_CHECKS]
     results.insert(18, check_vertical_safe_zone(c))
+    refusal = check_visual_guard_refusal(c)
+    if refusal is not None:
+        results.insert(17, refusal)
     return results
+
+
+def check_visual_guard_refusal(c: CheckContext) -> ValidationResult | None:
+    """``a09.q.visual_guard.refusal`` (8.4): a refused batch is never a silent PASS."""
+    ref = c.plan.refusal
+    if ref is None:
+        return None
+    n = sum(1 for r in c.plan.realism if r.get("refusal_reason") is not None)
+    rule = ref.violated_rule_ids[0] if ref.violated_rule_ids else None
+    return ValidationResult(
+        check_id="a09.q.visual_guard.refusal",
+        kind=CheckKind.DETERMINISTIC,
+        verdict=CheckVerdict.WARN,
+        blocking=False,
+        rule_id=rule,
+        measured=n,
+        threshold=0,
+        message=f"batch refused ({ref.reason}); {n} shot(s) degraded to fallback",
+    )

@@ -7,6 +7,7 @@ is checked first (``gates.assert_tenant_consistent``); the LLM receives the sani
 one tenant only; no content reaches a log (counts, IDs, hashes only).
 """
 
+import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping, Sequence
@@ -16,6 +17,8 @@ from agent_09_video_director.assemble import (
     Assembled,
     AssembleInput,
     assemble_plan,
+    canonical_json,
+    direction_from_shot,
     plan_hash,
 )
 from agent_09_video_director.checks import CheckContext, FeedbackItem, run_all
@@ -28,8 +31,10 @@ from agent_09_video_director.contracts import (
     Limits,
     NarrationTimeline,
     Origin,
+    Provenance,
     RevisionFeedback,
     ScriptDoc,
+    Shot,
     ShotPlan,
     Slot,
     StepLimits,
@@ -53,11 +58,12 @@ from agent_09_video_director.gates import assert_tenant_consistent, script_gate
 from agent_09_video_director.problems import input_invalid
 from agent_09_video_director.skeleton import build_skeleton, direction_slots
 from agent_09_video_director.timeline.hook import HookInfo, TimedSegment, analyze_hook
+from agent_09_video_director.timeline.rebase import rebase_shots
 from agent_09_video_director.timeline.timemap import TimeMap, build_time_map
 from amw_adapters.llm.protocol import LlmAdapter
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import CheckVerdict
-from amw_core.errors import BudgetExhaustedError, QualityRepeatedFailureError
+from amw_core.errors import BudgetExhaustedError, ConfigInvalidError, QualityRepeatedFailureError
 
 log = logging.getLogger("agent_09")
 
@@ -67,9 +73,11 @@ class Verification:
     verified_script_sha256: str
     stage_verdict: str
     approval_approved: bool = False
+    claim_blocked: bool = False
+    script_status: str = "ACTIVE"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ShotPlanRequest:
     org_id: str
     task_id: str
@@ -88,13 +96,17 @@ class ShotPlanRequest:
     banned_subjects: Sequence[str] = ()
     limits: Limits = field(default_factory=Limits)
     rule_packs: Mapping[str, str] = field(default_factory=dict)
+    rule_pack_versions: Mapping[str, str] = field(default_factory=dict)
+    previous_timeline: NarrationTimeline | None = None
+    """The timeline ``previous_plan`` was made on; required when the timeline hash changed."""
     iteration: int = 0
     previous_plan: ShotPlan | None = None
     feedback: Sequence[RevisionFeedback] = ()
     parent_shots: Mapping[str, Sequence[str]] | None = None
-    max_calls: int = 100
-    max_cost_micros: int = 10**12
-    worst_case_call_micros: int = 0
+    max_calls: int
+    max_cost_micros: int
+    worst_case_call_micros: int
+    """No defaults: the S4 reservation of the task (resource_budget) is required config."""
 
 
 @dataclass(slots=True)
@@ -138,7 +150,11 @@ class ShotPlanStep:
             verified_script_sha256=req.verification.verified_script_sha256,
             stage_verdict=req.verification.stage_verdict,
             approval_approved=req.verification.approval_approved,
+            claim_blocked=req.verification.claim_blocked,
+            script_status=req.verification.script_status,
         )
+        if req.max_calls < 1 or req.max_cost_micros < 1 or req.worst_case_call_micros < 1:
+            raise ConfigInvalidError("resource_budget / reservation config missing or not positive")
         tm = build_time_map([s.segment_id for s in req.script.segments], req.timeline)
         timed = [
             TimedSegment(s.segment_id, s.kind, *tm.spans[s.segment_id]) for s in req.script.segments
@@ -146,16 +162,33 @@ class ShotPlanStep:
         hook = analyze_hook(timed, req.aspect_ratio, self._cfg.hook_window_ms)
         return tm, hook
 
-    # ------------------------------------------------------------------ revision reuse
-    @staticmethod
-    def _reuse(req: ShotPlanRequest, slots: Sequence[Slot]) -> dict[str, Accepted]:
-        """Directions of untouched shots of the previous plan are kept (24 section 3.3 rule 6)."""
+    # ------------------------------------------------------------------ rebase (FR-16)
+    def _previous_shots(self, req: ShotPlanRequest, tm: TimeMap) -> Sequence[Shot]:
+        """Previous shots, rebased to the new measured timeline when its hash changed (F-24)."""
         prev = req.previous_plan
         if prev is None:
-            return {}
-        stored = prev.provenance.get("accepted_directions", {})
+            return ()
+        if prev.narration_timeline_sha256 == req.timeline_sha256:
+            return prev.shots
+        if req.previous_timeline is None:
+            raise input_invalid("PREVIOUS_TIMELINE_MISSING")
+        old = {
+            s.segment_id: (s.start_ms, s.end_ms)
+            for s in req.previous_timeline.segments
+            if s.start_ms is not None and s.end_ms is not None
+        }
+        common = {k: v for k, v in old.items() if k in tm.spans}
+        if not common:
+            raise input_invalid("REBASE_LIMIT")
+        return rebase_shots(prev.shots, common, {k: tm.spans[k] for k in common}, self._cfg)
+
+    # ------------------------------------------------------------------ revision reuse
+    @staticmethod
+    def _reuse(
+        req: ShotPlanRequest, slots: Sequence[Slot], prev_shots: Sequence[Shot]
+    ) -> dict[str, Accepted]:
+        """Directions of untouched shots of the previous plan are kept (24 section 3.3 rule 6)."""
         named = {sid for f in req.feedback for sid in f.shot_ids}
-        by_key = {s.content_key: s for s in prev.shots}
         out: dict[str, Accepted] = {}
         for slot in slots:
             if slot.origin is not Origin.MODEL:
@@ -164,27 +197,33 @@ class ShotPlanStep:
             old = next(
                 (
                     p
-                    for p in prev.shots
+                    for p in prev_shots
                     if p.shot_id == shot_id
                     and p.scene_id == slot.scene_id
                     and p.segment_ids == slot.segment_ids
                 ),
                 None,
             )
-            if (
-                old is None
-                or old.shot_id in named
-                or shot_id in named
-                or old.content_key not in by_key
-            ):
+            if old is None or old.shot_id in named or old.origin is Origin.FALLBACK:
                 continue
-            raw = stored.get(old.shot_id)
-            if raw is not None:
-                acc = Accepted.model_validate(raw)
-                out[slot.slot_id] = acc.model_copy(
-                    update={"direction": acc.direction.model_copy(update={"slot_id": slot.slot_id})}
-                )
+            direction = direction_from_shot(old).model_copy(update={"slot_id": slot.slot_id})
+            out[slot.slot_id] = Accepted(direction=direction, origin=old.origin)
         return out
+
+    def _input_hash(self, req: ShotPlanRequest, slot_ids: Sequence[str]) -> str:
+        """Binds a checkpoint to its inputs and config (blueprint 16 rule 1)."""
+        material = {
+            "script": req.script_sha256,
+            "timeline": req.timeline_sha256,
+            "cfg": json.loads(self._cfg.model_dump_json()),
+            "aspect": req.aspect_ratio.value,
+            "limits": json.loads(req.limits.model_dump_json()),
+            "banned": list(req.banned_subjects),
+            "iteration": req.iteration,
+            "packs": dict(req.rule_pack_versions),
+            "slots": list(slot_ids),
+        }
+        return hashlib.sha256(canonical_json(material).encode()).hexdigest()
 
     # ------------------------------------------------------------------ run
     def run(
@@ -197,7 +236,9 @@ class ShotPlanStep:
         cfg = self._cfg
         tm, hook = self._preconditions(req)
         slots = build_skeleton(req.script, tm, hook, cfg, req.limits)
-        reused = self._reuse(req, slots)
+        prev_shots = self._previous_shots(req, tm)
+        reused = self._reuse(req, slots, prev_shots)
+        input_hash = self._input_hash(req, [x.slot_id for x in slots])
         dslots = [
             s for s in direction_slots(slots, req.script, tm, req.limits) if s.slot_id not in reused
         ]
@@ -240,7 +281,7 @@ class ShotPlanStep:
                 slots=batch.slots,
             )
 
-        prompt_text = self._prompts.get(PROMPT_ID) if batches else ""
+        prompt_text = self._prompts.get(PROMPT_ID)
         result: DirectionResult = run_direction(
             batches=batches,
             base=base,
@@ -250,6 +291,7 @@ class ShotPlanStep:
             cfg=cfg,
             resume=resume,
             checkpoint=checkpoint,
+            input_sha256=input_hash,
         )
         accepted = {**reused, **result.accepted}
         model_slots = [s for s in slots if s.origin is Origin.MODEL]
@@ -278,16 +320,19 @@ class ShotPlanStep:
             parent_shots=req.parent_shots,
         )
         assembled: Assembled = assemble_plan(ainp)
-        stored = {
-            f"sh{sid[2:]}": json.loads(acc.model_dump_json()) for sid, acc in accepted.items()
-        }
         plan = assembled.plan.model_copy(
             update={
-                "provenance": {
-                    "prompt_id": PROMPT_ID,
-                    "accepted_directions": stored,
-                    "calls": meter.calls,
-                }
+                "provenance": Provenance(
+                    prompt_id=PROMPT_ID,
+                    prompt_sha256=hashlib.sha256(prompt_text.encode("utf-8")).hexdigest(),
+                    rule_pack_versions=dict(req.rule_pack_versions),
+                    config_key_families=(
+                        "agent_09.*",
+                        "qc.*",
+                        "llm.agent_09.shot_plan.direction.*",
+                    ),
+                    calls=tuple(meter.call_log),
+                )
             }
         )
         ctx = CheckContext(

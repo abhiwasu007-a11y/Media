@@ -55,6 +55,13 @@ def render_prompt(
         raise ConfigInvalidError("prompt file has no Role / schema sections")
     body = prompt_text[start:end]
 
+    required = {"rp.youtube_general"}
+    if batch.channel_category == "finance":
+        required.add("rp.finance_sebi_in")
+    missing = sorted(n for n in required if n in _PACK.findall(body) and not packs.get(n))
+    if missing:  # fail closed: a missing compliance pack never renders as empty text
+        raise ConfigInvalidError("required rule pack missing", details={"missing": missing})
+
     def pack(m: re.Match[str]) -> str:
         name = m.group(1)
         return "" if name == TENANT_PACK else packs.get(name, "")

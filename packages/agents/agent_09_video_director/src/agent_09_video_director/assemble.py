@@ -297,13 +297,7 @@ def assemble_plan(inp: AssembleInput) -> Assembled:
         for s in shots
         if s.interrupt is not None
     )
-    holds = tuple(
-        DeliberateHold(
-            start_ms=s.start_ms, end_ms=s.end_ms, shot_id=s.shot_id, reason=s.held.reason
-        )
-        for s in shots
-        if s.held is not None
-    )
+    holds = derive_holds(shots)
     jl_summary = tuple(
         JlCutSummary(
             boundary_ms=c.boundary_ms,
@@ -372,3 +366,48 @@ def assemble_plan(inp: AssembleInput) -> Assembled:
         realism=realism,
     )
     return Assembled(plan, jl.eligible_count)
+
+
+def derive_holds(shots: Sequence[Shot]) -> tuple[DeliberateHold, ...]:
+    """``deliberate_hold[]``: exactly the intervals of the shots with ``held`` non-null."""
+    return tuple(
+        DeliberateHold(
+            start_ms=s.start_ms, end_ms=s.end_ms, shot_id=s.shot_id, reason=s.held.reason
+        )
+        for s in shots
+        if s.held is not None
+    )
+
+
+def direction_from_shot(shot: Shot) -> Direction:
+    """The accepted direction of a previous plan, rebuilt from its shot (revision reuse, 6.7).
+
+    Flags that guards forced to false stay false; ``still_ok`` and ``needs_ai_video`` follow the
+    tiers the plan allowed.
+    """
+    from agent_09_video_director.contracts import Depiction
+
+    ids = tuple(f"t{r.index + 1}" for r in shot.text_refs if isinstance(r, TextRefScene))
+    kind = None if shot.intent_kind is IntentKind.CHART else shot.intent_kind.value
+    return Direction(
+        slot_id=f"sl{shot.shot_id[2:]}",
+        status="OK",
+        reason_code=None,
+        intent_kind=kind,
+        intent_text=shot.intent_text,
+        framing=shot.framing,
+        motion=shot.motion,
+        still_ok=Tier.E in shot.allowed_tiers,
+        needs_ai_video=Tier.D in shot.allowed_tiers,
+        interrupt_device=shot.interrupt.device if shot.interrupt else None,
+        transition_hint=shot.transition_in.kind,
+        text_ids=ids,
+        subject_anchor=shot.vertical.subject_anchor if shot.vertical else None,
+        depiction=Depiction(
+            real_person=False, identifiable_person=False, market_direction_imagery=False,
+            market_data_screen=False, brand_or_logo=False, ai_presenter=False,
+            realistic_event_depiction=shot.depiction.realistic_event_depiction,
+            schematic=shot.depiction.schematic,
+        ),
+        rationale="Kept from the previous iteration.",
+    )  # fmt: skip

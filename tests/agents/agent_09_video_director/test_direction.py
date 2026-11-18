@@ -31,6 +31,7 @@ from amw_core.errors import (
     AmwError,
     BudgetExhaustedError,
     CircuitOpenError,
+    ConfigInvalidError,
     InputInvalidError,
     InsufficientInputError,
     InvalidJsonError,
@@ -246,7 +247,13 @@ def test_prompt_rendering() -> None:
     ctx = step_input([s])
     text = PROMPT_PATH.read_text(encoding="utf-8")
     p = render_prompt(
-        text, ctx, {"rp.youtube_general": "PACK-YT", "rp.tenant_brand_safety": "TENANT-RULES"}
+        text,
+        ctx,
+        {
+            "rp.youtube_general": "PACK-YT",
+            "rp.finance_sebi_in": "PACK-FIN",
+            "rp.tenant_brand_safety": "TENANT-RULES",
+        },
     )
     assert (
         "PACK-YT" in p.system and "TENANT-RULES" not in p.system
@@ -257,8 +264,14 @@ def test_prompt_rendering() -> None:
     )  # markers escaped in data
     assert "{{rule_pack:" not in p.system and "240" in p.system
     assert len(p.prompt_sha256) == 64
-    plain = render_prompt(text, ctx, {})
+    plain = render_prompt(text, ctx, {"rp.youtube_general": "Y", "rp.finance_sebi_in": "F"})
     assert plain.user.startswith("<<<INPUT")
+    with pytest.raises(ConfigInvalidError):  # fail closed: a missing pack is never empty text
+        render_prompt(text, ctx, {"rp.youtube_general": "Y"})  # finance channel needs the SEBI pack
+    with pytest.raises(ConfigInvalidError):
+        render_prompt(text, ctx, {})
+    travel = step_input([s], channel_category="travel")
+    assert "PACK-YT" in render_prompt(text, travel, {"rp.youtube_general": "PACK-YT"}).system
     with pytest.raises(AmwError):
         render_prompt("no sections", ctx, {})
     assert FilePromptStore(PROMPT_PATH).get(PROMPT_ID).startswith("# agent_09/shot_direction.v1")
@@ -282,6 +295,7 @@ def base_fn(slots: list[DirectionSlot], **kw: Any) -> Any:
 
 
 PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
+PACKS = {"rp.youtube_general": "Y", "rp.finance_sebi_in": "F"}
 
 
 def run(slots: list[DirectionSlot], llm: ResponderLlm, **kw: Any) -> Any:
@@ -289,7 +303,7 @@ def run(slots: list[DirectionSlot], llm: ResponderLlm, **kw: Any) -> Any:
     cfg = base_for_tests().model_copy(update={"llm_batch_slots": kw.pop("size", 12)})
     res = run_direction(
         batches=make_batches(slots, cfg.llm_batch_slots), base=base_fn(slots, **kw.pop("ctx", {})),
-        prompt_text=PROMPT, packs={}, client=client, cfg=cfg, **kw,
+        prompt_text=PROMPT, packs=PACKS, client=client, cfg=cfg, **kw,
     )  # fmt: skip
     return res, rec, meter
 
@@ -345,7 +359,7 @@ def test_zero_repairs_goes_straight_to_fallback() -> None:
     client, _, meter = make_client(ResponderLlm(bad_then_good(calls)))
     cfg = base_for_tests().model_copy(update={"llm_max_repairs_per_batch": 0})
     s = [slot(1)]
-    res = run_direction(batches=make_batches(s, 12), base=base_fn(s), prompt_text=PROMPT, packs={},
+    res = run_direction(batches=make_batches(s, 12), base=base_fn(s), prompt_text=PROMPT, packs=PACKS,
                         client=client, cfg=cfg)  # fmt: skip
     assert meter.calls == 1 and res.accepted["sl01"].origin.value == "FALLBACK"
 

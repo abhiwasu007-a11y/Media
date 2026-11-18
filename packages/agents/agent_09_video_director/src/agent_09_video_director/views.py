@@ -107,8 +107,8 @@ def build_views(plan: ShotPlan, script: ScriptDoc) -> Views:
     hook_ids = set(plan.hook.segment_ids)
     chosen: list[tuple[Shot, Literal["HOOK", "PROOF"]]] = []
     for s in shots:
-        if s.intent_kind in (IntentKind.CHART, IntentKind.TEXT_CARD):
-            continue
+        if s.intent_kind in (IntentKind.CHART, IntentKind.TEXT_CARD) or not s.intent_text:
+            continue  # Agent 11 needs a describable picture (intent_text minLength 1)
         if hook_ids & set(s.segment_ids) and len(chosen) < 4:
             chosen.append((s, "HOOK" if not chosen else "PROOF"))
     subjects = tuple(

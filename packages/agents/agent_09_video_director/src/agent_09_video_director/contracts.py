@@ -503,6 +503,26 @@ class Stats(Model):
     min_gap_ms: int
 
 
+class CallInfo(Model):
+    step_key: str
+    provider: str
+    model: str
+    tokens_in: int
+    tokens_out: int
+    tokens_cached_in: int
+    cost_entry_id: str
+
+
+class Provenance(Model):
+    """Blueprint 8.1: not part of the determinism hash."""
+
+    prompt_id: str
+    prompt_sha256: SHA256 | None
+    rule_pack_versions: dict[str, str]
+    config_key_families: tuple[str, ...]
+    calls: tuple[CallInfo, ...]
+
+
 class ShotPlan(Model):
     """The plan blob (payload of ``agent_09.shot_plan.output`` 1.0.0, without ``plan_ref``)."""
 
@@ -529,7 +549,7 @@ class ShotPlan(Model):
     stats: Stats
     refusal: Refusal | None = None
     realism: tuple[dict[str, Any], ...] = ()
-    provenance: dict[str, Any] = Field(default_factory=dict)
+    provenance: Provenance | None = None
 
 
 class Slot(Model):

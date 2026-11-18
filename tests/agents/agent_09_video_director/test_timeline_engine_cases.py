@@ -14,10 +14,17 @@ from typing import Any
 
 import pytest
 
+from agent_09_video_director.assemble import derive_holds
 from agent_09_video_director.checks import (
     check_cadence,
+    check_chapters,
+    check_end_screen,
+    check_hook_no_brand,
+    check_hook_window,
     check_interrupt_first,
     check_revision_addressed,
+    check_tier_plan,
+    check_tiling,
     check_transitions,
     check_vertical,
 )
@@ -30,8 +37,14 @@ from agent_09_video_director.contracts import (
     HeldReason,
     Limits,
     NarrationTimeline,
+    Overlay,
+    OverlayKind,
+    Scene,
+    ScriptDoc,
     Section,
+    Segment,
     SegmentKind,
+    Tier,
     Vertical,
 )
 from agent_09_video_director.gates import script_gate
@@ -57,6 +70,8 @@ from tests.agents.agent_09_video_director.support import (
     make_request,
     make_step,
     sample_script,
+    synth_ctx,
+    synth_shot,
 )
 
 pytestmark = pytest.mark.unit
@@ -132,7 +147,8 @@ def te_10(case: dict[str, Any]) -> None:
             edges.append(s.end_ms)
     assert edges == exp["all_boundaries_ms"]
     assert len(edges) - 1 == exp["slot_count"]
-    assert edges[0] == 0 and edges[-1] == end  # a09.q.tiling PASS: contiguous, ends at content end
+    shots = [synth_shot(i, a, b) for i, (a, b) in enumerate(itertools.pairwise(edges), 1)]
+    assert check_tiling(synth_ctx(shots, config=c)).verdict.value == exp["a09.q.tiling"]
 
 
 def te_hook(case: dict[str, Any]) -> None:
@@ -151,7 +167,9 @@ def te_hook(case: dict[str, Any]) -> None:
         return
     h = analyze_hook(segs, aspect, c.hook_window_ms)
     assert (h.end_ms, h.first_payoff_ms) == (exp["hook_end_ms"], exp["first_payoff_ms"])
-    assert h.end_ms <= c.hook_window_ms  # a09.q.hook_window PASS
+    ctx = synth_ctx([synth_shot(1, 0, segs[-1].end_ms)], config=c, aspect=aspect,
+                    hook=(h.end_ms, h.first_payoff_ms))  # fmt: skip
+    assert check_hook_window(ctx).verdict.value == exp["a09.q.hook_window"]
 
 
 def te_sting(case: dict[str, Any]) -> None:
@@ -163,7 +181,29 @@ def te_sting(case: dict[str, Any]) -> None:
     got = plan_brand_sting(inp["hook_end_ms"], brand, c)
     want = [(o["start_ms"], o["end_ms"]) for o in exp["overlays"]]
     assert ([got] if got else []) == want
-    assert got is None or got[0] >= inp["hook_end_ms"]  # a09.q.hook_no_brand PASS
+    overlays = (
+        (Overlay(overlay_id="ov01", kind=OverlayKind.BRAND_STING, start_ms=got[0], end_ms=got[1],
+                 template_ref=brand.intro_ref),)
+        if got else ()
+    )  # fmt: skip
+    ctx = synth_ctx(
+        [synth_shot(1, 0, 60_000)], config=c, hook=(inp["hook_end_ms"], 9800), overlays=overlays
+    )
+    assert check_hook_no_brand(ctx).verdict.value == exp["a09.q.hook_no_brand"]
+    early = Overlay(
+        overlay_id="ov02", kind=OverlayKind.BRAND_STING, start_ms=0, end_ms=900, template_ref="t"
+    )
+    assert (
+        check_hook_no_brand(
+            synth_ctx(
+                [synth_shot(1, 0, 60_000)],
+                config=c,
+                hook=(inp["hook_end_ms"], 9800),
+                overlays=(early,),
+            )
+        ).verdict
+        is CheckVerdict.FAIL
+    )
 
 
 def te_interrupts(case: dict[str, Any]) -> None:
@@ -208,31 +248,65 @@ def te_end_screen(case: dict[str, Any]) -> None:
     for var, want in zip(inp["variants"], case["expected"]["variants"], strict=True):
         c = base(var)
         es, pauses = plan_end_screen(inp["content_end_ms"], c)
-        if want["end_screen"] is None:
-            assert es is None
-            assert inp["content_end_ms"] == want["total_duration_ms"]
-        else:
+        overlays = (
+            (Overlay(overlay_id="ov01", kind=OverlayKind.END_SCREEN, start_ms=es.start_ms,
+                     end_ms=es.end_ms, template_ref="outro"),)
+            if es else ()
+        )  # fmt: skip
+        ctx = synth_ctx(
+            [synth_shot(1, 0, inp["content_end_ms"])], config=c, overlays=overlays, pauses=pauses
+        )
+        assert ctx.plan.total_duration_ms == want["total_duration_ms"]
+        assert check_end_screen(ctx).verdict.value == want["a09.q.end_screen"]
+        if want["end_screen"] is not None:
             assert es is not None
             assert (es.start_ms, es.end_ms) == (
                 want["end_screen"]["start_ms"],
                 want["end_screen"]["end_ms"],
             )
-            assert es.end_ms == want["total_duration_ms"]
             assert [p.reason for p in pauses] == [p["reason"] for p in want["deliberate_pauses"]]
+        else:
+            assert es is None
 
 
 def te_chapters(case: dict[str, Any]) -> None:
     inp, exp = case["input"], case["expected"]
+    c = base(inp)
     aspect = AspectRatio(inp.get("aspect_ratio", "16:9"))
-    sections = [Section(section_id=s["section_id"]) for s in inp["sections"]]
+    sections = [
+        Section(section_id=s["section_id"], scene_ids=(f"{s['section_id']}.sc",))
+        for s in inp["sections"]
+    ]
     starts = {s["section_id"]: s["first_segment_start_ms"] for s in inp["sections"]}
     ch = build_chapters(sections, starts, aspect)
-    assert [c.start_ms for c in ch] == exp["chapters_ms"]  # estimates ignored
+    assert [x.start_ms for x in ch] == exp["chapters_ms"]  # estimates ignored
+    segs = tuple(
+        Segment(segment_id=f"s{i}", kind=SegmentKind.BODY, scene_id=f"{sec.section_id}.sc")
+        for i, sec in enumerate(sections, 1)
+    )
+    scenes = tuple(
+        Scene(scene_id=f"{sec.section_id}.sc", section_id=sec.section_id, segment_ids=(f"s{i}",))
+        for i, sec in enumerate(sections, 1)
+    )
+    script = ScriptDoc(script_id="scr_x", version=1, language="en-IN", aspect_ratio=aspect,
+                       sections=tuple(sections), scenes=scenes, segments=segs)  # fmt: skip
+    spans = {
+        f"s{i}": (starts[sec.section_id], starts[sec.section_id] + 1000)
+        for i, sec in enumerate(sections, 1)
+    }
+    end = max([v[1] for v in spans.values()] or [1000])
+    ctx = synth_ctx(
+        [synth_shot(1, 0, end)], config=c, aspect=aspect, chapters=ch, script=script, spans=spans
+    )
+    r = check_chapters(ctx)
+    assert r.verdict.value == exp["a09.q.chapters"]
+    if "blocking" in exp:
+        assert r.blocking is exp["blocking"]
 
 
 def te_tiers(case: dict[str, Any]) -> None:
     inp, exp = case["input"], case["expected"]
-    c = base(inp, {} if "tier.d_enabled" in inp["config_overrides"] else None)
+    c = base(inp)
     lim = Limits(**inp.get("limits", {}))
     shots = [
         TierShot(s["shot_id"], s["duration_ms"], still_ok=s.get("still_ok", False),
@@ -244,7 +318,18 @@ def te_tiers(case: dict[str, Any]) -> None:
         assert list(plan.e_allowed_shot_ids) == exp["e_allowed_shot_ids"]
         assert plan.worst_case_e_share_permille == exp["worst_case_e_share_permille"]
         assert plan.e_limit_permille == exp["e_limit_permille"]
-        assert plan.worst_case_e_share_permille * 1 < c.tier_e_max_share_permille  # tier_plan PASS
+        t = 0
+        synth = []
+        for i, s in enumerate(inp["shots"], 1):
+            synth.append(
+                synth_shot(i, t, t + s["duration_ms"], allowed_tiers=plan.allowed[s["shot_id"]])
+            )
+            t += s["duration_ms"]
+        synth.append(synth_shot(len(synth) + 1, t, inp["total_ms"], allowed_tiers=(Tier.C,)))
+        assert (
+            check_tier_plan(synth_ctx(synth, config=c, limits=lim)).verdict.value
+            == exp["a09.q.tier_plan"]
+        )
     else:
         assert {k: [t.value for t in v] for k, v in plan.allowed.items()} == exp["allowed_tiers"]
         assert plan.ai_video_allowed_ms == exp["ai_video_allowed_ms"]
@@ -385,56 +470,33 @@ HANDLERS["TE-38"] = te_audio
 
 
 def te_holds(case: dict[str, Any]) -> None:
-    exp = case["expected"]
-    script, durs = sample_script()
-    req = make_request(script, durs)
-    res = make_step()[0].run(req)
-    a, b = res.plan.shots[0], next(s for s in res.plan.shots if s.chart_id)
-    sa = a.model_copy(update={"start_ms": 0, "end_ms": 4000, "duration_ms": 4000, "held": None})
-    sb = b.model_copy(update={
-        "start_ms": 4000, "end_ms": 14_000, "duration_ms": 10_000,
-        "held": Held(reason=HeldReason.CHART_REVEAL, max_ms=10_000),
-    })  # fmt: skip
-    holds = tuple(
-        h.model_copy(update={"start_ms": 4000, "end_ms": 14_000, "shot_id": sb.shot_id})
-        for h in res.plan.deliberate_hold
-        if h.shot_id == b.shot_id
-    )
-    plan = res.plan.model_copy(update={"shots": (sa, sb), "deliberate_hold": holds})
-    got = check_transitions(replace(ctx_of(res, req), plan=plan))
-    assert got.verdict is CheckVerdict.PASS
-    assert plan.deliberate_black == ()
+    inp, exp = case["input"], case["expected"]
+    shots = []
+    for i, s in enumerate(inp["shots"], 1):
+        held = s["held"]
+        shots.append(synth_shot(i, s["start_ms"], s["end_ms"],
+                                held=None if held is None else Held(reason=HeldReason(held["reason"]), max_ms=held["max_ms"])))  # fmt: skip
     assert [
-        {"start_ms": h.start_ms, "end_ms": h.end_ms, "shot_id": "sh02", "reason": h.reason.value}
-        for h in plan.deliberate_hold
-    ] == [{**x, "shot_id": "sh02"} for x in exp["deliberate_hold"]] or [
-        (h.start_ms, h.end_ms, h.reason.value) for h in plan.deliberate_hold
-    ] == [(x["start_ms"], x["end_ms"], x["reason"]) for x in exp["deliberate_hold"]]
-    assert exp["deliberate_black"] == []
+        {"start_ms": h.start_ms, "end_ms": h.end_ms, "shot_id": h.shot_id, "reason": h.reason.value}
+        for h in derive_holds(shots)
+    ] == exp["deliberate_hold"]  # derived by the assembler function, not written by the test
+    ctx = synth_ctx(shots, config=base(inp))
+    assert ctx.plan.deliberate_black == () == tuple(exp["deliberate_black"])
+    assert check_transitions(ctx).verdict.value == exp["a09.q.transitions"]
 
 
 def te_flags(case: dict[str, Any]) -> None:
-    script, durs = sample_script()
-    req = make_request(script, durs)
-    res = make_step()[0].run(req)
     wants = case["expected"]["variants"]
     v0, v1, v2 = case["input"]["variants"]
-    # v0: iteration 0 revision check is not computable
-    r0 = check_revision_addressed(ctx_of(res, req))
-    # v1: windows unset, no interrupts -> WARN; v2: windows set, no interrupts -> FAIL
-    no_int = res.plan.model_copy(
-        update={"shots": tuple(s.model_copy(update={"interrupt": None}) for s in res.plan.shots)}
-    )
-    base_ctx = ctx_of(res, req)
-    unset = base_ctx.cfg.model_copy(
-        update={"first_dropoff_start_ms": None, "first_dropoff_end_ms": None}
-    )
-    r1 = check_interrupt_first(replace(base_ctx, plan=no_int, cfg=unset))
-    setc = base_ctx.cfg.with_overrides(v2["config_overrides"])
-    r2 = check_interrupt_first(replace(base_ctx, plan=no_int, cfg=setc))
-    assert v0["iteration"] == 0 and v1["interrupts"] == [] and v2["interrupts"] == []
-    for got, want in zip((r0, r1, r2), wants, strict=True):
-        assert (got.verdict.value, got.blocking, got.gate) == (
+    shots = [synth_shot(1, 0, 4000), synth_shot(2, 4000, 8000)]
+    got = [
+        check_revision_addressed(synth_ctx(shots, config=base(v0), iteration=v0["iteration"])),
+        check_interrupt_first(synth_ctx(shots, config=base(v1))),
+        check_interrupt_first(synth_ctx(shots, config=base(v2))),
+    ]
+    assert v1["interrupts"] == [] and v2["interrupts"] == []
+    for r, want in zip(got, wants, strict=True):
+        assert (r.verdict.value, r.blocking, r.gate) == (
             want["verdict"],
             want["blocking"],
             want["gate"],

@@ -100,7 +100,12 @@ def test_it06_changed_timeline_keeps_shot_ids_when_structure_holds() -> None:
     first = step.run(make_request(script, durs))
     longer = {k: (v + 200 if k in ("s4", "s5") else v) for k, v in durs.items()}
     req = make_request(
-        script, longer, iteration=1, previous_plan=first.plan, timeline_sha256="c" * 64
+        script,
+        longer,
+        iteration=1,
+        previous_plan=first.plan,
+        timeline_sha256="c" * 64,
+        previous_timeline=make_request(script, durs).timeline,
     )
     second = make_step()[0].run(req)
     assert [s.shot_id for s in second.plan.shots[:6]] == [s.shot_id for s in first.plan.shots[:6]]
@@ -270,12 +275,16 @@ def test_injection_in_script_text_cannot_change_the_plan_shape() -> None:  # S-0
     assert all(not s.intent_text or "IGNORE" not in s.intent_text for s in res.plan.shots)
 
 
-def test_plan_ships_the_accepted_directions_for_revision() -> None:
+def test_provenance_matches_the_contract() -> None:
     script, durs = sample_script()
     res = make_step()[0].run(make_request(script, durs))
-    stored = res.plan.provenance["accepted_directions"]
-    assert set(stored) == {f"sh{sid[2:]}" for sid in res.accepted}
-    assert res.plan.provenance["prompt_id"] == "agent_09/shot_direction.v1"
+    prov = res.plan.provenance
+    assert prov is not None
+    assert prov.prompt_id == "agent_09/shot_direction.v1" and len(prov.prompt_sha256 or "") == 64
+    assert prov.rule_pack_versions == {"rp.youtube_general": "1", "rp.finance_sebi_in": "1"}
+    assert [c.step_key for c in prov.calls] == ["direction.b01", "direction.b02"]
+    assert all(c.cost_entry_id.startswith("cst_") and c.tokens_in > 0 for c in prov.calls)
+    assert plan_hash(res.plan) == plan_hash(res.plan.model_copy(update={"provenance": None}))
 
 
 def test_scene_without_segments_is_refused() -> None:
@@ -319,6 +328,9 @@ class MemBlob:
         self.data[uri] = body
         return BlobInfo(uri, hashlib.sha256(body).hexdigest(), len(body))
 
+    def list_prefix(self, context: TenantContext, org_id: Any, area: str) -> list[BlobInfo]:
+        return []
+
     def head(self, context: TenantContext, uri: BlobUri) -> BlobHead:
         import hashlib
 
@@ -347,20 +359,20 @@ def test_plan_blob_is_write_once_and_round_trips() -> None:
     plan = make_step()[0].run(make_request(script, durs)).plan
     store = MemBlob()
     ctx = TenantContext(org_id=ORG_ID, actor=actor_ref("agent_09"))  # type: ignore[arg-type]
-    ref = persist_plan(store, ctx, plan, task_path="tsk_1/attempts/att_1/output.json")  # type: ignore[arg-type]
-    again = persist_plan(store, ctx, plan, task_path="tsk_1/attempts/att_1/output.json")  # type: ignore[arg-type]
+    ref = persist_plan(store, ctx, plan, task_path="tsk_1/attempts/att_1/output.json")
+    again = persist_plan(store, ctx, plan, task_path="tsk_1/attempts/att_1/output.json")
     assert ref == again and len(store.data) == 1
-    loaded = load_model(store, ctx, ref.uri, ref.sha256, ShotPlan)  # type: ignore[arg-type]
+    loaded = load_model(store, ctx, ref.uri, ref.sha256, ShotPlan)
     assert plan_hash(loaded) == plan_hash(plan)
     changed = plan.model_copy(update={"iteration": 9})
     with pytest.raises(CorruptedOutputError):
-        persist_plan(store, ctx, changed, task_path="tsk_1/attempts/att_1/output.json")  # type: ignore[arg-type]
-    other = TenantContext(org_id=str(ORG.new()), actor=actor_ref("agent_09"))  # type: ignore[arg-type]
+        persist_plan(store, ctx, changed, task_path="tsk_1/attempts/att_1/output.json")
+    other = TenantContext(org_id=ORG.new(), actor=actor_ref("agent_09"))
     with pytest.raises(CrossTenantRefError):
-        load_model(store, other, ref.uri, ref.sha256, ShotPlan)  # type: ignore[arg-type]
+        load_model(store, other, ref.uri, ref.sha256, ShotPlan)
     store.data[ref.uri] = b"{bad"
     with pytest.raises(CorruptedOutputError):
-        load_model(store, ctx, ref.uri, __import__("hashlib").sha256(b"{bad").hexdigest(), ShotPlan)  # type: ignore[arg-type]
+        load_model(store, ctx, ref.uri, __import__("hashlib").sha256(b"{bad").hexdigest(), ShotPlan)
 
 
 _ = BytesIO

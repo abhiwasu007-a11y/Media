@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from agent_09_video_director.config import Agent09Config
+from agent_09_video_director.contracts import CallInfo
 from agent_09_video_director.direction.prompt import RenderedPrompt
 from amw_adapters.llm.protocol import LlmAdapter, LlmMessage, LlmRequest, LlmResponse
 from amw_core.errors import BudgetExhaustedError, CircuitOpenError, InvalidJsonError
@@ -38,6 +39,7 @@ class CallMeter:
     tokens_out: int = 0
     tokens_cached_in: int = 0
     cost_entry_ids: list[str] = field(default_factory=list)
+    call_log: list[CallInfo] = field(default_factory=list)
 
     def check(self) -> None:
         if (
@@ -46,7 +48,7 @@ class CallMeter:
         ):
             raise BudgetExhaustedError("reservation does not cover the next call")
 
-    def after(self, response: LlmResponse, entry_id: str) -> None:
+    def after(self, response: LlmResponse, entry_id: str, step_key: str = "") -> None:
         u = response.usage
         self.calls += 1
         self.spent_micros += u.amount_micros
@@ -54,6 +56,17 @@ class CallMeter:
         self.tokens_out += u.tokens_out or 0
         self.tokens_cached_in += u.tokens_cached_in or 0
         self.cost_entry_ids.append(entry_id)
+        self.call_log.append(
+            CallInfo(
+                step_key=step_key,
+                provider=u.provider,
+                model=u.model or "",
+                tokens_in=u.tokens_in or 0,
+                tokens_out=u.tokens_out or 0,
+                tokens_cached_in=u.tokens_cached_in or 0,
+                cost_entry_id=entry_id,
+            )
+        )
 
 
 class DirectionClient:
@@ -95,7 +108,7 @@ class DirectionClient:
         )
         response = self._llm.complete(request, idempotency_key=str(key))
         entry_id = self._recorder.record(response, str(key))
-        self._meter.after(response, entry_id)
+        self._meter.after(response, entry_id, f"direction.{batch_id}")
         if response.stop_reason == "max_tokens":
             raise InvalidJsonError("model output truncated at max_output_tokens")
         return response.text
