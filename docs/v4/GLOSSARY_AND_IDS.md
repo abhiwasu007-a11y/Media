@@ -113,6 +113,7 @@ Rules:
 | `cpf` | Compliance profile | compliance_profiles |
 | `rpk` | Rule pack (row) | rule_packs |
 | `cvd` | Compliance verdict | compliance_verdicts |
+| `kcl` | Knowledge collection (CCR-011) | knowledge_collections |
 | `ksr` | Knowledge source | knowledge_sources |
 | `kch` | Knowledge chunk | knowledge_chunks |
 | `mem` | Memory item | memory_items |
@@ -158,7 +159,9 @@ Used in `source_agent`, `sender`, `receiver`, audit and transition rows.
 | `AGENT` | `agent_NN`, NN = 01–17 | `agent_06` |
 | `SERVICE` | `svc_sNN`, NN = 01–13 | `svc_s04` |
 | `HUMAN` | user wire ID | `usr_0192…` |
-| `SYSTEM` | `sys_<name>`, name ∈ {`scheduler`, `reaper`, `dlq_handler`, `migrator`, `api`} | `sys_reaper` |
+| `SYSTEM` | `sys_<name>`, name ∈ {`scheduler`, `reaper`, `dlq_handler`, `migrator`, `api`, `operator`} | `sys_reaper` |
+
+`sys_operator` (CCR-010, decision D5) is the operator tool through which the assistant records owner decisions, scores and editorial contributions **on the owner's behalf**. It is never an approver itself: every row it writes names the owner's `usr_` ID as the decision maker and carries the evidence of 04 §5.16.
 
 Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,32})$`; the exact pattern is `amw.common#/$defs/actor_ref` (03 §3.2).
 
@@ -168,6 +171,9 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 |---|---|---|
 | Task type | `<agent_id or service_id>.<snake_case>` | `agent_06.claim_extraction` |
 | Payload schema name | `<task_type>.input` / `<task_type>.output` | `agent_06.claim_extraction.output` |
+| Step schema name (CCR-018) | `<task_type>.<step>.input` / `<task_type>.<step>.output`, one pair per LLM step inside a task type; `<step>` is snake case and equals the prompt's `<task>` part where a prompt exists | `agent_09.shot_plan.direction.output` |
+| Agent document schema (CCR-018) | `<agent_id>.<snake_case>`: a blob document owned by one agent that is not a task payload (e.g. a script document, a pronunciation dictionary) | `agent_05.script_document` |
+| External reference ID (CCR-044) | `ext_` + 24 lowercase hex = the first 24 hex characters of SHA-256 over the canonical `{"org_id": …, "url": <normalised URL>}`; the org part makes the ID tenant-specific; never a primary key | `ext_3f9a…` |
 | Contract schema name | `amw.common`, `amw.task_input`, `amw.task_output`, `amw.envelope`, `amw.error`, `amw.control` (03); `amw.production_type` (registry record, 24 §2) | — |
 | Schema `$id` | `urn:amw:schema:<schema name>:<semver>` | `urn:amw:schema:amw.task_input:1.0.0` |
 | Production type key | `UPPER_SNAKE` (§6.48) + integer version | `CHANNEL_LONG_FORM` v1 |
@@ -175,7 +181,8 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 | Rule ID | `<PACK>-R<n>` | `FIN-R6` |
 | Prompt ID | `<agent_id>/<task>.v<N>`; file `prompts/<agent package>/<task>.v<N>.md` (package names 27 §7.2) | `agent_06/claim_extraction.v1` → `prompts/agent_06_fact_checker/claim_extraction.v1.md` |
 | Idempotency key | `idk_` + 64 lowercase hex = SHA-256 of the canonical key material (03 §9) | `idk_9f2c…` |
-| Config key | dotted snake case | `retry.temporary.max_attempts` |
+| Config key | dotted snake case; namespaces in 27 §4.2 (CCR-019) | `retry.temporary.max_attempts` |
+| Check ID | `^[a-z0-9_.-]{3,96}$` (03 §5.2); namespaces in 18 §13 (CCR-020): `qc.*` / `edit.*` owned by 18, `aNN.*` owned by blueprint NN | `qc.audio.integrated_lufs` |
 | Storage URI | 03 §8 | `amw-blob://org_…/jobs/job_…/renders/rnd_….mp4` |
 | Cache key | `amw:<org wire id>:<area>:<key>` — the org part is mandatory (§1C.1) | `amw:org_…:kb:kch_…` |
 | Metric label | every factory metric carries label `org_id` (platform-wide metrics use `org_id="platform"`) | — |
@@ -257,7 +264,7 @@ Same value set as `task_state` **without `RETRY_WAIT`** (retries are task-level 
 | `OPERATOR_PAUSE` | Emergency stop / manual pause (S8) | human resume |
 
 ### 6.4 `job_outcome` (set only when `job_state = COMPLETED`)
-`PUBLISHED` · `DELIVERED` (files delivered to client) · `BLOCKED_COMPLIANCE` (a blocking gate refused and the revision cap was reached) · `REJECTED_BY_APPROVER` · `NO_DELIVERABLE` (internal jobs such as analytics ingestion).
+`PUBLISHED` · `DELIVERED` (files delivered to the requester, owner or client; CCR-043) · `BLOCKED_COMPLIANCE` (a blocking gate refused and the revision cap was reached) · `REJECTED_BY_APPROVER` · `NO_DELIVERABLE` (internal jobs such as analytics ingestion).
 
 ### 6.5 `priority`
 | Value | Queue integer |
@@ -317,7 +324,7 @@ Same value set as `task_state` **without `RETRY_WAIT`** (retries are task-level 
 `A_OWNER_REAL` · `B_LICENSED_STOCK` · `C_CODE_MOTION` · `D_AI_VIDEO` · `E_AI_STILL`.
 
 ### 6.20 `capability` (worker / task)
-`llm` · `tts` · `image_gen` · `video_gen` · `stock_search` · `render_ffmpeg` · `media_probe` · `publish_youtube` · `file_delivery` · `analytics_ingest` · `notify_email`. New capabilities are additive via CCR.
+`llm` · `tts` · `image_gen` · `video_gen` · `stock_search` · `music_search` (CCR-007; 3B) · `render_ffmpeg` · `media_probe` · `doc_extract` (CCR-014; document text extraction for `agent_04.knowledge_ingest`) · `web_fetch` (CCR-015; allow-listed HTTPS reference fetch) · `publish_youtube` · `file_delivery` · `analytics_ingest` · `notify_email`. New capabilities are additive via CCR.
 
 ### 6.21 `third_party_permission`
 `PERMITTED` · `NOT_PERMITTED` · `UNKNOWN`. `UNKNOWN` blocks use for any tenant other than the licence holder's own channels (§1C.8).
@@ -412,6 +419,23 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `FIN-R12` | "Our method" content only on historical charts, clearly labelled, only from material the owner released (§1B.2a, Q26). |
 | `FIN-R13` | No forward-looking statement about the future direction of a named security, **even when the chart uses historical data older than the lag** (IN-03: SEBI final order of 23 Oct 2026 bars "historical data which provides future directional movement for a specified security"). |
 
+### 6.38a YouTube general rule IDs (`rp.youtube_general`, CCR-040)
+Rule text, tests and evidence are owned by 13 §3; the IDs are fixed here.
+
+| Rule ID | Rule (short) |
+|---|---|
+| `YTG-R1` | Inauthentic / mass-produced content gate |
+| `YTG-R2` | No AI persona presenting a sensitive topic |
+| `YTG-R3` | Synthetic/altered-media disclosure decision recorded |
+| `YTG-R4` | Human editorial contribution and human approval on every video |
+| `YTG-R5` | Reused / third-party content only with a recorded right |
+| `YTG-R6` | Licence completeness and validity for every asset, music and font |
+| `YTG-R7` | Made-for-kids handling |
+| `YTG-R8` | Publication defaults: `privacyStatus` explicit |
+| `YTG-R9` | Source-library copyright: no reproduction or close paraphrase |
+| `YTG-R10` | IT Rules synthetic-information declaration and provenance label |
+Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `ASC` (`rp.advertising_asci_in`) are reserved; their IDs are fixed by CCR when each pack is written.
+
 ### 6.39 `claim_type` (Agent 06)
 `FACTUAL` · `STATISTICAL` · `DEFINITION` · `HISTORICAL_MARKET` · `HYPOTHETICAL_EXAMPLE` · `RECOMMENDATION` · `FORWARD_VIEW` · `PRICE_LEVEL` · `PERFORMANCE_CLAIM` · `TESTIMONIAL` · `PROMOTION` · `QUOTED_THIRD_PARTY` · `PRODUCT_CLAIM` · `COMPARATIVE` · `OPINION`.
 
@@ -448,6 +472,8 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `actor_kind` | `HUMAN` · `AGENT` · `SERVICE` · `SYSTEM` |
 | `consent_state` (voice) | `PENDING_VERIFICATION` · `VERIFIED` · `WITHDRAWN` · `EXPIRED` · `REJECTED` |
 | `voice_kind` | `PROVIDER_STOCK` · `CONSENTED_CLONE` · `HUMAN_RECORDED` |
+| `presenter_kind` (CCR-027, **provisional until the owner answers 3A R4**) | `NEUTRAL_NARRATION` (voice only, no persona, no named presenter) · `OWNER_VOICE` (the owner's own recording or a consented clone of the owner's own voice) · `SYNTHETIC_PERSONA` (a synthetic voice or face presented as a named person; blocked on finance, health and political channels by FIN-R11 / YTG-R2) |
+| `approval_channel` (CCR-010, D5) | `OWNER_CHAT_OPERATOR` (3A: the owner's chat message recorded by the operator tool, `sys_operator`, with verbatim evidence) · `DASHBOARD` (3C: the owner acts in the authenticated dashboard) · `CLIENT_PORTAL` (Tier 2) |
 | `data_request_kind` / `data_request_status` | `EXPORT` · `ERASURE` / `RECEIVED` · `IN_PROGRESS` · `COMPLETED` · `REJECTED` |
 
 ### 6.45 Content, media and operations enums
@@ -461,6 +487,7 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `fingerprint_algo` | `SHA256` · `PERCEPTUAL_FRAME` · `AUDIO` (algorithms chosen in agent_08 blueprint) |
 | `knowledge_source_kind` | `BOOK` · `COURSE_NOTES` · `OWNER_NOTES` · `WEB_REFERENCE` · `OFFICIAL_DOCUMENT` · `CLIENT_DOCUMENT` |
 | `knowledge_source_status` | `REGISTERED` · `INGESTING` · `INDEXED` · `FAILED` · `RETIRED` |
+| `extraction_method` (CCR-013) | `TEXT_LAYER` · `OCR` |
 | `source_ownership` | `OWNED_COPY` · `LICENSED` · `OWNER_AUTHORED` · `PUBLIC_OFFICIAL` · `UNKNOWN` (Q25: owner item) |
 | `citation_support` | `SUPPORTS` · `PARTIAL` · `CONTRADICTS` |
 | `quality_dimension` (§1A.7, max points) | `RESEARCH_ACCURACY` 20 · `STORYTELLING` 15 · `AUDIENCE_VALUE` 15 · `VISUAL_QUALITY` 15 · `AUDIO_QUALITY` 10 · `EDITING_QUALITY` 10 · `THUMBNAIL_METADATA` 10 · `COMPLIANCE` 5 |
@@ -471,8 +498,8 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `reply_state` (S13) | `NONE` · `DRAFTED` · `APPROVED` · `REJECTED` · `POSTED` (only after a human approval; never auto-posted) |
 | `worker_status` | `STARTING` · `IDLE` · `BUSY` · `DRAINING` · `STOPPED` · `LOST` |
 | `idempotency_status` | `IN_PROGRESS` · `COMPLETED` · `FAILED` |
-| `budget_scope_kind` | `ORG` · `WORKSPACE` · `CHANNEL` · `PRODUCTION_TYPE` |
-| `budget_period` | `DAY` · `MONTH` · `PER_VIDEO` · `PER_JOB` |
+| `budget_scope_kind` | `ORG` · `WORKSPACE` · `CHANNEL` · `PRODUCTION_TYPE` · `PROVIDER` (CCR-035: owner-declared provider cap, `scope_key` = provider config key; a start gate for that provider's calls) |
+| `budget_period` | `DAY` · `MONTH` · `PER_VIDEO` · `PER_JOB` · `PILOT_TOTAL` (CCR-035: cumulative, never resets) |
 | `budget_state` | `ACTIVE` · `SUSPENDED_EXCEEDED` · `DISABLED` |
 | `reservation_status` | `HELD` · `CONSUMED` · `RELEASED` |
 | `cost_figure_kind` | `ESTIMATE` · `VERIFIED` |
@@ -523,7 +550,8 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `language_mode` | `SINGLE` · `MULTI` | 24 §2 |
 | `input_provider` | `OWNER` · `CLIENT` · `SYSTEM` | 24 §2 `required_inputs` |
 | `approval_workflow_key` | `owner_one_tap` · `client_two_step` · `owner_sensitive` | 24 §3.4 |
-| `data_age_vs_lag` | `OLDER_THAN_LAG` · `WITHIN_LAG` · `UNKNOWN` (`UNKNOWN` is treated as within the lag) | `agent_06.claim_extraction.input` |
+| `data_age_vs_lag` | `OLDER_THAN_LAG` · `WITHIN_LAG` · `UNKNOWN` (`UNKNOWN` is treated as within the lag). Closed set: a chart with no market data (schematic) carries `null`, not a new value (CCR-042) | `agent_06.claim_extraction.input`, `agent_08.asset_sourcing.output` |
+| `data_age_basis` (CCR-004) | `MEASURED` (computed from the dataset end date) · `CONSTRAINT` (a requirement the chart path must meet; Agent 08 fails the shot `DATA_WITHIN_LAG` otherwise; re-verified by `qc.visual.chart_data_age` and `s16_comp`) | `agent_06.claim_extraction.input` `chart_data_refs[]` |
 | `sebi_registration_status` | `UNREGISTERED` (v1 supports only this; values for registered intermediaries **REQUIRES REVIEW (Phase 1): owner input A6 and 13**) | `agent_06.claim_extraction.input` |
 | `citation_input_kind` | `KNOWLEDGE_CHUNK` · `EXTERNAL_REFERENCE` | `agent_06.claim_extraction.input` |
 | `eval_case_category` | `ANSWER_KEY` · `HARD_NEGATIVE` · `EDGE` · `REFUSAL` · `POSITIVE` | evals/README.md |
@@ -531,3 +559,29 @@ Full rule text, examples and enforcement detail are owned by 13_COMPLIANCE_YOUTU
 | `cost_unit_kind` | `characters` · `audio_ms` · `images` · `video_ms` · `render_ms` · `quota_units` · `items` · `bytes` | `cost_ledger.unit_kind`, 24 §6 |
 | `queue_name` | `light` · `ai` · `render` · `publish` | `task_queue.queue_name` |
 | `transition_id` | `T01`–`T20` (task), `J01`–`J12` (job) | 03 §11.3, §11.5 |
+| `gate_verdict` (CCR-001) | `PASSED` · `FAILED` (optional payload echo of a gate stage; the orchestrator decides from `validation_results`, 03 §5.3) | gate stage payloads (`agent_07.audio_master`, `agent_10.technical_qc`, …) |
+| `llm_model_tier` (CCR-019) | `SMALL` · `MID` · `TOP` (ADR-007 §2.3; resolved to provider + model by config `llm.tiers.<tier>.*`) | `llm.<task_type>[.<step>].model_tier` |
+| `video_kind` (CCR-006) | `GENERAL` · `METHOD_TOPIC` (a topic that uses the owner's released method material; FIN-R12) | `amw.owner_topic`, `agent_04.research_pack.input`, `agent_05.script_draft.input` |
+| `owner_reference_kind` (CCR-006) | `EXTERNAL_URL` · `KNOWLEDGE_SOURCE` | `amw.owner_topic` |
+| `factcheck_verify_mode` (CCR-042) | `EVIDENCE` · `CHART_FACTS` · `SKIPPED` · `CODE_ONLY` | `agent_06.claim_verification.output` |
+| `factcheck_assessment` | `SUPPORTED` · `PARTIALLY_SUPPORTED` · `CONTRADICTED` · `NOT_FOUND` · `UNCLEAR` | `agent_06.claim_verification.*` |
+| `factcheck_certainty` | `HIGH` · `MEDIUM` · `LOW` | `agent_06.claim_verification.*` |
+| `verification_reason_code` | `NO_EVIDENCE_CANDIDATES` · `SKIPPED_BY_POLICY` · `QUOTE_NOT_ATTRIBUTABLE` · `NO_CHART_FACTS` · `CHART_PENDING` (chart claim deferred to `s06_chart`, CCR-004) · `RESTRICTED_NOT_RELEASED` · `CITATION_UNRESOLVABLE` · `LOW_RELIABILITY_ONLY` · `NUMBER_NOT_IN_EVIDENCE` · `EVIDENCE_CONFLICT` · `NO_SCRIPT_CITATION` · `OVERREACH` · `CONTRADICTED_BY_EVIDENCE` · `NOT_FOUND_IN_EVIDENCE` · `MODEL_UNCERTAIN` · `MODEL_REFUSED` · `INJECTED_EVIDENCE_DISCARDED` · `SPAN_INVALID` · `CLAIM_CONFLICT` | `claims.status_reasons`, `agent_06.claim_verification.output` |
+| `discrepancy_kind` | `NUMBER` · `UNIT` · `ENTITY` · `DIRECTION` · `TIME_SCOPE` · `NEGATION` · `QUANTIFIER` · `CAUSATION` · `SCOPE` · `DEFINITION` | `agent_06.claim_verification.*` |
+| `claim_conflict_kind` | `NUMBER` · `DIRECTION` · `DEFINITION` · `ENTITY` · `TIME_SCOPE` · `NEGATION` | `agent_06.claim_verification.output` |
+| `revision_action` | `ADD_CITATION` · `CORRECT_CLAIM` · `PROVIDE_EVIDENCE` · `RESOLVE_CONFLICT` · `REMOVE_OR_REWORD` | `agent_06.claim_verification.output`, 24 §3.3 revision mapping |
+| `revision_feedback_source` (CCR-009) | `CLAIM_EXTRACTION` · `CLAIM_VERIFICATION` · `UNIQUENESS` · `COMPLIANCE` · `QUALITY_SCORE` · `APPROVER` | `agent_05.script_draft.input` `revision.feedback[]` |
+| `evidence_source_kind` | `KNOWLEDGE_CHUNK` · `EXTERNAL_REFERENCE` · `CHART_FACT` | `agent_06.claim_verification.*` |
+| `passage_flag` | `INJECTION_SUSPECTED` · `UNREADABLE` | `agent_06.claim_verification.*` |
+| `licence_destination` | `MONETIZED_YOUTUBE` · `NON_MONETIZED` (derived from `jobs.monetized_destination`, CCR-028) | `agent_08.asset_sourcing.*` |
+| `visual_skip_reason` | `NOT_APPLICABLE_INTENT` · `NO_CANDIDATE` · `NO_ACCEPTABLE_FIT` · `LICENCE_ABSENT` · `LICENCE_NOT_USABLE` · `TIER_DISABLED` · `PROHIBITED_DEPICTION` · `BUDGET` · `REUSE_LIMIT` · `NO_TEMPLATE_CONTENT` · `TIER_SHARE_LIMIT` · `PROVIDER_REFUSED` · `CANDIDATE_INVALID` | `agent_08.asset_sourcing.output` `skips[]`, `qc_results.message` |
+| `shot_unresolved_reason` | `NO_DATASET` · `NO_CHART_CASE` · `METHOD_NOT_RELEASED` · `DATA_WITHIN_LAG` · `NO_TEMPLATE_CONTENT` · `NO_SOURCE_IN_ANY_TIER` · `UNSAFE_CONTENT` (a refused depiction with no safe tier-C fallback) | `agent_08.asset_sourcing.output`, `s08_assets` routing (24 §7.1a) |
+| `shot_sourcing_status` | `SOURCED` · `REUSED` · `UNRESOLVED` | `agent_08.asset_sourcing.output` |
+| `sourcing_warning` | `FOOTAGE_INTENT_DOWNGRADED_TO_GRAPHIC` · `LICENCE_EXPIRING` · `NO_INDEMNIFICATION` · `NEAR_DUPLICATE_OF_OWNED_ASSET` · `CROPPED_TO_ASPECT` · `RELEASE_RECORD_ABSENT` · `REUSED_RECENTLY_USED_ASSET` | `agent_08.asset_sourcing.output` |
+| `chart_data_kind` | `REAL_HISTORICAL` · `SCHEMATIC` | `agent_05.script_draft.output` `chart_requests[]`, `agent_08.asset_sourcing.output` |
+| `shot_intent_kind` | `FOOTAGE` · `CHART` · `DIAGRAM` · `TEXT_CARD` | `agent_09.shot_plan.output`, `agent_08.asset_sourcing.output` |
+| `reuse_kind` | `EXACT` · `NEAR_DUPLICATE` | `agent_08.asset_sourcing.output` |
+| `crop_mode` | `NONE` · `CENTER_CROP` · `ANCHOR_CROP` | `agent_08.asset_sourcing.output`, `agent_10.render.input` |
+| `subject_anchor` | `CENTER` · `UPPER_THIRD` · `LOWER_THIRD` · `LEFT` · `RIGHT` | `agent_09.shot_plan.output` `vertical`, `agent_08.asset_sourcing.output` |
+
+Rule (CCR-042): a value set read by more than one agent, by the orchestrator, by the DB or by the owner's report is listed here. A set used only inside one agent's own step payloads, and read by no other component, may stay payload-local, but it must be a closed `enum` in that payload schema and must not reuse a name listed here with other values.
