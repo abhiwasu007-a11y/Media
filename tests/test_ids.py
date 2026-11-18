@@ -7,7 +7,7 @@ import pytest
 
 from amw_core import ids
 from amw_core.errors import InputInvalidError
-from tests.docs_tables import glossary_prefixes, idempotency_scopes
+from tests.docs_tables import glossary_prefixes, idempotency_scopes, system_actor_names
 
 WIRE_RE = re.compile(
     r"^[a-z]{3}_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -158,3 +158,21 @@ def test_scope_validation(scope: str, ok: bool) -> None:
     else:
         with pytest.raises(InputInvalidError, match="scope"):
             ids.make_idempotency_key(ids.ORG.new(), scope, ["a"])
+
+
+def test_system_actors_equal_glossary() -> None:
+    assert [a.value for a in ids.SystemActor] == [f"sys_{n}" for n in system_actor_names()]
+    assert all(ids.is_actor_ref(a.value) for a in ids.SystemActor)
+    assert ids.SystemActor.OPERATOR.value == "sys_operator"
+
+
+def test_external_ref_id() -> None:
+    org = "org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e9f"
+    ref = ids.make_external_ref_id(org, "https://example.org/a")
+    assert re.fullmatch(ids.EXTERNAL_REF_PATTERN, ref)
+    assert ref == ids.make_external_ref_id(org, "https://example.org/a")
+    assert ref != ids.make_external_ref_id(
+        ids.ORG.new(), "https://example.org/a"
+    )  # tenant-specific
+    with pytest.raises(InputInvalidError):
+        ids.make_external_ref_id(org, "http://example.org/a")

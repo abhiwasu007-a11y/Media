@@ -55,6 +55,18 @@ def ticks(text: str) -> list[str]:
     return list(seen)
 
 
+def list_values(text: str) -> list[str]:
+    """Values of a ``·``-separated list: the leading backticked token of each segment, so prose
+    and cross-references after a value (``(`UNKNOWN` is ...)``, ``A `cost_ledger` row``) are
+    ignored."""
+    values: list[str] = []
+    for segment in text.split("·"):
+        match = re.match(r"\s*`([^`]+)`", segment)
+        if match and match[1] not in values:
+            values.append(match[1])
+    return values
+
+
 def _expand_ranges(text: str) -> list[str]:
     values: list[str] = []
     for letter, lo, hi in re.findall(r"`([A-Z])(\d+)`\s*[\u2013-]\s*`[A-Z](\d+)`", text):
@@ -80,13 +92,13 @@ def glossary_enums() -> dict[str, list[str]]:
                 if cell.startswith("uses "):
                     groups = [result[ticks(cell)[0]]]
                 elif cell.startswith("same as "):
-                    groups = [ticks(cell.split(":", 1)[1])]
+                    groups = [list_values(cell.split(":", 1)[1])]
                 elif "\u2013" in cell:  # en dash range
                     groups = [_expand_ranges(cell)]
                 elif " / " in cell and len(row_names) > 1:
-                    groups = [ticks(part) for part in cell.split(" / ")]
+                    groups = [list_values(part) for part in cell.split(" / ")]
                 else:
-                    groups = [ticks(cell)]
+                    groups = [list_values(cell)]
                 if len(groups) == 1:
                     groups = groups * len(row_names)
                 for name, values in zip(row_names, groups, strict=True):
@@ -95,12 +107,12 @@ def glossary_enums() -> dict[str, list[str]]:
             result["job_state"] = [v for v in result["task_state"] if v != "RETRY_WAIT"]
         elif number == "6.36":
             decision, kind = first_list.split("Kind:")
-            result["experiment_decision"] = ticks(decision)
-            result["experiment_kind"] = ticks(kind)
+            result["experiment_decision"] = list_values(decision.split(":", 1)[1])
+            result["experiment_kind"] = list_values(kind)
         elif number == "6.37":
             scope, severity = first_list.split("Severity:")
-            result["rule_pack_scope"] = ticks(scope)
-            result["rule_severity"] = ticks(severity)
+            result["rule_pack_scope"] = list_values(scope.split(":", 1)[1])
+            result["rule_severity"] = list_values(severity)
             keys: list[str] = []
             for row in rows:
                 key = ticks(row[0])[0]
@@ -112,13 +124,15 @@ def glossary_enums() -> dict[str, list[str]]:
             result["rule_pack_key"] = keys
         elif number == "6.38":
             result["fin_rule_id"] = [ticks(r[0])[0] for r in rows]
+        elif number == "6.38a":
+            result["ytg_rule_id"] = [ticks(r[0])[0] for r in rows]
         elif number == "6.49":
             result["ad_spot_duration_s"] = [t for t in ticks(body) if t.isdigit()]
         elif rows:
             result[names[0]] = [ticks(r[0])[0] for r in rows]
         else:
             line = next(ln for ln in body.splitlines() if "`" in ln)
-            result[names[0]] = ticks(line.split(" — ", 1)[0])
+            result[names[0]] = list_values(line.split(" — ", 1)[0])
     return result
 
 
@@ -135,12 +149,64 @@ def error_catalogue() -> dict[str, list[str]]:
 
 
 def doc_json_schemas() -> list[str]:
-    """Raw JSON blocks of 03 that declare an ``urn:amw:schema`` ``$id``."""
-    blocks = re.findall(r"```json\n(.*?)```", doc_text("03_COMMUNICATION_STANDARD.md"), re.S)
+    """Raw JSON blocks of 03 and 24 that declare an ``urn:amw:schema`` ``$id``."""
+    blocks: list[str] = []
+    for name in ("03_COMMUNICATION_STANDARD.md", "24_PRODUCTION_TYPES.md"):
+        blocks += re.findall(r"```json\n(.*?)```", doc_text(name), re.S)
     return [b for b in blocks if '"$id": "urn:amw:schema:' in b]
+
+
+def _stage_route(cell: str) -> dict[str, object] | None:
+    """Gate of a 24 section 7 stage-table cell, or ``None``."""
+    if "on_fail STOP" in cell:
+        return {"blocking": True, "on_fail": {"action": "STOP"}}
+    match = re.search(r"on_fail REVISE → (\w+)(?:; alt ([\w, ]+?))?\s*(?:[.(;]|$)", cell)
+    if match is None:
+        return None
+    on_fail: dict[str, object] = {"action": "REVISE", "target_stage_id": match[1]}
+    if match[2]:
+        on_fail["alt_target_stage_ids"] = [a.strip() for a in match[2].split(",") if a.strip()]
+    return {"blocking": True, "on_fail": on_fail}
+
+
+def stage_table(heading_re: str) -> list[dict[str, object]]:
+    """Stages of one 24 section 7 record table as ``amw.production_type`` stage objects
+    (``capabilities`` are not in the tables and are left empty)."""
+    body = section(doc_text("24_PRODUCTION_TYPES.md"), heading_re, 3)
+    stages: list[dict[str, object]] = []
+    for row in table_rows(body):
+        if len(row) != 6 or not re.fullmatch(r"[a-z0-9_]{2,32}", row[0]):
+            continue
+        stage_id, task_cell, req, klass, deps, route = row
+        gate = _stage_route(route)
+        if route.startswith("blocking") and gate is None:
+            raise AssertionError(f"unparsed gate route for {stage_id}: {route}")
+        approval = re.match(r"`([A-Z_]+)` / `([a-z_]+)`", route)
+        stages.append(
+            {
+                "stage_id": stage_id,
+                "task_type": ticks(task_cell)[0],
+                "required": req.startswith("yes"),
+                "resource_class": klass,
+                "capabilities": [],
+                "depends_on": re.findall(r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b", deps.split("(")[0]),
+                "gate": gate,
+                "approval": {"approval_kind": approval[1], "workflow_key": approval[2]}
+                if approval
+                else None,
+            }
+        )
+    return stages
 
 
 def idempotency_scopes() -> list[str]:
     """03 section 9.2: every scope name (``task.<task_type>`` kept as written)."""
     body = section(doc_text("03_COMMUNICATION_STANDARD.md"), r"9\.2 ", 3)
     return [ticks(r[0])[0] for r in table_rows(body)]
+
+
+def system_actor_names() -> list[str]:
+    """GLOSSARY section 2.3: the names allowed after ``sys_``."""
+    body = section(doc_text("GLOSSARY_AND_IDS.md"), r"2\.3 ", 3)
+    row = next(r for r in table_rows(body) if r[0] == "`SYSTEM`")
+    return ticks(row[1].split("∈", 1)[1])

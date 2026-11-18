@@ -44,7 +44,26 @@ def test_small_helpers() -> None:
     assert enums.TransitionId.J12.entity_kind is enums.EntityKind.JOB
 
 
-def test_pending_ccr_values_are_not_invented() -> None:
-    # CCR-3A-4 / CCR-3A-5 are pending: the values must not exist until applied to GLOSSARY.
-    assert "PILOT_TOTAL" not in {p.value for p in enums.BudgetPeriod}
-    assert "PROVIDER" not in {s.value for s in enums.BudgetScopeKind}
+def test_ccr_035_values_are_real() -> None:
+    # CCR-035 applied PILOT_TOTAL / PROVIDER to GLOSSARY section 6.45.
+    assert enums.BudgetPeriod.PILOT_TOTAL.value == "PILOT_TOTAL"
+    assert enums.BudgetScopeKind.PROVIDER.value == "PROVIDER"
+
+
+def test_checked_in_module_is_the_generator_output() -> None:
+    from pathlib import Path
+
+    from scripts.gen_enums import OUT, render
+
+    assert Path(OUT).exists()
+    import subprocess
+    import sys
+
+    formatted = subprocess.run(
+        [sys.executable, "-m", "ruff", "format", "--stdin-filename", "enums.py", "-"],
+        input=render(),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert formatted == Path(OUT).read_text(encoding="utf-8")

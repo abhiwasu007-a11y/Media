@@ -57,6 +57,7 @@ class Prefix(StrEnum):
     COMPLIANCE_VERDICT = "cvd"
     KNOWLEDGE_SOURCE = "ksr"
     KNOWLEDGE_CHUNK = "kch"
+    KNOWLEDGE_COLLECTION = "kcl"
     MEMORY_ITEM = "mem"
     SCRIPT = "scr"
     CLAIM = "clm"
@@ -91,6 +92,7 @@ class Prefix(StrEnum):
     SSO_CONNECTION = "sso"
     VERIFIED_DOMAIN = "dom"
     EVAL_RUN = "run"
+    OWNER_INSTRUCTION_EVIDENCE = "oie"
 
 
 UUID7_BODY = r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -222,6 +224,20 @@ APPROVAL = IdKind(Prefix.APPROVAL, ApprovalId)
 PUBLICATION = IdKind(Prefix.PUBLICATION, PublicationId)
 RENDER = IdKind(Prefix.RENDER, RenderId)
 ASSET = IdKind(Prefix.ASSET, AssetId)
+OWNER_EVIDENCE = IdKind(Prefix.OWNER_INSTRUCTION_EVIDENCE, WireId)
+KNOWLEDGE_COLLECTION = IdKind(Prefix.KNOWLEDGE_COLLECTION, WireId)
+
+
+class SystemActor(StrEnum):
+    """GLOSSARY section 2.3 ``SYSTEM`` actors. ``sys_operator`` (CCR-010, D5) records owner
+    decisions on the owner's behalf; it is never an approver itself."""
+
+    SCHEDULER = "sys_scheduler"
+    REAPER = "sys_reaper"
+    DLQ_HANDLER = "sys_dlq_handler"
+    MIGRATOR = "sys_migrator"
+    API = "sys_api"
+    OPERATOR = "sys_operator"
 
 
 def is_executor_id(value: str) -> bool:
@@ -258,7 +274,8 @@ def idempotency_key_of(value: str) -> IdempotencyKey:
 
 class IdempotencyScope(StrEnum):
     """03 section 9.2 scopes (every external side effect). ``task.<task_type>`` is the pattern
-    ``TASK_SCOPE_PATTERN``; ``webhook.deliver`` is Tier 3 and ``billing.charge`` Tier 2."""
+    ``TASK_SCOPE_PATTERN`` (natural key: job, stage_id, task_type, iteration; CCR-005);
+    ``webhook.deliver`` is Tier 3 and ``billing.charge`` Tier 2."""
 
     JOB_CREATE = "job.create"
     LLM_CALL = "llm.call"
@@ -275,6 +292,8 @@ class IdempotencyScope(StrEnum):
     NOTIFY_SEND = "notify.send"
     WEBHOOK_DELIVER = "webhook.deliver"
     BILLING_CHARGE = "billing.charge"
+    FETCH_REFERENCE = "fetch.reference"
+    RENDER_SEGMENT = "render.segment"
 
 
 TASK_SCOPE_PATTERN = r"^task\.(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3]))\.[a-z0-9_]+$"
@@ -306,3 +325,19 @@ def make_idempotency_key(
     material = {"org_id": org_id, "natural_key": list(natural_key), "scope": scope}
     canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return IdempotencyKey("idk_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest())
+
+
+EXTERNAL_REF_PATTERN = r"^ext_[0-9a-f]{24}$"
+
+
+def make_external_ref_id(org_id: str, normalised_url: str) -> str:
+    """GLOSSARY section 2.4 (CCR-044): ``ext_`` + first 24 hex of SHA-256 over the canonical
+    ``{"org_id": ..., "url": <normalised URL>}``. The caller passes the URL already normalised
+    (the normalisation rule is not yet defined in the glossary)."""
+    parse_id(org_id, Prefix.ORGANISATION)
+    if not normalised_url.startswith("https://"):
+        raise InputInvalidError("external references are HTTPS URLs")
+    canonical = json.dumps(
+        {"org_id": org_id, "url": normalised_url}, sort_keys=True, separators=(",", ":")
+    )
+    return "ext_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]

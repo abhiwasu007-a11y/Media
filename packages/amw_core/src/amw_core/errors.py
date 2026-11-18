@@ -11,33 +11,10 @@ decides per attempt (03 section 6 rule 2). The Error object model lives in
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from amw_core.enums import EscalationLevel, FailureClass, WaitReason
-
-
-class Disposition(StrEnum):
-    """07 section 2 disposition (``SUSPEND:<reason>`` = SUSPEND + ``ErrorSpec.wait_reason``)."""
-
-    RETRY = "RETRY"
-    SUSPEND = "SUSPEND"
-    FAIL = "FAIL"
-    NO_ATTEMPT = "NO-ATTEMPT"
-
-
-class RetryPolicyName(StrEnum):
-    """07 section 3.3 policy names (config ``retry.<policy>.*``)."""
-
-    TEMPORARY = "temporary"
-    RATE_LIMITED = "rate_limited"
-    DB = "db"
-    RESOURCE = "resource"
-    AGENT = "agent"
-    AGENT_PARSE = "agent_parse"
-    INFRA = "infra"
-    PUBLISH_RESUME = "publish_resume"
+from amw_core.enums import ErrorDisposition, EscalationLevel, FailureClass, RetryPolicy, WaitReason
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,8 +23,8 @@ class ErrorSpec:
 
     code: str
     meaning: str
-    disposition: Disposition
-    retry_policy: RetryPolicyName | None
+    disposition: ErrorDisposition
+    retry_policy: RetryPolicy | None
     breaker_counts: bool
     escalation: EscalationLevel
     wait_reason: WaitReason | None = None
@@ -58,15 +35,10 @@ class ErrorSpec:
 
     @property
     def retryable(self) -> bool:
-        """Catalogue default: RETRY codes, plus the two NO-ATTEMPT codes that come back.
+        """07 section 2 reading rule (CCR-057): true for RETRY and NO-ATTEMPT, false for FAIL
+        and SUSPEND (a suspension resumes through T15, not a retry)."""
+        return self.disposition in (ErrorDisposition.RETRY, ErrorDisposition.NO_ATTEMPT)
 
-        07 section 2 has no explicit retryable column for NO-ATTEMPT codes; this provisional
-        default is filed with the contract integrator (docs/v4/CONTRACT_CHANGE_REQUESTS.md).
-        """
-        return self.disposition is Disposition.RETRY or self.code in _NO_ATTEMPT_RETRYABLE
-
-
-_NO_ATTEMPT_RETRYABLE = frozenset({"TEMPORARY.LOCK_CONFLICT", "INFRASTRUCTURE.CIRCUIT_OPEN"})
 
 # 07 section 2, one row per code: code | disposition[:wait_reason] | retry policy | breaker counts
 # | first escalation level ("L1 -> L2" is L1; the detail stays in 07) | meaning (shortened).
@@ -132,8 +104,8 @@ def _parse_row(line: str) -> ErrorSpec:
     return ErrorSpec(
         code=code,
         meaning=meaning,
-        disposition=Disposition(kind),
-        retry_policy=None if policy == "-" else RetryPolicyName(policy),
+        disposition=ErrorDisposition(kind.replace("-", "_")),
+        retry_policy=None if policy == "-" else RetryPolicy(policy),
         breaker_counts=breaker == "yes",
         escalation=EscalationLevel(escalation),
         wait_reason=WaitReason(wait) if wait else None,
