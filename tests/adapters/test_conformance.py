@@ -30,6 +30,7 @@ from amw_adapters.tts import FakeTtsAdapter, TtsAdapter, TtsRequest, VoiceListRe
 from amw_adapters.video_gen import FakeVideoGenAdapter, VideoGenAdapter, VideoGenRequest
 from amw_core.enums import AspectRatio, CostFigureKind
 from amw_core.errors import (
+    ConfigInvalidError,
     IdempotencyConflictError,
     InputInvalidError,
     ProviderRefusalError,
@@ -43,7 +44,7 @@ JOB_ID = JOB.new()
 
 
 def key(n: int) -> str:
-    return make_idempotency_key(ORG_ID, "conformance", [n])
+    return make_idempotency_key(ORG_ID, "llm.call", ["tsk_conformance", "step", n])
 
 
 def llm_req(system: str = "s", text: str = "hello world") -> LlmRequest:
@@ -141,7 +142,7 @@ CASES = [
          lambda r: [i.vendor_item_id for i in getattr(r, "items", ())] == ["track-9"]),
     Case("music.license", FakeMusicAdapter, MusicAdapter, _license, None, None),
     Case("image.generate", FakeImageAdapter, ImageAdapter, _image, "fixture prompt",
-         lambda r: r.usage.cost_micros == 4242),
+         lambda r: r.usage.amount_micros == 4242),
     Case("video.generate", FakeVideoGenAdapter, VideoGenAdapter, _video, "fixture prompt",
          lambda r: getattr(r, "duration_ms", None) == 5000),
     Case("delivery.file", FakeFileDeliveryAdapter, FileDeliveryAdapter, _deliver, None, None),
@@ -160,15 +161,6 @@ OPERATIONS = {
     "video.generate": "video.generate",
     "delivery.file": "delivery.file",
 }
-
-
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(*_a: object, **_k: object) -> None:
-        raise AssertionError("adapter fake attempted a network connection")
-
-    monkeypatch.setattr(socket, "socket", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
 
 
 def _engine(fake: Any) -> FakeEngine:
@@ -192,8 +184,8 @@ def test_usage_is_ledger_ready(case: Case) -> None:
     assert usage.figure_kind is CostFigureKind.ESTIMATE
     assert usage.idempotency_key == key(1)
     assert usage.provider == fake.provider
-    assert usage.cost_micros >= 0
-    assert isinstance(usage.cost_micros, int)
+    assert usage.amount_micros >= 0
+    assert isinstance(usage.amount_micros, int)
     assert usage.currency == "USD"
     assert usage.operation == OPERATIONS[case.name]
 
@@ -266,3 +258,14 @@ def test_recorded_fixture_overrides(case: Case) -> None:
     assert case.fixture_check(with_fixture)
     without = case.call(case.factory(), key(1), case.fixture_variant)
     assert not case.fixture_check(without)
+
+
+def test_network_is_blocked() -> None:
+    with pytest.raises(AssertionError, match="network"):
+        socket.create_connection(("example.invalid", 443))
+
+
+@pytest.mark.parametrize("case", CASES, ids=IDS)
+def test_unknown_provider_rejected(case: Case) -> None:
+    with pytest.raises(ConfigInvalidError):
+        case.factory(provider="anthropic")

@@ -7,8 +7,10 @@ from amw_adapters.common import (
     CallUsage,
     FailurePlan,
     FakeEngine,
+    FakeProvider,
     FixtureStore,
     fake_bytes,
+    fake_provider,
 )
 from amw_adapters.image.protocol import ImageRequest, ImageResult
 from amw_core.enums import CostUnitKind
@@ -20,13 +22,13 @@ class FakeImageAdapter:
     def __init__(
         self,
         *,
-        provider: str = "fake_image",
+        provider: str = FakeProvider.IMAGE,
         currency: str = "USD",
         price_micros_per_image: int = 1000,
         failures: FailurePlan | None = None,
         fixtures: FixtureStore | None = None,
     ) -> None:
-        self._provider = provider
+        self._provider = fake_provider(provider)
         self._currency = currency
         self._price = price_micros_per_image
         self.engine = FakeEngine("image", failures=failures, fixtures=fixtures)
@@ -44,7 +46,7 @@ class FakeImageAdapter:
                 model=request.model,
                 units=1,
                 unit_kind=CostUnitKind.IMAGES,
-                cost_micros=int(fx.get("cost_micros", self._price)),
+                amount_micros=int(fx.get("amount_micros", self._price)),
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
                 idempotency_key=idempotency_key,

@@ -11,19 +11,40 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from amw_core.enums import BillingMode, CostFigureKind, CostUnitKind
-from amw_core.errors import AmwError, IdempotencyConflictError
+from amw_core.errors import AmwError, ConfigInvalidError, IdempotencyConflictError
 from amw_core.ids import IDEMPOTENCY_KEY_PATTERN, idempotency_key_of
 
 NonNeg = Annotated[int, Field(ge=0, strict=True)]
 ProviderName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9_]{2,32}$")]
 Operation = Annotated[str, StringConstraints(pattern=r"^[a-z_]+\.[a-z_]+$")]
 FAKE_PRICE_REF = "fake-pricing-v0"
+
+
+class FakeProvider(StrEnum):
+    """The only provider names a fake accepts (real names come from config, never fakes)."""
+
+    LLM = "fake_llm"
+    TTS = "fake_tts"
+    STOCK = "fake_stock"
+    MUSIC = "fake_music"
+    IMAGE = "fake_image"
+    VIDEO = "fake_video"
+    DELIVERY = "fake_delivery"
+
+
+def fake_provider(value: str) -> FakeProvider:
+    """``ConfigInvalidError`` for any name that is not a ``FakeProvider``."""
+    try:
+        return FakeProvider(value)
+    except ValueError:
+        raise ConfigInvalidError(f"unknown fake provider {value!r}") from None
 
 
 class AdapterModel(BaseModel):
@@ -42,7 +63,7 @@ class CallUsage(AdapterModel):
     tokens_cached_in: NonNeg | None = None
     units: NonNeg | None = None
     unit_kind: CostUnitKind | None = None
-    cost_micros: NonNeg
+    amount_micros: NonNeg
     currency: Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
     figure_kind: CostFigureKind = CostFigureKind.ESTIMATE
     price_ref: str | None = None

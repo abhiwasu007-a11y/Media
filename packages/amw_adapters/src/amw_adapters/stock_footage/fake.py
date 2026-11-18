@@ -1,6 +1,6 @@
 """Deterministic in-memory stock_footage fake (no network)."""
 
-from amw_adapters.common import FailurePlan, FixtureStore
+from amw_adapters.common import FailurePlan, FakeProvider, FixtureStore
 from amw_adapters.library import FakeLibrary
 
 
@@ -8,7 +8,7 @@ class FakeStockFootageAdapter(FakeLibrary):
     def __init__(
         self,
         *,
-        provider: str = "fake_stock",
+        provider: str = FakeProvider.STOCK,
         currency: str = "USD",
         price_micros_per_item: int = 1000,
         failures: FailurePlan | None = None,

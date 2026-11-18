@@ -16,7 +16,7 @@ from amw_core.errors import CrossTenantRefError
 from amw_core.ids import JOB, ORG, make_idempotency_key
 
 ORG_ID = ORG.new()
-K = make_idempotency_key(ORG_ID, "t", [1])
+K = make_idempotency_key(ORG_ID, "llm.call", ["tsk_x", "step", 1])
 
 
 def test_llm_cost_is_tokens_times_configured_price() -> None:
@@ -30,7 +30,7 @@ def test_llm_cost_is_tokens_times_configured_price() -> None:
     out = fake.complete(req, idempotency_key=K)
     assert out.usage.tokens_in == 20
     assert out.usage.tokens_out == 2  # capped by max_output_tokens
-    assert out.usage.cost_micros == 20 * 3 + 2 * 7
+    assert out.usage.amount_micros == 20 * 3 + 2 * 7
     assert out.usage.model == "m"
 
 
@@ -41,7 +41,7 @@ def test_tts_bills_characters() -> None:
     )
     assert out.usage.unit_kind is CostUnitKind.CHARACTERS
     assert out.usage.characters == len("नमस्कार")
-    assert out.usage.cost_micros == 2 * len("नमस्कार")
+    assert out.usage.amount_micros == 2 * len("नमस्कार")
     assert out.sample_rate_hz == 48_000
     voices = fake.list_voices(VoiceListRequest(language="xx"), idempotency_key=K)
     assert voices.voices == ()
@@ -52,7 +52,7 @@ def test_stock_license_cost_and_terms() -> None:
     out = fake.license(
         LibraryLicenseRequest(vendor_item_id="v1", licence_ref="lic_1"), idempotency_key=K
     )
-    assert out.usage.cost_micros == 1234
+    assert out.usage.amount_micros == 1234
     assert out.usage.units == 1
     assert out.terms_ref.endswith("v1")
     assert len(out.media) == 64
@@ -79,7 +79,7 @@ def _delivery(uri_org: str) -> DeliveryRequest:
 def test_delivery_manifest_and_bytes() -> None:
     fake = FakeFileDeliveryAdapter()
     receipt = fake.deliver(_delivery(ORG_ID), idempotency_key=K)
-    assert receipt.usage.cost_micros == 0
+    assert receipt.usage.amount_micros == 0
     assert receipt.usage.units == 5
     assert len(receipt.manifest_sha256) == 64
     assert receipt.files[0].delivered_ref in fake.delivered
@@ -96,7 +96,7 @@ def test_usage_units_pair_rule() -> None:
             provider="p1",
             operation="a.b",
             units=1,
-            cost_micros=0,
+            amount_micros=0,
             currency="USD",
             idempotency_key=K,
         )

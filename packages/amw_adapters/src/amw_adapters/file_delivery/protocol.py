@@ -5,7 +5,7 @@ preset, file SHA-256).
 Delivers already-stored, verified blobs of one tenant; every file URI must belong to the
 request's ``org_id`` (``CrossTenantRefError`` otherwise, 03 section 8.3). The storage area
 ``jobs/<job>/deliveries/<publication>/`` is pending CCR-3A-3, so the delivered location is an
-opaque ``delivered_ref`` chosen by the adapter. Usage is recorded with ``cost_micros = 0``.
+opaque ``delivered_ref`` chosen by the adapter. Usage is recorded with ``amount_micros = 0``.
 """
 
 from typing import Annotated, Protocol, runtime_checkable

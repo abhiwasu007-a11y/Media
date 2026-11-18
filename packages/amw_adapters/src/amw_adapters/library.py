@@ -19,6 +19,7 @@ from amw_adapters.common import (
     FakeEngine,
     FixtureStore,
     fake_bytes,
+    fake_provider,
 )
 from amw_core.enums import AspectRatio, CostUnitKind
 
@@ -71,7 +72,7 @@ class FakeLibrary:
         failures: FailurePlan | None,
         fixtures: FixtureStore | None,
     ) -> None:
-        self._provider = provider
+        self._provider = fake_provider(provider)
         self._media_type = media_type
         self._currency = currency
         self._price = price_micros_per_item
@@ -102,7 +103,7 @@ class FakeLibrary:
                 operation=self._search_op,
                 units=len(items),
                 unit_kind=CostUnitKind.ITEMS,
-                cost_micros=0,
+                amount_micros=0,
                 currency=self._currency,
                 idempotency_key=idempotency_key,
             )
@@ -122,7 +123,7 @@ class FakeLibrary:
                 operation=self._license_op,
                 units=1,
                 unit_kind=CostUnitKind.ITEMS,
-                cost_micros=int(fx.get("cost_micros", self._price)),
+                amount_micros=int(fx.get("amount_micros", self._price)),
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
                 idempotency_key=idempotency_key,

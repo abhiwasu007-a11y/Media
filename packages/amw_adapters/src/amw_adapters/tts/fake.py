@@ -7,8 +7,10 @@ from amw_adapters.common import (
     CallUsage,
     FailurePlan,
     FakeEngine,
+    FakeProvider,
     FixtureStore,
     fake_bytes,
+    fake_provider,
 )
 from amw_adapters.tts.protocol import (
     OPERATION_LIST_VOICES,
@@ -29,7 +31,7 @@ class FakeTtsAdapter:
     def __init__(
         self,
         *,
-        provider: str = "fake_tts",
+        provider: str = FakeProvider.TTS,
         currency: str = "USD",
         price_micros_per_character: int = 1,
         voices: tuple[VoiceInfo, ...] = (
@@ -38,7 +40,7 @@ class FakeTtsAdapter:
         failures: FailurePlan | None = None,
         fixtures: FixtureStore | None = None,
     ) -> None:
-        self._provider = provider
+        self._provider = fake_provider(provider)
         self._currency = currency
         self._price = price_micros_per_character
         self._voices = voices
@@ -59,7 +61,7 @@ class FakeTtsAdapter:
                 model=request.model,
                 units=characters,
                 unit_kind=CostUnitKind.CHARACTERS,
-                cost_micros=characters * self._price,
+                amount_micros=characters * self._price,
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
                 idempotency_key=idempotency_key,
@@ -84,7 +86,7 @@ class FakeTtsAdapter:
             usage = CallUsage(
                 provider=self._provider,
                 operation=OPERATION_LIST_VOICES,
-                cost_micros=0,
+                amount_micros=0,
                 currency=self._currency,
                 idempotency_key=idempotency_key,
             )

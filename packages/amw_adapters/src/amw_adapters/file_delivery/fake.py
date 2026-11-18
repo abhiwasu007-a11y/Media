@@ -4,7 +4,14 @@ import hashlib
 import json
 from typing import Any
 
-from amw_adapters.common import CallUsage, FailurePlan, FakeEngine, FixtureStore
+from amw_adapters.common import (
+    CallUsage,
+    FailurePlan,
+    FakeEngine,
+    FakeProvider,
+    FixtureStore,
+    fake_provider,
+)
 from amw_adapters.file_delivery.protocol import DeliveredFile, DeliveryReceipt, DeliveryRequest
 from amw_core.contracts.common import storage_uri_owner
 from amw_core.enums import CostUnitKind
@@ -17,12 +24,12 @@ class FakeFileDeliveryAdapter:
     def __init__(
         self,
         *,
-        provider: str = "fake_delivery",
+        provider: str = FakeProvider.DELIVERY,
         currency: str = "USD",
         failures: FailurePlan | None = None,
         fixtures: FixtureStore | None = None,
     ) -> None:
-        self._provider = provider
+        self._provider = fake_provider(provider)
         self._currency = currency
         self.engine = FakeEngine("file_delivery", failures=failures, fixtures=fixtures)
         self.delivered: dict[str, DeliveredFile] = {}
@@ -58,7 +65,7 @@ class FakeFileDeliveryAdapter:
                 operation=OPERATION,
                 units=sum(f.size_bytes for f in files),
                 unit_kind=CostUnitKind.BYTES,
-                cost_micros=0,
+                amount_micros=0,
                 currency=self._currency,
                 idempotency_key=idempotency_key,
             )

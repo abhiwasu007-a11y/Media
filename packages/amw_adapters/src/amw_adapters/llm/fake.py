@@ -2,7 +2,15 @@
 
 from typing import Any
 
-from amw_adapters.common import FAKE_PRICE_REF, CallUsage, FailurePlan, FakeEngine, FixtureStore
+from amw_adapters.common import (
+    FAKE_PRICE_REF,
+    CallUsage,
+    FailurePlan,
+    FakeEngine,
+    FakeProvider,
+    FixtureStore,
+    fake_provider,
+)
 from amw_adapters.llm.protocol import (
     OPERATION_COMPLETION,
     OPERATION_COUNT_TOKENS,
@@ -21,14 +29,14 @@ class FakeLlmAdapter:
     def __init__(
         self,
         *,
-        provider: str = "fake_llm",
+        provider: str = FakeProvider.LLM,
         currency: str = "USD",
         input_price_micros_per_token: int = 1,
         output_price_micros_per_token: int = 5,
         failures: FailurePlan | None = None,
         fixtures: FixtureStore | None = None,
     ) -> None:
-        self._provider = provider
+        self._provider = fake_provider(provider)
         self._currency = currency
         self._in_price = input_price_micros_per_token
         self._out_price = output_price_micros_per_token
@@ -55,7 +63,7 @@ class FakeLlmAdapter:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 tokens_cached_in=cached,
-                cost_micros=tokens_in * self._in_price + tokens_out * self._out_price,
+                amount_micros=tokens_in * self._in_price + tokens_out * self._out_price,
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
                 idempotency_key=idempotency_key,
@@ -75,7 +83,7 @@ class FakeLlmAdapter:
                 operation=OPERATION_COUNT_TOKENS,
                 model=request.model,
                 tokens_in=tokens_in,
-                cost_micros=0,
+                amount_micros=0,
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
                 idempotency_key=idempotency_key,

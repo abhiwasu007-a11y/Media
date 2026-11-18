@@ -7,8 +7,10 @@ from amw_adapters.common import (
     CallUsage,
     FailurePlan,
     FakeEngine,
+    FakeProvider,
     FixtureStore,
     fake_bytes,
+    fake_provider,
 )
 from amw_adapters.video_gen.protocol import VideoGenRequest, VideoGenResult
 from amw_core.enums import CostUnitKind
@@ -20,13 +22,13 @@ class FakeVideoGenAdapter:
     def __init__(
         self,
         *,
-        provider: str = "fake_video",
+        provider: str = FakeProvider.VIDEO,
         currency: str = "USD",
         price_micros_per_video_ms: int = 1,
         failures: FailurePlan | None = None,
         fixtures: FixtureStore | None = None,
     ) -> None:
-        self._provider = provider
+        self._provider = fake_provider(provider)
         self._currency = currency
         self._price = price_micros_per_video_ms
         self.engine = FakeEngine("video_gen", failures=failures, fixtures=fixtures)
@@ -45,7 +47,7 @@ class FakeVideoGenAdapter:
                 model=request.model,
                 units=duration_ms,
                 unit_kind=CostUnitKind.VIDEO_MS,
-                cost_micros=duration_ms * self._price,
+                amount_micros=duration_ms * self._price,
                 currency=self._currency,
                 price_ref=FAKE_PRICE_REF,
                 idempotency_key=idempotency_key,
