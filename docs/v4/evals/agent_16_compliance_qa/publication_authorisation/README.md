@@ -4,14 +4,14 @@
 |---|---|
 | Status | Draft — documentation. Software: **Planned** |
 | Owner | Agent 16 Compliance & QA |
-| Depends on | [blueprint](../../../agents/agent_16_compliance_qa.md) §6.5 (guards G0–G14, G9a), §6.6 (human-wins total, no scaling), §19.3, §23.3 (R14 evidence), §21 (SEC-R14 cases); 04 §5.16, §5.17, §5.21; 03 §11.6 rule 6; 18 §9.1; CCR-010 |
-| Files | `cases.jsonl` (43 cases), `rubric.md` |
+| Depends on | [blueprint](../../../agents/agent_16_compliance_qa.md) §6.5 (guards G0–G14, G9a), §6.6 (human-wins total, no scaling), §19.3, §23.3 (R14 evidence), §21 (SEC-R14 cases); 04 §3.6a, §5.16, §5.17, §5.21; 03 §11.6 rules 6–7; 18 §9.1; CCR-010, CCR-087…CCR-090, CCR-100…CCR-103 |
+| Files | `cases.jsonl` (58 cases), `rubric.md` |
 | LLM step | **none** — this task is deterministic (27 §9: "deterministic checks only"); no prompt file exists |
 | Case IDs | component prefix `PA-NN` (2 capitals, declared here per 27 §6.1); `category` carries the `eval_case_category` value |
 | Answer keys | none of the directive §1B.2 answer-key cases apply to this task (they test the policy judge); the cases marked ANSWER_KEY here are the R14 and §1A.7 must-pass cases |
 
 ## 1. Case format
-Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1). The fixture below describes the **rows the guard functions read**: the approval, its steps, the contributions, the HUMAN score rows, the human verdict rows that resolve NHR items, and for each human-originated record its `approval_channel` and an `evidence` summary. The evidence summary holds the outcome of every check that guard G4 re-runs on the stored `owner_instruction_evidence` row (04 §5.16): `state`, `source_kind`, same org, `on_behalf_of` and subject match, review code, `parsed_decision` against the recorded step state, message later than the approval request, confirmation later than the message, the verifier result, the recomputed `evidence_sha256`, and the replay key. The harness materialises it as rows in a test org and runs `AuthorisationGuards.evaluate`. No calendar dates: ages are relative day counts. Machine rows respect the 3A caps (the machine owns D + J points only: 17, 12, 10, 12, 7, 8, 8, 5, total at most 79; the generator uses a base of 66); the owner's HUMAN rows complete the total (Q-O2 provisional default: no scaling).
+Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1). The fixture below describes the **rows the guard functions read**: the approval, its steps, the contributions, the HUMAN score rows, the human verdict rows that resolve NHR items, the other approvals whose `APPROVED` state the gate relied on (`other_approvals`: FIN-R12 release, YTG-R9 quotation, NHR resolution; CCR-102), and for each human-originated record its `approval_channel` and an `evidence` summary. The evidence summary holds the outcome of every check that guard G4 re-runs on the stored `owner_instruction_evidence` row (04 §5.16): `state`, `source_kind`, same org, `on_behalf_of` and subject match, review code, `parsed_decision` against the recorded step state, message later than the approval request, confirmation later than the message, the verifier result (`failed_tests`, `refused_reason`), the recomputed `evidence_sha256`, the keyed MAC re-check `amw_evidence_mac_valid` (`mac_valid`, CCR-100), the CCR-101 replay keys and whether the evidence backs only this record. The grammar cases (negation, question, conditional, quote/forward, extra tokens, dispute as confirmation, score self-correction) are represented by the row the evidence store leaves behind (`REFUSED` with `NEEDS_CLARIFICATION`, or `VERIFIED` that never became `CONFIRMED`) and a human record that cites it anyway: the store's refusal is tested in the integration tests (blueprint §21), the G4 refusal here. The harness materialises it as rows in a test org and runs `AuthorisationGuards.evaluate`. No calendar dates: ages are relative day counts. Machine rows respect the 3A caps (the machine owns D + J points only: 17, 12, 10, 12, 7, 8, 8, 5, total at most 79; the generator uses a base of 66); the owner's HUMAN rows complete the total (Q-O2 provisional default: no scaling).
 
 ## 2. Fixture schema (`agent_16.publication_authorisation.fixture` 1.0.0, validated in CI with the repository's JSON Schema tooling)
 ```json
@@ -34,8 +34,12 @@ Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1).
         "message_after_request",
         "confirmation_after_message",
         "verifier_all_passed",
+        "failed_tests",
+        "refused_reason",
         "hash_recomputes",
-        "replay_free"
+        "mac_valid",
+        "replay_free",
+        "backs_only_this_record"
       ],
       "properties": {
         "state": {"enum": ["PENDING_VERIFICATION", "VERIFIED", "CONFIRMED", "REFUSED"]},
@@ -47,9 +51,33 @@ Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1).
         "parsed_decision_matches": {"type": ["boolean", "null"]},
         "message_after_request": {"type": "boolean"},
         "confirmation_after_message": {"type": "boolean"},
-        "verifier_all_passed": {"type": "boolean"},
-        "hash_recomputes": {"type": "boolean"},
-        "replay_free": {"type": "boolean"}
+        "verifier_all_passed": {"type": "boolean", "description": "true exactly when failed_tests is empty"},
+        "failed_tests": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "DECISION_GRAMMAR", "CONTENT_RULES", "SCORE_RULES", "CONFIRMATION_GRAMMAR"]},
+          "description": "tests of the stored verifier_result that did not pass (03 §11.6 rule 7; blueprint §19.3 rules 4-5)"
+        },
+        "refused_reason": {"enum": [null, "NEEDS_CLARIFICATION", "NOT_OWNER_AUTHORED", "EVENT_NOT_FOUND", "CHECK_FAILED"], "description": "non-null exactly when state = REFUSED (blueprint §19.3 rule 4)"},
+        "hash_recomputes": {"type": "boolean", "description": "unkeyed evidence_sha256 integrity only"},
+        "mac_valid": {"type": "boolean", "description": "result of amw_evidence_mac_valid(evidence_id) (04 §3.6a, CCR-100); false for a row without a MAC"},
+        "replay_free": {"type": "boolean", "description": "CCR-101 keys: no other live row uses the event or the confirmation event in either role"},
+        "backs_only_this_record": {"type": "boolean", "description": "the evidence backs no other human record (a step and the verdict row written with it count as one; the HUMAN score rows of one claimed_scores count as one)"}
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step_no", "state", "decided_by_kind", "membership_active", "holds_required_role", "recorded_by_kind", "approval_channel", "evidence"],
+      "properties": {
+        "step_no": {"type": "integer", "minimum": 1},
+        "state": {"enum": ["NOT_STARTED", "PENDING", "APPROVED", "REJECTED", "CHANGES_REQUESTED", "SKIPPED"]},
+        "decided_by_kind": {"enum": ["HUMAN", "AGENT"]},
+        "membership_active": {"type": "boolean"},
+        "holds_required_role": {"type": "boolean"},
+        "recorded_by_kind": {"enum": ["OPERATOR", "SELF", "AGENT"]},
+        "approval_channel": {"enum": ["OWNER_CHAT_OPERATOR", "WEB_DASHBOARD", "CLIENT_PORTAL", null]},
+        "evidence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ev"}]}
       }
     }
   },
@@ -60,6 +88,7 @@ Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1).
     "approval",
     "steps",
     "contributions",
+    "other_approvals",
     "scores",
     "gate",
     "disclosure_decision",
@@ -83,24 +112,7 @@ Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1).
         "review_code_present": {"type": "boolean"}
       }
     },
-    "steps": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["step_no", "state", "decided_by_kind", "membership_active", "holds_required_role", "recorded_by_kind", "approval_channel", "evidence"],
-        "properties": {
-          "step_no": {"type": "integer", "minimum": 1},
-          "state": {"enum": ["NOT_STARTED", "PENDING", "APPROVED", "REJECTED", "CHANGES_REQUESTED", "SKIPPED"]},
-          "decided_by_kind": {"enum": ["HUMAN", "AGENT"]},
-          "membership_active": {"type": "boolean"},
-          "holds_required_role": {"type": "boolean"},
-          "recorded_by_kind": {"enum": ["OPERATOR", "SELF", "AGENT"]},
-          "approval_channel": {"enum": ["OWNER_CHAT_OPERATOR", "WEB_DASHBOARD", "CLIENT_PORTAL", null]},
-          "evidence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ev"}]}
-        }
-      }
-    },
+    "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
     "contributions": {
       "type": "array",
       "items": {
@@ -114,6 +126,21 @@ Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1).
           "bound_to_this_approval": {"type": "boolean"},
           "approval_channel": {"enum": ["OWNER_CHAT_OPERATOR", "WEB_DASHBOARD", "CLIENT_PORTAL", null]},
           "evidence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/ev"}]}
+        }
+      }
+    },
+    "other_approvals": {
+      "type": "array",
+      "description": "approvals other than this one whose APPROVED state the gate relied on (CCR-102): FIN-R12 release, YTG-R9 quotation, NHR resolution",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "state", "relied_on_by", "steps"],
+        "properties": {
+          "kind": {"enum": ["KNOWLEDGE_RELEASE", "SENSITIVE_CLAIM", "COPYRIGHT_DOUBT"]},
+          "state": {"enum": ["PENDING", "APPROVED", "REJECTED", "CHANGES_REQUESTED", "WITHDRAWN", "EXPIRED"]},
+          "relied_on_by": {"enum": ["FIN_R12", "YTG_R9_QUOTATION", "NHR_RESOLUTION"]},
+          "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}}
         }
       }
     },
@@ -228,10 +255,10 @@ Datasets of deterministic executors use `input = {"fixture": {…}}` (27 §6.1).
 ## 3. `expected`
 `verdict` (`ALLOWED` / `BLOCKED`, always `is_final = true`), `failed_guards` (exact set, in guard order; G14 is `SKIPPED` in 3A and never listed), `authorised_action` (`DELIVERY` when ALLOWED, else null), `human_wins_total` (per dimension the HUMAN row **bound to the render hash** replaces the machine row; computed from the fixture by the generator, independent of G4).
 
-Guard semantics used by the generator (blueprint §6.5): G0 requested action is `DELIVERY`; G1 approval `FINAL_VIDEO`, `APPROVED`, hash match, review code; G2 every step human, active, role, recorded by the operator or the human; G3 a contribution bound to this approval, ≥ 20 characters, human; **G4 every human-originated record used (steps, contributions bound to this approval, HUMAN scores bound to the hash, human NHR verdict rows) has channel `OWNER_CHAT_OPERATOR` and evidence that passes every check**; G5 gate `ALLOWED`, or `NEEDS_HUMAN_REVIEW` with every item resolved by a final human verdict row with valid evidence; G6 no `BLOCKED` row; G7 disclosure decided; G8 render `QC_PASSED`, no blocking QC FAIL; G9 total ≥ threshold; G9a at least one HUMAN row bound to the render hash; G10 licences active; G11 FIN-R9 age ≥ lag; G12 hashes unchanged; G13 same org.
+Guard semantics used by the generator (blueprint §6.5): G0 requested action is `DELIVERY`; G1 approval `FINAL_VIDEO`, `APPROVED`, hash match, review code; G2 every step of this approval and of every relied-on approval `APPROVED`, human, active, role, recorded by the operator or the human (an approval's `APPROVED` state is never taken from `approvals.state` alone); G3 a contribution bound to this approval, ≥ 20 characters, human; **G4 every human-originated record used (steps of this approval and of every relied-on approval, contributions bound to this approval, HUMAN scores bound to the hash, human NHR verdict rows) has channel `OWNER_CHAT_OPERATOR` and evidence that passes every check: `CONFIRMED`, owner chat source, same org, on-behalf-of, subject, review code, decision, order, `failed_tests` empty, hash, `mac_valid`, replay keys, backs only this record**; a step that is still undecided (state `PENDING`, no channel, no evidence) is not a human record and fails G2 only; G5 gate `ALLOWED`, or `NEEDS_HUMAN_REVIEW` with every item resolved by a final human verdict row with valid evidence; G6 no `BLOCKED` row; G7 disclosure decided; G8 render `QC_PASSED`, no blocking QC FAIL; G9 total ≥ threshold; G9a at least one HUMAN row bound to the render hash; G10 licences active; G11 FIN-R9 age ≥ lag; G12 hashes unchanged; G13 same org.
 
 ## 4. Coverage
-Positive paths (PA-01, 03, 18, 20, 23, 25), §1A.7 compliance-rejects-regardless (PA-04), approval binding (PA-05…07), contribution (PA-08, 09, 38), human-only steps (PA-10), **R14 negatives** — unconfirmed (PA-11), subagent / peer message (PA-12), document (PA-13), tool result (PA-14), no review code (PA-15), non-verbatim quote (PA-16), fabricated message (PA-29), another human (PA-30), failed confirmation (PA-31), HUMAN score without evidence (PA-32), NULL channel (PA-33), human NHR verdict without evidence (PA-34), replay (PA-35), decision mismatch (PA-36), two pending approvals on one render (PA-37), non-accepted channel (PA-42), one message for two steps (PA-43) — NHR and disclosure (PA-17…20), blocking QC (PA-21), licences (PA-22, 23), FIN-R9 boundary (PA-24, 25), subject changed (PA-26), cross-tenant (PA-27), threshold boundary (PA-02, 28), HUMAN score bound to an older hash (PA-39), requested action (PA-40), missing owner score (PA-41). The recording-side tests (event fetch, origin checks, append-only, org isolation) are integration tests with a fake session event store (blueprint §21 SEC-R14).
+Positive paths (PA-01, 03, 18, 20, 23, 25), §1A.7 compliance-rejects-regardless (PA-04), approval binding (PA-05…07), contribution (PA-08, 09, 38), human-only steps (PA-10), **R14 negatives** — unconfirmed (PA-11), subagent / peer message (PA-12), document (PA-13), tool result (PA-14), no review code (PA-15), non-verbatim quote (PA-16), fabricated message (PA-29), another human (PA-30), failed confirmation (PA-31), HUMAN score without evidence (PA-32), NULL channel (PA-33), human NHR verdict without evidence (PA-34), replay (PA-35), decision mismatch (PA-36), two pending approvals on one render (PA-37), non-accepted channel (PA-42), one message for two steps (PA-43); **pass 3 (CCR-087…CCR-103)** — negation (PA-44), question (PA-45), conditional/deferral (PA-46), quote/forward (PA-47), extra tokens (PA-48), event reused as another row's confirmation (PA-49), dispute sent as the confirmation (PA-50), confirmation of step 1 bound as the decision of step 2 (PA-51), notification source (PA-52), direct insert in `CONFIRMED` without a verifier MAC (PA-53), wrong MAC on a HUMAN score (PA-54), spoofed actor reusing genuine evidence (PA-55), release approved by state only (PA-56), NHR resolution with an invalid MAC (PA-57), score self-correction (PA-58) — NHR and disclosure (PA-17…20), blocking QC (PA-21), licences (PA-22, 23), FIN-R9 boundary (PA-24, 25), subject changed (PA-26), cross-tenant (PA-27), threshold boundary (PA-02, 28), HUMAN score bound to an older hash (PA-39), requested action (PA-40), missing owner score (PA-41). The recording-side tests (event fetch, origin checks, append-only, org isolation) are integration tests with a fake session event store (blueprint §21 SEC-R14).
 
 ## 5. Threshold
 **100 %** of cases (deterministic; any failure blocks the PR).
