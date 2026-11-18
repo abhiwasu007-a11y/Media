@@ -10,7 +10,7 @@
 | Files | `cases.jsonl` (25 cases), `rubric.md` (judge) |
 
 ## 1. Scope
-Tests one section call = model output **plus** the post-checks `a05.sec.*` and the near-copy guard. `input` is the prompt's variable object. Numeric budgets (`scene_budget`, `max_change_gap_ms`, `speech_rate_cps`) are carried in each input (test values, not product defaults), so the dataset does not depend on configuration. Cited chunk text is not part of any input (the near-copy comparison runs in code against fixtures of the deterministic dataset). All text is invented; no dates; the method concept is a placeholder.
+Tests one section call = model output **plus** the post-checks `a05.sec.*` and the near-copy guard. `input` is the prompt's variable object; CI validates every input against the step input schema `agent_05.script_draft.section.input` 1.0.0 (blueprint §7.4, prompt appendix A; 27 §6.1). Numeric budgets (`scene_budget`, `max_change_gap_ms`, `speech_rate_cps`) are carried in each input (test values, not product defaults), so the dataset does not depend on configuration. Cited chunk text is not part of any input (the near-copy comparison runs in code against fixtures of the deterministic dataset). All text is invented; no dates; the method concept is a placeholder.
 
 ## 2. Case coverage
 | Category | Cases | What they prove |
