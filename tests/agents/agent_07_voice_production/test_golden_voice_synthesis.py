@@ -29,10 +29,6 @@ NOT_RUN = {
 # case's amount and characters: a copy-paste defect of the dataset (the zero-rows and zero-calls
 # assertions stay mandatory for them). Only these two IDs are excused.
 AMOUNT_COPY_PASTE_DEFECT = {"VS-46", "VS-47"}
-# VS-40 expects ``ledger_rows`` 0 for a provider call that returned garbage. FR-9 and Q-23
-# ("every paid call has a ledger row") win over the dataset: the call is recorded as an ESTIMATE
-# and debited (M1 of the PR 37 review; dataset correction filed in CONTRACT_CHANGE_REQUESTS.md).
-DATASET_CORRECTIONS = {"VS-40": {"ledger_rows": 1}}
 pytestmark = [pytest.mark.integration]
 
 
@@ -41,7 +37,7 @@ def _results(out: TaskOutput) -> dict[str, str]:
 
 
 def _check(case: dict[str, Any], world: VoiceWorld, out: TaskOutput) -> None:
-    exp = {**case["expected"], **DATASET_CORRECTIONS.get(case["case_id"], {})}
+    exp = case["expected"]
     assert out.status.value == exp["status"]
     code = out.error.code if out.error is not None else None
     assert code == exp["error_code"]

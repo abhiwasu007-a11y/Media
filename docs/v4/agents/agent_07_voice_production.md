@@ -264,7 +264,11 @@ No normalisation of a stem to a loudness it cannot hold without audible limiting
 | `agent_07.max_segments` | cap of sentences per task | design default 500 (07 §9 style cap) |
 | `agent_07.sample.max_segments` | sentences in a voice sample | — (3B) |
 | `agent_07.noise_floor.max_dbfs` | noise limit | — (18 §4: calibrate in 3B) |
-| `agent_07.master.max_passes`, `.codec_headroom_step_db`, `.limiter_ceiling_dbtp`, `.max_limiter_reduction_db`, `.denoise_mode` | mastering controls | passes: design default 3; denoise default `OFF`; others — |
+| `agent_07.master.max_passes`, `.max_limiter_reduction_db`, `.denoise_mode` | mastering controls | passes: design default 3; denoise default `OFF`; limiter reduction — |
+| `agent_07.master.limiter_ceiling_dbtp`, `agent_07.master.codec_headroom_step_db` | true-peak limiter ceiling; step by which the ceiling is lowered for the next pass when the post-codec peak overshoots (§6.4) | **required, no default shipped (`PERMANENT.CONFIG_INVALID` when unset)**; design default, REQUIRES REVIEW (Phase 1): no sourced value, calibrate in 3B (A07-N4) |
+| `agent_07.master.pause_span_tolerance_ms` | a silence run inside a deliberate-pause span within this tolerance is not dead air | **required, no default shipped (`CONFIG_INVALID` when unset)**; design default, REQUIRES REVIEW (Phase 1): no sourced value, calibrate in 3B (A07-N4) |
+| `agent_07.tts.max_attempt_retries`, `agent_07.tts.max_retry_after_ms` | in-attempt retries of a temporary provider failure; a provider `retry_after` above the second value ends the attempt (`RETRY_WAIT`) | **required, no default shipped (`CONFIG_INVALID` when unset)**; design default, REQUIRES REVIEW (Phase 1): not in RESEARCH_LOG, verify against the chosen provider's limits (A07-N4) |
+| `agent_07.idempotency_lock_ms` | lease of an in-flight idempotency key (03 §9) | **required, no default shipped (`CONFIG_INVALID` when unset)**; design default, REQUIRES REVIEW (Phase 1): no sourced value (A07-N4) |
 | `qc.loudness.target_lufs` −14.0 · `qc.loudness.tolerance_lu` — · `qc.true_peak.max_dbtp` −1.0 · `qc.audio.sample_rate_hz` 48000 · `qc.audio.min_bitrate_bps` 384000 · `qc.music_bed.min_db`/`max_db` −20.0/−15.0 · `qc.silence.max_ms` — | shared with 18 §13 | as 18 §13 |
 | `evals.agent_07.*` | thresholds of §26 | design defaults in §26 |
 

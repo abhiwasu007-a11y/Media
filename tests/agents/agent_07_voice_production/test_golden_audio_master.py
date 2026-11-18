@@ -2,9 +2,6 @@
 descriptor-driven FFmpeg stub (``stub`` measurement mode of the dataset README).
 
 Harness notes (not a weakening of any assertion):
-* AM-30 expects an FFmpeg crash "during pass 2", but a case with the given codec model would
-  finish in pass 1; the harness gives that case a first-pass codec overshoot of 0.6 dB so that a
-  second pass exists, then asserts the resume from ``master.pass_1`` on retry.
 * AM-17, AM-18, AM-19 are 3B music cases (D6): music mixing is not implemented in 3A.
 """
 
