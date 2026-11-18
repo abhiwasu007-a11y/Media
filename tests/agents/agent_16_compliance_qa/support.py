@@ -1,7 +1,8 @@
 """Shared test helpers for Agent 16: config, lexicon, dataset loading, scripted LLM, IDs."""
 
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,17 @@ from agent_16_compliance_qa.config import Agent16Config
 from amw_adapters.common import CallUsage
 from amw_adapters.llm.protocol import LlmRequest, LlmResponse
 from amw_core import ids
+from amw_core.errors import BudgetExhaustedError
+from amw_core.ids import BudgetId, CostEntryId, JobId, TaskId
+from amw_core.interfaces.budget_guard import Budget as BudgetRow
+from amw_core.interfaces.budget_guard import (
+    BudgetStatus,
+    CallCheck,
+    Reservation,
+    ReservationOutcome,
+)
+from amw_core.interfaces.cost_ledger import CostEntry, CostTotals, NewCostEntry
+from amw_core.interfaces.tenancy_context import TenantTransaction
 
 REPO = Path(__file__).resolve().parents[3]
 EVALS = REPO / "docs/v4/evals/agent_16_compliance_qa"
@@ -185,13 +197,90 @@ class ScriptedLlm:
         raise NotImplementedError
 
 
-class Recorder:
+class Ledger:
+    """In-memory ``CostLedger`` (one row per paid call, keyed by its idempotency key)."""
+
     def __init__(self) -> None:
         self.rows: list[str] = []
+        self.entries: dict[str, CostEntry] = {}
 
-    def record(self, response: LlmResponse, idempotency_key: str) -> str:
-        self.rows.append(idempotency_key)
-        return ids.COST_ENTRY.new()
+    def record(self, tx: TenantTransaction, entry: NewCostEntry) -> CostEntry:
+        self.rows.append(str(entry.idempotency_key))
+        row = CostEntry(id=ids.COST_ENTRY.new(), org_id=tx.context.org_id, entry=entry)
+        self.entries[str(row.id)] = row
+        return row
+
+    def get(self, tx: TenantTransaction, entry_id: CostEntryId) -> CostEntry | None:
+        return self.entries.get(str(entry_id))
+
+    def for_job(self, tx: TenantTransaction, job_id: JobId) -> Sequence[CostEntry]:
+        return [e for e in self.entries.values() if e.entry.job_id == job_id]
+
+    def for_task(self, tx: TenantTransaction, task_id: TaskId) -> Sequence[CostEntry]:
+        return [e for e in self.entries.values() if e.entry.task_id == task_id]
+
+    def job_totals(self, tx: TenantTransaction, job_id: JobId) -> CostTotals:
+        raise NotImplementedError  # not used by Agent 16
+
+
+class Budget:
+    """In-memory ``BudgetGuard`` parts the judge client uses (E2 / E3 and the provider gate)."""
+
+    def __init__(self, *, gate_open: bool = True, remaining: int = 10**9) -> None:
+        self.gate_open, self.remaining = gate_open, remaining
+        self.checks: list[CallCheck] = []
+        self.after: list[CostEntry] = []
+
+    def check_provider_gate(self, tx: TenantTransaction, provider: str) -> None:
+        if not self.gate_open:
+            raise BudgetExhaustedError("no ACTIVE PROVIDER budget")
+
+    def check_call(self, tx: TenantTransaction, check: CallCheck) -> None:
+        self.checks.append(check)
+        if check.estimated_cost_micros > self.remaining:
+            raise BudgetExhaustedError("reservation exhausted")
+
+    def after_call(self, tx: TenantTransaction, entry: CostEntry) -> Sequence[BudgetRow]:
+        self.after.append(entry)
+        self.remaining -= entry.entry.amount_micros
+        return []
+
+    # the rest of BudgetGuard is the worker's (E1 / T08 / T11), never Agent 16's
+    def applicable_budgets(self, tx: TenantTransaction, job_id: JobId) -> Sequence[BudgetRow]:
+        raise NotImplementedError
+
+    def reserve(
+        self, tx: TenantTransaction, task_id: TaskId, amount_micros: int, currency: str
+    ) -> ReservationOutcome:
+        raise NotImplementedError
+
+    def consume(self, tx: TenantTransaction, task_id: TaskId) -> Sequence[Reservation]:
+        raise NotImplementedError
+
+    def release(self, tx: TenantTransaction, task_id: TaskId) -> Sequence[Reservation]:
+        raise NotImplementedError
+
+    def status(self, tx: TenantTransaction, budget_id: BudgetId) -> BudgetStatus:
+        raise NotImplementedError
+
+
+class Breaker:
+    def __init__(self, open_: bool = False) -> None:
+        self.open = open_
+
+    def is_open(self, provider: str) -> bool:
+        return self.open
+
+
+class FixedClock:
+    def __init__(self, now: datetime) -> None:
+        self._now = now
+
+    def now(self) -> datetime:
+        return self._now
+
+    def monotonic_ms(self) -> int:
+        return 0
 
 
 def blueprint_schema(heading: str) -> dict[str, Any]:

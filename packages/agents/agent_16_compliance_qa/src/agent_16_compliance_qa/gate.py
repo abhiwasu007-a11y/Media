@@ -46,7 +46,7 @@ from amw_core.enums import (
     DisclosureDecision,
     PresenterKind,
 )
-from amw_core.errors import InputInvalidError, InsufficientInputError
+from amw_core.errors import InputInvalidError, InsufficientInputError, LoopCapExceededError
 
 _LOG = logging.getLogger(__name__)
 FINANCE_PACK: Final = "rp.finance_sebi_in"
@@ -173,6 +173,14 @@ class ComplianceGate:
         self._cfg, self._packs = cfg, packs
         self._policy, self._para, self._frames = policy_judge, paraphrase_judge, frames_judge
 
+    def _spend(self, calls: int) -> int:
+        """NF-05 / F-11: ``compliance.gate.max_llm_calls`` (required config) is checked before
+        every judge call, whatever judge is wired in; over the cap => ``AGENT.LOOP_CAP_EXCEEDED``
+        (the worker fails the task; no verdict is written)."""
+        if calls + 1 > self._cfg.gate_max_llm_calls:
+            raise LoopCapExceededError("compliance.gate.max_llm_calls reached")
+        return calls + 1
+
     def deterministic(self, inp: GateInputs) -> list[RuleResult]:
         """C1: every deterministic rule of an active pack (13 section 1.4)."""
         active = self._packs.active_rule_ids
@@ -246,8 +254,8 @@ class ComplianceGate:
                 active_rule_ids=tuple(sorted(self._packs.active_rule_ids)),
                 items=tuple(items[start : start + size]),
             )
+            calls = self._spend(calls)
             out = self._policy(batch)
-            calls += 1
             if out.refusal is not None:
                 if out.refusal.reason == "INSUFFICIENT_INPUT":
                     raise InsufficientInputError("policy judge: insufficient input")
@@ -264,8 +272,8 @@ class ComplianceGate:
                 )
         if inp.paraphrase_pairs and "YTG-R9" in self._packs.active_rule_ids:
             pin = ParaphraseInput(language_script=inp.language, pairs=inp.paraphrase_pairs)
+            calls = self._spend(calls)
             pout = self._para(pin)
-            calls += 1
             approvals = [QuotationApproval(h, s) for h, s in inp.quotation_approvals]  # type: ignore[arg-type]
             pd = apply_paraphrase(pin, pout, inp.span_hashes, approvals)
             for pv in pd.pairs:
@@ -299,8 +307,8 @@ class ComplianceGate:
             checks.append("qc.visual.no_synthetic_presenter")
         fout: FramesOutput | None = None
         if inp.frames_payload is not None and inp.frame_ids:
+            calls = self._spend(calls)
             fout = self._frames(inp.frames_payload)
-            calls += 1
         frames = apply_frames(
             checks,
             inp.sensitive_channel,

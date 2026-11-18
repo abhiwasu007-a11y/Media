@@ -20,7 +20,7 @@ from agent_16_compliance_qa.gate import (
     gate_payload,
     validation_results,
 )
-from agent_16_compliance_qa.judge.client import CallMeter, JudgeClient, system_prompt
+from agent_16_compliance_qa.judge.client import CallMeter, CallScope, JudgeClient, system_prompt
 from agent_16_compliance_qa.judge.models import (
     FramesOutput,
     ItemClaim,
@@ -48,7 +48,10 @@ from amw_core.interfaces import TenantContext
 from amw_core.testing.memory import MemoryTransaction
 from tests.agents.agent_16_compliance_qa.support import (
     PROMPTS,
-    Recorder,
+    Breaker,
+    Budget,
+    FixedClock,
+    Ledger,
     ScriptedLlm,
     blueprint_schema,
     config,
@@ -430,19 +433,25 @@ def test_pack_loader_refuses_draft_and_hash_mismatch() -> None:
 
 # --- JudgeClient: budget, cap, breaker, parse retry, idempotency (FI-04...FI-08) ------------
 def client(
-    texts: list[str], max_calls: int = 4, max_cost: int = 1000, breaker: Any = None
-) -> tuple[JudgeClient, ScriptedLlm, Recorder]:
-    llm, rec = ScriptedLlm(texts), Recorder()
+    texts: list[str],
+    max_calls: int = 4,
+    max_cost: int = 1000,
+    breaker: Breaker | None = None,
+    budget: Budget | None = None,
+) -> tuple[JudgeClient, ScriptedLlm, Ledger]:
+    llm, rec = ScriptedLlm(texts), Ledger()
     cfg = config().step("llm_policy")
+    tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("agent_16")))
     jc = JudgeClient(
         llm=llm,
         step=cfg,
-        meter=CallMeter(max_calls=max_calls, max_cost_micros=max_cost),
-        recorder=rec,
-        org_id=ids.ORG.new(),
-        task_id=ids.TASK.new(),
+        meter=CallMeter(max_calls=max_calls, max_cost_micros=max_cost, currency="USD"),
+        budget=budget or Budget(),
+        costs=rec,
+        breaker=breaker or Breaker(),
+        clock=FixedClock(datetime(2026, 1, 31, tzinfo=UTC)),
+        scope=CallScope(tx, ids.JOB.new(), ids.TASK.new(), ids.ATTEMPT.new()),
         language="en-IN",
-        breaker=breaker,
     )
     return jc, llm, rec
 
@@ -473,14 +482,56 @@ def test_judge_client_budget_cap_and_breaker() -> None:
     with pytest.raises(LoopCapExceededError):  # FI-08
         jc.judge("sys", {}, PolicyOutput, "policy.b02")
 
-    class Open:
-        def is_open(self, provider: str) -> bool:
-            return True
-
-    jc, llm, _ = client([OK], breaker=Open())
+    jc, llm, _ = client([OK], breaker=Breaker(open_=True))
     with pytest.raises(CircuitOpenError):  # FI-04 breaker: no attempt
         jc.judge("sys", {}, PolicyOutput, "policy.b01")
     assert llm.requests == []
+    jc, llm, _ = client([OK], budget=Budget(gate_open=False))
+    with pytest.raises(BudgetExhaustedError):  # 09 section 8: no PROVIDER budget, no call
+        jc.judge("sys", {}, PolicyOutput, "policy.b01")
+    assert llm.requests == []
+    jc, llm, _ = client([OK], budget=Budget(remaining=10))
+    with pytest.raises(BudgetExhaustedError):  # E2: the reservation does not cover the call
+        jc.judge("sys", {}, PolicyOutput, "policy.b01")
+    assert llm.requests == []
+
+
+def test_judge_client_writes_one_ledger_row_per_call_and_runs_e3() -> None:
+    budget = Budget()
+    jc, _llm, rec = client(["not json", OK], budget=budget)
+    jc.judge("sys", {}, PolicyOutput, "policy.b01")
+    assert len(rec.entries) == 2 == len(budget.after) == len(budget.checks)
+    assert all(e.entry.task_id and e.entry.attempt_id for e in rec.entries.values())
+
+
+def test_call_meter_takes_the_tightest_cap_and_zero_without_steps() -> None:
+    from amw_core.contracts.common import ResourceBudget
+
+    step = config().step("llm_policy")
+    rb = ResourceBudget(max_cost_micros=50, currency="USD", max_wall_ms=1000, max_llm_calls=2)
+    m = CallMeter.for_task([step], 16, rb)
+    assert m.max_calls == min(2, step.max_calls) and m.max_cost_micros == min(
+        50, step.max_cost_micros
+    )
+    assert CallMeter.for_task([], 16, rb).max_calls == 0
+    unlimited = ResourceBudget(max_cost_micros=10**9, currency="USD", max_wall_ms=1000)
+    assert CallMeter.for_task([step], 1, unlimited).max_calls == 1
+
+
+def test_gate_enforces_max_llm_calls_with_any_judge() -> None:
+    """Review M3: the gate's own cap holds even when the judge callable has none."""
+    calls = Calls()
+    items = [
+        SourceItem(ref=f"x{i}", surface="SCRIPT_SEGMENT", text="Buy this stock now")
+        for i in range(3)
+    ]
+    cfg = config(
+        **{"compliance.gate.max_items_per_judge_call": 1, "compliance.gate.max_llm_calls": 2}
+    )
+    g = ComplianceGate(cfg, packs(), calls, no_para, frames_clean)
+    with pytest.raises(LoopCapExceededError):
+        g.evaluate(clean_inputs(items=items))
+    assert len(calls.batches) == 2
 
 
 def test_system_prompt_holds_no_tenant_data_and_model_comes_from_config() -> None:
