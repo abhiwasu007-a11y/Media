@@ -57,7 +57,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Final, Protocol, runtime_checkable
 
 from amw_core.enums import (
@@ -89,6 +89,7 @@ DEFAULT_RECORD_KIND_RULES: Final[Mapping[EvidenceRecordKind, EvidenceVerificatio
     EvidenceRecordKind.COMPLIANCE_DECISION: EvidenceVerificationKind.DECISION,
     EvidenceRecordKind.KNOWLEDGE_RELEASE_REQUEST: EvidenceVerificationKind.DECISION,
     EvidenceRecordKind.CONTRIBUTION: EvidenceVerificationKind.CONTENT,
+    EvidenceRecordKind.REVISION_NOTE: EvidenceVerificationKind.CONTENT,
     EvidenceRecordKind.OWNER_TOPIC: EvidenceVerificationKind.CONTENT,
     EvidenceRecordKind.DATASET_INTAKE: EvidenceVerificationKind.CONTENT,
     EvidenceRecordKind.HUMAN_SCORE: EvidenceVerificationKind.SCORE,
@@ -110,12 +111,23 @@ _R = ApprovalStepState.REJECTED
 DEFAULT_DECISION_WORDS: Final[Mapping[str, ApprovalStepState]] = {
     # approve side (English, Marathi, Hindi)
     "approve": _A, "approved": _A, "yes": _A, "ok": _A, "okay": _A, "go ahead": _A,
-    "release": _A, "confirmed": _A, "मंजूर": _A, "होय": _A, "ठीक": _A, "ठीक आहे": _A, "हाँ": _A,
+    "release": _A, "मंजूर": _A, "होय": _A, "ठीक": _A, "ठीक आहे": _A, "हाँ": _A,
     # reject side
     "reject": _R, "rejected": _R, "no": _R, "stop": _R, "नामंजूर": _R, "नाही": _R, "नहीं": _R,
     # changes requested (the change itself is a separate CONTENT record)
     "changes": ApprovalStepState.CHANGES_REQUESTED, "बदल": ApprovalStepState.CHANGES_REQUESTED,
 }  # fmt: skip
+DEFAULT_CONFIRM_WORDS: Final = frozenset({"confirm", "confirmed", "पक्के", "पक्का", "पक्की"})
+"""``approvals.owner_chat.confirm_words.<lang>`` (CCR-101); disjoint from the decision words."""
+DEFAULT_STAGE_WORDS: Final[Mapping[str, tuple[str, ...]]] = {
+    "script": ("s05_script", "s05_shorts"),
+    "स्क्रिप्ट": ("s05_script", "s05_shorts"),
+    "visuals": ("s09_plan",),
+    "thumbnail": ("s11_thumbs",),
+    "थंबनेल": ("s11_thumbs",),
+}
+"""``approvals.owner_chat.stage_words.<lang>`` (CCR-089): word -> candidate stages; the one the
+approval's workflow allows is chosen (``script`` is ``s05_script`` or ``s05_shorts``)."""
 DEFAULT_NEUTRAL_TOKENS: Final = frozenset(
     {"please", "thanks", "the", "this", "it", "कृपया", "धन्यवाद"}
 )
@@ -167,11 +179,18 @@ DEFAULT_INTERROGATIVE_ANY_TOKENS: Final = frozenset(
     {"काय", "का", "कसे", "कसा", "कशी", "कधी", "केव्हा", "क्या", "क्यों", "कब", "कैसे"}
 )
 """Marathi / Hindi interrogatives, a question wherever they occur."""
-DEFAULT_REVIEW_CODE_PATTERN: Final = r"(?=[a-z0-9]*[a-z])(?=[a-z0-9]*[0-9])[a-z0-9]{4}"
-"""Shape of a review code token (letters and digits, four characters); 04 defines no format."""
+DEFAULT_REVIEW_CODE_PATTERN: Final = (
+    r"(?=[2-9a-hjkmnp-z]*[a-hjkmnp-z])(?=[2-9a-hjkmnp-z]*[2-9])[2-9a-hjkmnp-z]{4}"
+)
+"""Case-folded shape of a review code (CCR-090: 4 characters of ``23456789ABCDEFGHJKMNPQRSTUVWXYZ``
+with at least one letter and one digit); see ``amw_core.owner_evidence_review_code``."""
 DEFAULT_DIMENSION_LABELS: Final[Mapping[QualityDimension, tuple[str, ...]]] = {
     d: (d.value.casefold(),) for d in QualityDimension
 }
+_NO_ANCHOR_KINDS: Final = frozenset(
+    {EvidenceRecordKind.OWNER_TOPIC, EvidenceRecordKind.DATASET_INTAKE}
+)
+"""A7 (CCR-091): kinds that precede the job and have no request anchor."""
 _QUOTES: Final = frozenset(map(chr, (0x22, 0x27, 0x201C, 0x201D, 0x2018, 0x2019, 0xAB, 0xBB)))
 _APOSTROPHES: Final = str.maketrans(
     dict.fromkeys(map(chr, (0x2019, 0x2018, 0x02BC, 0x0060, 0x00B4, 0x2032)), "'")
@@ -227,6 +246,8 @@ class NewEvidence:
     step_no: int | None = None
     review_code: str | None = None
     parsed_decision: ApprovalStepState | None = None
+    parsed_target_stage_id: str | None = None
+    """``CHANGES_REQUESTED`` only (CCR-089): the stage code maps from the message's stage word."""
     supersedes_id: WireId | None = None
     claimed_scores: tuple[tuple[QualityDimension, int], ...] = ()
     """``HUMAN_SCORE`` only (CCR-060): the integer points per dimension the owner wrote."""
@@ -238,7 +259,8 @@ class NewEvidence:
 
 
 def evidence_sha256(evidence: NewEvidence) -> str:
-    """``evidence_sha256`` of 04 section 5.16 over the listed fields (incl. ``claimed_scores``)."""
+    """``evidence_sha256`` of 04 section 5.16 over the listed fields (incl. ``claimed_scores`` and
+    ``parsed_target_stage_id``)."""
     material = {
         "session_id": evidence.session_id,
         "event_uuid": evidence.event_uuid,
@@ -249,6 +271,7 @@ def evidence_sha256(evidence: NewEvidence) -> str:
         "subject_id": evidence.subject_id,
         "review_code": evidence.review_code,
         "parsed_decision": evidence.parsed_decision.value if evidence.parsed_decision else None,
+        "parsed_target_stage_id": evidence.parsed_target_stage_id,
         "claimed_scores": evidence.claimed_scores_json,
     }
     canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -268,6 +291,13 @@ class VerifierPolicy:
         default_factory=lambda: dict(DEFAULT_DECISION_WORDS)
     )
     neutral_tokens: frozenset[str] = DEFAULT_NEUTRAL_TOKENS
+    confirm_words: frozenset[str] = DEFAULT_CONFIRM_WORDS
+    stage_words: Mapping[str, tuple[str, ...]] = field(
+        default_factory=lambda: dict(DEFAULT_STAGE_WORDS)
+    )
+    content_max_age_ms: int | None = None
+    """``approvals.owner_chat.content_max_age_ms`` (CCR-091): freshness window for OWNER_TOPIC /
+    DATASET_INTAKE events; no default (unset = those kinds are refused, fail closed)."""
     negation_tokens: frozenset[str] = DEFAULT_NEGATION_TOKENS
     quote_marker_tokens: frozenset[str] = DEFAULT_QUOTE_MARKER_TOKENS
     deferral_tokens: frozenset[str] = DEFAULT_DEFERRAL_TOKENS
@@ -352,37 +382,90 @@ def _wholly_quoted(content: str) -> bool:
     return len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES
 
 
-def read_decision(
-    content: str, review_code: str, policy: VerifierPolicy
-) -> ApprovalStepState | None:
-    """The decision of a DECISION-kind message under the whitelist grammar, or ``None``
-    (``NEEDS_CLARIFICATION``): exactly one review code, every other token a decision or neutral
-    token, exactly one decision word or phrase."""
+def _without_code(content: str, review_code: str) -> list[str] | None:
+    """Whitelist tokens with exactly one review code removed; ``None`` for a question, a wholly
+    quoted message, or zero / several copies of the code."""
     if _wholly_quoted(content) or "?" in unicodedata.normalize("NFKC", content):
-        return None  # a quoted message or a question (A9), checked before punctuation is removed
+        return None  # A9, checked before punctuation is removed
     words = whitelist_tokens(content)
     code = " ".join(whitelist_tokens(review_code))
     if not code or words.count(code) != 1:
         return None
-    rest = [w for w in words if w != code]
-    phrases = sorted(
-        ((whitelist_tokens(p), d) for p, d in policy.decision_words.items()),
-        key=lambda item: -len(item[0]),
-    )
+    return [w for w in words if w != code]
+
+
+def read_decision_message(
+    content: str,
+    review_code: str,
+    policy: VerifierPolicy,
+    allowed_stages: frozenset[str] | None = None,
+) -> tuple[ApprovalStepState, str | None] | None:
+    """The ``(decision, target stage)`` of a DECISION-kind message under the whitelist grammar
+    (CCR-087 / CCR-089), or ``None`` (``NEEDS_CLARIFICATION``): exactly one review code; every
+    other token a decision, neutral or (with ``CHANGES_REQUESTED`` only) stage token; exactly
+    one decision word; ``CHANGES_REQUESTED`` needs exactly one stage word that maps to one stage
+    in ``allowed_stages`` (``None`` = any stage of the map)."""
+    rest = _without_code(content, review_code)
+    if rest is None:
+        return None
+    phrases: list[tuple[list[str], tuple[str, str]]] = [
+        (whitelist_tokens(p), ("decision", d.value)) for p, d in policy.decision_words.items()
+    ]
+    phrases += [(whitelist_tokens(w), ("stage", w)) for w in policy.stage_words]
+    phrases.sort(key=lambda item: -len(item[0]))
     neutral = {" ".join(whitelist_tokens(n)) for n in policy.neutral_tokens}
-    found: list[ApprovalStepState] = []
+    decisions: list[ApprovalStepState] = []
+    stage_words: list[str] = []
     i = 0
     while i < len(rest):
-        for parts, decision in phrases:
+        for parts, (kind, value) in phrases:
             if parts and rest[i : i + len(parts)] == parts:
-                found.append(decision)
+                if kind == "decision":
+                    decisions.append(ApprovalStepState(value))
+                else:
+                    stage_words.append(str(value))
                 i += len(parts)
                 break
         else:
             if rest[i] not in neutral:
                 return None
             i += 1
-    return found[0] if len(found) == 1 else None
+    if len(decisions) != 1:
+        return None
+    decision = decisions[0]
+    if decision is not ApprovalStepState.CHANGES_REQUESTED:
+        return None if stage_words else (decision, None)
+    if len(stage_words) != 1:
+        return None
+    candidates = [
+        stage
+        for stage in policy.stage_words[stage_words[0]]
+        if allowed_stages is None or stage in allowed_stages
+    ]
+    return (decision, candidates[0]) if len(candidates) == 1 else None
+
+
+def read_decision(
+    content: str, review_code: str, policy: VerifierPolicy
+) -> ApprovalStepState | None:
+    """The decision only (see ``read_decision_message``); ``None`` = ``NEEDS_CLARIFICATION``."""
+    reading = read_decision_message(content, review_code, policy)
+    return reading[0] if reading else None
+
+
+def is_confirmation(content: str, review_code: str | None, policy: VerifierPolicy) -> bool:
+    """Confirmation whitelist (CCR-101): exactly the record's own review code, exactly one confirm
+    word, every other token neutral. A dispute, correction, new decision or second code is never a
+    confirmation."""
+    if not review_code:
+        return False
+    rest = _without_code(content, review_code)
+    if rest is None:
+        return False
+    confirm = {" ".join(whitelist_tokens(w)) for w in policy.confirm_words}
+    neutral = {" ".join(whitelist_tokens(n)) for n in policy.neutral_tokens}
+    hits = [w for w in rest if w in confirm]
+    return len(hits) == 1 and all(w in confirm or w in neutral for w in rest)
 
 
 def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
@@ -448,17 +531,20 @@ def verify_owner_event(
     purpose: str,
     quote: str,
     message_at: datetime | None,
-    not_before: datetime,
+    anchor: datetime | None,
     distinct_from_event_uuid: str | None,
     policy: VerifierPolicy,
     now: datetime,
+    allowed_stages: frozenset[str] | None = None,
 ) -> VerificationOutcome:
-    """Pure check of one fetched event against the operator's claims (rules above).
+    """Pure check of one fetched event against the operator's claims (03 section 11.6 rule 7).
 
-    For ``purpose = RECORD`` pass the evidence's own quote and ``message_at``; for a
-    confirmation pass the confirmation quote and ``message_at = None``. A confirmation runs the
-    authenticity tests, the subject reference and clarity, and for DECISION kinds the same
-    decision. ``not_before`` is exclusive.
+    ``purpose = RECORD``: the evidence's own quote and ``message_at``; ``anchor`` is the request
+    (``approvals.created_at``; the job's creation for CONTRIBUTION / HUMAN_SCORE; the superseded
+    evidence if later) or ``None`` for OWNER_TOPIC / DATASET_INTAKE, which use the freshness
+    window instead (A7, CCR-091). ``purpose = CONFIRMATION``: the confirmation quote,
+    ``message_at = None``, ``anchor`` = the recorded event time, and the confirmation whitelist
+    (CCR-101) replaces the kind rules. ``anchor`` is exclusive.
     """
     if event is None:
         return EventUnavailable(evidence.session_id, evidence.event_uuid)
@@ -466,9 +552,16 @@ def verify_owner_event(
     kind = policy.record_kind_rules.get(evidence.record_kind)
     session_id = evidence.session_id if purpose == RECORD else event.session_id
     checks: dict[str, bool] = {"rule_defined": kind is not None}
-    if kind is EvidenceVerificationKind.DECISION:
+    if purpose == RECORD and kind is EvidenceVerificationKind.DECISION:
         checks["review_code_given"] = bool(evidence.review_code)
         checks["decision_given"] = evidence.parsed_decision is not None
+    if purpose == RECORD and evidence.record_kind in _NO_ANCHOR_KINDS:
+        window = policy.content_max_age_ms  # no request anchor: freshness window (CCR-091)
+        order_ok = window is not None and (
+            timedelta(0) <= now - event.timestamp <= timedelta(milliseconds=window)
+        )
+    else:
+        order_ok = anchor is not None and event.timestamp > anchor
     checks |= {
         "event_identity": event.session_id == session_id
         and (purpose != RECORD or event.event_uuid == evidence.event_uuid),
@@ -480,16 +573,24 @@ def verify_owner_event(
         or event.parent_session_id is None,
         "quote_verbatim": bool(quote) and quote in content,
         "timestamp_equal": message_at is None or message_at == event.timestamp,
-        "message_order": event.timestamp > not_before,
+        "message_order": order_ok,
         "distinct_event": distinct_from_event_uuid is None
         or event.event_uuid != distinct_from_event_uuid,
     }
-    if kind is EvidenceVerificationKind.DECISION:
-        stated = read_decision(content, evidence.review_code or "", policy)
-        checks[NEEDS_CLARIFICATION] = stated is not None
-        checks["subject_reference"] = stated is not None
-        checks["clarity"] = stated is not None
-        checks["decision_matches"] = stated is not None and stated == evidence.parsed_decision
+    if purpose == CONFIRMATION:
+        confirmed = is_confirmation(content, evidence.review_code, policy)
+        checks["confirmation_grammar"] = confirmed
+        checks["subject_reference"] = confirmed
+        checks["clarity"] = confirmed
+    elif kind is EvidenceVerificationKind.DECISION:
+        reading = read_decision_message(content, evidence.review_code or "", policy, allowed_stages)
+        checks[NEEDS_CLARIFICATION] = reading is not None
+        checks["subject_reference"] = reading is not None
+        checks["clarity"] = reading is not None
+        checks["decision_matches"] = reading is not None and reading[0] == evidence.parsed_decision
+        checks["target_stage_matches"] = (
+            reading is not None and reading[1] == evidence.parsed_target_stage_id
+        )
     elif kind is not None:
         problem = clarity_problem(content, policy)
         checks[NEGATION_OR_WITHHOLDING] = problem != NEGATION_OR_WITHHOLDING
@@ -497,8 +598,10 @@ def verify_owner_event(
         checks[QUESTION_OR_DEFERRED] = problem != QUESTION_OR_DEFERRED
         checks["clarity"] = problem is None
         checks["subject_reference"] = _subject_reference(content, evidence, policy)
-        checks["decision_not_applicable"] = evidence.parsed_decision is None
-        if kind is EvidenceVerificationKind.CONTENT and purpose == RECORD:
+        checks["decision_not_applicable"] = (
+            evidence.parsed_decision is None and evidence.parsed_target_stage_id is None
+        )
+        if kind is EvidenceVerificationKind.CONTENT:
             reference = {
                 normalise(evidence.review_code or ""),
                 normalise(evidence.job_id or ""),
@@ -511,7 +614,7 @@ def verify_owner_event(
                 or len(quote.strip()) >= policy.min_contribution_chars
             )
             checks["content_present"] = bool(carried) and long_enough
-        if kind is EvidenceVerificationKind.SCORE and purpose == RECORD:
+        if kind is EvidenceVerificationKind.SCORE:
             checks["scores_given"] = bool(evidence.claimed_scores)
             checks["scores_in_range"] = _scores_in_range(evidence.claimed_scores)
             checks["scores_stated"] = bool(evidence.claimed_scores) and _scores_stated(
