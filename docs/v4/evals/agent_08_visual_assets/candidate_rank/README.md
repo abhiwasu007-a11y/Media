@@ -70,3 +70,10 @@ CI fails the PR if any mandatory threshold or any other threshold is missed.
 - The direction-imagery list (RK-05, RK-29) and the presenter rule (RK-14) are rule-content decisions owned by 13 (FIN-R3, FIN-R11, FIN-R13, YTG-R2). A change in 13 changes these cases by a dataset version.
 - The step judges **metadata only**. Whether a vision check of preview frames is added is REQUIRES REVIEW (Phase 1) for 3B; if added it is a new prompt version with its own cases.
 - Whether an owner clip showing people needs a release record in every case is §1D.3 territory (ads and client material); for the owner's own channel the policy value is REQUIRES REVIEW (Phase 1) with 13; RK-11 uses the strict reading.
+
+## 9. Format notes (27 §6.1, CCR-024)
+- **Case-ID prefix:** `RK` is the component prefix of this dataset (27 §6.1 allows `<COMP>-NN` besides the category prefixes); `category` always carries the `eval_case_category` value.
+- **Input validity:** every `input` validates against `agent_08.asset_sourcing.candidate_rank.input` 1.0.0, defined in the prompt file (Appendix A) and in blueprint §7.3; the offline CI step and `amw_evals lint` check this.
+- **Fixture:** none; the step has no test doubles beyond the scripted model.
+- **Answer keys:** none apply. The directive's answer-key cases (§1B.2) belong to claim extraction; this step's rules are covered by the cases above and by blueprint §20.1.
+- **Refusals:** the step refusal is asserted here as the model output; its effect on the cascade (item-level mapping, blueprint §5.1) is asserted in `deterministic_core` (TC-24…TC-27).

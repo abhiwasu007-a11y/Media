@@ -8,11 +8,11 @@
 | Task type | `agent_04.research_pack` (24 §3.2), step `notes` (called once per concept and passage batch) |
 | Status | Draft (documentation). Software: **Planned** |
 | Owner | Agent 04 Research & Knowledge |
-| Input payload schema | `agent_04.research_pack_notes.input` 1.0.0 (§A below) |
-| Output payload schema | `agent_04.research_pack_notes.output` 1.0.0 (= the Output JSON Schema below = the Pydantic model `EvidenceNotes`) |
-| Rule packs injected | `rp.youtube_general` (always; carries YTG-R9 source-use rules, 13 §8), `rp.finance_sebi_in` (when active) — by reference |
+| Input payload schema | `agent_04.research_pack.notes.input` 1.0.0 (§A below) |
+| Output payload schema | `agent_04.research_pack.notes.output` 1.0.0 (= the Output JSON Schema below = the Pydantic model `EvidenceNotes`) |
+| Rule packs injected | `rp.youtube_general` (always; carries YTG-R9 source-use rules, 13 §8, GLOSSARY §6.38a), `rp.finance_sebi_in` (only when its key is in `active_rule_packs`; otherwise its `{{rule_pack:…}}` line renders as nothing) — by reference, PLATFORM packs in the cached prefix, passages and any TENANT pack after the cache breakpoint (27 §4.2) |
 | Eval set | [`evals/agent_04_research_knowledge/research_pack_notes/`](../../evals/agent_04_research_knowledge/research_pack_notes/) |
-| Config keys | `llm.agent_04.research_pack_notes.model_tier`, `.temperature`, `.max_output_tokens`, `.timeout_ms`, `.cost_budget_micros`, `.cache_system_prompt`, `.batch_eligible` (pending CCR: step-level config-key registration) |
+| Config keys | `llm.agent_04.research_pack.notes.model_tier`, `.temperature`, `.max_output_tokens`, `.timeout_ms`, `.cost_budget_micros`, `.cache_system_prompt`, `.batch_eligible` (pending CCR: step-level config-key registration) |
 | Deterministic pre-checks (step code, before the model) | NT0 every passage belongs to the task's `org_id` and `channel_id`, comes from an allowed collection and passed the restricted-collection gate (the model is never given a passage the gate excluded); NT1 passages are wrapped as delimited data with step-assigned `passage_id` values (`p1…`); NT2 passage count per call ≤ config `research.notes.max_passages_per_call`; NT3 resolves `max_note_chars`, `max_verbatim_words` from config |
 | Deterministic post-checks (step code, after the model) | NT4 schema validity; NT5 every `passage_id` in `assessments`, `notes` and `excluded_statements` exists in the input, and every input passage has exactly one assessment; NT6 **copy guard**: no note shares `max_verbatim_words` or more consecutive normalised words with its passage, and the overlap ratio of word n-grams is below config `research.copy_guard.max_overlap_ratio` (thresholds REQUIRES REVIEW (Phase 1): set on measured data with the owner's real source samples, 13 §8); NT7 every number written in a note also appears in its passage; NT8 no URL, e-mail address, referral/coupon pattern or quotation-mark span in a note; NT9 a note with `time_reference_kind = FUTURE`, or with `forward_looking = true`, is stored but marked `usable_for_script = false` (FIN-R3, FIN-R13); NT10 an `INJECTION_SUSPECTED` passage yields no note (notes citing it are dropped) and raises a security-event log; NT11 failed notes are re-asked once with the failure reason (`repair_feedback`), then dropped and the concept gets the gap `COPY_GUARD_REMOVED` |
 | Not in scope of this step | choosing sources or ranking passages (code); reliability tier (code, from source metadata); the `method_labelled` flag and release check (code, from the passage's collection); verification against the world (Agent 06); the final compliance verdict (Agent 16) |
@@ -61,7 +61,7 @@ You are the evidence-note step of the Research & Knowledge stage in a video prod
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:amw:schema:agent_04.research_pack_notes.output:1.0.0",
+  "$id": "urn:amw:schema:agent_04.research_pack.notes.output:1.0.0",
   "title": "Agent 04 evidence notes output",
   "type": "object",
   "additionalProperties": false,
@@ -234,12 +234,12 @@ Never invent passages, pages, sources, numbers or notes. The step code maps refu
 
 ---
 
-## A. Input payload schema (`agent_04.research_pack_notes.input` 1.0.0)
+## A. Input payload schema (`agent_04.research_pack.notes.input` 1.0.0)
 Built by the step code (never by another agent); the passage text is data between delimiters in the rendered prompt.
 ```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:amw:schema:agent_04.research_pack_notes.input:1.0.0",
+  "$id": "urn:amw:schema:agent_04.research_pack.notes.input:1.0.0",
   "title": "Agent 04 evidence notes input",
   "type": "object",
   "additionalProperties": false,

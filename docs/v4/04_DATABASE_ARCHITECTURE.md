@@ -237,6 +237,7 @@ Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, name)`.
 | gcp_project_id | uuid | yes | FK → gcp_projects |
 | status | enum(channel_status) | no | |
 | production_window | jsonb | yes | T1+ per-tenant window on a dedicated server (06) |
+| audience_kind | enum(audience_kind) | yes | CCR-081: the channel-setup decision of 13 §3.7 (YTG-R7), set only by a human; NULL = not decided ⇒ YTG-R7 is `NEEDS_HUMAN_REVIEW` |
 | connected_at | timestamptz | yes | |
 Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, platform, external_channel_id)`. Index `(org_id, workspace_id)`.
 
@@ -642,7 +643,7 @@ Keys: `UNIQUE (org_id, id)`. RLS: standard tenant policy (§3.4), `ENABLE` + `FO
 | chunk_no | int | no | `UNIQUE (org_id, source_id, ingest_version, chunk_no)` (CCR-013) |
 | extraction_method | enum(extraction_method) | no | default `TEXT_LAYER` (CCR-013; ADR-013 §2.2.3) |
 | ocr_confidence | numeric(4,3) | yes | required when `extraction_method = 'OCR'` (CHECK) |
-| release_approval_id | uuid | yes | TFK → approvals (`KNOWLEDGE_RELEASE`, CCR-012); a chunk of a `restricted` collection is usable only when this approval or the source's `release_approval_id` is `APPROVED` and covers it (§5.16 `approvals` release rule) |
+| release_approval_id | uuid | yes | TFK → approvals (`KNOWLEDGE_RELEASE`, CCR-012); a denormalised pointer set once (NULL → value, the only UPDATE the trigger allows on this Std table, CCR-070) when the approval becomes `APPROVED`; the authoritative chunk list is the approval's `subject_ref` document; a chunk of a `restricted` collection is usable only when this approval or the source's `release_approval_id` is `APPROVED` and covers it (§5.16 `approvals` release rule) |
 | chapter / section | text | yes | |
 | page_from / page_to | int | yes | |
 | language | text | no | |
@@ -889,6 +890,7 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | subject_kind | text | no | `script`, `render`, `thumbnail`, `metadata`, `concept`, `brief`, `budget`, `dead_letter`, `experiment`, `comment_reply`, `knowledge_source`, `knowledge_release` (CCR-012), `asset` (CCR-012: e.g. a chart case), `voice` (voice sample), … |
 | subject_id | uuid | no | |
 | subject_sha256 | bytea | yes | binds the decision to exact content |
+| subject_ref | text | yes | CCR-070: storage URI of the canonical subject document when the subject is a set (e.g. the chunk list of a `knowledge_release`); write-once; its SHA-256 equals `subject_sha256` |
 | state | enum(approval_state) | no | |
 | workflow_key | text | no | approval workflow from the production type (24) |
 | current_step | int | no | |
@@ -913,7 +915,7 @@ Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in on
 | approval_channel | enum(approval_channel) | yes | CCR-010; required (CHECK) once the step is decided; no default (fail closed) |
 | recorded_by | text | yes | actor ref that wrote the decision: the deciding `usr_` itself (`WEB_DASHBOARD`, `CLIENT_PORTAL`) or `sys_operator` (`OWNER_CHAT_OPERATOR`) |
 | evidence_id | uuid | yes | TFK → owner_instruction_evidence; required when `approval_channel = 'OWNER_CHAT_OPERATOR'` |
-Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_contributions` and HUMAN `quality_scores`): an `agent_NN` / `svc_sNN` actor can never write a human row. A `usr_` actor writes only its own decision. `sys_operator` may write a human row only with `approval_channel = 'OWNER_CHAT_OPERATOR'` and an `evidence_id` that references an `owner_instruction_evidence` row of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, whose `on_behalf_of` equals the row's human field (`decided_by`, `contributor_user_id`, or the user of `scorer_ref`), whose `subject_kind`/`subject_id` (and `approval_id`/`step_no`, `parsed_decision` = the step's decision) match the row, and whose `state = 'CONFIRMED'`; the human must still hold an `ACTIVE` membership with the required role. The operator is never the approver. **Every human-originated row needs evidence of its channel** (CCR-010): `approval_channel` is mandatory on every human row of `approval_steps`, `editorial_contributions`, HUMAN `quality_scores` and human `compliance_verdicts` overrides; in 3A the only accepted channel is `OWNER_CHAT_OPERATOR` (config `approvals.accepted_channels`; `WEB_DASHBOARD` is accepted only once the authenticated dashboard exists, 3C, and then the `usr_` session is the evidence).
+Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_contributions` and HUMAN `quality_scores`): an `agent_NN` / `svc_sNN` actor can never write a human row. A `usr_` actor writes only its own decision. `sys_operator` may write a human row only with `approval_channel = 'OWNER_CHAT_OPERATOR'` and an `evidence_id` that references an `owner_instruction_evidence` row of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, whose `on_behalf_of` equals the row's human field (`decided_by`, `contributor_user_id`, or the user of `scorer_ref`), whose `subject_kind`/`subject_id` (and `approval_id`/`step_no`, `parsed_decision` = the step's decision) match the row, and whose `state = 'CONFIRMED'`; the human must still hold an `ACTIVE` membership with the required role. For a HUMAN `quality_scores` row the trigger also requires `points` to equal `claimed_scores->>dimension` of its evidence (and `points` to be an integer); for an `editorial_contributions` row, `description` must be a verbatim substring of the evidence `quote` (CCR-060). The operator is never the approver. **Every human-originated row needs evidence of its channel** (CCR-010): `approval_channel` is mandatory on every human row of `approval_steps`, `editorial_contributions`, HUMAN `quality_scores` and human `compliance_verdicts` overrides; in 3A the only accepted channel is `OWNER_CHAT_OPERATOR` (config `approvals.accepted_channels`; `WEB_DASHBOARD` is accepted only once the authenticated dashboard exists, 3C, and then the `usr_` session is the evidence).
 
 **editorial_contributions** — TENANT · T0 · Std
 | Column | Type | Null | Constraint / note |
@@ -938,7 +940,8 @@ One row per owner instruction that the operator tool was asked to record, includ
 | record_kind | enum(evidence_record_kind) | no | what the instruction creates (GLOSSARY §6.44) |
 | subject_kind / subject_id | text / uuid | no | what the instruction is about (vocabulary of `approvals.subject_kind`) |
 | review_code | text | yes | the approval's `review_code` (§5.16 `approvals`); required for `STEP_DECISION`, `CONTRIBUTION`, `HUMAN_SCORE` of an approval subject |
-| parsed_decision | enum(approval_step_state) | yes | for `STEP_DECISION`: the decision the operator read; must match the code check below |
+| parsed_decision | enum(approval_step_state) | yes | for `DECISION` kinds (03 §11.6 rule 7): the decision the operator read; must match the code check; NULL for other kinds (CHECK) |
+| claimed_scores | jsonb | yes | CCR-060: for `HUMAN_SCORE` only (CHECK): object `{"<quality_dimension>": <integer points>, …}` exactly as stated in the owner's message; non-empty; each value `0 ≤ points ≤ max_points` of the dimension |
 | source_kind | enum(instruction_source_kind) | no | only `OWNER_CHAT_MESSAGE` may reach `VERIFIED`; other values are stored only on `REFUSED` rows |
 | session_id / event_uuid | text / text | no | the session and the transcript event of the owner's message, as the platform's session event store names them |
 | quote | text | no | the owner's words as copied from the fetched event (≤ 4000 chars) |
@@ -949,11 +952,11 @@ One row per owner instruction that the operator tool was asked to record, includ
 | confirmation_event_uuid / confirmation_quote / confirmation_message_at | text / text / timestamptz | yes | the owner's reply to the echo: a **second** human event, verified the same way, with `confirmation_message_at > message_at` |
 | recorded_by | text | no | actor ref (`sys_operator`) |
 | on_behalf_of | uuid | no | FK → users: the owner |
-| evidence_sha256 | bytea | no | SHA-256 of the canonical `{session_id, event_uuid, quote, message_at, record_kind, subject_kind, subject_id, review_code, parsed_decision}` |
+| evidence_sha256 | bytea | no | SHA-256 of the canonical `{session_id, event_uuid, quote, message_at, record_kind, subject_kind, subject_id, review_code, parsed_decision, claimed_scores}` (CCR-060) |
 | refused_reason | text | yes | set with `state = REFUSED` (ambiguous message, not owner-authored, event not found, check failed); a refused row backs nothing |
 | supersedes_id | uuid | yes | TFK → owner_instruction_evidence (a correction never edits a row) |
 Keys: `UNIQUE (org_id, event_uuid, record_kind, subject_kind, subject_id) WHERE state <> 'REFUSED'` (one owner message backs one record of each kind per subject: replay check). Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
-**Code check (`VERIFIED`)**, run by the operator tool's verifier in code, never by the model: the event fetched by `session_id` + `event_uuid` exists; its role is `user`; it is not synthetic; its inbound origin is the human user (not a peer session, a notification, a tool result, a scheduled message or a document); `quote` is a verbatim substring of the event content; `message_at` equals the event timestamp; the content contains the `review_code` (where required) and a decision word from the per-language list (config `approvals.owner_chat.decision_words.<lang>`) that maps to `parsed_decision`; the event is later than the approval request (`approvals.created_at`) and than any evidence it supersedes. A row whose event cannot be fetched stays `PENDING_VERIFICATION` and can never back a record.
+**Code check (`VERIFIED`)**, run by the evidence store in code (never by the model and never accepted from a caller): the authenticity tests A1–A9 and the rule set of the record kind in 03 §11.6 rule 7 (CCR-059) — among them the owner's own account, a top-level owner session, verbatim quote, equal timestamp, one subject reference, no question/conditional/deferral, the strict decision grammar for `DECISION` kinds, no negation for `CONTENT` kinds, exact integer scores for `SCORE`. A row whose event cannot be fetched stays `PENDING_VERIFICATION` and can never back a record.
 **Two-phase rule:** a human record (§5.16, §5.17) may reference only a `CONFIRMED` row: `VERIFIED` plus a verified confirmation event. A slow confirmation leaves the approval `PENDING` (03 §11.6); it never makes a decision final.
 **Append-only exception:** the trigger allows only the forward state changes above, each setting its own columns once (`event_verified_at`, `verifier_result`; then the confirmation fields; or `refused_reason`); nothing else is ever updated or deleted.
 
