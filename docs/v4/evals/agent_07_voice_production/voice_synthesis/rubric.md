@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Used by | the owner (or a delegate) at the 3B golden-sample review and, afterwards, on sampled videos (sampling rate **REQUIRES REVIEW (Phase 1)**) |
-| Records | HUMAN rows in `quality_scores` for the 3 human points of AUDIO_QUALITY (18 §9.2) and the check row `qc.voice.listening` |
+| Records | HUMAN rows in `quality_scores` for the 3 human points of AUDIO_QUALITY (18 §9.2) and the check row `qc.voice.listening` (18 §4), both written under the human-row rule against confirmed owner evidence (04 §5.16, CCR-010) |
 | Scope | subjective narration quality only. Loudness, true peak, clipping, silence, sync and dictionary application are measured deterministically (README §4) and are **not** scored here. |
 | Not an eval gate | this rubric does not decide a case of this dataset; it is stored here so the calibration of the human points is reproducible. |
 

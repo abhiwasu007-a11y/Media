@@ -16,7 +16,14 @@ from amw_core.contracts.error import (
     error_object_from_exception,
 )
 from amw_core.contracts.owner_topic import CourseChapterPointer, OwnerReference, OwnerTopic
-from amw_core.contracts.production_type import Gate, ProductionType, Stage, stage_ancestors
+from amw_core.contracts.production_type import (
+    Gate,
+    ProductionType,
+    Stage,
+    default_disabled,
+    materialise,
+    stage_ancestors,
+)
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import (
     NextAction,
@@ -63,10 +70,12 @@ __all__ = [
     "TaskOutput",
     "ValidationResult",
     "Violation",
+    "default_disabled",
     "error_object_from_exception",
     "gate_failures",
     "has_gate_results",
     "integrity_failures",
+    "materialise",
     "meets_success_rule_2b",
     "schema_violations",
     "stage_ancestors",

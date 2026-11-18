@@ -38,6 +38,8 @@ One registry defines every product the platform makes, so a new business line is
 | `default_price` | `{amount_minor, currency, label: PROPOSAL}` | yes | per plan (T2) | **REQUIRES REVIEW (Phase 1): 21_PRICING_AND_PACKAGING** |
 | `limits` | `{max_revision_loops}` | yes | lower only (ceiling 07 §9) | |
 
+Capabilities (CCR-064): each stage lists the worker capabilities its task type needs (GLOSSARY §6.20); the v2 tables below state them. Stage `params` (CCR-075) used in v2: `s06_chart` `{"verify_mode": "CHART_FACTS"}`; `s08_assets` `{"script_stage_id": "s05_script"}` (`"s05_shorts"` in `SHORTS`), so a `DATA_WITHIN_LAG` result can name the script stage as `remedy_stage_id`.
+
 Validation at load: schema valid; every `task_type` exists in the task-type catalogue (§3.2); the stage graph is a DAG; every gate's `on_fail` target and every `alt_target_stage_ids` entry precedes the gate (is a transitive dependency of it); every mandatory approval has a workflow; `rp.youtube_general` is mandatory whenever `YOUTUBE` is a destination.
 
 ### 2.1 Record schema (`amw.production_type` 1.0.0, CCR-057)
@@ -48,11 +50,12 @@ Validation at load: schema valid; every `task_type` exists in the task-type cata
   "title": "AMW production type record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["key", "version", "display_name", "status", "first_tier", "destinations", "requires_channel",
+  "required": ["schema_version", "key", "version", "display_name", "status", "first_tier", "destinations", "requires_channel",
                "parent_input", "duration_targets_ms", "aspect_ratios", "languages", "stages", "required_inputs",
                "approvals", "templates", "qc_profile", "rule_packs", "deliverables", "cost_model",
                "default_price", "limits"],
   "properties": {
+    "schema_version": { "type": "string", "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", "description": "version of this record schema (CCR-067); `version` is the record's own version" },
     "key": { "enum": ["CHANNEL_LONG_FORM", "SHORTS", "AD_SPOT", "EXPLAINER_CORPORATE_TRAINING", "ECOMMERCE_PRODUCT", "DUBBING_LOCALISATION"] },
     "version": { "type": "integer", "minimum": 1 },
     "display_name": { "type": "string", "minLength": 1, "maxLength": 120 },
@@ -257,7 +260,10 @@ A blueprint that needs another task type files a CCR (CONTRACT_CHANGE_REQUESTS.m
    | `UNIQUENESS`, `COMPLIANCE`, `QUALITY_SCORE` | `svc_s02.uniqueness_check`, `agent_16.compliance_gate`, `agent_16.quality_score` failing results | the flagged segment, or `null` for whole-script items | the result's `rule_id` (or `[]`) | the result's `message` | `[]` |
    | `APPROVER` | an approval decided `CHANGES_REQUESTED` | the segment named by the approver, or `null` | `[]` | the approver's comment (verbatim) | `[]` |
    A `revision_action = PROVIDE_EVIDENCE` request whose `remedy_stage_id` is `s04_research` sends the revision to `s04_research` first (rule 1); the orchestrator then passes the open gaps to Agent 04 as `revision.gaps`.
+7b. **Revision feedback to a non-script stage** (CCR-078). When the target is `s09_plan`, `s08_assets`, `s07_voice`, `s10_render` or `s11_thumbs`, the orchestrator passes `revision_feedback[]` built one item per failing gate result (`s08_assets`, `s06_chart`, `s10_qc`, `s16_comp`, `s16_score`) or `CHANGES_REQUESTED` approval: `{source_stage_id, check_id, shot_ids[] (from the result's evidence, may be empty), measured, threshold, message}`; an approver item carries `check_id = null` and the approver's comment verbatim as `message`. The target's input schema defines how it reads them.
 8. **Shorts revision** (CCR-003): a `SHORTS` job revises like the long form, with `agent_05.shorts_adaptation` as the script stage (it accepts `revision.feedback[]` and the previous cut as `PRIOR_OUTPUT`).
+9. **Optional stages** (CCR-065). A dependency on an optional stage that is disabled for the job counts as satisfied (the edge is dropped when the graph is materialised); an enabled optional stage must complete like a required one. A disabled stage is never a revise target; an `alt_target_stage_ids` entry naming one is skipped.
+10. **Knowledge released after the pack** (CCR-071). A `KNOWLEDGE_RELEASE` approved after a job's `s04_research` completed never changes that job; the owner (through the operator) starts a new job for the topic, which reads the released material. The running job continues without it.
 
 ### 3.4 Approval workflows (`workflow_key`)
 | Key | Steps (role per step) | Used by |
@@ -371,35 +377,34 @@ The 3A line (D1): the owner gives the topic, files are delivered, nothing is upl
 | approvals | `FINAL_VIDEO` / `owner_one_tap` (mandatory, with ≥ 1 editorial contribution); `SCRIPT` / `owner_one_tap` (optional); `SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT` / `owner_sensitive` (inserted on `NEEDS_HUMAN_REVIEW`) |
 | rule_packs | mandatory `rp.youtube_general` (the files are made for later YouTube use, 3A_SLICE_SPEC R3) + by category as v1 |
 | deliverables | `yt_master_1080p`, `srt_per_language`, `thumbnail_set`, `qc_report`, `cost_per_stage_report`, `delivery_manifest` |
-| music | no music bed in 3A technical runs; a licensed bed is a precondition for 3B scoring (D6, CCR-007): Agent 08 sources it (`MUSIC_BED` ledger rows, capability `music_search`), Agent 09 plans the cue, Agent 07 mixes it in `s07_master`. Enabled by a new record version once the owner has chosen the licensed source |
+| music | no music bed in 3A technical runs; a licensed bed is a precondition for 3B scoring (D6, CCR-007): Agent 08 sources it (`MUSIC_BED` ledger rows, capability `music_search`), Agent 09 plans the cue, Agent 07 mixes it in `s07_master`. Enabled by a new record version once the owner has chosen the licensed source; in that version `s07_master` depends on `s07_voice`, `s09_plan` and `s08_assets` so Agent 07 can mix the planned, sourced bed (CCR-079) |
 | limits | `max_revision_loops` 3 |
 | child jobs | when `owner_topic.shorts_wanted = true`, the orchestrator creates one `SHORTS` v2 child job (`parent_job_id`) after the parent's `s06_verify` is `COMPLETED` and `a_script` (if enabled) is decided; cap `limits.max_child_jobs_per_job` |
 
 Stages (dotted routes are gates; `alt` = `alt_target_stage_ids`, §3.3 rule 1):
-| stage_id | task_type | req | class | depends_on | gate / approval |
-|---|---|---|---|---|---|
-| s04_research | `agent_04.research_pack` | yes | AI_IO | — (job input) | blocking; compliance `BLOCKED` topic → on_fail STOP (`BLOCKED_COMPLIANCE`) |
-| s05_script | `agent_05.script_draft` | yes | AI_IO | s04_research | — |
-| s06_claims | `agent_06.claim_extraction` | yes | AI_IO | s05_script | blocking; on_fail REVISE → s05_script |
-| s06_verify | `agent_06.claim_verification` | yes | AI_IO | s06_claims | blocking; on_fail REVISE → s05_script; alt s04_research |
-| a_script | `svc_s07.request_approval` | no | LIGHT | s06_verify | `SCRIPT` / `owner_one_tap` |
-| s07_voice | `agent_07.voice_synthesis` | yes | AI_IO | s06_verify, a_script | — |
-| s07_master | `agent_07.audio_master` | yes | HEAVY_CPU | s07_voice | blocking gate (loudness, 18 §5); on_fail REVISE → s07_voice |
-| s09_plan | `agent_09.shot_plan` | yes | AI_IO | s06_verify, s07_voice | — (needs the measured narration timeline; no estimated-timing mode in 3A, CCR-051) |
-| s08_assets | `agent_08.asset_sourcing` | yes | AI_IO | s09_plan | blocking gate (unresolved shots, `shot_unresolved_reason`); on_fail REVISE → s09_plan; alt s05_script. Owner-material reasons (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`) are not gate results: the task fails `PERMANENT.MISSING_DEPENDENCY` (L3, the owner supplies material) |
-| s06_chart | `agent_06.claim_verification` (mode `CHART_FACTS`, CCR-004) | yes | AI_IO | s08_assets | blocking; on_fail REVISE → s05_script; alt s08_assets. With no chart claim the task succeeds at once with mode `SKIPPED` and no LLM call |
-| s10_render | `agent_10.render` | yes | HEAVY_CPU | s07_master, s08_assets, s06_chart | — |
-| s10_subs | `agent_10.subtitles` | yes | HEAVY_CPU | s10_render | — |
-| s10_qc | `agent_10.technical_qc` | yes | HEAVY_CPU | s10_subs | blocking gate; on_fail REVISE → s10_render; alt s07_voice, s08_assets, s09_plan |
-| s11_thumbs | `agent_11.thumbnail_variants` | yes | AI_IO | s09_plan, s08_assets | blocking (compliance `BLOCKED`, e.g. no variant can be made without breaking a rule); on_fail REVISE → s05_script |
-| s12_meta | `agent_12.metadata` | no (disabled in 3A, D1) | AI_IO | s06_verify | — |
-| s02u_unique | `svc_s02.uniqueness_check` | yes | AI_IO | s10_qc | blocking; on_fail REVISE → s05_script (3A part only, 13 §3.1) |
-| s16_comp | `agent_16.compliance_gate` | yes | AI_IO | s02u_unique, s11_thumbs, s12_meta (if enabled) | blocking; on_fail REVISE → s05_script; alt s08_assets, s11_thumbs |
-| s16_score | `agent_16.quality_score` | yes | AI_IO | s16_comp | blocking (≥ 85; **owner question Q-O2 of the CCR register on blocking before calibration**); on_fail REVISE → s09_plan; alt s05_script, s07_voice, s10_render, s11_thumbs |
-| a_final | `svc_s07.request_approval` | yes | LIGHT | s16_score | `FINAL_VIDEO` / `owner_one_tap`; `CHANGES_REQUESTED` routes to the stage the owner names among s05_script, s09_plan, s11_thumbs (§3.3 rule 3) |
-| s16_auth | `agent_16.publication_authorisation` | yes | LIGHT | a_final | blocking; on_fail STOP (authorises **delivery** in v2, deterministic checks only) |
-| s13_deliver | `agent_13.file_delivery` | yes | LIGHT | s16_auth | — (idempotency `delivery.file`) |
-
+| stage_id | task_type | req | class | capabilities | depends_on | gate / approval |
+|---|---|---|---|---|---|---|
+| s04_research | `agent_04.research_pack` | yes | AI_IO | `llm`, `web_fetch` | — (job input) | blocking; compliance `BLOCKED` topic → on_fail STOP (`BLOCKED_COMPLIANCE`) |
+| s05_script | `agent_05.script_draft` | yes | AI_IO | `llm` | s04_research | — |
+| s06_claims | `agent_06.claim_extraction` | yes | AI_IO | `llm` | s05_script | blocking; on_fail REVISE → s05_script |
+| s06_verify | `agent_06.claim_verification` | yes | AI_IO | `llm` | s06_claims | blocking; on_fail REVISE → s05_script; alt s04_research |
+| a_script | `svc_s07.request_approval` | no | LIGHT | — | s06_verify | `SCRIPT` / `owner_one_tap` |
+| s07_voice | `agent_07.voice_synthesis` | yes | AI_IO | `tts`, `media_probe` | s06_verify, a_script | — |
+| s07_master | `agent_07.audio_master` | yes | HEAVY_CPU | `render_ffmpeg`, `media_probe` | s07_voice | blocking gate (loudness, 18 §5); on_fail REVISE → s07_voice |
+| s09_plan | `agent_09.shot_plan` | yes | AI_IO | `llm` | s06_verify, s07_voice | — (needs the measured narration timeline; no estimated-timing mode in 3A, CCR-051) |
+| s08_assets | `agent_08.asset_sourcing` | yes | AI_IO | `llm`, `stock_search`, `media_probe` | s09_plan | blocking gate (unresolved shots, `shot_unresolved_reason`); on_fail REVISE → s09_plan; alt s05_script. Owner-material reasons (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`) are not gate results: the task fails `PERMANENT.MISSING_DEPENDENCY` (L3, the owner supplies material) |
+| s06_chart | `agent_06.claim_verification` (mode `CHART_FACTS`, CCR-004) | yes | AI_IO | `llm` | s08_assets | blocking; on_fail REVISE → s05_script; alt s08_assets. With no chart claim the task succeeds at once with mode `SKIPPED` and no LLM call. A chart claim with no chart facts (`NO_CHART_FACTS`) is a gate `FAIL` with `remedy_stage_id = s08_assets` (CCR-074), not `NEEDS_HUMAN_REVIEW` |
+| s10_render | `agent_10.render` | yes | HEAVY_CPU | `render_ffmpeg` | s07_master, s08_assets, s06_chart | — |
+| s10_subs | `agent_10.subtitles` | yes | HEAVY_CPU | `render_ffmpeg` | s10_render | — |
+| s10_qc | `agent_10.technical_qc` | yes | HEAVY_CPU | `render_ffmpeg`, `media_probe` | s10_subs | blocking gate; on_fail REVISE → s10_render; alt s07_voice, s08_assets, s09_plan |
+| s11_thumbs | `agent_11.thumbnail_variants` | yes | AI_IO | `llm`, `media_probe` | s09_plan, s08_assets | blocking (compliance `BLOCKED`, e.g. no variant can be made without breaking a rule); on_fail REVISE → s05_script |
+| s12_meta | `agent_12.metadata` | no (disabled in 3A, D1) | AI_IO | `llm` | s06_verify | — |
+| s02u_unique | `svc_s02.uniqueness_check` | yes | AI_IO | `media_probe` | s10_qc | blocking; on_fail REVISE → s05_script (3A part only, 13 §3.1) |
+| s16_comp | `agent_16.compliance_gate` | yes | AI_IO | `llm` | s02u_unique, s11_thumbs, s12_meta (if enabled) | blocking; on_fail REVISE → s05_script; alt s08_assets, s11_thumbs |
+| s16_score | `agent_16.quality_score` | yes | AI_IO | `llm` | s16_comp | blocking gate declared; behaviour by config `quality.score_gate_mode` (CCR-085): provisional `REPORT_ONLY` until the 3B judge calibration — the score is computed and reported, a total below 85 is a `WARN` result (`blocking: false`), and delivery still needs the owner's `FINAL_VIDEO` approval; `BLOCKING` (≥ 85) after calibration, refused at startup while `quality.machine_scaling = NONE` (owner Q-O2); on_fail REVISE → s09_plan; alt s05_script, s07_voice, s10_render, s11_thumbs |
+| a_final | `svc_s07.request_approval` | yes | LIGHT | — | s16_score | `FINAL_VIDEO` / `owner_one_tap`; `CHANGES_REQUESTED` routes to the stage the owner names among s05_script, s09_plan, s11_thumbs (§3.3 rule 3) |
+| s16_auth | `agent_16.publication_authorisation` | yes | LIGHT | — | a_final | blocking; on_fail STOP (authorises **delivery** in v2, deterministic checks only) |
+| s13_deliver | `agent_13.file_delivery` | yes | LIGHT | `file_delivery` | s16_auth | — (idempotency `delivery.file`) |
 ### 7.2 `SHORTS` v1 — Tier 0 (after the MVP)
 | Field | Value |
 |---|---|
@@ -427,27 +432,26 @@ Created only by the parent rule of §7.1a. Fields not listed are as `CHANNEL_LON
 | qc_profile / deliverables | `qc.shorts` / `shorts_9x16`, `srt_per_language`, `qc_report`, `cost_per_stage_report`, `delivery_manifest` (thumbnails only if `s11_thumbs` is enabled) |
 | script shape | a Shorts script has `scenes[]` and no `sections[]`: section-based items (chapters) do not apply and are emitted `SKIPPED`, `blocking: false` (03 §5.3 rule 5) |
 
-| stage_id | task_type | req | class | depends_on | gate / approval |
-|---|---|---|---|---|---|
-| s05_shorts | `agent_05.shorts_adaptation` | yes | AI_IO | — (parent refs) | — |
-| s06_claims | `agent_06.claim_extraction` | yes | AI_IO | s05_shorts | blocking; on_fail REVISE → s05_shorts |
-| s06_verify | `agent_06.claim_verification` | yes | AI_IO | s06_claims | blocking; on_fail REVISE → s05_shorts (CCR-003: the cut is verified like the long form) |
-| s07_voice | `agent_07.voice_synthesis` | yes | AI_IO | s06_verify | — |
-| s07_master | `agent_07.audio_master` | yes | HEAVY_CPU | s07_voice | blocking gate; on_fail REVISE → s07_voice |
-| s09_plan | `agent_09.shot_plan` | yes | AI_IO | s06_verify, s07_voice | — |
-| s08_assets | `agent_08.asset_sourcing` | yes | AI_IO | s09_plan | blocking gate; on_fail REVISE → s09_plan; alt s05_shorts |
-| s06_chart | `agent_06.claim_verification` (mode `CHART_FACTS`) | yes | AI_IO | s08_assets | blocking; on_fail REVISE → s05_shorts; alt s08_assets |
-| s10_render | `agent_10.render` | yes | HEAVY_CPU | s07_master, s08_assets, s06_chart | — |
-| s10_subs | `agent_10.subtitles` | yes | HEAVY_CPU | s10_render | — |
-| s10_qc | `agent_10.technical_qc` | yes | HEAVY_CPU | s10_subs | blocking gate; on_fail REVISE → s10_render; alt s07_voice, s08_assets, s09_plan |
-| s11_thumbs | `agent_11.thumbnail_variants` | no (disabled by default) | AI_IO | s09_plan, s08_assets | blocking; on_fail REVISE → s05_shorts |
-| s02u_unique | `svc_s02.uniqueness_check` | yes | AI_IO | s10_qc | blocking; on_fail REVISE → s05_shorts |
-| s16_comp | `agent_16.compliance_gate` | yes | AI_IO | s02u_unique, s11_thumbs (if enabled) | blocking; on_fail REVISE → s05_shorts; alt s08_assets |
-| s16_score | `agent_16.quality_score` | yes | AI_IO | s16_comp | blocking (≥ 85); on_fail REVISE → s09_plan; alt s05_shorts, s07_voice, s10_render |
-| a_final | `svc_s07.request_approval` | yes | LIGHT | s16_score | `FINAL_VIDEO` / `owner_one_tap` |
-| s16_auth | `agent_16.publication_authorisation` | yes | LIGHT | a_final | blocking; on_fail STOP |
-| s13_deliver | `agent_13.file_delivery` | yes | LIGHT | s16_auth | — |
-
+| stage_id | task_type | req | class | capabilities | depends_on | gate / approval |
+|---|---|---|---|---|---|---|
+| s05_shorts | `agent_05.shorts_adaptation` | yes | AI_IO | `llm` | — (parent refs) | — |
+| s06_claims | `agent_06.claim_extraction` | yes | AI_IO | `llm` | s05_shorts | blocking; on_fail REVISE → s05_shorts |
+| s06_verify | `agent_06.claim_verification` | yes | AI_IO | `llm` | s06_claims | blocking; on_fail REVISE → s05_shorts (CCR-003: the cut is verified like the long form) |
+| s07_voice | `agent_07.voice_synthesis` | yes | AI_IO | `tts`, `media_probe` | s06_verify | — |
+| s07_master | `agent_07.audio_master` | yes | HEAVY_CPU | `render_ffmpeg`, `media_probe` | s07_voice | blocking gate; on_fail REVISE → s07_voice |
+| s09_plan | `agent_09.shot_plan` | yes | AI_IO | `llm` | s06_verify, s07_voice | — |
+| s08_assets | `agent_08.asset_sourcing` | yes | AI_IO | `llm`, `stock_search`, `media_probe` | s09_plan | blocking gate; on_fail REVISE → s09_plan; alt s05_shorts |
+| s06_chart | `agent_06.claim_verification` (mode `CHART_FACTS`) | yes | AI_IO | `llm` | s08_assets | blocking; on_fail REVISE → s05_shorts; alt s08_assets |
+| s10_render | `agent_10.render` | yes | HEAVY_CPU | `render_ffmpeg` | s07_master, s08_assets, s06_chart | — |
+| s10_subs | `agent_10.subtitles` | yes | HEAVY_CPU | `render_ffmpeg` | s10_render | — |
+| s10_qc | `agent_10.technical_qc` | yes | HEAVY_CPU | `render_ffmpeg`, `media_probe` | s10_subs | blocking gate; on_fail REVISE → s10_render; alt s07_voice, s08_assets, s09_plan |
+| s11_thumbs | `agent_11.thumbnail_variants` | no (disabled by default) | AI_IO | `llm`, `media_probe` | s09_plan, s08_assets | blocking; on_fail REVISE → s05_shorts |
+| s02u_unique | `svc_s02.uniqueness_check` | yes | AI_IO | `media_probe` | s10_qc | blocking; on_fail REVISE → s05_shorts |
+| s16_comp | `agent_16.compliance_gate` | yes | AI_IO | `llm` | s02u_unique, s11_thumbs (if enabled) | blocking; on_fail REVISE → s05_shorts; alt s08_assets |
+| s16_score | `agent_16.quality_score` | yes | AI_IO | `llm` | s16_comp | as long-form v2 (`quality.score_gate_mode`); on_fail REVISE → s09_plan; alt s05_shorts, s07_voice, s10_render |
+| a_final | `svc_s07.request_approval` | yes | LIGHT | — | s16_score | `FINAL_VIDEO` / `owner_one_tap` |
+| s16_auth | `agent_16.publication_authorisation` | yes | LIGHT | — | a_final | blocking; on_fail STOP |
+| s13_deliver | `agent_13.file_delivery` | yes | LIGHT | `file_delivery` | s16_auth | — |
 ### 7.3 `AD_SPOT` v1 — first ad client (Tier 1+)
 | Field | Value |
 |---|---|
