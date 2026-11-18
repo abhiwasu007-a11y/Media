@@ -969,7 +969,7 @@ Keys: `UNIQUE (org_id, event_uuid, record_kind, subject_kind, subject_id) WHERE 
 | job_id | uuid | no | TFK → jobs |
 | subject_kind / subject_id / subject_sha256 | text / uuid / bytea | no | |
 | rule_pack_id | uuid | yes | FK → rule_packs; NULL only for an overall or authorisation row (`rule_id IS NULL AND is_final`; CHECK, CCR-010) |
-| rule_pack_version | int | no | |
+| rule_pack_version | int | yes | NULL exactly when `rule_pack_id` is NULL |
 | rule_id | text | yes | NULL = pack-level / overall verdict |
 | verdict | enum(compliance_verdict) | no | |
 | disclosure_decision | enum(disclosure_decision) | yes | for disclosure rules (YT-06/07) |
