@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Final, Literal, Protocol
 
 from agent_16_compliance_qa.authorisation.facts import EvidenceFacts, StepFacts, VerifierTest
-from agent_16_compliance_qa.authorisation.guards import evidence_problems, step_problems
+from agent_16_compliance_qa.authorisation.guards import steps_approved
 from amw_core.enums import (
     ApprovalChannel,
     ApprovalState,
@@ -344,14 +344,7 @@ def derive_approval_state(
     failing or undecided step is ``APPROVED_UNVERIFIED`` (never counted as approved)."""
     if state is None:
         return "NONE"
-    ok = bool(steps) and all(
-        not step_problems(s)
-        and not evidence_problems(
-            s.approval_channel, s.evidence, accepted_channels, decision_kind=True
-        )
-        for s in steps
-    )
-    if ok:
+    if steps_approved(steps, accepted_channels):
         return "APPROVED"
     if state is ApprovalState.APPROVED:
         return "APPROVED_UNVERIFIED"

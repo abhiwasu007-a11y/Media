@@ -23,6 +23,7 @@ from agent_16_compliance_qa.authorisation.facts import (
     AuthRows,
     EvidenceFacts,
     HumanScoreFacts,
+    NhrResolution,
     StepFacts,
 )
 from agent_16_compliance_qa.base import Model
@@ -102,6 +103,7 @@ _KIND_FOR_ACTION: Final[Mapping[str, ApprovalKind]] = {
     "UPLOAD_PRIVATE": ApprovalKind.FINAL_VIDEO,
     "PUBLISH": ApprovalKind.PUBLISH,
 }
+RESOLVING_KINDS: Final = frozenset({ApprovalKind.SENSITIVE_CLAIM, ApprovalKind.COPYRIGHT_DOUBT})
 _UNDECIDED: Final = frozenset({ApprovalStepState.NOT_STARTED, ApprovalStepState.PENDING})
 
 
@@ -217,6 +219,25 @@ def approval_from_steps(steps: Sequence[StepFacts]) -> list[str]:
     return [p for s in steps for p in step_problems(s)]
 
 
+def steps_approved(steps: Sequence[StepFacts], accepted: frozenset[ApprovalChannel]) -> bool:
+    """Section 19.3 rule 13 (F-26): an approval counts as APPROVED only when it has steps and
+    every step is APPROVED and passes G2 and G4."""
+    return bool(steps) and all(
+        not step_problems(s)
+        and not evidence_problems(s.approval_channel, s.evidence, accepted, decision_kind=True)
+        for s in steps
+    )
+
+
+def mapped_step_verdict(state: ApprovalStepState) -> ComplianceVerdict:
+    """04 section 5.17: ``APPROVED -> ALLOWED``; every other step state -> ``BLOCKED``."""
+    return (
+        ComplianceVerdict.ALLOWED
+        if state is ApprovalStepState.APPROVED
+        else (ComplianceVerdict.BLOCKED)
+    )
+
+
 def human_wins(rows: AuthRows) -> tuple[float, tuple[DimensionUse, ...]]:
     """Section 6.6.5: per dimension the HUMAN row bound to the render hash replaces the machine
     row. Rows bound to another hash are ignored."""
@@ -283,7 +304,49 @@ class AuthorisationGuards:
                 problems.append(f"NHR resolution {i + 1}: {p}")
         return problems
 
+    def _resolution_problems(self, r: NhrResolution, items: frozenset[str]) -> list[str]:
+        """Section 6.5 G5 for one human verdict row; empty list = it resolves ``r.item_ref``."""
+        acc = self._p.accepted_channels
+        problems: list[str] = []
+        if not r.verdict_is_final:
+            problems.append("not is_final")
+        if r.decided_by_kind != "HUMAN":
+            problems.append("not decided by a human")
+        if r.item_ref is None:
+            problems.append("not bound to an NHR item of the gate")
+        elif r.item_ref not in items:
+            problems.append("bound to an item the gate did not raise")
+        if not r.same_subject_hash:
+            problems.append("bound to another subject hash")
+        if evidence_problems(r.approval_channel, r.evidence, acc, decision_kind=False):
+            problems.append("evidence fails G4")
+        if not r.reuses_step_evidence:
+            problems.append("does not reuse the evidence of the step written with it")
+        ra = r.resolving_approval
+        if ra is None:
+            problems.append("resolving approval not visible")
+        else:
+            if ra.kind not in RESOLVING_KINDS:
+                problems.append(f"resolving approval kind {ra.kind.value}")
+            if not ra.subject_matches_item:
+                problems.append("resolving approval is for another subject hash")
+            if not steps_approved(ra.steps, acc):
+                problems.append(f"resolving {ra.kind.value} approval fails G2 / G4")
+        if r.step_state is None:
+            problems.append("no step written with the row")
+        else:
+            mapped = mapped_step_verdict(r.step_state)
+            if r.verdict is not mapped:
+                problems.append(
+                    f"verdict {r.verdict.value} is not the mapped step decision {mapped.value}"
+                )
+            if mapped is not ComplianceVerdict.ALLOWED:
+                problems.append(f"step {r.step_state.value}: the item is BLOCKED (G6)")
+        return problems
+
     def _g5(self, rows: AuthRows) -> list[str]:
+        """Every NHR item of the gate has its own resolving row; a count is never trusted and a
+        failing resolution is never outweighed by a passing one."""
         gate = rows.gate
         if gate.overall is ComplianceVerdict.ALLOWED:
             return []
@@ -292,24 +355,37 @@ class AuthorisationGuards:
         problems: list[str] = []
         if gate.unresolved_nhr:
             problems.append(f"{gate.unresolved_nhr} NEEDS_HUMAN_REVIEW item(s) unresolved")
+        items = frozenset(gate.nhr_items)
+        if not items:
+            problems.append("gate NEEDS_HUMAN_REVIEW without an NHR item row to resolve")
         if not gate.nhr_resolutions:
             problems.append("no resolving human verdict row")
-        acc = self._p.accepted_channels
+        resolved: set[str] = set()
         for i, r in enumerate(gate.nhr_resolutions):
-            if not r.verdict_is_final:
-                problems.append(f"resolution {i + 1} not is_final")
-            if r.decided_by_kind != "HUMAN":
-                problems.append(f"resolution {i + 1} not decided by a human")
-            if not r.same_subject_hash:
-                problems.append(f"resolution {i + 1} bound to another subject hash")
-            if r.verdict is not ComplianceVerdict.ALLOWED:
-                problems.append(f"resolution {i + 1} verdict {r.verdict.value}")
-            if evidence_problems(r.approval_channel, r.evidence, acc, decision_kind=False):
-                problems.append(f"resolution {i + 1} evidence fails G4")
+            found = self._resolution_problems(r, items)
+            problems.extend(f"resolution {i + 1} {p}" for p in found)
+            if not found and r.item_ref is not None:
+                resolved.add(r.item_ref)
+        problems.extend(
+            f"NHR item {item} has no valid resolution" for item in sorted(items - resolved)
+        )
         for a in rows.other_approvals:
             if a.relied_on_by == "NHR_RESOLUTION" and approval_from_steps(a.steps):
                 problems.append(f"resolving {a.kind} approval fails G2")
         return problems
+
+    @staticmethod
+    def _blocked_resolutions(rows: AuthRows) -> int:
+        """Human rows that resolve an item as BLOCKED (stored or by the mapped step)."""
+        return sum(
+            1
+            for r in rows.gate.nhr_resolutions
+            if r.verdict is ComplianceVerdict.BLOCKED
+            or (
+                r.step_state is not None
+                and mapped_step_verdict(r.step_state) is ComplianceVerdict.BLOCKED
+            )
+        )
 
     def evaluate(self, rows: AuthRows) -> AuthDecision:
         total, uses = human_wins(rows)
@@ -361,8 +437,9 @@ class AuthorisationGuards:
         results.append(_result("G4", self._g4(rows), "every human record has CONFIRMED evidence"))
         results.append(_result("G5", self._g5(rows), "compliance ALLOWED or every NHR resolved"))
         g6 = []
-        if rows.gate.blocked_rows or rows.gate.overall is ComplianceVerdict.BLOCKED:
-            g6.append(f"{max(rows.gate.blocked_rows, 1)} BLOCKED verdict(s) for the subject hash")
+        blocked = rows.gate.blocked_rows + self._blocked_resolutions(rows)
+        if blocked or rows.gate.overall is ComplianceVerdict.BLOCKED:
+            g6.append(f"{max(blocked, 1)} BLOCKED verdict(s) for the subject hash")
         results.append(_result("G6", g6, "no BLOCKED verdict"))
         g7: list[str] = []
         if rows.disclosure_decision is DisclosureDecision.NEEDS_HUMAN_REVIEW and (

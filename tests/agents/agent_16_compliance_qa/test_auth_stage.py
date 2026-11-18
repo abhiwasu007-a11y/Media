@@ -19,6 +19,7 @@ from agent_16_compliance_qa.authorisation.stage import (
     GateSummary,
     HumanScoreRow,
     HumanVerdictRow,
+    NhrItemRow,
     PublicationAuthorisationStage,
     RenderRow,
     ScoreSummary,
@@ -41,6 +42,7 @@ from amw_core.enums import (
     RenderStatus,
 )
 from amw_core.errors import InputInvalidError
+from amw_core.ids import WireId
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from tests.agents.agent_16_compliance_qa.r14_support import CODE, R14, REQUESTED
 from tests.agents.agent_16_compliance_qa.support import config, validate_against_blueprint
@@ -185,7 +187,7 @@ def world() -> tuple[R14, Repo, AuthorisationInput]:
         S_SHA,
         (T_SHA,),
         packs,
-        0,
+        (),
         0,
         DisclosureDecision.NOT_REQUIRED,
         ids.new_id(ids.Prefix.COMPLIANCE_VERDICT),
@@ -253,17 +255,29 @@ def test_positive_path_delivers_and_outputs_validate() -> None:
     assert all(r.gate for r in out.validation_results)
 
 
-def test_nhr_resolution_with_invalid_mac_fails_g4_and_g5() -> None:
-    """SEC-R14-42 / PA-57: the SENSITIVE_CLAIM step and its verdict row share evidence whose MAC
-    fails; the item stays unresolved."""
+NHR_RULE = "FIN-R3"
+
+
+def nhr_world(
+    *,
+    kind: ApprovalKind = ApprovalKind.SENSITIVE_CLAIM,
+    step_state: ApprovalStepState = ApprovalStepState.APPROVED,
+    row_verdict: ComplianceVerdict = ComplianceVerdict.ALLOWED,
+    listed: bool = True,
+    items: tuple[str, ...] = (NHR_RULE,),
+) -> tuple[R14, Repo, AuthorisationInput, str, WireId]:
+    """A gate with NHR items and one resolution through a resolving approval."""
     h, repo, req = world()
     sc_id = ids.APPROVAL.new()
-    ev = h.record(f"approve {CODE}", approval_id=sc_id)
+    word = {ApprovalStepState.APPROVED: "approve", ApprovalStepState.REJECTED: "reject"}
+    ev = h.record(f"{word[step_state]} {CODE}", approval_id=sc_id, parsed_decision=step_state)
     repo.approvals[sc_id] = ApprovalRow(
         sc_id,
         h.org,
-        ApprovalKind.SENSITIVE_CLAIM,
-        ApprovalState.APPROVED,
+        kind,
+        ApprovalState.APPROVED
+        if step_state is ApprovalStepState.APPROVED
+        else ApprovalState.REJECTED,
         "render",
         h.render,
         R_SHA,
@@ -272,25 +286,132 @@ def test_nhr_resolution_with_invalid_mac_fails_g4_and_g5() -> None:
     )
     key = f"step:{sc_id}:1"
     repo.steps_[sc_id] = [
-        StepRow(
-            sc_id, h.org, 1, ApprovalStepState.APPROVED, h.owner, True, True, OP, CH, ev.id, key
-        )
+        StepRow(sc_id, h.org, 1, step_state, h.owner, True, True, OP, CH, ev.id, key)
     ]
     repo.verdicts = [
         HumanVerdictRow(
-            h.org, ComplianceVerdict.ALLOWED, True, h.owner, R_SHA, sc_id, 1, OP, CH, ev.id, key
+            h.org, row_verdict, True, h.owner, R_SHA, sc_id, 1, OP, CH, ev.id, key, NHR_RULE
         )
     ]
     repo.gate_ = replace(
         repo.gate_,
         overall=ComplianceVerdict.NEEDS_HUMAN_REVIEW,  # type: ignore[type-var]
-        relied_approvals=((sc_id, "NHR_RESOLUTION"),),
+        relied_approvals=((sc_id, "NHR_RESOLUTION"),) if listed else (),
+        nhr_items=tuple(
+            NhrItemRow(h.org, ids.new_id(ids.Prefix.COMPLIANCE_VERDICT), rule, R_SHA)
+            for rule in items
+        ),
     )
+    return h, repo, req, sc_id, ev.id
+
+
+def test_nhr_resolution_with_invalid_mac_fails_g4_and_g5() -> None:
+    """SEC-R14-42 / PA-57: the SENSITIVE_CLAIM step and its verdict row share evidence whose MAC
+    fails; the item stays unresolved."""
+    h, repo, req, _, ev_id = nhr_world()
     ok = run(h, repo, req).decision
     assert ok.verdict is ComplianceVerdict.ALLOWED, [g for g in ok.guards if g.result == "FAIL"]
-    h.db.superuser_tamper(h.tx(), ev.id, evidence_mac=b"\x00" * 32)
+    h.db.superuser_tamper(h.tx(), ev_id, evidence_mac=b"\x00" * 32)
     d = run(h, repo, req).decision
     assert {"G4", "G5"} <= set(d.failed_guards) and d.verdict is ComplianceVerdict.BLOCKED
+
+
+@pytest.mark.parametrize("listed", [False, True])
+def test_rejected_sensitive_claim_step_with_allowed_row_never_resolves(listed: bool) -> None:
+    """Review B1 attack 1: the SENSITIVE_CLAIM step is REJECTED (CONFIRMED "reject"), the verdict
+    row claims ALLOWED. Whether or not the gate lists the approval, G5 and G6 fail."""
+    h, repo, req, _, _ = nhr_world(step_state=ApprovalStepState.REJECTED, listed=listed)
+    d = run(h, repo, req).decision
+    assert d.verdict is ComplianceVerdict.BLOCKED and d.authorised_action is None
+    assert {"G5", "G6"} <= set(d.failed_guards)
+    g5 = next(g for g in d.guards if g.guard_id == "G5")
+    assert "not the mapped step decision" in g5.detail
+
+
+def test_rejected_step_with_blocked_row_blocks() -> None:
+    h, repo, req, _, _ = nhr_world(
+        step_state=ApprovalStepState.REJECTED, row_verdict=ComplianceVerdict.BLOCKED
+    )
+    d = run(h, repo, req).decision
+    assert {"G5", "G6"} <= set(d.failed_guards) and d.verdict is ComplianceVerdict.BLOCKED
+
+
+def test_final_video_step_evidence_reused_as_resolution_blocks() -> None:
+    """Review B1 attack 2: the FINAL_VIDEO approval's own step and evidence are cited as the NHR
+    resolution (wrong approval kind)."""
+    h, repo, req = world()
+    st = repo.steps_[h.approval][0]
+    repo.verdicts = [
+        HumanVerdictRow(
+            h.org,
+            ComplianceVerdict.ALLOWED,
+            True,
+            h.owner,
+            R_SHA,
+            h.approval,
+            1,
+            OP,
+            CH,
+            st.evidence_id,
+            st.record_key,
+            NHR_RULE,
+        )
+    ]
+    repo.gate_ = replace(
+        repo.gate_,
+        overall=ComplianceVerdict.NEEDS_HUMAN_REVIEW,  # type: ignore[type-var]
+        nhr_items=(NhrItemRow(h.org, "cvd", NHR_RULE, R_SHA),),
+    )
+    d = run(h, repo, req).decision
+    assert d.verdict is ComplianceVerdict.BLOCKED and "G5" in d.failed_guards
+    g5 = next(g for g in d.guards if g.guard_id == "G5")
+    assert "resolving approval kind FINAL_VIDEO" in g5.detail
+
+
+def test_copyright_doubt_resolution_is_accepted() -> None:
+    h, repo, req, _, _ = nhr_world(kind=ApprovalKind.COPYRIGHT_DOUBT)
+    assert run(h, repo, req).decision.verdict is ComplianceVerdict.ALLOWED
+
+
+def test_each_nhr_item_needs_its_own_resolution() -> None:
+    """Two NHR items, one resolution: the gate's own rows are counted, never a supplied
+    count."""
+    h, repo, req, _, _ = nhr_world(items=(NHR_RULE, "FIN-R1"))
+    d = run(h, repo, req).decision
+    assert d.failed_guards == ["G5"]
+    assert "FIN-R1@" in next(g for g in d.guards if g.guard_id == "G5").detail
+
+
+def test_resolution_for_another_rule_or_hash_does_not_resolve() -> None:
+    h, repo, req, _, _ = nhr_world()
+    repo.verdicts = [replace(repo.verdicts[0], rule_id="FIN-R1")]
+    assert "G5" in run(h, repo, req).decision.failed_guards
+    h, repo, req, _, _ = nhr_world()
+    repo.verdicts = [replace(repo.verdicts[0], subject_sha256=S_SHA)]
+    assert "G5" in run(h, repo, req).decision.failed_guards
+    h, repo, req, _, _ = nhr_world()
+    repo.verdicts = [replace(repo.verdicts[0], rule_id=None)]
+    assert "G5" in run(h, repo, req).decision.failed_guards
+
+
+def test_nhr_gate_without_item_rows_fails_closed() -> None:
+    h, repo, req, _, _ = nhr_world(items=())
+    d = run(h, repo, req).decision
+    assert "G5" in d.failed_guards
+
+
+def test_resolution_not_reusing_its_step_evidence_fails() -> None:
+    h, repo, req, sc_id, _ = nhr_world()
+    other = h.record(f"approve {CODE}", approval_id=sc_id)
+    repo.verdicts = [replace(repo.verdicts[0], evidence_id=other.id)]
+    assert "G5" in run(h, repo, req).decision.failed_guards
+
+
+def test_resolving_approval_of_another_org_fails_g13() -> None:
+    h, repo, req, sc_id, _ = nhr_world(listed=False)
+    repo.approvals[sc_id] = replace(repo.approvals[sc_id], org_id=ids.ORG.new())
+    d = run(h, repo, req).decision
+    assert {"G5", "G13"} <= set(d.failed_guards)
 
 
 @pytest.mark.parametrize(

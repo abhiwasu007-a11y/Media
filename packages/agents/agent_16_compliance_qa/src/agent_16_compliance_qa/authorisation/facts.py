@@ -73,9 +73,10 @@ class EvidenceFacts(Model):
     mac_valid: bool
     replay_free: bool
     backs_only_this_record: bool
-    recorded_by_operator: bool = True
-    """Record and evidence both ``recorded_by = sys_operator``. The real-row path always sets it;
-    the dataset fixture has no such field (its steps carry ``recorded_by_kind`` instead)."""
+    recorded_by_operator: bool
+    """Record and evidence both ``recorded_by = sys_operator``. Required (no fail-open default):
+    the real-row path computes it; the dataset fixture 1.0.0 has no such field, so the eval
+    harness states it from the fixture's own recorder facts."""
     evidence_id: str | None = None
     """``oie_`` id (real-row path only; reported in ``evidence_ids``)."""
 
@@ -127,21 +128,47 @@ class Scores(Model):
     human: tuple[HumanScoreFacts, ...]
 
 
+class ResolvingApproval(Model):
+    """The approval whose step wrote an NHR resolution row (04 section 5.17, CCR-102). G5
+    derives its state from its steps (G2 + G4); ``approvals.state`` is reported only."""
+
+    kind: ApprovalKind
+    state: ApprovalState
+    subject_matches_item: bool
+    """``approvals.subject_sha256`` = the subject hash of the NHR item being resolved."""
+    steps: tuple[StepFacts, ...]
+
+
 class NhrResolution(Model):
     verdict_is_final: bool
     decided_by_kind: ActorKind
     same_subject_hash: bool
+    """The row's ``subject_sha256`` = the subject hash of the NHR item it resolves."""
     approval_channel: ApprovalChannel | None
     evidence: EvidenceFacts | None
     verdict: ComplianceVerdict = ComplianceVerdict.ALLOWED
-    """The mapped step decision (``APPROVED -> ALLOWED``; anything else ``BLOCKED``, G6)."""
+    """The verdict the row stores; G5 requires it to equal the mapped step decision."""
+    item_ref: str | None = None
+    """The gate's NHR item (``rule_id`` + subject hash) this row resolves; ``None`` = unbound
+    (G5 FAIL). The dataset fixture 1.0.0 has no such field (the eval harness derives it)."""
+    step_state: ApprovalStepState | None = None
+    """State of the step written together with the row; ``None`` = no such step (G5 FAIL)."""
+    reuses_step_evidence: bool = False
+    """The row cites the same evidence row and record key as that step (one record)."""
+    resolving_approval: ResolvingApproval | None = None
+    """``None`` = the approval named by the row is not visible (G5 FAIL)."""
 
 
 class GateFacts(Model):
     overall: ComplianceVerdict
     unresolved_nhr: int = Field(ge=0)
+    """Reported only; a non-zero value fails G5, a zero value proves nothing (G5 binds every
+    item in ``nhr_items`` to its own resolution)."""
     blocked_rows: int = Field(ge=0)
     nhr_resolutions: tuple[NhrResolution, ...]
+    nhr_items: tuple[str, ...] = ()
+    """The gate's ``NEEDS_HUMAN_REVIEW`` verdict rows as item refs (``rule_id`` + subject hash);
+    an NHR gate with no item row fails G5 (nothing to bind a resolution to)."""
 
 
 class RenderFacts(Model):

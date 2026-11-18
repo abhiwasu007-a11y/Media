@@ -37,6 +37,7 @@ from agent_16_compliance_qa.authorisation.facts import (
     RecorderKind,
     ReliedApproval,
     RenderFacts,
+    ResolvingApproval,
     Scores,
     StepFacts,
 )
@@ -150,6 +151,25 @@ class HumanScoreRow:
 
 
 @dataclass(frozen=True, slots=True)
+class NhrItemRow:
+    """One ``NEEDS_HUMAN_REVIEW`` ``compliance_verdicts`` row the gate wrote (an item to
+    resolve). The item is identified by its ``rule_id`` and ``subject_sha256``."""
+
+    org_id: OrgId
+    verdict_id: str
+    rule_id: str
+    subject_sha256: str
+
+    @property
+    def ref(self) -> str:
+        return item_ref(self.rule_id, self.subject_sha256)
+
+
+def item_ref(rule_id: str, subject_sha256: str) -> str:
+    return f"{rule_id}@{subject_sha256}"
+
+
+@dataclass(frozen=True, slots=True)
 class HumanVerdictRow:
     """A human NHR resolution row (written with its step by ``amw_human_record_apply``)."""
 
@@ -164,6 +184,8 @@ class HumanVerdictRow:
     approval_channel: ApprovalChannel | None
     evidence_id: WireId | None
     record_key: str
+    rule_id: str | None = None
+    """The rule of the NHR item it resolves; ``None`` = unbound (G5 FAIL)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +198,8 @@ class GateSummary:
     script_sha256: str
     thumbnail_set_sha256: tuple[str, ...]
     pack_versions: tuple[tuple[str, int], ...]
-    unresolved_nhr: int
+    nhr_items: tuple[NhrItemRow, ...]
+    """The gate's NHR rows themselves (never a count: G5 binds a resolution to each)."""
     blocked_rows: int
     disclosure_decision: DisclosureDecision
     disclosure_verdict_id: str
@@ -420,20 +443,15 @@ class PublicationAuthorisationStage:
             for o, ss, why in relied
             if o.kind.value in ("KNOWLEDGE_RELEASE", "SENSITIVE_CLAIM", "COPYRIGHT_DOUBT")
         )
+        items = {i.ref: i for i in gate.nhr_items} if gate else {}
         resolutions = []
+        res_rows: list[object] = []
         for v in verdicts:
             res_approval = repo.approval(tx, v.approval_id)
-            res_anchor = (
-                ApprovalAnchor(
-                    res_approval.id,
-                    res_approval.org_id,
-                    res_approval.review_code,
-                    res_approval.created_at,
-                )
-                if res_approval
-                else anchor
-            )
-            step = next((s for s in repo.steps(tx, v.approval_id) if s.step_no == v.step_no), None)
+            res_steps = list(repo.steps(tx, v.approval_id)) if res_approval else []
+            res_rows += [res_approval, *res_steps]
+            step = next((s for s in res_steps if s.step_no == v.step_no), None)
+            item = items.get(item_ref(v.rule_id, v.subject_sha256)) if v.rule_id else None
             ref = HumanRecordRef(
                 record_kind=EvidenceRecordKind.STEP_DECISION,
                 record_key=v.record_key,
@@ -449,14 +467,40 @@ class PublicationAuthorisationStage:
                 step_state=step.state if step else None,
                 target_stage_id=step.target_stage_id if step else None,
             )
+            resolving = None
+            res_anchor = anchor
+            if res_approval is not None:
+                res_anchor = ApprovalAnchor(
+                    res_approval.id,
+                    res_approval.org_id,
+                    res_approval.review_code,
+                    res_approval.created_at,
+                )
+                res_loaded = [*loaded, *(self._step_ref(res_approval, s) for s in res_steps)]
+                resolving = ResolvingApproval(
+                    kind=res_approval.kind,
+                    state=res_approval.state,
+                    subject_matches_item=item is not None
+                    and res_approval.subject_sha256 == item.subject_sha256,
+                    steps=self._step_facts(tx, res_approval, res_steps, res_loaded),
+                )
             resolutions.append(
                 NhrResolution(
                     verdict_is_final=v.is_final,
                     decided_by_kind="HUMAN" if _human(v.decided_by) else "AGENT",
-                    same_subject_hash=v.subject_sha256 in (r_hash, req.subject.script_sha256),
+                    same_subject_hash=item is not None
+                    and v.subject_sha256 == item.subject_sha256
+                    and item.subject_sha256 in (r_hash, req.subject.script_sha256),
                     approval_channel=v.approval_channel,
                     evidence=self._evidence.facts(tx, ref, res_anchor, loaded),
                     verdict=v.verdict,
+                    item_ref=item.ref if item else None,
+                    step_state=step.state if step else None,
+                    reuses_step_evidence=step is not None
+                    and step.evidence_id is not None
+                    and step.evidence_id == v.evidence_id
+                    and step.record_key == v.record_key,
+                    resolving_approval=resolving,
                 )
             )
         lag = self._cfg.price_data_lag_days
@@ -466,6 +510,10 @@ class PublicationAuthorisationStage:
             for x in (approval, gate, score, render, *steps, *contribs, *scores, *verdicts)
             if x is not None
         ) and all(o.org_id == org for o, _, _ in relied)
+        same_org = same_org and all(
+            getattr(x, "org_id", org) == org for x in res_rows if x is not None
+        )
+        same_org = same_org and all(i.org_id == org for i in (gate.nhr_items if gate else ()))
         unchanged = (
             gate is not None
             and score is not None
@@ -493,9 +541,14 @@ class PublicationAuthorisationStage:
             scores=Scores(machine=dict(score.machine) if score else {}, human=tuple(human_facts)),
             gate=GateFacts(
                 overall=gate.overall if gate else ComplianceVerdict.NEEDS_HUMAN_REVIEW,
-                unresolved_nhr=gate.unresolved_nhr if gate else 1,
+                unresolved_nhr=len(
+                    set(items) - {r.item_ref for r in resolutions if r.item_ref is not None}
+                )
+                if gate
+                else 1,
                 blocked_rows=gate.blocked_rows if gate else 0,
                 nhr_resolutions=tuple(resolutions),
+                nhr_items=tuple(sorted(items)),
             ),
             disclosure_decision=(
                 gate.disclosure_decision if gate else DisclosureDecision.NEEDS_HUMAN_REVIEW

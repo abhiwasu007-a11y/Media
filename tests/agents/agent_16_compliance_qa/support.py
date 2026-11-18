@@ -179,5 +179,6 @@ def evidence_mapping(**over: Any) -> Mapping[str, Any]:
         "mac_valid": True,
         "replay_free": True,
         "backs_only_this_record": True,
+        "recorded_by_operator": True,
     }
     return base | over
