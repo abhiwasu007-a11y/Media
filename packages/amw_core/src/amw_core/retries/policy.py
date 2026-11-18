@@ -47,7 +47,7 @@ def backoff_ms(policy: RetryPolicySettings, k: int, u: float) -> int:
         raise InputInvalidError("U must be in [0, 1)")
     d_k = min(policy.cap_ms, policy.base_ms * policy.multiplier ** (k - 1))
     d = Decimal(d_k)
-    wait = d * (1 - policy.jitter) + Decimal(u) * d * policy.jitter
+    wait = d * (1 - policy.jitter) + Decimal(repr(u)) * d * policy.jitter
     return int(wait.to_integral_value(rounding=ROUND_FLOOR))
 
 
