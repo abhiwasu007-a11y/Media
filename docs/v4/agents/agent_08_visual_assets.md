@@ -6,28 +6,28 @@
 | Owner | Agent 08 Visual Assets; integration owner: Agent 01 (orchestrator) |
 | Package | `agent_08_visual_assets` (27 §7.2); prompts `prompts/agent_08_visual_assets/`; evals `evals/agent_08_visual_assets/` |
 | Directive sections covered | §3.1 row 08 (generation, licensed sourcing, provenance, asset library + reuse engine: fingerprints, licence, expiry, channel permission), §1A.1 (visual sourcing hierarchy a–e, log source and licence of every shot), §1A.6 (every shot has a licence record; no watermark or logo from sources), §1A.11 (AI video B-roll budgeted per video), §1C.8 (licensing for client work), §1B.2a and §1 (charts from the owner's historical data; 30-day price-data lag; no forward-looking content), §3.3 (contracts, failures, quality, observability, AI providers), §3.5 (prompt, eval, code standards), §4 (26 sections) |
-| Owner decisions applied | D1 (3A production line with Agents 04–11 and the Agent 16 gates; topic owner-given; outputs are files; no upload, no OAuth; paid calls only within owner-set provider limits, per-video and pilot budget enforced by the cost ledger with a stop on breach; keys only through the environment's secret mechanism; render never in market hours), D2 (full blueprint for 3A agents; REQUIRES REVIEW does not block 3A unless it changes a 3A design decision) |
-| Binding contracts | GLOSSARY_AND_IDS.md (§2.2 prefixes `ast`, `afp`, `lic`, `lcu`; §6.17–6.22 licence and tier enums; §6.45 `asset_kind`, `asset_status`, `fingerprint_algo`; §6.50 `aspect_ratio`; §6.51 `refusal_reason`; §6.38 FIN-R rule IDs), 03_COMMUNICATION_STANDARD.md (§3–§9, §11), 04_DATABASE_ARCHITECTURE.md §5.15 (`licences`, `licence_ledger`, `assets`, `asset_fingerprints`), §5.14, §5.7, §5.9, §5.10, 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md §3.2 (`agent_08.asset_sourcing`), 27_ENGINEERING_STANDARDS.md |
+| Owner decisions applied | D1 (3A production line with Agents 04–11 and the Agent 16 gates; topic owner-given; outputs are files; no upload, no OAuth; paid calls only within owner-set provider limits, per-video and pilot budget enforced by the cost ledger with a stop on breach; keys only through the environment's secret mechanism; render never in market hours), D5 (owner actions go through the operator tool), D6 (music: licensed source decided by the owner; sourcing is 3B), D2 (full blueprint for 3A agents; REQUIRES REVIEW does not block 3A unless it changes a 3A design decision) |
+| Binding contracts | CONTRACT_CHANGE_REQUESTS.md §5 "Resolved for blueprint 08" and §§1–4, 6 (decided names and rules; applied here), 24_PRODUCTION_TYPES.md §7.1a / §7.2a (`CHANNEL_LONG_FORM` v2 and `SHORTS` v2 graphs, gate `s08_assets`, stage `s06_chart`), GLOSSARY_AND_IDS.md (§2.2 prefixes `ast`, `afp`, `lic`, `lcu`; §6.17–6.22 licence and tier enums; §6.45 `asset_kind`, `asset_status`, `fingerprint_algo`; §6.50 `aspect_ratio`; §6.51 `refusal_reason`; §6.38 FIN-R rule IDs), 03_COMMUNICATION_STANDARD.md (§3–§9, §11), 04_DATABASE_ARCHITECTURE.md §5.15 (`licences`, `licence_ledger`, `assets`, `asset_fingerprints`), §5.14, §5.7, §5.9, §5.10, 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md §3.2 (`agent_08.asset_sourcing`), 27_ENGINEERING_STANDARDS.md |
 | Shared docs referenced by name/§ only | agent_09_video_director.md (§6.6 tier plan, §8.1–§8.2 shot plan and `views.agent_08_shots[]`; written in parallel, alignment confirmed at integration), 18_PRODUCTION_QUALITY_STANDARD.md §2 (hierarchy, per-shot licence record, sourcing checks), §7.9–§7.10, §13; 13_COMPLIANCE_YOUTUBE_POLICY.md §1.3, §5 (FIN-R9, FIN-R12, FIN-R13), YTG-R6; 09_COST_AND_BUDGET.md; 08_SECURITY.md §3, §5.3, §8; 3A_SLICE_SPEC.md §2.3, §3, §12 (R2, R3, R17); ADR-005 (storage), ADR-007 (LLM routing), ADR-009 (visual and music sourcing), ADR-012 (worker placement); agent_05_scriptwriter.md (`chart_requests`, `scenes[].visual_intent`), agent_06_fact_checker.md (D3 chart data age) |
 | Facts cited | RESEARCH_LOG IN-02 (30-day price-data lag), IN-03 (no direction for a named security, even on historical data), PR-06 / PR-06d/e (Storyblocks plans and licence; monetization and whitelisting NOT CONFIRMED), PR-07 (other vendors, headline only), YT-06 / YT-07 (synthetic-media disclosure), PR-01 / PR-02 / PR-03 (models, batch and caching, API vs subscription), INF-03 / INF-04 (resource caps), INF-09 (FFmpeg QC filters), INF-10 (YouTube bitrate floors), INF-11 (RLS) |
 | Marking | Every section states its **MVP** in the first line: 3A / 3B / 3C (owner build stages of D1) and Tier 0–3 (GLOSSARY §6.47) |
-| Conventions | `(pending CCR)` = a contract item that does not exist in Wave A and is listed in the structured return for the integrator; this blueprint is written against the proposed name. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. `3A-BLOCKING` marks an item that changes a 3A design decision. Config key names are proposals until the registry (18 §13) exists. No private method, book, course or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config and the SEBI price-data lag filter, which is a compliance filter and never part of chart reading. |
+| Conventions | Every contract item this blueprint needed is decided in CONTRACT_CHANGE_REQUESTS.md (§5, "Resolved for blueprint 08") and is used here under its real name; no `(pending CCR)` marker remains. `REQUIRES REVIEW (Phase 1): <need>` = unknown value; none is invented. `3A-BLOCKING` marks an item that changes a 3A design decision. Config key names are registered through the registry of 18 §13 (CCR-019). No private method, book, course or server detail appears here. No dates or clock times appear in rules (owner rule C.4); the only time-based values are operational config and the SEBI price-data lag filter, which is a compliance filter and never part of chart reading. |
 
 ---
 
 ## 1 Identity and mission
-**MVP: 3A (charts, graphics, owner material, licence ledger, fingerprints, reuse; stock only if the owner buys a licence) · 3B (tier-mix measurement on golden samples, thresholds, AI B-roll only where no real or licensed option exists) · 3C (several libraries, AI-still adapter, music and SFX provenance, scheduled expiry sweeps). Tier 0 designed for Tier 1+ (Business licences, client-supplied material).**
+**MVP: 3A (charts, graphics, owner material, licence ledger, fingerprints, reuse; stock only if the owner buys a licence) · 3B (tier-mix measurement on golden samples, thresholds, AI B-roll only where no real or licensed option exists, music-bed sourcing once the owner has chosen a licensed source, D6) · 3C (several libraries, AI-still adapter, SFX provenance, scheduled expiry sweeps). Tier 0 designed for Tier 1+ (Business licences, client-supplied material).**
 
 ### 1.1 Mission
 Agent 08 turns the shot plan of Agent 09 into a set of concrete, owned or licensed, fingerprinted assets — one per shot — and writes the licence ledger row that proves the right to use each of them. It is the only stage that decides **where a picture comes from**. It does four jobs on one shot plan (task `agent_08.asset_sourcing`, stage `s08_assets`):
 
 1. **Hierarchy sourcing.** For every shot it searches the tiers in the order of §1A.1 — owner real material (`A_OWNER_REAL`), licensed stock (`B_LICENSED_STOCK`), code-made graphics and charts (`C_CODE_MOTION`), AI video B-roll (`D_AI_VIDEO`), AI stills (`E_AI_STILL`) — and records, for every tier it skipped, why. The order is enforced by code (ADR-009 §2.1), not by a model.
 2. **Real charts from the owner's historical data.** A chart is drawn by code from an owner-supplied historical dataset and an owner-curated chart case, never from a stock image, never from live data and never with a forward-looking overlay. The last bar must be older than the SEBI price-data lag (IN-02, FIN-R9) and the drawing carries nothing that implies a future direction (IN-03, FIN-R13).
-3. **Licence and provenance.** Each shot gets exactly one covering `licence_ledger` row (18 §2.2, §7.9) against an `ACTIVE` licence that is usable for the tenant and the destination (§1C.8); stock is fetched only through the licensed download path (no preview, no watermark, §1A.6); AI assets carry the disclosure flags that Agent 16's decision needs (YT-06, YT-07).
+3. **Licence and provenance.** Each shot gets exactly one covering `licence_ledger` row (18 §2.2, §7.9) against an `ACTIVE` licence that is usable for the tenant and the destination (§1C.8). The same rule covers every other visual element the plan places: Agent 08 writes one `TEMPLATE` row per overlay interval of the overlay track and one whole-timeline `FONT` row per brand font (CCR-031), and, in 3B, the `MUSIC_BED` row of a sourced bed; stock is fetched only through the licensed download path (no preview, no watermark, §1A.6); AI assets carry the disclosure flags that Agent 16's decision needs (YT-06, YT-07).
 4. **Asset library and reuse engine.** Every asset is stored per tenant with a SHA-256 and a perceptual fingerprint; before a new item is made or bought the engine looks for a reusable one (exact or near-duplicate) that respects licence, expiry and channel permission. AI B-roll is budgeted per video (§1A.11) and stops on breach (D1).
 
 ### 1.2 Where it sits
-Stage `s08_assets` of every production type that has a shot plan (24 §3.1, §7; class `AI_IO`; `depends_on s09_plan`; "licence row per shot (blocking downstream)"). In `CHANNEL_LONG_FORM` it runs after `s09_plan` and before `s10_render`; in the Shorts child job it runs on the child shot plan (9:16); in ad types it prefers the client's own product media (§1D.4, 3C). Downstream: Agent 10 (render and `technical_qc`), Agent 16 (`compliance_gate`, `quality_score` VISUAL_QUALITY and COMPLIANCE inputs), S2 (fingerprints for uniqueness), S4 (cost).
+Stage `s08_assets` of every production type that has a shot plan (24 §3.1, §7; class `AI_IO`; `depends_on s09_plan`). In 3A it runs in `CHANNEL_LONG_FORM` v2 and, for the 9:16 cut, in the `SHORTS` v2 child job on the child shot plan (24 §7.1a, §7.2a); in ad types it prefers the client's own product media (§1D.4, 3C). It is a **blocking gate**: shots it could not source make the gate FAIL and route `REVISE → s09_plan` (alternative target the script stage `s05_script` / `s05_shorts`); owner-material gaps (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`) fail the task `PERMANENT.MISSING_DEPENDENCY` instead (§18). Downstream: `s06_chart` (`agent_06.claim_verification`, mode `CHART_FACTS`, reads the `agent_08.chart_facts` documents written here), Agent 10 (`s10_render` depends on `s08_assets` and `s06_chart`; `technical_qc` may route back to `s08_assets`), Agent 11 (`s11_thumbs` depends on `s09_plan` and `s08_assets`), Agent 16 (`s16_comp` may route back to `s08_assets`; `quality_score` VISUAL_QUALITY and COMPLIANCE inputs), S2 (fingerprints for uniqueness), S4 (cost).
 
 ### 1.3 Authority boundaries
 | Agent 08 **decides** | Agent 08 **does not decide** (owner of the decision) |
@@ -37,18 +37,18 @@ Stage `s08_assets` of every production type that has a shot plan (24 §3.1, §7;
 | to reuse, to make or to license an item; what to record in the ledger and in the asset row | the compliance verdict, the disclosure decision (`containsSyntheticMedia`), any waiver (Agent 16 final authority, plan Q5) |
 | whether a stock or owner candidate passes the deterministic filters, and (with the model's help) which acceptable candidate fits best | licence terms and their interpretation; activating, verifying or revoking a `licences` row (owner and Agent 16; Agent 08 only reads them) |
 | whether tier D or E may be tried for a shot (gates, caps) and the exact generation prompt (deterministic template) | budgets and limits (owner, S4); whether a video is rendered, approved, published or delivered |
-| fingerprints and asset flags (`is_realistic_synthetic`, `depicts_real_person`, `allowed_channel_ids` default) | music and SFX selection (3C, open item Q-V8) |
+| fingerprints and asset flags (`is_realistic_synthetic`, `depicts_real_person`, `allowed_channel_ids` default); in 3B which licensed music bed answers the plan's music request | SFX selection (3C); the music cue, offsets and ducking (Agent 09); the music mix and mastering (Agent 07) |
 Agent 08 never edits the shot plan or the script and never approves, publishes or delivers anything. An unresolved shot is reported, never hidden and never filled with a placeholder (rule 7).
 
 ### 1.4 Success criteria (measurable; targets are config and are set in 3B; hard rules are marked)
 | ID | Criterion | Target | Measured by |
 |---|---|---|---|
-| SC-1 | Licence completeness: every sourced shot has exactly one covering ledger row on an `ACTIVE`, destination-valid, tenant-valid licence | **100 % (hard)** | `a08.cov.licence_row_per_shot`; `qc.licence.completeness` (18 §7.9) |
+| SC-1 | Licence completeness: every sourced shot, every overlay interval and every brand font has exactly one covering ledger row on an `ACTIVE`, destination-valid, tenant-valid licence | **100 % (hard)** | `a08.cov.licence_row_per_shot`, `a08.cov.overlay_rows`, `a08.cov.font_rows`; `qc.licence.completeness` (18 §7.9) |
 | SC-2 | Hierarchy conformance: a lower tier is used only when every higher tier has a recorded skip reason; no shot uses a lower tier while a higher tier had an accepted candidate | **100 % (hard)** | `a08.hier.skip_reasons_recorded`, `a08.hier.tier_order` |
 | SC-3 | Chart data age: charts whose `data_age_vs_lag` is not `OLDER_THAN_LAG`; overlay elements beyond the last bar or with free text | **0 (hard)** | `a08.chart.data_age`, `a08.chart.annotations`, `qc.visual.chart_data_age` |
 | SC-4 | Share of visual screen time in tier `E_AI_STILL` | **< 50 % (hard limit, 18 §2.3)**; stricter target from niche benchmarks (19) set in 3B | `a08.tier.share_e`, `qc.visual.tier_share_e` |
 | SC-5 | AI B-roll spend and length within the per-video caps; AI assets depicting a real person | within caps **100 %**; real person **0** (hard) | `a08.ai.budget`, `a08.ai.no_real_person` |
-| SC-6 | Unresolved shots in a `SUCCEEDED` output | **0 (hard)** | `a08.cov.all_shots_resolved` |
+| SC-6 | Unresolved shots when the gate passes (any unresolved shot makes the gate FAIL and routes the job back, §18) | **0 (hard)** | `a08.cov.all_shots_resolved` (gate result) |
 | SC-7 | Preview, trial or watermarked stock assets in a manifest | **0 (hard)** | `a08.lic.no_preview`, `qc.watermark.provenance` |
 | SC-8 | Assets below the resolution floor for their aspect | **0** | `a08.asset.resolution` (floors from `qc.video.min_*`) |
 | SC-9 | Cross-tenant reads or writes in the tenancy suite | **0 (hard)** | S-series tests (§21.7) |
@@ -67,16 +67,16 @@ Agent 08 never edits the shot plan or the script and never approves, publishes o
 ### 2.1 Task type
 | Task type (24 §3.2) | Stage | Class | Required capabilities | Output | MVP |
 |---|---|---|---|---|---|
-| `agent_08.asset_sourcing` | `s08_assets` (blocking downstream) | `AI_IO` | registry: `llm`, `media_probe`; added by the orchestrator when the job enables them: `stock_search`, `video_gen`, `image_gen` (GLOSSARY §6.20; REQUIRES REVIEW (Phase 1): worker placement of `media_probe` for the AI worker, ADR-012) | `agent_08.asset_sourcing.output` 1.0.0 (§8): per-shot sourcing manifest, tier mix, licence ledger rows written, report fields | 3A |
-One task per shot plan iteration. Step-level LLM prompts (`query_plan`, `candidate_rank`) are **not** task types: they are steps of this task, like the section step of Agent 05.
+| `agent_08.asset_sourcing` | `s08_assets` (blocking downstream) | `AI_IO` | registry: `llm`, `media_probe`; added by the orchestrator when the job enables them: `stock_search`, `video_gen`, `image_gen`, and in 3B `music_search` (GLOSSARY §6.20; light media work in `AI_IO` is not rendering, ADR-012 §3.3, 3A_SLICE R22) | `agent_08.asset_sourcing.output` 1.0.0 (§8): per-shot sourcing manifest, overlay, font and music sections, tier mix, licence ledger rows written, report fields; plus one agent document `agent_08.chart_facts` 1.0.0 (§8.5) per real chart | 3A |
+One task per shot plan iteration. The task is a blocking gate stage (24 §7.1a): a failed gate is a `SUCCEEDED` task with a failing gate result (03 §5.3 rule 4, CCR-001). Step-level LLM prompts (`query_plan`, `candidate_rank`) are **not** task types: they are steps of this task, like the section step of Agent 05.
 
 ### 2.2 Requirements
 | ID | Requirement (what) | Why | When / trigger | Inputs | Outputs | Dependants | MVP |
 |---|---|---|---|---|---|---|---|
 | FR-01 | Validate the task input, the tenant and every reference before any read or spend | rule 9; 03 §7 | task start (`VALIDATING`/`RUNNING`) | Task Input, envelope | `a08.pre.*` results or a typed rejection | orchestrator | 3A |
-| FR-02 | Read the shot plan (`views.agent_08_shots[]` and the shot objects, agent_09 §8) and the script context; map them to internal `ShotRequirement` objects; validate the plan's `intent_kind` (`FOOTAGE`, `CHART`, `DIAGRAM`, `TEXT_CARD`; internally `FOOTAGE`, `CHART`, `GRAPHIC`) against `chart_id`, `allowed_tiers` and the text fields | the hierarchy applies to footage, graphics and charts differently (§6.3) | after FR-01 | shot plan (Agent 09), script `chart_requests`, `scenes[]` | requirement list, chart-request map | all later steps | 3A |
-| FR-03 | Resolve licence prerequisites: tenant self-grant rows for `OWNER_MADE` and `CODE_GENERATED` (and `FONT`) and any stock/AI licence rows, with state, expiry and permission | every shot needs a ledger row (§1A.6); `licence_id` is NOT NULL (04 §5.15) | before sourcing | `licences`, brand kit fonts | resolved licence handles or `PERMANENT.MISSING_DEPENDENCY` | FR-13 | 3A |
-| FR-04 | Chart path: load the owner dataset, verify its SHA-256, classify the last bar's age against the lag, match an owner chart case (instrument, timeframe, indicators, pattern concept, outcome), validate annotations, render deterministically per requested aspect, register the asset, fingerprint it | §1A.1a/c, §1B.2a; FIN-R9; FIN-R13; IN-02, IN-03 | for each shot with `intent_kind = CHART` | chart requests, datasets, chart cases, brand kit | chart PNG asset(s), `chart` block with `data_end_date`, `earliest_compliant_publish_date` | Agent 10, Agent 16 (`qc.visual.chart_data_age`) | 3A |
+| FR-02 | Read the shot plan (`views.agent_08_shots[]`, the shot objects and `overlays[]`, agent_09 §8) and the script context; map them to internal `ShotRequirement` / `OverlayRequirement` objects; validate the plan's `intent_kind` (`shot_intent_kind`: `FOOTAGE`, `CHART`, `DIAGRAM`, `TEXT_CARD`; internally `FOOTAGE`, `CHART`, `GRAPHIC`) against `chart_id`, `allowed_tiers` and the text fields | the hierarchy applies to footage, graphics and charts differently (§6.3) | after FR-01 | shot plan (Agent 09), script `chart_requests`, `scenes[]` | requirement list, chart-request map | all later steps | 3A |
+| FR-03 | Resolve licence prerequisites: tenant self-grant rows for `OWNER_MADE` and `CODE_GENERATED` (and `FONT`) and any stock/AI licence rows, with state, expiry and permission; the registered package template assets of the overlay track and the brand-kit font assets | every shot, overlay interval and font needs a ledger row (§1A.6); `licence_id` is NOT NULL (04 §5.15) | before sourcing | `licences`, `assets`, brand kit fonts (`fonts[] {asset_id, role, scripts}`) | resolved licence and asset handles or `PERMANENT.MISSING_DEPENDENCY` | FR-13 | 3A |
+| FR-04 | Chart path: load the owner dataset, verify its SHA-256, classify the last bar's age against the lag (the request arrives as an `OLDER_THAN_LAG` constraint, CCR-004), match an owner chart case (instrument, timeframe, indicators, pattern concept, outcome), validate annotations, render deterministically per requested aspect, register the asset (`kind = CHART`), fingerprint it | §1A.1a/c, §1B.2a; FIN-R9; FIN-R13; IN-02, IN-03 | for each shot with `intent_kind = CHART` | chart requests, datasets, chart cases, brand kit | chart PNG asset(s), `chart` block with `data_end_date`, `earliest_compliant_publish_date`, chart facts (FR-22) | Agent 06 (`s06_chart`), Agent 10, Agent 16 (`qc.visual.chart_data_age`) | 3A |
 | FR-05 | Tier A: search the owner library (assets of `OWNER_MADE` or `CLIENT_SUPPLIED`), filter deterministically, rank by relevance, choose | owner material first (§1A.1a) | `FOOTAGE` shots | `assets`, query plan | chosen asset or skip reason | FR-13 | 3A |
 | FR-06 | Tier B: when a stock adapter and a usable licence exist, plan queries, search, filter by licence, duration, resolution, aspect, preview-only, reuse limits, rank, then license and download through the licensed path, probe, fingerprint, register | licensed real footage (§1A.1b) | `FOOTAGE` shots not satisfied by A | stock adapter, licence, S4 | asset and ledger row, or skip reason | FR-13 | 3A (only if the owner buys a licence, ADR-009, R17); otherwise `TIER_DISABLED` |
 | FR-07 | Tier C: render brand-consistent graphics — kinetic text, concept diagram, title card — from the script's own `on_screen_text` and diagram specs and the brand kit, or the plan's `fallback_template_key` abstract brand motion template (no words); no invented text | code-made graphics before AI (§1A.1c) | `GRAPHIC` shots, and `FOOTAGE` shots A and B could not serve | script text, brand kit | graphic asset | FR-13 | 3A |
@@ -85,23 +85,25 @@ One task per shot plan iteration. Step-level LLM prompts (`query_plan`, `candida
 | FR-10 | Enforce the hierarchy and record `skips[]` (tier, reason code) for every shot | 18 §2.1: falling to a lower rank requires a recorded reason | every shot | cascade state | manifest `skips[]`; `qc_results.message` text derived | Agent 16, owner report | 3A |
 | FR-11 | Reuse engine: before making or buying, look in the tenant's library for an exact (SHA-256 / spec hash / vendor item) or near-duplicate (perceptual) asset that is `ACTIVE`, unexpired, permitted for the channel and under any reuse cap; reuse it with a new ledger row | cost, consistency, directive row 08 | before FR-04/06/07/08 acquire | `assets`, `asset_fingerprints` | `REUSED` result | cost | 3A (exact) · 3B (near-duplicate calibration) |
 | FR-12 | Fingerprint every registered asset: `SHA256` of the file and `PERCEPTUAL_FRAME` (64-bit difference hash of sampled frames) | reuse, S2 uniqueness, duplicate detection (GLOSSARY §6.45 defers algorithms to this blueprint) | at registration | media file | `asset_fingerprints` rows | S2, FR-11 | 3A |
-| FR-13 | Write one `licence_ledger` row per shot (interval = the shot's `start_ms`/`end_ms`), plus whole-render rows for fonts and templates the renderer used | §1A.6; 18 §2.2 | after the asset is final | asset, licence, shot | rows with `usage_kind` per tier | Agent 10 `qc.licence.completeness`, Agent 16 | 3A |
+| FR-13 | Write ledger rows at sourcing (`render_id` NULL, CCR-030): one row per shot (interval = the shot's `start_ms`/`end_ms`, `shot_id`), one `TEMPLATE` row per overlay interval of the overlay track (`shot_id` = the overlay id), one whole-timeline `FONT` row per brand font (interval 0 to the timeline end), and in 3B the `MUSIC_BED` rows; thumbnails are Agent 11's (it writes its own rows) | §1A.6; 18 §2.2 (any visual track); CCR-031 | after the asset is final | asset, licence, shot, overlay, brand-kit fonts | rows with `usage_kind` `SHOT`, `IMAGE`, `AI_OUTPUT`, `TEMPLATE`, `FONT`, `MUSIC_BED` | Agent 10 `qc.licence.completeness`, Agent 16 | 3A (music rows 3B) |
 | FR-14 | Provenance and watermark control: stock only from the licensed download (ledger row with `vendor_item_id`), never from a preview URL; reject trial files | §1A.6; 18 §7.10 | at download | vendor response | flag in manifest `provenance` | `qc.watermark.provenance` | 3A |
 | FR-15 | Set asset flags `is_realistic_synthetic`, `depicts_real_person`, `release_ref`, `allowed_channel_ids` | YT-06/07 inputs; reuse permission | at registration | asset, release record | asset row | Agent 16 | 3A |
 | FR-16 | Cost control: reserve through S4 before any paid or LLM call, record every call in `cost_ledger`, stop on refusal | D1, rule 8 | before each paid effect | S4, adapters | cost rows, `RESOURCE.BUDGET_EXHAUSTED` suspend | S4, Agent 16 | 3A |
 | FR-17 | Report: tier mix (A–E ms and share), `earliest_compliant_publish_date`, AI spend, reuse counts, warnings (expiring licences, downgraded intents, no-indemnification stock) | owner and Agent 16 reports; 13 §1.3 | at assembly | results | `payload` report fields | QC report, S7 | 3A |
-| FR-18 | Assemble the output, run the blocking checks of §8.3, persist the manifest | 03 §5.3 | end | all | `agent_08.asset_sourcing.output` | orchestrator | 3A |
+| FR-18 | Assemble the output, run the checks of §8.3 (process-integrity checks and the single gate result `a08.cov.all_shots_resolved`), persist the manifest and the chart-facts documents | 03 §5.3 | end | all | `agent_08.asset_sourcing.output` | orchestrator | 3A |
 | FR-19 | Checkpoint after each unit of work and resume without repeating a paid or ledger effect | 07 §10 | continuous | checkpoint | `checkpoints` rows | orchestrator | 3A |
 | FR-20 | Revision iterations: re-source only the shots whose `content_key`, interval or aspect differs from the previous manifest (the orchestrator's `changed_shot_ids` is a hint that can only add shots), carry over unchanged results from `previous_sourcing_ref`, write new ledger rows only for shots whose asset or interval changed | cost; a revision loop must not re-buy | iteration > 0 | previous manifest | manifest | orchestrator | 3A |
-| FR-21 | `AssetRegistrar` (library code, not a task type): register owner-made items, owner datasets and chart cases — hash, probe, extract `data_end_date`, fingerprint, insert `assets` (human actor) | the owner's material and data must enter the library; no task type exists for intake (REQUIRES REVIEW (Phase 1): intake path in the app, S8/API design) | owner action in the app | files | `assets` rows | FR-04, FR-05 | 3A (3A-BLOCKING for datasets and chart cases) |
+| FR-21 | `AssetRegistrar` (library code, not a task type): register owner-made items, owner datasets and chart cases — hash, probe, extract `data_start_date`, `data_end_date`, bars count, fingerprint, insert `assets` (human actor). **Dataset intake rule (3A_SLICE R20, Q22; `SourceIntakeGuard`):** datasets enter only through the operator tool on the owner's instruction (D5), only from the owner-approved course `data_pack`, read-only; `assets.attributes.source_path_class` records the source class; any other source is rejected; the factory never reads the Trade research folders and never writes to the source | the owner's material and data must enter the library; no task type exists for intake; the Q22 limits are binding | owner action through the operator tool | files | `assets` rows, audit rows | FR-04, FR-05 | 3A (3A-BLOCKING for datasets and chart cases) |
+| FR-22 | Chart facts: for every real (`REAL_HISTORICAL`) chart emit the agent document `agent_08.chart_facts` 1.0.0 (§8.5), computed by code from the dataset window, so that `s06_chart` can verify chart claims (evidence `source_ref = <chart_id>#<fact_id>`) | CCR-004: chart claims cannot be verified before the chart exists | after the chart is rendered | dataset window, chart spec | one document per real chart, referenced in `output_refs` | Agent 06 `s06_chart`, Agent 16 | 3A |
+| FR-23 | Music bed sourcing (3B, after the owner's licensed-source decision D6): answer the plan's `audio_plan.music` request through the `music_search` capability, license and download, register (`AUDIO_MUSIC`), write the `MUSIC_BED` row. Not enabled in 3A (the `music` adapter is fake-only; no bed; `qc.audio.music_bed_offset` is `SKIPPED`) | CCR-007 | 3B, when the production-type version enables the bed | plan `audio_plan`, `music_search` adapter, S4 | music asset, ledger row, manifest `music_beds[]` | Agent 07 (mix in `s07_master`), Agent 10 | 3B |
 
 ### 2.3 Out of scope (explicit)
 - Choosing the shot list, durations or pacing (Agent 09); cutting, rendering, subtitles (Agent 10); thumbnails (Agent 11); writing any on-screen text (Agent 05).
 - Deciding compliance, disclosure or publication (Agent 16, Agent 13); interpreting licence terms (owner, counsel ⚖).
 - Detecting patterns on charts or choosing which historical window teaches a concept: that is owner-curated chart-case content (the private method stays private); Agent 08 only renders what the case specifies.
-- Music and SFX selection (3C, Q-V8); voice (Agent 07); fonts' creation.
+- SFX selection (3C); the music cue plan and ducking (Agent 09) and the music mix (Agent 07); voice (Agent 07); fonts' creation. Music sourcing itself is in scope from 3B (FR-23).
 - Any live or intraday market data, any quote not older than the lag, any chart built from scraped or third-party screenshots.
-- Scheduled library sweeps (expiry, revocation) as a task type: none exists in 24 §3.2; expiry and state are checked at every use (FR-03, FR-11). A sweep would need a CCR (3C).
+- Scheduled library sweeps (expiry, revocation) as a task type: none exists in 24 §3.2; expiry and state are checked at every use (FR-03, FR-11). A sweep would be a new task type added through the register (3C).
 - Uploading, delivering or posting anything (Agent 13; no upload in 3A).
 
 ---
@@ -130,7 +132,7 @@ One task per shot plan iteration. Step-level LLM prompts (`query_plan`, `candida
 ---
 
 ## 4 Internal architecture
-**MVP: 3A (all components with fakes for stock, video and image adapters; live stock only on an owner licence) · 3B (live AI video adapter, near-duplicate calibration) · 3C (image adapter, more libraries, music provenance). Tier 0.**
+**MVP: 3A (all components with fakes for stock, video and image adapters; live stock only on an owner licence) · 3B (live AI video adapter, near-duplicate calibration, music sourcing) · 3C (image adapter, more libraries, SFX provenance). Tier 0.**
 
 ### 4.1 Component view
 ```mermaid
@@ -159,8 +161,12 @@ flowchart TD
     STK -. "queries, candidates" .-> LLM
 
     RE --> LIC["LicenceResolver, LicenceGuard<br/>DisclosureFlags"]
+    CHP --> CF["ChartFactsBuilder<br/>(agent_08.chart_facts)"]
+    RD --> TLP["TimelineLedgerPlanner<br/>(overlay TEMPLATE rows, FONT rows)"]
     LIC --> LED["LedgerWriter<br/>CoverageVerifier"]
-    LED --> OUT["OutputAssembler<br/>ValidationRunner (a08.*)"]
+    TLP --> LED
+    LED --> OUT["OutputAssembler<br/>ValidationRunner (a08.*)<br/>GateRouter"]
+    CF --> OUT
     OUT --> ORCH
 
     STK --> SPA["StockFootagePort<br/>(adapter)"]
@@ -261,7 +267,7 @@ Deterministic dataset for everything else: [evals/agent_08_visual_assets/determi
 - **Data, not instructions.** Shot text, on-screen text and every vendor or owner metadata field are delimited as data; instruction-like content is flagged (`INTENT_IS_INSTRUCTION`, `INJECTION_SUSPECTED`) and never repeated (08 §5.3). The model has no tools.
 - **No invention.** Queries and rationales may not add facts, names, numbers, dates or claims; the model never judges from what it "thinks the footage shows" beyond the supplied metadata.
 - **Rule packs by reference.** `{{rule_pack:rp.youtube_general}}`, `{{rule_pack:rp.finance_sebi_in}}` (when active), `{{rule_pack:rp.tenant_brand_safety}}` (when defined); versions recorded per call. No rule text is pasted in the files.
-- **Refusal mapping** (27 §4.3, per call): `INSUFFICIENT_INPUT` and `OUT_OF_SCOPE` make the affected shots' tier A and B search `NO_ACCEPTABLE_FIT` / `NO_CANDIDATE` and the cascade continues with tiers that need no model; the task fails with `PERMANENT.INSUFFICIENT_INPUT` only if **every** footage shot of the task is refused and no tier C result exists for any of them (a systematic input problem). `RULE_WOULD_BE_BROKEN` is not used. `UNSAFE_CONTENT` marks the shot `UNRESOLVED` with a flag that Agent 16 sees as `NEEDS_HUMAN_REVIEW` input (27 §4.3).
+- **Refusal mapping** (declared item-level mapping, 27 §4.3 and CCR-023; one mapping for both prompts, tested by `TC-24…TC-27`): a refusal of a step call never becomes a `PASS` and never fails the task by itself. For the refused call's shots, tiers A and B are skipped with `NO_CANDIDATE` (query-plan step: no query exists, so no search is made) or `NO_ACCEPTABLE_FIT` (candidate-rank step: no candidate accepted) for `INSUFFICIENT_INPUT`, `OUT_OF_SCOPE` and `CONFLICTING_INSTRUCTIONS`; for `UNSAFE_CONTENT` they are skipped `PROHIBITED_DEPICTION` and the shot is `UNRESOLVED` with `shot_unresolved_reason = UNSAFE_CONTENT` only when no tier-C content exists (otherwise tier C serves it with the downgrade warning). The cascade then continues with the tiers that need no model. Each affected shot emits a validation result `a08.q.refusal` / `a08.r.refusal` with verdict `WARN`, `blocking: false`, and the refusal reason in `message`; `UNSAFE_CONTENT` results are surfaced to Agent 16 through the manifest `refusals[]`. **Task-level failure condition:** the task fails `PERMANENT.INSUFFICIENT_INPUT` only if **every** footage shot of the task is refused and no tier-C result exists for any of them (a systematic input problem). `RULE_WOULD_BE_BROKEN` is not used. The 07 §3.5 deterministic fallback key `agent_08.llm.fallback_on_unavailable` is not used: footage ranking has no deterministic equivalent, so the key stays `false` and an unavailable model is retried or suspended per 07.
 - **Model, temperature, token and cost caps, caching, batch** are config keys `llm.agent_08.asset_sourcing.<step>.*`, never in the files (§11).
 
 ### 5.2 Prompt change rule
@@ -292,6 +298,9 @@ A released prompt is immutable. Any change is `v2` plus a run of the eval gate (
 | D15 | Disclosure **flags** on an asset | code (`DisclosureFlags`); the disclosure **decision** is Agent 16's | YT-06/07 |
 | D16 | Ledger rows (what, interval, usage kind) | code (`LedgerWriter`) | contract-bound |
 | D17 | Whether the task succeeds | code (blocking checks of §8.3, 03 §5.3) | a model never decides success |
+| D18 | Whether the gate passes and where a failed gate routes | code (`GateRouter`), from `shot_unresolved_reason` (§18) | 24 §7.1a registers the routes; a model never routes |
+| D19 | Chart facts of a real chart | code (`ChartFactsBuilder`), from the dataset window | `s06_chart` verifies chart claims against them; a model must not write evidence |
+| D20 | Ledger rows of the overlay track and brand fonts | code (`TimelineLedgerPlanner`, `LedgerRowBuilder`) | 18 §2.2 any-track rule; CCR-031 |
 
 ### 6.2 Why the split
 - Safety and compliance arithmetic (lag, overlays, licences, spend, tenancy) is deterministic, unit-tested and measured by `deterministic_core` (139 cases). A model's wrong answer can cost relevance, never a licence or a compliance rule: `SafetyFloor` forces `REJECT` on any reject-class reason code and `a08.r.*` rejects ordering errors.
@@ -299,7 +308,7 @@ A released prompt is immutable. Any change is `v2` plus a run of the eval gate (
 - Candidate review uses metadata only. Looking at the pixels (preview frames) is not in v1: it would add a vision call per candidate and a new failure mode; it is a 3B option and, if added, a new prompt version with its own cases (candidate_rank README §8). The human final approval (S7) and `qc.watermark.visual` (18 §7.10) are the visual backstops.
 
 ### 6.3 Tier cascade (per shot; the exact rules `TierCascade` implements, tested by `TC-*`)
-Skip reason codes (payload-local enum `tier_skip_reason`): `NOT_APPLICABLE_INTENT`, `NO_CANDIDATE`, `NO_ACCEPTABLE_FIT`, `LICENCE_ABSENT`, `LICENCE_NOT_USABLE`, `TIER_DISABLED`, `PROHIBITED_DEPICTION`, `BUDGET`, `REUSE_LIMIT`, `NO_TEMPLATE_CONTENT`, `TIER_SHARE_LIMIT`, `PROVIDER_REFUSED`, `CANDIDATE_INVALID`. Unresolved reason codes (`unresolved_reason`): `NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`, `DATA_WITHIN_LAG`, `NO_TEMPLATE_CONTENT`, `NO_SOURCE_IN_ANY_TIER`.
+Skip reason codes (GLOSSARY §6.52 `visual_skip_reason`): `NOT_APPLICABLE_INTENT`, `NO_CANDIDATE`, `NO_ACCEPTABLE_FIT`, `LICENCE_ABSENT`, `LICENCE_NOT_USABLE`, `TIER_DISABLED`, `PROHIBITED_DEPICTION`, `BUDGET`, `REUSE_LIMIT`, `NO_TEMPLATE_CONTENT`, `TIER_SHARE_LIMIT`, `PROVIDER_REFUSED`, `CANDIDATE_INVALID`. Unresolved reason codes (GLOSSARY §6.52 `shot_unresolved_reason`): `NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`, `DATA_WITHIN_LAG`, `NO_TEMPLATE_CONTENT`, `NO_SOURCE_IN_ANY_TIER`, `UNSAFE_CONTENT` (a refused depiction with no safe tier-C fallback). Warning codes: GLOSSARY §6.52 `sourcing_warning`. Shot status: `shot_sourcing_status`.
 1. **`CHART`** shot: tiers A and B skipped `NOT_APPLICABLE_INTENT`; tier C only: the chart path (§6.4). Tiers D and E skipped `NOT_APPLICABLE_INTENT`. Failure ⇒ `UNRESOLVED` with the chart reason; **never** a stock or AI substitute.
 2. **`GRAPHIC`** shot: A, B, D, E skipped `NOT_APPLICABLE_INTENT`; tier C needs content (`on_screen_text` or a diagram spec); none ⇒ `UNRESOLVED(NO_TEMPLATE_CONTENT)`.
 3. **`FOOTAGE`** shot, in this order, stopping at the first tier that yields an accepted asset:
@@ -311,17 +320,19 @@ Skip reason codes (payload-local enum `tier_skip_reason`): `NOT_APPLICABLE_INTEN
    - none ⇒ `UNRESOLVED(NO_SOURCE_IN_ANY_TIER)`.
 4. A skip is recorded with the tier and the reason; the list is complete for every tier above the chosen one (check `a08.hier.skip_reasons_recorded`). After a selection, code re-verifies that no higher tier had an accepted candidate (`a08.hier.tier_order`).
 5. `tier_hint` from the script never narrows the search for `FOOTAGE`. The plan's `allowed_tiers` (agent_09 §6.6: hierarchy order, always containing a tier-C fallback; `D_AI_VIDEO` only for shots the plan marked as needing AI video, `E_AI_STILL` only where the plan allowed stills) **bound** the cascade: a tier not in `allowed_tiers` is never used; it is recorded with `NOT_APPLICABLE_INTENT` (graphic and chart shots, A/B) or `TIER_DISABLED` (D/E not planned because disabled or over the planned budget). Tier C for a `FOOTAGE` shot is applicable when `D_AI_VIDEO` is not in `allowed_tiers` (an abstract template does not meet the intent of a shot the plan marked as needing AI video; then C is recorded `NO_TEMPLATE_CONTENT`); it renders the shot's text card when `on_screen_text` exists, else the plan's `fallback_template_key` abstract brand motion template, which adds no words.
-6. Per-shot work is independent; the order of shots never changes a result (no cross-shot state except the reuse cap, the tier-E share and the AI caps, which are applied in shot order of the plan and stored in the checkpoint).
+6. A step refusal (§5.1) changes the skip reasons of tiers A and B as stated there and nothing else; `UNSAFE_CONTENT` with no tier-C content gives `UNRESOLVED(UNSAFE_CONTENT)` (`TC-24`), a plain `prohibited_depiction` with no tier-C content still gives `NO_SOURCE_IN_ANY_TIER` (`TC-10`).
+7. Per-shot work is independent; the order of shots never changes a result (no cross-shot state except the reuse cap, the tier-E share and the AI caps, which are applied in shot order of the plan and stored in the checkpoint).
 
 ### 6.4 Chart path (D3–D6; `intent_kind = CHART`)
-1. **Request.** From the script's `chart_requests[]` (Agent 05 §8.2): `chart_id`, `chart_kind` (`REAL_HISTORICAL` or `SCHEMATIC`), `instrument` (null when `SCHEMATIC`), `timeframe` (`1D`, `1W`, `1M`), `indicators[]`, `pattern_concept_id`, `outcome_shown` (`WORKED`, `FAILED`, `BOTH`, `NOT_APPLICABLE`), `must_be_historical` (always true).
+1. **Request.** From the script's `chart_requests[]` (Agent 05 §8.2): `chart_id`, `chart_kind` (GLOSSARY §6.52 `chart_data_kind`: `REAL_HISTORICAL` or `SCHEMATIC`), `instrument` (null when `SCHEMATIC`), `timeframe` (`1D`, `1W`, `1M`), `indicators[]`, `pattern_concept_id`, `outcome_shown` (`WORKED`, `FAILED`, `BOTH`, `NOT_APPLICABLE`), `must_be_historical` (always true).
 2. **Chart case.** `REAL_HISTORICAL`: a case in the tenant's chart-case library (an owner-curated JSON document stored as an `assets` row of `kind = DOCUMENT`, registered by `AssetRegistrar`; stored fields: `case_id`, `instrument`, `timeframe`, `dataset_asset_id`, `window {first_bar_index, last_bar_index}` as **bar indexes**, `indicators[]`, `pattern_concept_ids[]`, `outcome`, `annotations[]` (allowed kinds below), `method_content` flag, `release_approval_id` when method content, `template_id`). Matching key: `(instrument, timeframe, pattern_concept_id, outcome ∈ {outcome_shown, BOTH}, indicators ⊆ case.indicators)`; several matches ⇒ the least recently used for the channel, then the lowest `case_id` (deterministic). None ⇒ `UNRESOLVED(NO_CHART_CASE)`. The dataset must exist (`NO_DATASET`) and its SHA-256 must match the registered hash. **No case is generated, edited or "improved" by Agent 08**; the owner's private method is outside this repository and this agent.
-3. **Method content (FIN-R12).** A case with `method_content = true` needs an `APPROVED` `KNOWLEDGE_RELEASE` approval row of the same org covering it (Agent 08 reads the state only) and the label required by the script's `method_label`; otherwise `UNRESOLVED(METHOD_NOT_RELEASED)`.
-4. **Data age (FIN-R9, IN-02).** `data_end_date` = the **last calendar date covered by the last bar of the window** (a daily bar: its date; a weekly bar: its start + 6 days unless the dataset carries a period end; a monthly bar: its start + 30 days unless it carries a period end; the largest possible span, so the guard errs on the safe side). `age_days = sourcing_day − data_end_date`. `OLDER_THAN_LAG` iff `age_days ≥ lag_days` (config `compliance.finance_sebi_in.price_data_lag_days`, 30 per IN-02, never below the platform minimum, config invalid otherwise). A future date is invalid input. A missing date is `UNKNOWN`, treated as within the lag. Only `OLDER_THAN_LAG` charts are rendered. The check is also re-run by `qc.visual.chart_data_age` and Agent 16 at delivery/publish time (age only grows). The manifest carries `data_end_date`, `earliest_compliant_publish_date = data_end_date + lag_days` (calendar days assumed; whether the circular counts calendar or trading days is REQUIRES REVIEW (Phase 1) ⚖, 13 §1.3) and the overall maximum for the report (3A: the owner uploads by hand). Calendar arithmetic is in UTC dates; the display zone is IST (GLOSSARY §4).
+3. **Method content (FIN-R12).** A case with `method_content = true` needs an `APPROVED` `KNOWLEDGE_RELEASE` approval row of the same org with `subject_kind = asset`, `subject_id` = the case asset's UUID and `subject_sha256` = the SHA-256 of the case document (04 §5.16, CCR-012; Agent 08 reads the state only; a changed case document no longer matches) and the label required by the script's `method_label`; otherwise `UNRESOLVED(METHOD_NOT_RELEASED)`.
+4. **Data age (FIN-R9, IN-02).** `data_end_date` = the **last calendar date covered by the last bar of the window** (a daily bar: its date; a weekly bar: its start + 6 days unless the dataset carries a period end; a monthly bar: its start + 30 days unless it carries a period end; the largest possible span, so the guard errs on the safe side). `age_days = sourcing_day − data_end_date`. `OLDER_THAN_LAG` iff `age_days ≥ lag_days` (config `compliance.finance_sebi_in.price_data_lag_days`, 30 per IN-02, never below the platform minimum, config invalid otherwise). A future date is invalid input. A missing date is `UNKNOWN`, treated as within the lag. Only `OLDER_THAN_LAG` charts are rendered. The check is also re-run by `qc.visual.chart_data_age` and Agent 16 at delivery/publish time (age only grows). The manifest carries `data_end_date`, `earliest_compliant_publish_date = data_end_date + lag_days` (calendar days assumed; whether the circular counts calendar or trading days is REQUIRES REVIEW (Phase 1) ⚖, 13 §1.3) and the overall maximum for the report (3A: the owner uploads by hand). Upstream, a `REAL_HISTORICAL` request reaches Agent 06 at `s06_claims` as a constraint (`chart_data_refs` item with `data_age_vs_lag = OLDER_THAN_LAG`, `data_age_basis = CONSTRAINT`, CCR-004); this step is where the constraint is met or the shot fails `DATA_WITHIN_LAG`, and `qc.visual.chart_data_age` and `s16_comp` re-check the measured end date (the stricter value wins). Calendar arithmetic is in UTC dates; the display zone is IST (GLOSSARY §4).
 5. **Chart content (FIN-R13, FIN-R1/R2/R3).** The renderer draws the window's bars, the indicators of the case and the case's annotations. **Allowed annotation kinds:** `MARK_BAR` (a marker on a bar inside the window), `HLINE_THROUGH_BARS` (a horizontal line that starts and ends inside the window, never extended to the right), `SHADE_RANGE` (a shaded bar range inside the window), `LABEL` (text from the script's `on_screen_text` allowlist for this scene or from the versioned template label set, e.g. "Historical example"; anchored on a bar inside the window). Everything else — forecast or projection kinds, arrows beyond the last bar, extended lines, free text, price targets, "zones" worded as advice, any element to the right of the last bar — is rejected (`a08.chart.annotations`, blocking). The chart title is built from the instrument, the timeframe and the first and last bar dates; it never contains direction words. Levels shown are located on historical bars only and are labelled by the template as historical.
-6. **Schematic charts** (`SCHEMATIC`, `instrument = null`): the points come from an owner-given schematic case; Agent 08 draws only those points; the template adds the label "Illustrative example, not real data" (wording owned by 13, REQUIRES REVIEW (Phase 1)); `data_age_vs_lag` is not applicable; the asset records `data_kind = SCHEMATIC`.
+6. **Schematic charts** (`SCHEMATIC`, `instrument = null`): the points come from an owner-given schematic case; Agent 08 draws only those points; the template adds the label "Illustrative example, not real data" (wording owned by 13, REQUIRES REVIEW (Phase 1)); `data_age_vs_lag` is `null` (a closed set, CCR-042); the asset records `data_kind = SCHEMATIC`; no chart-facts document is emitted.
 7. **Rendering.** Deterministic (§3); one image per requested aspect (16:9 at least the `qc.video.min_*` floor; 9:16 laid out for vertical); a **reveal sequence** of `len(change_events_ms) + 1` stills (Agent 09 gives the reveal steps of a chart shot as `change_events_ms`; each still shows progressively more bars, left to right, never beyond the last bar of the window), so that the change events are realised later by Agent 10 from stills and no video is encoded here. Brand colours and fonts from the brand kit; text from the allowlists only.
-8. **Tier and source type.** The rendered chart is `visual_source_tier = C_CODE_MOTION`, `source_type = CODE_GENERATED` (it matches Agent 05 Q-08 and 3A_SLICE R2; the dataset itself is an owner-made `DOCUMENT` asset, `OWNER_MADE`, linked in the asset's attributes). 18 §2.1 lists "real charts rendered from real historical data" under rank 1 as well; this blueprint classifies by who produced the pixels and files the clarification as a contract request (the tier-E rule and the hierarchy order are unaffected).
+8. **Asset, tier and source type (decided, CCR-045).** The rendered chart is an `assets` row with `kind = CHART`, `visual_source_tier = C_CODE_MOTION` and `source_type = CODE_GENERATED` (18 §2.1 is aligned); the reveal stills are `IMAGE` assets of the same tier; the dataset itself is an owner-made `DOCUMENT` asset (`OWNER_MADE`), linked in the asset's `attributes` (`dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`). The tier-E rule and the hierarchy order are unaffected.
+9. **Chart facts (CCR-004; `ChartFactsBuilder`, FR-22).** For every `REAL_HISTORICAL` chart the code computes, from the dataset window only, the facts `WINDOW_RANGE` (bar count and the first and last bar dates), `WINDOW_HIGH` and `WINDOW_LOW` (the value and the bar date; on equal values the earliest bar), and `CLOSE_CHANGE` (first and last close and the percentage change rounded half up to two decimals), in this order as `f01…f04`, each as a fixed-template English statement of historical numbers (no direction word, no forecast, no method content). They are written as the agent document `agent_08.chart_facts` 1.0.0 (§8.5); the evidence reference is `<chart_id>#<fact_id>`. No model writes a fact. `SCHEMATIC` charts emit none.
 
 ### 6.5 Deterministic candidate filters (D8; applied before any LLM call, in this order; each failure is a recorded drop reason)
 1. Asset or vendor item belongs to this tenant's library or the vendor result set (never another tenant's).
@@ -335,7 +346,7 @@ Skip reason codes (payload-local enum `tier_skip_reason`): `NOT_APPLICABLE_INTEN
 9. At most `assets.max_candidates_per_shot` candidates survive to ranking (best by the deterministic keyword score, ties by id).
 
 ### 6.6 Licence guard (D11; mirrors the insert guard of 04 §5.15 and goes further, before any spend)
-`usable = true` only if: the licence `state` is `ACTIVE` (or `EXPIRING`, with a warning); `expires_at` is after the sourcing time; if the licence is platform-held (`org_id IS NULL`) and the tenant is not the platform-owner org then `third_party_permission = PERMITTED` (`UNKNOWN` and `NOT_PERMITTED` block, §1C.8); and, for a monetized destination, `covers_monetized_youtube = true` (NULL blocks: ADR-009, PR-06d/e NOT CONFIRMED). `indemnification` false or NULL on stock yields the warning `NO_INDEMNIFICATION` (free libraries, §1A.1b). **3A treats the destination as monetized YouTube** (18 §2.2 b; 3A_SLICE R3) although nothing is uploaded; the report states that publishing Storyblocks-class footage to a monetized channel stays blocked until PR-06d/e is answered in writing.
+`usable = true` only if: the licence `state` is `ACTIVE` (or `EXPIRING`, with a warning); `expires_at` is after the sourcing time; if the licence is platform-held (`org_id IS NULL`) and the tenant is not the platform-owner org then `third_party_permission = PERMITTED` (`UNKNOWN` and `NOT_PERMITTED` block, §1C.8); and, for a monetized destination, `covers_monetized_youtube = true` (NULL blocks: ADR-009, PR-06d/e NOT CONFIRMED). `indemnification` false or NULL on stock yields the warning `NO_INDEMNIFICATION` (free libraries, §1A.1b). The destination is `licence_destination`, derived by the orchestrator from `jobs.monetized_destination` (04 §5.3, CCR-028); **3A sets it to monetized YouTube** for every job (18 §2.2 b; 3A_SLICE R3) although nothing is uploaded, and the DB insert guard reads the same column; the report states that publishing Storyblocks-class footage to a monetized channel stays blocked until PR-06d/e is answered in writing.
 
 ### 6.7 AI B-roll gate (D13; `AiBudgetGate`)
 Tier D is tried for a shot only if **all** hold: job `ai_video_allowed = true`; adapter configured; `D_AI_VIDEO` in the shot's `allowed_tiers`; no prohibited depiction (a query-plan `NO_SAFE_QUERY` or a plan `depiction.realistic_event_depiction = true`: a realistic scene of an event is never AI-generated); the shot's required clip length ≤ `assets.ai_video.max_clip_ms`; clips used < `assets.ai_video.max_clips_per_video`; remaining AI milliseconds ≥ shot length and remaining AI micros ≥ the estimate (caps `assets.ai_video.max_ms_per_video`, `assets.ai_video.max_cost_micros_per_video`; **no default, unset = 0 = disabled**; values are owner-set, 09, REQUIRES REVIEW (Phase 1)). A local cap reached skips the tier (`BUDGET`) and the cascade continues. A **refusal by S4** (per-video or pilot budget, 07 `RESOURCE.BUDGET_EXHAUSTED`) is different: the task suspends `AWAITING_BUDGET`; Agent 08 never continues past a refused reservation. A generation request is made once per `media.generate` idempotency key; a provider failure is not retried automatically beyond the 07 policy for `TEMPORARY.*` codes and is never repeated with a changed prompt in the same attempt (cost control). Output that depicts a real person is rejected (`REAL_PERSON_IN_AI_OUTPUT`); AI assets carry `is_realistic_synthetic` and `depicts_real_person` (false) and `usage_kind = AI_OUTPUT`.
@@ -347,7 +358,7 @@ For each candidate E shot: `(planned E ms + this shot's ms) × 1000 < limit × t
 Order: (1) exact key hit — same `content_sha256`, or same chart `spec_sha256`, or same `(vendor_item_id, licence)` — within the tenant; (2) near-duplicate — Hamming distance between 64-bit perceptual hashes ≤ `assets.reuse.near_duplicate_max_distance` (value REQUIRES REVIEW (Phase 1): calibrated in 3B; no default). A hit is reusable only if `status = ACTIVE`, unexpired, permitted for the channel, licence still usable (§6.6) and under the reuse cap; a reuse writes a **new ledger row** for this job and shot; a near-duplicate of a different file is reported (`near_duplicate_flags`) and reused only when the new candidate is a stock item (it avoids buying a clip that looks like one the tenant already owns). Matching never leaves the tenant (rule 9; `RE-02`, `TG-08`).
 
 ### 6.10 Fingerprints (FR-12; GLOSSARY §6.45 `fingerprint_algo`)
-`SHA256`: SHA-256 of the file bytes, stored in `assets.content_sha256` and as an `asset_fingerprints` row. `PERCEPTUAL_FRAME`: for each sampled frame (config `assets.fingerprint.frames_per_clip`, evenly spaced; one frame for stills), convert to luma, resize to 9×8, and set bit `1` when a pixel is darker than its right neighbour (a 64-bit difference hash, row-major, most significant bit first); stored as `value bytea` with `frame_ms`. Distance = Hamming distance. `AUDIO` is not used by Agent 08 (music, 3C). The algorithm version is recorded with each row (pending CCR: `asset_fingerprints.algo_version`).
+`SHA256`: SHA-256 of the file bytes, stored in `assets.content_sha256` and as an `asset_fingerprints` row. `PERCEPTUAL_FRAME`: for each sampled frame (config `assets.fingerprint.frames_per_clip`, evenly spaced; one frame for stills), convert to luma, resize to 9×8, and set bit `1` when a pixel is darker than its right neighbour (a 64-bit difference hash, row-major, most significant bit first); stored as `value bytea` with `frame_ms`. Distance = Hamming distance. `AUDIO` is not used by Agent 08 (music, 3C). The algorithm version is recorded with each row in `asset_fingerprints.algo_version smallint` (CCR-032; the first definition is version 1).
 
 ---
 
@@ -369,6 +380,7 @@ The envelope fields (`org_id`, `job_id`, `task_id`, `project_id`, `channel_id`, 
     "script_ref",
     "aspect_ratios",
     "destination",
+    "script_stage_id",
     "channel_category",
     "active_rule_packs",
     "ai_video_allowed",
@@ -409,6 +421,7 @@ The envelope fields (`org_id`, `job_id`, `task_id`, `project_id`, `channel_id`, 
     },
     "aspect_ratios": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["16:9", "9:16", "1:1", "4:5"]}},
     "destination": {"enum": ["MONETIZED_YOUTUBE", "NON_MONETIZED"]},
+    "script_stage_id": {"type": "string", "pattern": "^[a-z0-9_]{2,32}$"},
     "channel_category": {"type": "string", "maxLength": 32},
     "active_rule_packs": {"type": "array", "items": {"type": "string", "pattern": "^rp\\.[a-z_]+$"}},
     "ai_video_allowed": {"type": "boolean"},
@@ -439,20 +452,286 @@ The envelope fields (`org_id`, `job_id`, `task_id`, `project_id`, `channel_id`, 
 
 Rules (checked by `a08.pre.*`):
 1. `shot_plan_ref.sha256` and `script_ref.sha256` are verified on read (03 §8.4); a mismatch is `PERMANENT.INPUT_INVALID`.
-2. `destination`: `MONETIZED_YOUTUBE` or `NON_MONETIZED` (payload-local value set). **3A default `MONETIZED_YOUTUBE`** even though nothing is uploaded (18 §2.2 b, 3A_SLICE R3); the orchestrator sets it from the production type and the channel, never the model.
+2. `destination` (GLOSSARY §6.52 `licence_destination`: `MONETIZED_YOUTUBE` or `NON_MONETIZED`) mirrors `jobs.monetized_destination` (04 §5.3, CCR-028; `true` = `MONETIZED_YOUTUBE`). **3A default `MONETIZED_YOUTUBE`** even though nothing is uploaded (18 §2.2 b, 3A_SLICE R3); the orchestrator sets the column at job creation from the production type and the channel, never the model; a payload value that disagrees with the column is `PERMANENT.INPUT_INVALID`.
+2b. `script_stage_id` is the stage id of the script stage of this job's production type (`s05_script` or `s05_shorts`, the alternative gate target of `s08_assets`, 24 §7.1a/§7.2a). It is used only as the `remedy_stage_id` of a failed gate whose cause is a chart that must change (`DATA_WITHIN_LAG`, §18); the orchestrator's input builder supplies it from the stage record.
 3. `aspect_ratios`: one entry per output aspect the shot plan covers (`["16:9"]` for the long-form job, `["9:16"]` for the Shorts child job; 3A_SLICE R11). Every shot is sourced for every listed aspect.
 4. `ai_video_allowed` and `stills_allowed` are per-job switches set by the owner's job settings, default `false`; the amounts come from budgets (S4) and config, never from this payload.
 5. `iteration > 0` requires `previous_sourcing_ref`; a shot is re-sourced when its `content_key`, interval or aspect differs from the previous manifest, or when it is listed in `changed_shot_ids` (an optional orchestrator hint; `[]` adds nothing) (FR-20).
-6. The shot list read from the shot plan is mapped by `ShotPlanReader` into the internal `ShotRequirement` model: `shot_id`, `scene_id`, `start_ms`, `end_ms`, `aspect_ratio`, `tier_hint`, `intent_kind`, `intent_text`, `on_screen_text[]`, `chart_id or null`, `allowed_tiers`, `fallback_template_key`, `content_key`, `allows_hold` (= `held` is non-null), `vertical_anchor`, `realistic_event_depiction`, `change_events_ms`. **The mapper is the only code that touches Agent 09's field names (anti-corruption layer); it reads the plan's `views.agent_08_shots[]` and the shot objects defined in agent_09 §8.1–§8.2 (`shot_id`, `scene_id`, `start_ms`, `end_ms`, `duration_ms`, `intent_kind`, `intent_text`, `on_screen_text[]` resolved from `text_refs`, `allowed_tiers`, `tier_hint`, `fallback_template_key`, `chart_id`, `content_key`, `held`, `vertical {subject_anchor}`, `depiction {realistic_event_depiction, schematic}`, `change_events_ms`, `parent_shot_id`); alignment is confirmed at integration (§15.3). Fields of Agent 05 used: `scenes[].visual_intent`, `scenes[].on_screen_text`, `scenes[].chart_id`, `scenes[].method_label`, `chart_requests[]`.
+6. The shot list and the overlay track read from the shot plan are mapped by `ShotPlanReader` into the internal `ShotRequirement` and `OverlayRequirement` models. `ShotRequirement`: `shot_id`, `scene_id`, `start_ms`, `end_ms`, `aspect_ratio`, `tier_hint`, `intent_kind`, `intent_text`, `on_screen_text[]`, `chart_id or null`, `allowed_tiers`, `fallback_template_key`, `content_key`, `allows_hold` (= `held` is non-null), `vertical_anchor`, `realistic_event_depiction`, `change_events_ms`; `OverlayRequirement`: `overlay_id`, `kind`, `start_ms`, `end_ms`, `template_ref`. **The mapper is the only code that touches Agent 09's field names (anti-corruption layer); it reads the plan's `views.agent_08_shots[]` and the shot objects defined in agent_09 §8.1–§8.2 (`shot_id`, `scene_id`, `start_ms`, `end_ms`, `duration_ms`, `intent_kind`, `intent_text`, `on_screen_text[]` resolved from `text_refs`, `allowed_tiers`, `tier_hint`, `fallback_template_key`, `chart_id`, `content_key`, `held`, `vertical {subject_anchor}`, `depiction {realistic_event_depiction, schematic}`, `change_events_ms`, `parent_shot_id`; and, from `overlays[]`, `overlay_id` (`ov01…`), `kind` (`BRAND_STING`, `LOWER_THIRD`, `CAPTION_CARD`, `CHAPTER_CARD`, `DISCLAIMER_CARD`, `END_SCREEN`), `start_ms`, `end_ms`, `template_ref`); the field list consumed here is stated in the "Agent 08" row of agent_09 §15 and checked by contract test C-02 (§15.3). Fields of Agent 05 used: `scenes[].visual_intent`, `scenes[].on_screen_text`, `scenes[].chart_id`, `scenes[].method_label`, `chart_requests[]`.
 
 ### 7.2 `agent_08.asset_sourcing.query_plan.input` 1.0.0 (LLM step 1)
-Defined in the prompt file (`prompts/agent_08_visual_assets/query_plan.v1.md`, Inputs and the dataset validator): `batch_id`, `language`, `channel_category`, `banned_subjects[]`, `limits {max_stock_queries, max_owner_queries, max_query_chars}`, `shots[]` (at most 20 per call, `intent_kind` always `FOOTAGE`). The step code builds it from `ShotRequirement`s; the model never sees `org_id`, storage paths or database IDs.
+Step input schema (GLOSSARY §2.4: `<task_type>.<step>.input`). The step code builds it from `ShotRequirement`s; the model never sees `org_id`, storage paths or database IDs. At most 20 shots per call, `intent_kind` always `FOOTAGE`. The same schema text is Appendix A of `prompts/agent_08_visual_assets/query_plan.v1.md`; contract test C-04 compares the two, and every case of the `query_plan` eval set validates against it.
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:agent_08.asset_sourcing.query_plan.input:1.0.0",
+  "title": "agent_08.asset_sourcing query_plan step input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "batch_id",
+    "language",
+    "channel_category",
+    "banned_subjects",
+    "limits",
+    "shots"
+  ],
+  "properties": {
+    "batch_id": {
+      "type": "string",
+      "pattern": "^b[0-9]{2}$"
+    },
+    "language": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$"
+    },
+    "channel_category": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "banned_subjects": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_stock_queries",
+        "max_owner_queries",
+        "max_query_chars"
+      ],
+      "properties": {
+        "max_stock_queries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "max_owner_queries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "max_query_chars": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 200
+        }
+      }
+    },
+    "shots": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "shot_id",
+          "intent_kind",
+          "intent_text",
+          "on_screen_text",
+          "aspect_ratio",
+          "duration_ms"
+        ],
+        "properties": {
+          "shot_id": {
+            "type": "string",
+            "pattern": "^sh[0-9]{2,4}$"
+          },
+          "intent_kind": {
+            "const": "FOOTAGE"
+          },
+          "intent_text": {
+            "type": "string",
+            "maxLength": 600
+          },
+          "on_screen_text": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:5"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600000
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ### 7.3 `agent_08.asset_sourcing.candidate_rank.input` 1.0.0 (LLM step 2)
-Defined in the prompt file (`prompts/agent_08_visual_assets/candidate_rank.v1.md`): `shot {shot_id, intent_text, aspect_ratio, duration_ms}`, `channel_category`, `active_rule_packs[]`, `avoid_subjects[]`, `candidates[]` (at most 12; per-call aliases `c01…`; metadata only: title, tags, description, duration, aspect, `release_record_present`, `reused_recently`). Aliases are mapped back by code.
+Step input schema. Candidates are metadata only: `{candidate_id, source_tier, title, tags[], description, duration_ms, aspect_ratio, release_record_present, reused_recently}` (at most 12; per-call aliases `c01…` mapped back by code). The same schema text is Appendix A of `prompts/agent_08_visual_assets/candidate_rank.v1.md`.
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:agent_08.asset_sourcing.candidate_rank.input:1.0.0",
+  "title": "agent_08.asset_sourcing candidate_rank step input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "shot",
+    "channel_category",
+    "active_rule_packs",
+    "avoid_subjects",
+    "candidates"
+  ],
+  "properties": {
+    "shot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "shot_id",
+        "intent_text",
+        "aspect_ratio",
+        "duration_ms"
+      ],
+      "properties": {
+        "shot_id": {
+          "type": "string",
+          "pattern": "^sh[0-9]{2,4}$"
+        },
+        "intent_text": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "aspect_ratio": {
+          "enum": [
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:5"
+          ]
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000
+        }
+      }
+    },
+    "channel_category": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32
+    },
+    "active_rule_packs": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^rp\\.[a-z_]+$"
+      }
+    },
+    "avoid_subjects": {
+      "type": "array",
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "IDENTIFIABLE_PERSON",
+          "BRAND_OR_LOGO",
+          "READABLE_TEXT",
+          "REAL_EVENT_OR_NEWS",
+          "MARKET_DATA_SCREEN",
+          "MINORS"
+        ]
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "source_tier",
+          "title",
+          "tags",
+          "description",
+          "duration_ms",
+          "aspect_ratio",
+          "release_record_present",
+          "reused_recently"
+        ],
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "pattern": "^c[0-9]{2}$"
+          },
+          "source_tier": {
+            "enum": [
+              "A_OWNER_REAL",
+              "B_LICENSED_STOCK"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "aspect_ratio": {
+            "enum": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:5"
+            ]
+          },
+          "release_record_present": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "reused_recently": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 ### 7.4 Validation order (every attempt)
-Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, input and every URI (`PERMANENT.TENANT_MISMATCH` / `PERMANENT.CROSS_TENANT_REF`) → payload schema above → hash checks → config checks (lag at or above the platform minimum; enabled adapters have a usable licence row and an S4 budget row; prompt files present with matching hashes) → self-grant licence rows present (FR-03) → S4 pre-check of the task's `resource_budget`.
+Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, input and every URI (`PERMANENT.TENANT_MISMATCH` / `PERMANENT.CROSS_TENANT_REF`) → payload schema above → `destination` equals `jobs.monetized_destination` → hash checks → config checks (lag at or above the platform minimum; enabled adapters have a usable licence row and an S4 budget row; prompt files present with matching hashes) → self-grant licence rows, package template assets for the plan's overlays and brand-kit font assets present (FR-03) → S4 pre-check of the task's `resource_budget`.
 
 ---
 
@@ -462,14 +741,14 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
 ### 8.1 Envelope mapping (`amw.task_output` 1.0.0, 03 §5)
 | Field | Value |
 |---|---|
-| `status` | `SUCCEEDED` only when every blocking validation result is `PASS` and `unresolved_shot_ids = []`; `FAILED` with an `amw.error` otherwise (§18); `SUSPENDED` on a budget or drain wait |
+| `status` | `SUCCEEDED` when every process-integrity result is `PASS` (03 §5.3 rule 2) — including when the gate result `a08.cov.all_shots_resolved` is `FAIL` (gate failed, `gate_verdict = FAILED`, 03 §5.3 rule 4, CCR-001; the orchestrator then takes the `on_fail` route `REVISE → s09_plan`, alt `s05_script`/`s05_shorts`); `FAILED` with an `amw.error` otherwise (§18), notably owner-material gaps (`PERMANENT.MISSING_DEPENDENCY`); `SUSPENDED` on a budget or drain wait |
 | `payload` | `payload_schema = agent_08.asset_sourcing.output`, `payload_schema_version = 1.0.0`; `data` inline when ≤ `contracts.inline_payload_max_bytes`, else `data_ref` + `data_sha256` |
-| `output_refs` | the manifest blob (`kind = DATA`), each new asset file (`kind = VIDEO` or `IMAGE`, with `entity_ref` = the `amw-entity://…/assets/ast_…` URI), chart reveal sequences (`IMAGE`), the report blob (`kind = REPORT`); every entry with SHA-256 and size (`maxItems` 512: a plan with more distinct assets is split into the manifest plus an asset index blob, REQUIRES REVIEW (Phase 1): size) |
+| `output_refs` | the manifest blob (`kind = DATA`), each new asset file (`kind = VIDEO` or `IMAGE`, with `entity_ref` = the `amw-entity://…/assets/ast_…` URI), chart reveal sequences (`IMAGE`), one `agent_08.chart_facts` document per real chart (`kind = DATA`), the report blob (`kind = REPORT`); every entry with SHA-256 and size (`maxItems` 512: a plan with more distinct assets is split into the manifest plus an asset index blob, REQUIRES REVIEW (Phase 1): size) |
 | `quality_score` | `null` (Agent 16 scores) |
 | `confidence` | `null` |
-| `validation_results` | §8.3 |
+| `validation_results` | §8.3; the single gate result carries `gate: true` and, when it fails, `remedy_stage_id` |
 | `resource_usage` | tokens, calls, cost micros, `cost_ledger` entry IDs of every LLM, stock and AI call |
-| `next_action` / `downstream_agent` | advisory: `agent_10` render (`s10_render`); the orchestrator follows the registry graph |
+| `next_action` / `downstream_agent` | advisory: `{type: CONTINUE}`; when the gate failed, `reason = "gate FAILED: a08.cov.all_shots_resolved"` (03 §5.3 rule 4); `downstream_agent` `agent_06` (`s06_chart`) then `agent_10` render (`s10_render`); the orchestrator follows the registry graph |
 
 ### 8.2 `agent_08.asset_sourcing.output` 1.0.0
 ```json
@@ -481,7 +760,12 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
   "additionalProperties": false,
   "required": [
     "iteration",
+    "gate_verdict",
     "shots",
+    "overlays",
+    "fonts",
+    "music_beds",
+    "chart_facts",
     "tier_mix",
     "ai_broll",
     "cost_summary",
@@ -494,6 +778,7 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
   ],
   "properties": {
     "iteration": {"type": "integer", "minimum": 0},
+    "gate_verdict": {"enum": ["PASSED", "FAILED"]},
     "shots": {
       "type": "array",
       "maxItems": 1000,
@@ -534,7 +819,7 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
           "start_ms": {"type": "integer", "minimum": 0},
           "end_ms": {"type": "integer", "minimum": 1},
           "aspect_ratio": {"enum": ["16:9", "9:16", "1:1", "4:5"]},
-          "intent_kind": {"enum": ["FOOTAGE", "GRAPHIC", "CHART"]},
+          "intent_kind": {"enum": ["FOOTAGE", "CHART", "DIAGRAM", "TEXT_CARD"]},
           "status": {"enum": ["SOURCED", "REUSED", "UNRESOLVED"]},
           "tier": {"oneOf": [{"type": "null"}, {"enum": ["A_OWNER_REAL", "B_LICENSED_STOCK", "C_CODE_MOTION", "D_AI_VIDEO", "E_AI_STILL"]}]},
           "asset_id": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}]},
@@ -647,7 +932,7 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
             }
           },
           "unresolved_reason": {
-            "oneOf": [{"type": "null"}, {"enum": ["NO_DATASET", "NO_CHART_CASE", "METHOD_NOT_RELEASED", "DATA_WITHIN_LAG", "NO_TEMPLATE_CONTENT", "NO_SOURCE_IN_ANY_TIER"]}]
+            "oneOf": [{"type": "null"}, {"enum": ["NO_DATASET", "NO_CHART_CASE", "METHOD_NOT_RELEASED", "DATA_WITHIN_LAG", "NO_TEMPLATE_CONTENT", "NO_SOURCE_IN_ANY_TIER", "UNSAFE_CONTENT"]}]
           },
           "reuse": {
             "oneOf": [
@@ -691,11 +976,11 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
                 "properties": {
                   "chart_id": {"type": "string", "pattern": "^chart_[0-9a-z_]{1,32}$"},
                   "data_kind": {"enum": ["REAL_HISTORICAL", "SCHEMATIC"]},
-                  "instrument": {"type": ["string", "null"], "maxLength": 100},
+                  "instrument": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"}]},
                   "timeframe": {"enum": ["1D", "1W", "1M"]},
                   "data_start_date": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}]},
                   "data_end_date": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}]},
-                  "data_age_vs_lag": {"enum": ["OLDER_THAN_LAG", "WITHIN_LAG", "UNKNOWN", "NOT_APPLICABLE"]},
+                  "data_age_vs_lag": {"oneOf": [{"type": "null"}, {"enum": ["OLDER_THAN_LAG", "WITHIN_LAG", "UNKNOWN"]}]},
                   "earliest_compliant_publish_date": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}]},
                   "dataset_asset_id": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}]},
                   "dataset_sha256": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{64}$"}]},
@@ -728,6 +1013,79 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
               }
             ]
           }
+        }
+      }
+    },
+    "overlays": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["overlay_id", "kind", "start_ms", "end_ms", "template_asset_id", "source_type", "licence_id", "ledger_entry_ids", "usage_kind"],
+        "properties": {
+          "overlay_id": {"type": "string", "pattern": "^ov[0-9]{2,4}$"},
+          "kind": {"enum": ["BRAND_STING", "LOWER_THIRD", "CAPTION_CARD", "CHAPTER_CARD", "DISCLAIMER_CARD", "END_SCREEN"]},
+          "start_ms": {"type": "integer", "minimum": 0},
+          "end_ms": {"type": "integer", "minimum": 1},
+          "template_asset_id": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+          "source_type": {"enum": ["OWNER_MADE", "CODE_GENERATED"]},
+          "licence_id": {"type": "string", "pattern": "^lic_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+          "ledger_entry_ids": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^lcu_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}},
+          "usage_kind": {"const": "TEMPLATE"}
+        }
+      }
+    },
+    "fonts": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "licence_id", "ledger_entry_ids", "usage_kind", "used_from_ms", "used_to_ms"],
+        "properties": {
+          "asset_id": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+          "licence_id": {"type": "string", "pattern": "^lic_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+          "ledger_entry_ids": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^lcu_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}},
+          "usage_kind": {"const": "FONT"},
+          "used_from_ms": {"const": 0},
+          "used_to_ms": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "music_beds": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "licence_id", "ledger_entry_ids", "usage_kind", "used_from_ms", "used_to_ms"],
+        "properties": {
+          "asset_id": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+          "licence_id": {"type": "string", "pattern": "^lic_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+          "ledger_entry_ids": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"type": "string", "pattern": "^lcu_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"}},
+          "usage_kind": {"const": "MUSIC_BED"},
+          "used_from_ms": {"type": "integer", "minimum": 0},
+          "used_to_ms": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "chart_facts": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["chart_id", "document_uri", "document_sha256", "fact_count"],
+        "properties": {
+          "chart_id": {"type": "string", "pattern": "^chart_[0-9a-z_]{1,32}$"},
+          "document_uri": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^(amw-blob://(org_[0-9a-f-]{36}|platform)/[A-Za-z0-9._/-]+|amw-entity://(org_[0-9a-f-]{36}|platform)/[a-z_]+/[a-z]{3}_[0-9a-f-]{36})$"
+          },
+          "document_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "fact_count": {"type": "integer", "minimum": 1, "maximum": 20}
         }
       }
     },
@@ -803,10 +1161,12 @@ Envelope and Task Input schema (03 §7) → `org_id` agreement across envelope, 
     "licence_summary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ledger_rows_written", "whole_render_rows", "warnings"],
+      "required": ["ledger_rows_written", "overlay_rows", "font_rows", "music_rows", "warnings"],
       "properties": {
         "ledger_rows_written": {"type": "integer", "minimum": 0},
-        "whole_render_rows": {"type": "integer", "minimum": 0},
+        "overlay_rows": {"type": "integer", "minimum": 0},
+        "font_rows": {"type": "integer", "minimum": 0},
+        "music_rows": {"type": "integer", "minimum": 0},
         "warnings": {
           "type": "array",
           "items": {
@@ -888,22 +1248,28 @@ Notes:
 1. One `shots[]` entry per (shot, aspect) in plan order. `ledger_entry_ids` has exactly one element for every `SOURCED` and `REUSED` shot and none for `UNRESOLVED`.
 2. `skips[]` is ordered by tier and lists every tier above `tier` (all five when `UNRESOLVED`); `NOT_APPLICABLE_INTENT` is a recorded reason (18 §2.1).
 3. `content_key` echoes the plan's `content_key` of the shot; a revision iteration re-sources a shot only when it changed (FR-20). `crop.anchor` is the plan's `vertical.subject_anchor` for 9:16 shots, else null.
-3b. `fingerprints.algo_version` is the version of the perceptual-hash definition of §6.10 (pending CCR for the column).
-4. The manifest carries no title, description, narration, vendor metadata text or on-screen text; it carries IDs, hashes, enums and numbers only (it is shown to Agent 16 and to the owner's report, which look the text up by ID where they have the right).
+3b. `fingerprints.algo_version` is the version of the perceptual-hash definition of §6.10 (`asset_fingerprints.algo_version`, CCR-032).
+4. The manifest carries no title, description, narration, vendor metadata text or on-screen text; it carries IDs, hashes, enums and numbers only (it is shown to Agent 16 and to the owner's report, which look the text up by ID where they have the right). `chart.instrument` is not free text: it is the instrument key recorded in the dataset asset's `attributes.instrument` (pattern `^[A-Za-z0-9_.-]{1,64}$`), `null` for schematic charts. Value sets are the GLOSSARY §6.52 sets `visual_skip_reason`, `shot_unresolved_reason`, `shot_sourcing_status`, `sourcing_warning`, `chart_data_kind`, `shot_intent_kind`, `reuse_kind`, `crop_mode`, `subject_anchor`; `data_age_vs_lag` is `null` for schematic charts (the set stays closed).
 5. `earliest_compliant_publish_date` is the largest `chart.earliest_compliant_publish_date` of the video, or `null` when no real-data chart is used (13 §1.3).
+6. `gate_verdict` is `FAILED` iff `unresolved_shot_ids` is not empty (the gate result of §8.3); the manifest then still lists every shot, with `status = UNRESOLVED` for the failed ones, so the revision run and the owner's report can see what was sourced.
+7. `overlays[]` has one entry per overlay of the plan, in plan order, each with exactly one `TEMPLATE` ledger row; `fonts[]` one entry per brand-kit font, each with one whole-timeline `FONT` row (`used_from_ms = 0`, `used_to_ms` = the timeline end); `music_beds[]` is empty in 3A (3B: one `MUSIC_BED` entry per sourced bed). Thumbnails are Agent 11's rows, not listed here.
+8. `chart_facts[]` has one entry per real chart shot's `chart_id` (several aspects of the same chart share one document).
 
-### 8.3 `validation_results` (check ids match `^[a-z0-9_.-]{3,96}$`; kind `DETERMINISTIC`; `blocking` as shown)
+### 8.3 `validation_results` (check ids match `^[a-z0-9_.-]{3,96}$`; kind `DETERMINISTIC`; `blocking` as shown; `gate` is `false` for every row except the one marked gate; a `WARN` or `SKIPPED` result is always `blocking: false`, 03 §5.2)
 | check_id | Criterion | Blocking |
 |---|---|---|
 | `a08.pre.tenant`, `a08.pre.refs`, `a08.pre.shot_plan`, `a08.pre.config`, `a08.pre.licence_rows`, `a08.pre.budget`, `a08.pre.batch_size` | preconditions of §7.4 | yes |
-| `a08.cov.all_shots_resolved` | no `UNRESOLVED` shot | yes |
+| `a08.cov.all_shots_resolved` | no `UNRESOLVED` shot. **The only gate result** (`gate: true`, `blocking: true`): `FAIL` makes the gate fail with `remedy_stage_id = s09_plan`, or the script stage (`script_stage_id`) when a `DATA_WITHIN_LAG` shot is present (the earliest stage that fixes every cause; 24 §3.3 rule 1). Owner-material reasons are not gate results (§18) | yes (gate) |
 | `a08.cov.licence_row_per_shot` | exactly one covering ledger row per sourced shot (`CoverageVerifier`, same rule as 18 §7.9) | yes |
-| `a08.cov.interval_match` | each row's interval equals the shot's `start_ms`/`end_ms` | yes |
+| `a08.cov.overlay_rows` | exactly one covering `TEMPLATE` ledger row per overlay of the plan (`TimelineLedgerPlanner`, 18 §2.2) | yes |
+| `a08.cov.font_rows` | exactly one whole-timeline `FONT` ledger row per brand-kit font | yes |
+| `a08.cov.interval_match` | each shot and overlay row's interval equals the element's `start_ms`/`end_ms` | yes |
 | `a08.hier.skip_reasons_recorded` | every tier above the chosen one has a skip reason | yes |
 | `a08.hier.tier_order` | no lower tier used while a higher tier had an accepted candidate | yes |
 | `a08.chart.data_age` | every real-data chart `OLDER_THAN_LAG` | yes |
 | `a08.chart.annotations` | allowed kinds, nothing beyond the last bar, text from the allowlists only | yes |
 | `a08.chart.provenance` | dataset hash, case id, spec hash and template version recorded; dataset hash equals the registered hash | yes |
+| `a08.chart.facts` | one `agent_08.chart_facts` document per real chart, valid against §8.5, fact ids unique, `source_ref`s resolvable; none for schematic charts | yes |
 | `a08.lic.guard` | `LicenceGuard` passes for every ledger row | yes |
 | `a08.lic.no_preview` | no preview, trial or watermarked variant; stock rows carry `vendor_item_id` | yes |
 | `a08.lic.third_party` | platform-held licences used for another tenant have `PERMITTED` | yes |
@@ -923,11 +1289,13 @@ Notes:
 | `a08.output.refs` | every `output_refs[]` object exists with the stated hash and size | yes |
 | `a08.tenant.output_scope` | every URI and ID in the output belongs to `org_id` | yes |
 | `a08.q.*`, `a08.r.*` | the LLM-step post-checks named in the two prompt files (per call) | yes (a failure follows 07 `agent_parse`) |
+| `a08.q.refusal`, `a08.r.refusal` | a step call was refused; the item-level mapping of §5.1 was applied; never a `PASS` | `WARN`, `blocking: false` |
 
 ### 8.4 Example (values are examples; no real data)
 ```json
 {
   "iteration": 0,
+  "gate_verdict": "PASSED",
   "shots": [
     {
       "shot_id": "sh01",
@@ -1046,6 +1414,17 @@ Notes:
       "selection": null
     }
   ],
+  "overlays": [
+    {"overlay_id": "ov01", "kind": "BRAND_STING", "start_ms": 4000, "end_ms": 6000, "template_asset_id": "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e30", "source_type": "OWNER_MADE", "licence_id": "lic_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e16", "ledger_entry_ids": ["lcu_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e22"], "usage_kind": "TEMPLATE"},
+    {"overlay_id": "ov02", "kind": "END_SCREEN", "start_ms": 10000, "end_ms": 12000, "template_asset_id": "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e31", "source_type": "CODE_GENERATED", "licence_id": "lic_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e15", "ledger_entry_ids": ["lcu_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e23"], "usage_kind": "TEMPLATE"}
+  ],
+  "fonts": [
+    {"asset_id": "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e32", "licence_id": "lic_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e17", "ledger_entry_ids": ["lcu_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e24"], "usage_kind": "FONT", "used_from_ms": 0, "used_to_ms": 12000}
+  ],
+  "music_beds": [],
+  "chart_facts": [
+    {"chart_id": "chart_1", "document_uri": "amw-blob://org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e01/jobs/job_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e02/tasks/tsk_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e03/chart_facts_chart_1.json", "document_sha256": "f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7", "fact_count": 4}
+  ],
   "tier_mix": {
     "total_visual_ms": 12000,
     "by_tier": {
@@ -1058,7 +1437,7 @@ Notes:
   },
   "ai_broll": {"clips": 0, "total_ms": 0, "cost_micros": 0, "currency": "INR"},
   "cost_summary": {"llm_micros": 0, "stock_micros": 0, "ai_video_micros": 0, "ai_still_micros": 0, "currency": "INR", "figure_kind": "ESTIMATE"},
-  "licence_summary": {"ledger_rows_written": 3, "whole_render_rows": 0, "warnings": []},
+  "licence_summary": {"ledger_rows_written": 6, "overlay_rows": 2, "font_rows": 1, "music_rows": 0, "warnings": []},
   "reuse_summary": {"reused_exact": 0, "reused_near_duplicate": 0, "new_assets": 3, "near_duplicate_flags": 0},
   "earliest_compliant_publish_date": "2000-10-30",
   "unresolved_shot_ids": [],
@@ -1074,6 +1453,43 @@ Notes:
   "refusals": []
 }
 ```
+
+### 8.5 `agent_08.chart_facts` 1.0.0 (agent document, one per real chart; CCR-004)
+Written by `ChartFactsBuilder` (§6.4(9)) as a blob next to the manifest and listed in `output_refs` and in the manifest `chart_facts[]`. Stage `s06_chart` (`agent_06.claim_verification`, `params.verify_mode = CHART_FACTS`) reads it as the `chart_facts[]` input of Agent 06 (`ref_id = chart_id`); the evidence reference of a fact is `source_ref = <chart_id>#<fact_id>`. The statements are fixed English templates over numbers and bar dates of the dataset window: `f01` "The window contains {n} {daily|weekly|monthly} bars from {first_date} to {last_date}."; `f02` "The highest high in the window is {value}, on the bar dated {date}."; `f03` "The lowest low in the window is {value}, on the bar dated {date}."; `f04` "The close of the last bar is {last} against {first} for the first bar, a change of {pct} percent." No direction word, no forecast, no method wording (FIN-R13). The document carries the instrument key of the dataset asset; it is not shown in logs (§22).
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:amw:schema:agent_08.chart_facts:1.0.0",
+  "title": "agent_08.chart_facts agent document",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chart_id", "instrument", "dataset_asset_id", "dataset_sha256", "data_start_date", "data_end_date", "facts"],
+  "properties": {
+    "chart_id": {"type": "string", "pattern": "^chart_[0-9a-z_]{1,32}$"},
+    "instrument": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$"},
+    "dataset_asset_id": {"type": "string", "pattern": "^ast_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "dataset_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "data_start_date": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "data_end_date": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "facts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fact_id", "statement"],
+        "properties": {
+          "fact_id": {"type": "string", "pattern": "^f[0-9]{2}$"},
+          "statement": {"type": "string", "minLength": 1, "maxLength": 300}
+        }
+      }
+    }
+  }
+}
+```
+Example (values are examples): `{"chart_id": "chart_1", "instrument": "EXAMPLE_INDEX", "dataset_asset_id": "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e0c", "dataset_sha256": "<64 hex>", "data_start_date": "2000-02-01", "data_end_date": "2000-09-30", "facts": [{"fact_id": "f01", "statement": "The window contains 168 daily bars from 2000-02-01 to 2000-09-30."}]}`.
+
 
 ---
 
