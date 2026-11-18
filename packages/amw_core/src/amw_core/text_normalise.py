@@ -28,8 +28,8 @@ boundaries (Hangul conjoining jamo L+V) are not composed; irrelevant for Latin/D
 
 Input size: texts longer than ``MAX_INPUT_CHARS`` (1,000,000) raise ``InputInvalidError``;
 callers chunk longer documents. Pure-ASCII text takes a linear fast path. Cost is linear;
-measured about 0.3 s for 1M ASCII characters, about 6 s for 1M characters of mixed
-Latin / Devanagari / look-alike text and up to about 10 s for 1M varied clusters
+measured about 0.3 s for 1M ASCII characters, about 8 s for 1M characters of mixed (6-8 s, machine dependent)
+Latin / Devanagari / look-alike text and up to about 19 s for 1M varied clusters
 (provisional). Output is bounded too (``MAX_OUTPUT_CHARS``, character expansion).
 Memory: one span tuple per output character.
 
@@ -120,8 +120,8 @@ MAX_INPUT_CHARS = 1_000_000
 """Longest text ``normalise_for_matching`` accepts; longer input raises ``InputInvalidError``.
 Callers chunk longer documents (for example by paragraph) and shift the offsets themselves.
 Cost is linear in the length (one long combining cluster included). Measured on the
-development machine: about 0.3 s for 1M ASCII characters, about 6 s for 1M characters of mixed
-Latin / Devanagari text, up to about 10 s for 1M varied clusters (provisional). Memory is one
+development machine: about 0.3 s for 1M ASCII characters, about 8 s for 1M characters of mixed (6-8 s, machine dependent)
+Latin / Devanagari text, up to about 19 s for 1M varied clusters (provisional). Memory is one
 span tuple per output character."""
 
 MAX_OUTPUT_CHARS = 1_000_000
