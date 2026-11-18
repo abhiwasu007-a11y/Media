@@ -123,6 +123,7 @@ Rules:
 | `apr` | Approval | approvals |
 | `aps` | Approval step | approval_steps |
 | `edc` | Editorial contribution | editorial_contributions |
+| `oie` | Owner instruction evidence (CCR-010) | owner_instruction_evidence |
 | `qsc` | Quality score line | quality_scores |
 | `qcr` | QC result | qc_results |
 | `rnd` | Render | renders |
@@ -161,7 +162,7 @@ Used in `source_agent`, `sender`, `receiver`, audit and transition rows.
 | `HUMAN` | user wire ID | `usr_0192…` |
 | `SYSTEM` | `sys_<name>`, name ∈ {`scheduler`, `reaper`, `dlq_handler`, `migrator`, `api`, `operator`} | `sys_reaper` |
 
-`sys_operator` (CCR-010, decision D5) is the operator tool through which the assistant records owner decisions, scores and editorial contributions **on the owner's behalf**. It is never an approver itself: every row it writes names the owner's `usr_` ID as the decision maker and carries the evidence of 04 §5.16.
+`sys_operator` (CCR-010, decision D5) is the operator tool through which the assistant records owner decisions, scores and editorial contributions **on the owner's behalf**. It is never an approver itself: every row it writes names the owner's `usr_` ID as the decision maker and references an `owner_instruction_evidence` row (04 §5.16).
 
 Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,32})$`; the exact pattern is `amw.common#/$defs/actor_ref` (03 §3.2).
 
@@ -473,7 +474,8 @@ Prefixes `HLT` (`rp.health`), `KID` (`rp.kids`), `POL` (`rp.political_news`), `A
 | `consent_state` (voice) | `PENDING_VERIFICATION` · `VERIFIED` · `WITHDRAWN` · `EXPIRED` · `REJECTED` |
 | `voice_kind` | `PROVIDER_STOCK` · `CONSENTED_CLONE` · `HUMAN_RECORDED` |
 | `presenter_kind` (CCR-027, **provisional until the owner answers 3A R4**) | `NEUTRAL_NARRATION` (voice only, no persona, no named presenter) · `OWNER_VOICE` (the owner's own recording or a consented clone of the owner's own voice) · `SYNTHETIC_PERSONA` (a synthetic voice or face presented as a named person; blocked on finance, health and political channels by FIN-R11 / YTG-R2) |
-| `approval_channel` (CCR-010, D5) | `OWNER_CHAT_OPERATOR` (3A: the owner's chat message recorded by the operator tool, `sys_operator`, with verbatim evidence) · `DASHBOARD` (3C: the owner acts in the authenticated dashboard) · `CLIENT_PORTAL` (Tier 2) |
+| `approval_channel` (CCR-010, D5) | `OWNER_CHAT_OPERATOR` (3A: the owner's chat message recorded by the operator tool, `sys_operator`, with an `owner_instruction_evidence` row) · `WEB_DASHBOARD` (3C: the owner acts in the authenticated dashboard) · `CLIENT_PORTAL` (Tier 2) |
+| `instruction_source_kind` (CCR-010) | `OWNER_CHAT_MESSAGE` (the only value that can back a human record) · `TOOL_RESULT` · `SUBAGENT_MESSAGE` · `NOTIFICATION` · `DOCUMENT` (refused sources, stored only on refused evidence rows for audit) |
 | `data_request_kind` / `data_request_status` | `EXPORT` · `ERASURE` / `RECEIVED` · `IN_PROGRESS` · `COMPLETED` · `REJECTED` |
 
 ### 6.45 Content, media and operations enums

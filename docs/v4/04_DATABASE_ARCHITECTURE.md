@@ -146,6 +146,7 @@ Every call is logged with the caller's actor; `amw_platform_ops_summary` calls a
 | 5.8 | circuit_breakers | SHARED-CATALOGUE | T0 | 01 | |
 | 5.9 | idempotency_keys | TENANT | T0 | 01 | |
 | 5.10 | memory_items | TENANT | T0 | 04 / 01 | |
+| 5.10 | knowledge_collections | TENANT | T0+ | 04 | CCR-011; per-channel collections with a `restricted` flag |
 | 5.10 | knowledge_sources | TENANT | T0+ | 04 | text outside git |
 | 5.10 | knowledge_chunks | TENANT | T0+ | 04 | |
 | 5.11 | scripts | TENANT | T0 | 05 | |
@@ -166,6 +167,7 @@ Every call is logged with the caller's actor; `amw_platform_ops_summary` calls a
 | 5.16 | approvals | TENANT | T0 | S7 → 01 | |
 | 5.16 | approval_steps | TENANT | T0 | S7 → 01 | |
 | 5.16 | editorial_contributions | TENANT | T0 | S7 / 16 | |
+| 5.16 | owner_instruction_evidence | TENANT (append-only) | T0 | S7 → 01 | CCR-010, decision D5 |
 | 5.17 | quality_scores | TENANT | T0 | 16 | |
 | 5.17 | qc_results | TENANT | T0 | 10 / 16 | |
 | 5.17 | compliance_verdicts | TENANT | T0 | 16 | |
@@ -380,7 +382,8 @@ Keys: `UNIQUE (org_id, profile_id, rule_pack_id)`. Trigger: a link with `is_mand
 | correlation_id | uuid | no | |
 | idempotency_key | text | no | scope `job.create` (03 §9.2) |
 | requested_by | text | no | actor ref |
-| input_ref | text | yes | storage URI of job inputs (brief, source video) |
+| input_ref | text | yes | storage URI of job inputs (brief, source video, `amw.owner_topic` document, 03 §3.4) |
+| monetized_destination | boolean | no | default `true` (CCR-028). Set by the orchestrator at J02 from the production type's destinations and the channel; 3A sets `true` for every job (licence checks as if monetized YouTube, 3A_SLICE_SPEC R3). Read by the `licence_ledger` insert guard and by agents (payload `licence_destination`, GLOSSARY §6.52); never changed after J03 |
 | task_count | int | no | default 0; ≤ config `limits.max_tasks_per_job` (checked in code) |
 | cost_estimate_micros | bigint | no | default 0 (rolled up from cost_ledger ESTIMATE) |
 | cost_verified_micros | bigint | no | default 0 (VERIFIED) |
@@ -599,12 +602,23 @@ Keys: `UNIQUE (provider, operation_class, credential_scope)`. Updated only via `
 | review_after | timestamptz | yes | for `CHANNEL`, `LONG_TERM` |
 | superseded_by | uuid | yes | TFK → memory_items |
 Index `(org_id, scope, channel_id, key)`.
-Rules: (1) retrieval always filters `org_id` and the narrowest scope chain of the requesting task: `TASK`/`WORKING` of the same task → `PROJECT` of the same project → `CHANNEL` and `LONG_TERM` of the same channel; never another channel or project (§3.3 Memory). (2) Defaults (config): `WORKING` expires at attempt end; `TASK` with job retention; `PROJECT` when the project is archived + `memory.project_ttl_ms`. (3) Agent writes to `LONG_TERM` require provenance; changes to critical policies never come from memory (§3.3 Learning loop).
+Rules: (1) retrieval always filters `org_id` and the narrowest scope chain of the requesting task: `TASK`/`WORKING` of the same task → `PROJECT` of the same project → `CHANNEL` and `LONG_TERM` of the same channel; never another channel or project (§3.3 Memory). A revision iteration is a **new task** (24 §3.3), so it never reads the previous iteration's `TASK` items; what a later iteration or a later stage needs from an earlier task travels as a `PRIOR_OUTPUT` context ref or an output ref set by the orchestrator (24 §3.3 rule 6), or as a `PROJECT` item (CCR-008). (2) Defaults (config): `WORKING` expires at attempt end; `TASK` with job retention; `PROJECT` when the project is archived + `memory.project_ttl_ms`. (3) Agent writes to `LONG_TERM` require provenance; changes to critical policies never come from memory (§3.3 Learning loop).
+
+**knowledge_collections** — TENANT · T0+ · Std + Mut (CCR-011; KNOWLEDGE_LIBRARY_PLAN §5, Q34)
+| Column | Type | Null | Constraint / note |
+|---|---|---|---|
+| channel_id | uuid | no | TFK → channels |
+| collection_key | text | no | CHECK `collection_key ~ '^[a-z0-9_]{2,48}$'`; `UNIQUE (org_id, channel_id, collection_key)` |
+| title | text | no | |
+| restricted | boolean | no | default `false`; `true` = material is used only when released (`KNOWLEDGE_RELEASE`, FIN-R12, Q26) |
+| description | text | yes | |
+Keys: `UNIQUE (org_id, id)`. RLS: standard tenant policy (§3.4), `ENABLE` + `FORCE`. Index `(org_id, channel_id)`.
 
 **knowledge_sources** — TENANT · T0+ · Std + Mut (§1B.2a; content never in git)
 | Column | Type | Null | Constraint / note |
 |---|---|---|---|
 | channel_id | uuid | no | TFK → channels (channel-isolated library) |
+| collection_id | uuid | no | TFK → knowledge_collections (CCR-011); the collection's `channel_id` equals this row's (CHECK by trigger) |
 | kind | enum(knowledge_source_kind) | no | |
 | title / author / edition | text | no / yes / yes | |
 | language | text | no | |
@@ -623,7 +637,12 @@ Rules: (1) retrieval always filters `org_id` and the narrowest scope chain of th
 |---|---|---|---|
 | channel_id | uuid | no | TFK → channels |
 | source_id | uuid | no | TFK → knowledge_sources |
-| chunk_no | int | no | `UNIQUE (org_id, source_id, chunk_no)` |
+| collection_id | uuid | no | TFK → knowledge_collections; denormalised copy of the source's collection (CCR-011) |
+| ingest_version | int | no | the source's `ingest_version` at ingest (CCR-013); retrieval reads only rows whose `ingest_version` equals `knowledge_sources.ingest_version` |
+| chunk_no | int | no | `UNIQUE (org_id, source_id, ingest_version, chunk_no)` (CCR-013) |
+| extraction_method | enum(extraction_method) | no | default `TEXT_LAYER` (CCR-013; ADR-013 §2.2.3) |
+| ocr_confidence | numeric(4,3) | yes | required when `extraction_method = 'OCR'` (CHECK) |
+| release_approval_id | uuid | yes | TFK → approvals (`KNOWLEDGE_RELEASE`, CCR-012); a chunk of a `restricted` collection is usable only when this approval or the source's `release_approval_id` is `APPROVED` and covers it (§5.16 `approvals` release rule) |
 | chapter / section | text | yes | |
 | page_from / page_to | int | yes | |
 | language | text | no | |
@@ -632,11 +651,11 @@ Rules: (1) retrieval always filters `org_id` and the narrowest scope chain of th
 | search_tsv | tsvector | yes | keyword index (GIN); text-search configuration per language **REQUIRES REVIEW (agent_04 blueprint)** |
 | embedding_ref | text | yes | vector store reference; store choice **REQUIRES REVIEW (ADR on vector store)** |
 | token_count | int | yes | |
-Indexes: GIN `(search_tsv)`; `(org_id, channel_id, source_id)`. Every query also filters `channel_id` (channel isolation).
+Indexes: GIN `(search_tsv)`; `(org_id, channel_id, source_id)`; `(org_id, channel_id, collection_id)` (CCR-011). Every query also filters `channel_id` (channel isolation).
 
 ### 5.11 Scripts, claims, citations
 
-**scripts** — TENANT · T0 · Std
+**scripts** — TENANT · T0 · Std + Mut (CCR-033: only `status` is mutable, a trigger rejects an UPDATE of any other column; content columns stay write-once)
 | Column | Type | Null | Constraint / note |
 |---|---|---|---|
 | job_id | uuid | no | TFK → jobs |
@@ -671,7 +690,9 @@ Indexes: GIN `(search_tsv)`; `(org_id, channel_id, source_id)`. Every query also
 | requires_citation | boolean | no | |
 | substantiation_ref | text | yes | ad claims: client document (§1D.3) |
 | extracted_by_task_id | uuid | no | TFK → tasks |
-Index `(org_id, script_id)`.
+| verified_by_task_id | uuid | yes | TFK → tasks (CCR-029): the verification task that last set `status` |
+| status_reasons | text[] | yes | values of `verification_reason_code` (GLOSSARY §6.52; CCR-029) |
+Index `(org_id, script_id)`. Key (CCR-029, replay-safe insert): `UNIQUE (org_id, script_id, extracted_by_task_id, segment_id, char_start, char_end)`.
 
 **citations** — TENANT · T0+ · Std
 | Column | Type | Null | Constraint / note |
@@ -682,7 +703,7 @@ Index `(org_id, script_id)`.
 | research_log_id | text | yes | e.g. `YT-09` |
 | support | enum(citation_support) | no | |
 | accessed_at | timestamptz | yes | required with `external_url` |
-CHECK exactly one of `knowledge_chunk_id`, `external_url` is not null.
+CHECK exactly one of `knowledge_chunk_id`, `external_url` is not null. Key (CCR-029): `UNIQUE NULLS NOT DISTINCT (org_id, claim_id, knowledge_chunk_id, external_url)` (PostgreSQL 15 or later; the build uses 16 locally and 18 in CI, D8 build facts).
 
 ### 5.12 Brand kits, voices, consents
 
@@ -693,10 +714,10 @@ CHECK exactly one of `knowledge_chunk_id`, `external_url` is not null.
 | version | int | no | `UNIQUE (org_id, workspace_id, version)` |
 | is_current | boolean | no | partial `UNIQUE (org_id, workspace_id) WHERE is_current` |
 | logo_asset_id | uuid | yes | TFK → assets |
-| colours / fonts | jsonb | no | fonts reference licensed font assets |
+| colours / fonts | jsonb | no | CCR-034. `colours`: `{"primary": "#RRGGBB", "secondary": "#RRGGBB", "tertiary": "#RRGGBB" or null, "text": …, "background": …}`. `fonts`: array of `{"asset_id": ast wire ID (an `assets` row of kind `FONT` with an `ACTIVE` licence), "role": "HEADLINE"/"BODY"/"CAPTION", "scripts": [ISO 15924 codes covered, e.g. "Deva", "Latn"]}` |
 | lower_third_template_ref / intro_ref / outro_ref | text | yes | |
 | voice_id | uuid | yes | TFK → voices |
-| tone_rules | jsonb | no | |
+| tone_rules | jsonb | no | documented keys (CCR-034): `latin_allow_list` (array of Latin-script terms allowed in a non-Latin script, Agent 05); other keys are added by CCR |
 | banned_words | text[] | no | |
 
 **voices** — TENANT · T0 · Std + Mut
@@ -709,6 +730,8 @@ CHECK exactly one of `knowledge_chunk_id`, `external_url` is not null.
 | languages | text[] | no | |
 | consent_id | uuid | yes | TFK → voice_consents; CHECK `kind <> 'CONSENTED_CLONE' OR consent_id IS NOT NULL` |
 | pronunciation_dict_ref | text | yes | |
+| licence_id | uuid | yes | FK → licences (CCR-026); CHECK `status <> 'ACTIVE' OR licence_id IS NOT NULL` (provider terms, clone consent licence or the self-grant row of a human narration) |
+| presenter_kind | enum(presenter_kind) | no | CCR-027, **provisional until the owner answers 3A R4**; default derived at insert: `PROVIDER_STOCK` → `NEUTRAL_NARRATION`, a consented clone of the owner or the owner's own recording → `OWNER_VOICE`; any other value only by a recorded human decision |
 | status | enum(asset_status) | no | |
 
 **voice_consents** — TENANT · T0+ · Std + Mut (§1A.3, §1C.8)
@@ -721,6 +744,7 @@ CHECK exactly one of `knowledge_chunk_id`, `external_url` is not null.
 | verified_by | uuid | yes | FK → users |
 | verified_at | timestamptz | yes | |
 | scope_note | text | no | permitted uses/channels |
+| permitted_channel_ids | uuid[] | yes | CCR-026: machine-readable channel scope; NULL = no channel permitted until set; every element must be a channel of this org (checked in code and by trigger, as `assets.allowed_channel_ids`) |
 | third_party_use | boolean | no | |
 | state | enum(consent_state) | no | only `VERIFIED` voices may be rendered (Agent 07 check) |
 | expires_at / withdrawn_at | timestamptz | yes | |
@@ -765,7 +789,9 @@ Rules: `amw_app` has `INSERT` only; a trigger rejects `UPDATE`/`DELETE` for ever
 | billing_mode | enum(billing_mode) | yes | LLM calls |
 | tokens_in / tokens_out / tokens_cached_in | int | yes | |
 | units | numeric(20,6) | yes | non-token units |
-| unit_kind | text | yes | `characters`, `audio_ms`, `images`, `video_ms`, `render_ms`, `quota_units`, `items` |
+| unit_kind | text | yes | `cost_unit_kind` (GLOSSARY §6.52): `characters`, `audio_ms`, `images`, `video_ms`, `render_ms`, `quota_units`, `items`, `bytes` |
+| tokens_cache_write_in | int | yes | CCR-037: prompt-cache write tokens (ADR-007 §2.7) |
+| chars_in / language | int / text | yes | CCR-037: input characters and BCP 47 language of an LLM/TTS call, for the measured Devanagari token ratio (ADR-007 §2.9) |
 | amount_micros | bigint | no | ≥ 0 |
 | currency | char(3) | no | |
 | fx_rate / fx_source | numeric(18,8) / text | yes | |
@@ -782,8 +808,8 @@ PK `(id, occurred_at)`. Indexes `(org_id, job_id)`, `(org_id, occurred_at)`.
 |---|---|---|---|
 | scope_kind | enum(budget_scope_kind) | no | |
 | scope_id | uuid | yes | NULL for `ORG`; else workspace/channel ID; production type key in `scope_key` |
-| scope_key | text | yes | for `PRODUCTION_TYPE` |
-| period | enum(budget_period) | no | |
+| scope_key | text | yes | for `PRODUCTION_TYPE`; for `PROVIDER` (CCR-035) the provider config key |
+| period | enum(budget_period) | no | `PILOT_TOTAL` (CCR-035) never resets; the cumulative spend of its scope counts against it |
 | limit_minor | bigint | no | ≥ 0; values set by the owner/tenant (rule 8), never defaulted silently |
 | currency | char(3) | no | |
 | soft_limit_ratio | numeric(4,3) | no | warning threshold 0–1 |
@@ -818,14 +844,16 @@ PK `(id, occurred_at)`. Indexes `(org_id, job_id)`, `(org_id, occurred_at)`.
 | asset_id | uuid | no | TFK → assets |
 | licence_id | uuid | no | FK → licences |
 | job_id | uuid | no | TFK → jobs |
-| render_id | uuid | yes | TFK → renders |
+| render_id | uuid | yes | TFK → renders; NULL for rows written at sourcing, before any render exists (CCR-030) |
+| task_id | uuid | yes | TFK → tasks: the task that wrote the row (CCR-030) |
+| shot_id | text | yes | plan shot or overlay ID the row covers (CCR-030) |
 | usage_kind | enum(licence_usage_kind) | no | |
 | source_url / vendor_item_id | text | yes | |
 | used_from_ms / used_to_ms | bigint | yes | position in the render |
 | client_permission_ref | text | yes | evidence for third-party/client use |
 | expiry_at | timestamptz | yes | |
 | recorded_by | text | no | actor ref |
-Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-held (`org_id IS NULL`) and this org is not the platform owner org, then `third_party_permission = 'PERMITTED'`; if the job publishes to a monetized destination, `covers_monetized_youtube = true`. Index `(org_id, job_id)`, `(org_id, licence_id)`.
+Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-held (`org_id IS NULL`) and this org is not the platform owner org, then `third_party_permission = 'PERMITTED'`; if `jobs.monetized_destination` is true (CCR-028), `covers_monetized_youtube = true`. Index `(org_id, job_id)`, `(org_id, licence_id)`. Key (CCR-030, replay-safe): `UNIQUE NULLS NOT DISTINCT (org_id, task_id, asset_id, usage_kind, shot_id, used_from_ms)`; rows are written in the task's `db.output` transaction (03 §9.2). Matching for licence completeness: a row covers a timeline element of render R of job J when `asset_id` matches, the interval covers it, and `render_id = R` **or** (`render_id IS NULL` and `job_id = J`) (18 §7.9).
 
 **assets** — TENANT · T0 · Std + Mut (per-tenant library; never shared across tenants, rule 9)
 | Column | Type | Null | Constraint / note |
@@ -847,8 +875,9 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | allowed_channel_ids | uuid[] | yes | NULL = all channels of this org (reuse engine channel permission) |
 | expires_at | timestamptz | yes | licence expiry copy |
 | status | enum(asset_status) | no | |
+| attributes | jsonb | yes | CCR-032; documented keys only: `tags[]`, `description`, `language` (BCP 47; required for `SUBTITLE`), `data_start_date`, `data_end_date`, `bars_count`, `instrument`, `timeframe`, `dataset_asset_id`, `case_id`, `spec_sha256`, `template_id`, `template_version`, `method_content`, `release_approval_id`, `prompt_sha256`, `provider_request_id`, `source_path_class` (dataset intake, 3A_SLICE_SPEC R20); other keys by CCR |
 
-**asset_fingerprints** — TENANT · T0+ · Std: `asset_id` TFK → assets, `algo enum(fingerprint_algo)`, `value bytea`, `frame_ms bigint NULL`. Index `(org_id, algo, value)`. Matching runs only inside one tenant (S2 uniqueness, reuse engine).
+**asset_fingerprints** — TENANT · T0+ · Std: `asset_id` TFK → assets, `algo enum(fingerprint_algo)`, `algo_version smallint NOT NULL DEFAULT 1` (CCR-032: version of the hash definition; only equal versions are compared), `value bytea`, `frame_ms bigint NULL`. Index `(org_id, algo, value)`. Matching runs only inside one tenant (S2 uniqueness, reuse engine).
 
 ### 5.16 Approvals and editorial contribution (S7)
 
@@ -857,7 +886,7 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 |---|---|---|---|
 | job_id | uuid | yes | TFK → jobs |
 | kind | enum(approval_kind) | no | |
-| subject_kind | text | no | `script`, `render`, `thumbnail`, `metadata`, `concept`, `brief`, `budget`, `dead_letter`, `experiment`, `comment_reply`, `knowledge_source`, … |
+| subject_kind | text | no | `script`, `render`, `thumbnail`, `metadata`, `concept`, `brief`, `budget`, `dead_letter`, `experiment`, `comment_reply`, `knowledge_source`, `knowledge_release` (CCR-012), `asset` (CCR-012: e.g. a chart case), `voice` (voice sample), … |
 | subject_id | uuid | no | |
 | subject_sha256 | bytea | yes | binds the decision to exact content |
 | state | enum(approval_state) | no | |
@@ -866,7 +895,8 @@ Trigger (insert guard): licence `state = 'ACTIVE'`; if the licence is platform-h
 | managed_service | boolean | no | true only when the client contracted managed service (rule 10) |
 | requested_by | text | no | actor ref |
 | decided_at / expires_at | timestamptz | yes | |
-Index `(org_id, state, kind)`.
+Index `(org_id, state, kind)`. The decision record (who, channel, evidence) is on `approval_steps`; the approval's final `state` is derived from its steps (03 §11.6).
+Release rule (CCR-012, `KNOWLEDGE_RELEASE`): an approval releases material in one of two forms. (a) `subject_kind = 'knowledge_source'`, `subject_id` = the source: the whole source (3A default). (b) `subject_kind = 'knowledge_release'`, `subject_id` = the `knowledge_collections` row, `subject_sha256` = SHA-256 of the canonical JSON `{"topic_title": …, "collection_key": …, "chunk_ids": [sorted kch wire IDs]}`: the listed chunks for that topic only. A chunk is covered when the approval is `APPROVED` and the chunk is the subject source's or is listed and the recomputed hash matches. `subject_kind = 'asset'` releases one asset (e.g. a chart case) with `subject_sha256` = the asset's content hash.
 
 **approval_steps** — TENANT · T0 · Std + Mut
 | Column | Type | Null | Constraint / note |
@@ -879,21 +909,47 @@ Index `(org_id, state, kind)`.
 | decided_by | uuid | yes | FK → users; must be a human with an `ACTIVE` membership in this org holding `required_role` (trigger) |
 | decided_at | timestamptz | yes | |
 | comment | text | yes | |
+| approval_channel | enum(approval_channel) | yes | CCR-010; required (CHECK) once the step is decided; no default (fail closed) |
+| recorded_by | text | yes | actor ref that wrote the decision: the deciding `usr_` itself (`WEB_DASHBOARD`, `CLIENT_PORTAL`) or `sys_operator` (`OWNER_CHAT_OPERATOR`) |
+| evidence_id | uuid | yes | TFK → owner_instruction_evidence; required when `approval_channel = 'OWNER_CHAT_OPERATOR'` |
+Trigger (CCR-010, D5; "human-row rule", shared by `approval_steps`, `editorial_contributions` and HUMAN `quality_scores`): an `agent_NN` / `svc_sNN` actor can never write a human row. A `usr_` actor writes only its own decision. `sys_operator` may write a human row only with `approval_channel = 'OWNER_CHAT_OPERATOR'` and an `evidence_id` that references an `owner_instruction_evidence` row of the same org with `source_kind = 'OWNER_CHAT_MESSAGE'`, whose `on_behalf_of` equals the row's human field (`decided_by`, `contributor_user_id`, or the user of `scorer_ref`), and whose `subject_kind`/`subject_id` match the row's subject; the human must still hold an `ACTIVE` membership with the required role. The operator is never the approver.
 
 **editorial_contributions** — TENANT · T0 · Std
 | Column | Type | Null | Constraint / note |
 |---|---|---|---|
 | job_id | uuid | no | TFK → jobs |
 | approval_id | uuid | yes | TFK → approvals |
-| contributor_user_id | uuid | no | FK → users (a human; agents cannot write this table — grant via the API role path only, enforced by trigger checking `app.actor` is a `usr_` actor) |
+| contributor_user_id | uuid | no | FK → users (a human; agents cannot write this table — enforced by trigger: `app.actor` is the contributor's `usr_` actor, or `sys_operator` with channel `OWNER_CHAT_OPERATOR` and full evidence, CCR-010) |
+| approval_channel | enum(approval_channel) | no | CCR-010; no default |
+| recorded_by | text | no | actor ref (`usr_…` or `sys_operator`) |
+| evidence_id | uuid | yes | TFK → owner_instruction_evidence; required when `approval_channel = 'OWNER_CHAT_OPERATOR'` (human-row rule of `approval_steps`) |
 | type | enum(editorial_contribution_type) | no | |
 | description | text | no | ≥ 20 chars (meaningful; threshold configurable) |
 | target_ref | text | yes | script segment / shot / thumbnail |
 Index `(org_id, job_id)`.
 
+**owner_instruction_evidence** — TENANT · T0 · append-only · Std (CCR-010, decision D5; prefix `oie`)
+One row per owner instruction that the operator tool was asked to record, including refused attempts (kept for audit).
+| Column | Type | Null | Constraint / note |
+|---|---|---|---|
+| job_id | uuid | yes | TFK → jobs |
+| subject_kind / subject_id | text / uuid | no | what the instruction is about (same vocabulary as `approvals.subject_kind`) |
+| subject_review_code | text | yes | the short code shown to the owner for the subject (so the owner's message can name it unambiguously) |
+| source_kind | enum(instruction_source_kind) | no | only `OWNER_CHAT_MESSAGE` may back a human row; the other values are stored only for refused attempts |
+| quote | text | no | the owner's words, verbatim (≤ 4000 chars) |
+| message_at | timestamptz | no | timestamp of the owner's message |
+| session_ref | text | no | link to the session in which the owner wrote it |
+| recorded_by | text | no | actor ref (`sys_operator`) |
+| on_behalf_of | uuid | no | FK → users: the owner |
+| evidence_sha256 | bytea | no | SHA-256 of the canonical `{quote, message_at, session_ref, subject_kind, subject_id}` |
+| refused_reason | text | yes | set when the operator refused to record (ambiguous message, not owner-authored, wrong source); a refused row backs nothing |
+| owner_confirmed_at / confirmation_quote / confirmation_message_at | timestamptz / text / timestamptz | yes | the owner's reply to the echo (03 §11.6 rule 6) |
+| supersedes_id | uuid | yes | TFK → owner_instruction_evidence (a correction never edits a row) |
+Append-only (rule 7) with one exception: the trigger allows a single UPDATE that sets the three confirmation fields from NULL, and nothing else. Index `(org_id, subject_kind, subject_id)`. RLS: standard tenant policy, `ENABLE` + `FORCE`.
+
 ### 5.17 Quality, QC and compliance
 
-**quality_scores** — TENANT · T0 · Std: `job_id` TFK, `subject_kind text`, `subject_id uuid`, `subject_sha256 bytea`, `rubric_version text`, `dimension enum(quality_dimension)`, `max_points smallint` (CHECK equals the dimension's points, GLOSSARY §6.45), `points numeric(5,2)` (CHECK `0 ≤ points ≤ max_points`), `scorer_kind enum(check_kind)`, `scorer_ref text`, `evidence_ref text NULL`. Index `(org_id, job_id, subject_id)`. The total per subject is a view; per dimension the `HUMAN` row wins over `LLM_JUDGE` (§1A.7). Publish threshold (85) is config `quality.publish_min_score`.
+**quality_scores** — TENANT · T0 · Std: `job_id` TFK, `subject_kind text`, `subject_id uuid`, `subject_sha256 bytea`, `rubric_version text`, `dimension enum(quality_dimension)`, `max_points smallint` (CHECK equals the dimension's points, GLOSSARY §6.45), `points numeric(5,2)` (CHECK `0 ≤ points ≤ max_points`), `scorer_kind enum(check_kind)`, `scorer_ref text`, `evidence_ref text NULL`; for `scorer_kind = 'HUMAN'` rows also `approval_channel enum(approval_channel)`, `recorded_by text` and `evidence_id uuid` TFK → owner_instruction_evidence (nullable columns, CHECK required for HUMAN rows; human-row rule of `approval_steps`; `scorer_ref` = the owner's `usr_` ID, never the operator; CCR-010). Index `(org_id, job_id, subject_id)`. The total per subject is a view; per dimension the `HUMAN` row wins over `LLM_JUDGE` (§1A.7). Publish threshold (85) is config `quality.publish_min_score`.
 
 **qc_results** — TENANT · T0 · Std (persisted `validation_results`): `job_id` TFK, `task_id` TFK, `render_id` TFK NULL, `check_id text`, `kind enum(check_kind)`, `verdict enum(check_verdict)`, `blocking boolean`, `rule_id text NULL`, `measured_num numeric NULL`, `measured_text text NULL`, `threshold_num numeric NULL`, `threshold_text text NULL`, `unit text NULL`, `message text`, `evidence_ref text NULL`. Index `(org_id, job_id, check_id)`.
 
@@ -910,7 +966,8 @@ Index `(org_id, job_id)`.
 | rationale | text | no | |
 | evidence_ref | text | yes | |
 | decided_by | text | no | actor ref (Agent 16 or human) |
-| is_final | boolean | no | true only for Agent 16's publication authorisation or a human override (Q5) |
+| is_final | boolean | no | true only for Agent 16's publication authorisation or a human override (Q5); trigger (CCR-010): `is_final = true` requires `decided_by = 'agent_16'` or a `usr_` actor, directly or through `sys_operator` with an `evidence_id` (human-row rule) |
+| evidence_id | uuid | yes | TFK → owner_instruction_evidence; required for a human override recorded by `sys_operator` |
 Index `(org_id, job_id, is_final)`.
 
 ### 5.18 Renders
