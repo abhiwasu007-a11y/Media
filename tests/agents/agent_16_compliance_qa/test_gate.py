@@ -608,19 +608,31 @@ EVASIONS = [
     "B\u200buy this stock now",  # zero-width space
     "\uff42\uff55\uff59 this stock now",  # full-width
     "bu\u00ady this stock now",  # soft hyphen
-    pytest.param(
-        "b\u057dy this stock now",  # Armenian look-alike u
-        marks=pytest.mark.xfail(
-            strict=True,
-            reason="core_need: amw_core.text_normalise has no Armenian look-alikes (CCR-105 "
-            "forbids a private fold; the table is PROVISIONAL)",
-        ),
-    ),
     "bu\u0443 this stock now",  # Cyrillic look-alike y
     "\U0001d41b\U0001d42e\U0001d432 this stock now",  # mathematical bold
     "B\u200du\u2060y this stock now",  # zero-width joiner + word joiner
     "Join our gr\u200boup for daily c\u200balls",
     "\ufeffSELL this stock now",
+    "b-u-y this stock now",  # separator-split (re-review m1)
+    "b.u.y this stock now",
+    "b u y this stock now",
+    "B_U_Y this stock now",
+    "join our g-r-o-u-p today",
+    *(
+        pytest.param(
+            text,
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="core_need CCR-110: amw_core.text_normalise does not fold this look-alike "
+                "(CCR-105 forbids a private fold)",
+            ),
+        )
+        for text in (
+            "b\u057dy this stock now",  # Armenian seh (u)
+            "b\u057ey this stock now",  # Armenian vo (look-alike of u)
+            "bu\u13a9 this stock now",  # Cherokee yu (look-alike of Y)
+        )
+    ),
 ]
 
 
@@ -736,3 +748,27 @@ def test_a_failing_frame_test_is_never_overridden_by_a_later_pass(duplicate: boo
     b = calls.batches[0]
     pc = post_check(PolicyInput.model_validate(b.model_dump()), _frame_reply(duplicate=True)(b))
     assert all(t.leaves_expectation for t in pc.frame_tests.values())
+
+
+def test_split_word_join_leaves_ordinary_text_alone() -> None:
+    from agent_16_compliance_qa.prefilter import collapse_split_words, select_rules
+    from tests.agents.agent_16_compliance_qa.test_llm_evals import CG
+
+    ordinary = [
+        "a candle has a body.",
+        "I am a trader and I read a b test",
+        "A. B. Smith wrote x / y / z",
+        "e.g. the 2008 gap",
+    ]
+    assert [collapse_split_words(t) for t in ordinary] == ordinary
+    lex = config().prefilter_lexicon("en-IN")
+    active = frozenset(YTG + FIN)
+    assert select_rules("A candle has a body.", (), (), lex, active) == ()
+    # no dataset item changes its selection because of the join (false-positive check)
+    changed = [
+        it["text"]
+        for c in CG
+        for it in c["input"]["items"]
+        if collapse_split_words(it["text"].casefold()) != it["text"].casefold()
+    ]
+    assert changed == []

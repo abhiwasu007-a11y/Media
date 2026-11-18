@@ -28,6 +28,7 @@ from typing import Literal, Protocol
 
 from pydantic import Field, ValidationError
 
+from agent_16_compliance_qa.authorisation.evidence import VerifiedApprovalState
 from agent_16_compliance_qa.authorisation.stage import ApprovalStepVerifier
 from agent_16_compliance_qa.base import Model
 from agent_16_compliance_qa.gate import GateInputs, Routing
@@ -99,15 +100,25 @@ class ComplianceGateInput(Model):
     inputs: GateRefs
 
 
+class ReleaseRef(Model):
+    """A ``KNOWLEDGE_RELEASE`` approval named by the research pack and the hash of what it must
+    release (the cited chunk / topic subject, 04 section 5.16); the approval counts only when
+    its ``subject_sha256`` is this hash (re-review m3)."""
+
+    approval_id: str
+    released_sha256: str = Field(pattern=_SHA)
+
+
 class ExtractedGate(Model):
     """What ``GateFactExtractor`` returns: the gate facts plus the approval IDs whose state the
     assembler derives (the extractor never decides an approval state)."""
 
     inputs: GateInputs
-    method_release_approvals: Mapping[str, str | None] = Field(default_factory=dict)
-    """segment_ref -> ``KNOWLEDGE_RELEASE`` approval id named by the research pack (or None)."""
+    method_release_approvals: Mapping[str, ReleaseRef | None] = Field(default_factory=dict)
+    """segment_ref -> the release named by the research pack (or None)."""
     quotation_approvals: Mapping[str, str | None] = Field(default_factory=dict)
-    """span sha256 -> ``COPYRIGHT_DOUBT`` approval id (or None)."""
+    """span sha256 -> ``COPYRIGHT_DOUBT`` approval id (or None); the approval must be for that
+    span hash (its ``subject_sha256``)."""
 
 
 class GateFactExtractor(Protocol):
@@ -134,6 +145,15 @@ class GateInputAssembler:
     ) -> None:
         self._storage, self._renders = storage, renders
         self._approvals, self._extractor = approvals, extractor
+
+    def _release_state(
+        self, tx: TenantTransaction, ref: ReleaseRef | None
+    ) -> VerifiedApprovalState:
+        if ref is None:
+            return "NONE"
+        return self._approvals.derive(
+            tx, ref.approval_id, ApprovalKind.KNOWLEDGE_RELEASE, ref.released_sha256
+        )
 
     @staticmethod
     def parse(ti: TaskInput) -> ComplianceGateInput:
@@ -172,17 +192,15 @@ class GateInputAssembler:
         segments = tuple(
             seg.model_copy(
                 update={
-                    "release_state": self._approvals.derive(
-                        tx,
-                        extracted.method_release_approvals.get(seg.segment_ref),
-                        ApprovalKind.KNOWLEDGE_RELEASE,
+                    "release_state": self._release_state(
+                        tx, extracted.method_release_approvals.get(seg.segment_ref)
                     )
                 }
             )
             for seg in inputs.method_segments
         )
         quotations = tuple(
-            (span, self._approvals.derive(tx, aid, ApprovalKind.COPYRIGHT_DOUBT))
+            (span, self._approvals.derive(tx, aid, ApprovalKind.COPYRIGHT_DOUBT, span))
             for span, aid in sorted(extracted.quotation_approvals.items())
         )
         fixed = inputs.model_copy(

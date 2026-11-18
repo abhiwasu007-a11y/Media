@@ -8,13 +8,13 @@ import hashlib
 import json
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
 
-from agent_16_compliance_qa.assembler import ExtractedGate, GateInputAssembler
+from agent_16_compliance_qa.assembler import ExtractedGate, GateInputAssembler, ReleaseRef
 from agent_16_compliance_qa.authorisation.stage import (
     ApprovalRow,
     ApprovalStepVerifier,
@@ -179,6 +179,8 @@ class Extractor:
 
     def __init__(self, release_id: str | None, items: Any = None) -> None:
         self.release_id, self.items = release_id, items
+        self.released = R_SHA
+        self.quotations: dict[str, str | None] = {}
         self.seen: Mapping[str, bytes] = {}
 
     def extract(
@@ -193,7 +195,12 @@ class Extractor:
             over["items"] = self.items
         return ExtractedGate(
             inputs=clean_inputs(**over),
-            method_release_approvals={"seg_m": self.release_id},
+            method_release_approvals={
+                "seg_m": ReleaseRef(approval_id=self.release_id, released_sha256=self.released)
+                if self.release_id
+                else None
+            },
+            quotation_approvals=dict(self.quotations),
         )
 
 
@@ -607,3 +614,46 @@ def test_report_section_lists_every_row_and_never_prints_zero_for_unknown() -> N
     assert music.value == f"{UNKNOWN} / 1"  # SKIPPED never prints as 0 points
     assert rep.quality_total == UNKNOWN
     assert rep.publish_date_note.startswith("already compliant")
+
+
+NOT_APPROVED = [s for s in ApprovalState if s is not ApprovalState.APPROVED]
+
+
+@pytest.mark.parametrize("state", NOT_APPROVED, ids=lambda s: s.value)
+def test_release_approval_state_must_be_approved(state: ApprovalState) -> None:
+    """Re-review N1 (FIN-R12): a WITHDRAWN / EXPIRED / ... release never releases method
+    content, even with APPROVED steps and CONFIRMED evidence."""
+    w = gate_world()
+    rel = next(iter(w.approvals.approvals))
+    w.approvals.approvals[rel] = replace(w.approvals.approvals[rel], state=state)
+    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    r12 = next(r for r in data["rules"] if r["rule_id"] == "FIN-R12")
+    assert r12["compliance_verdict"] == "BLOCKED" and data["verdict"] == "BLOCKED"
+
+
+def test_release_approval_for_another_subject_never_counts() -> None:
+    """Re-review m3: the release must be for the hash of what is released."""
+    w = gate_world()
+    w.extractor.released = "e" * 64
+    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    assert data["verdict"] == "BLOCKED"
+
+
+@pytest.mark.parametrize("state", [ApprovalState.APPROVED, *NOT_APPROVED], ids=lambda s: s.value)
+def test_quotation_approval_state_and_span_binding(state: ApprovalState) -> None:
+    """Re-review N1 + m3 (V12): a COPYRIGHT_DOUBT approval counts only when APPROVED (state and
+    steps) and only for its own span hash."""
+    w = gate_world()
+    rel = next(iter(w.approvals.approvals))
+    span = R_SHA
+    w.approvals.approvals[rel] = replace(
+        w.approvals.approvals[rel], kind=ApprovalKind.COPYRIGHT_DOUBT, state=state
+    )
+    verifier = ApprovalStepVerifier(w.approvals, w.h.a16, config().accepted_channels)
+    tx = MemoryTransaction(TenantContext(w.h.org, ids.ActorRef("agent_16")))
+    got = verifier.derive(tx, rel, ApprovalKind.COPYRIGHT_DOUBT, span)
+    assert (got == "APPROVED") is (state is ApprovalState.APPROVED)
+    assert verifier.derive(tx, rel, ApprovalKind.COPYRIGHT_DOUBT, "f" * 64) == "NONE"
+    assert verifier.derive(tx, rel, ApprovalKind.COPYRIGHT_DOUBT, None) == "NONE"
+    w.extractor.quotations = {span: rel}
+    data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))  # the assembler path runs the same check

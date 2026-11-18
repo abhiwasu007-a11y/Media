@@ -326,6 +326,8 @@ class AuthorisationGuards:
         if ra is None:
             problems.append("resolving approval not visible")
         else:
+            if ra.state is not ApprovalState.APPROVED:
+                problems.append(f"resolving approval state {ra.state.value}")
             if ra.kind not in RESOLVING_KINDS:
                 problems.append(f"resolving approval kind {ra.kind.value}")
             if not ra.subject_matches_item:
@@ -361,6 +363,17 @@ class AuthorisationGuards:
         if not gate.nhr_resolutions:
             problems.append("no resolving human verdict row")
         resolved: set[str] = set()
+        for label, keys in (
+            ("step", [r.step_key for r in gate.nhr_resolutions]),
+            (
+                "evidence",
+                [r.evidence.evidence_id if r.evidence else None for r in gate.nhr_resolutions],
+            ),
+        ):
+            used = [k for k in keys if k is not None]
+            for k in sorted({k for k in used if used.count(k) > 1}):
+                # 04 section 5.17: one human row per evidence / step (re-review m4)
+                problems.append(f"one resolving {label} backs {used.count(k)} verdict rows ({k})")
         for i, r in enumerate(gate.nhr_resolutions):
             found = self._resolution_problems(r, items)
             problems.extend(f"resolution {i + 1} {p}" for p in found)
@@ -414,6 +427,8 @@ class AuthorisationGuards:
         g2 = approval_from_steps(rows.steps)
         for a in rows.other_approvals:
             g2.extend(f"{a.kind} ({a.relied_on_by}): {p}" for p in approval_from_steps(a.steps))
+            if a.state is not ApprovalState.APPROVED:  # re-review N1: state AND steps
+                g2.append(f"{a.kind} ({a.relied_on_by}): approval state {a.state.value}")
         results.append(_result("G2", g2, "every relied-on step APPROVED by an active human"))
         bound = [c for c in rows.contributions if c.bound_to_this_approval]
         good = [

@@ -132,7 +132,7 @@ def prefiltered(case: dict[str, Any]) -> dict[str, Any]:
 
 PREFILTER_GAPS = {
     "EDGE-R6-04": "a percentage / money amount with no first- or second-person subject is not a "
-    "blueprint 6.2 signal; REQUIRES REVIEW (Phase 1): owner decides whether to widen the rule",
+    "blueprint 6.2 signal (conflicts with 13 FIN-R6; CCR-109 PROPOSED); REQUIRES REVIEW (Phase 1)",
 }
 
 

@@ -581,3 +581,31 @@ def test_authorisation_and_mac_failure_are_audited() -> None:
     stage.run(h.tx("agent_16"), req, datetime(2026, 1, 31, tzinfo=UTC), "idk-audit")
     assert "security.evidence_mac_invalid" in audit.actions()
     assert audit.actions()[-1] == "publication_authorisation.decided"
+
+
+NOT_APPROVED = [s for s in ApprovalState if s is not ApprovalState.APPROVED]
+
+
+@pytest.mark.parametrize("state", NOT_APPROVED, ids=lambda s: s.value)
+@pytest.mark.parametrize("listed", [False, True])
+def test_resolving_approval_state_must_be_approved(state: ApprovalState, listed: bool) -> None:
+    """Re-review N1: valid APPROVED steps and CONFIRMED evidence, but the SENSITIVE_CLAIM
+    approval is PENDING / REJECTED / CHANGES_REQUESTED / EXPIRED / WITHDRAWN: never ALLOWED."""
+    h, repo, req, sc_id, _ = nhr_world(listed=listed)
+    repo.approvals[sc_id] = replace(repo.approvals[sc_id], state=state)
+    d = run(h, repo, req).decision
+    assert d.verdict is ComplianceVerdict.BLOCKED and "G5" in d.failed_guards
+    if listed:
+        assert "G2" in d.failed_guards
+    assert f"resolving approval state {state.value}" in next(
+        g.detail for g in d.guards if g.guard_id == "G5"
+    )
+
+
+def test_one_resolving_step_cannot_back_two_nhr_items() -> None:
+    """Re-review m4: 04 section 5.17 writes one human row per evidence / step."""
+    h, repo, req, _, _ = nhr_world(items=(NHR_RULE, "FIN-R1"))
+    repo.verdicts = [*repo.verdicts, replace(repo.verdicts[0], rule_id="FIN-R1")]
+    d = run(h, repo, req).decision
+    g5 = next(g for g in d.guards if g.guard_id == "G5")
+    assert d.verdict is ComplianceVerdict.BLOCKED and "backs 2 verdict rows" in g5.detail

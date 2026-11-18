@@ -344,8 +344,10 @@ class ApprovalStepVerifier:
         tx: TenantTransaction,
         approval_id: str | None,
         kind: ApprovalKind,
-        subject_sha256: str | None = None,
+        subject_sha256: str | None,
     ) -> VerifiedApprovalState:
+        """``subject_sha256``: the hash of what is released / quoted; ``None`` (the binding is
+        unknown) is ``NONE`` — an approval for another subject never counts (re-review m3)."""
         if approval_id is None:
             return "NONE"
         approval = self._reader.approval(tx, approval_id)
@@ -353,7 +355,8 @@ class ApprovalStepVerifier:
             approval is None
             or approval.org_id != tx.context.org_id
             or approval.kind is not kind
-            or (subject_sha256 is not None and approval.subject_sha256 != subject_sha256)
+            or subject_sha256 is None
+            or approval.subject_sha256 != subject_sha256
         ):
             return "NONE"
         steps = [s for s in self._reader.steps(tx, approval.id) if s.org_id == approval.org_id]
@@ -589,6 +592,7 @@ class PublicationAuthorisationStage:
                     and step.evidence_id == v.evidence_id
                     and step.record_key == v.record_key,
                     resolving_approval=resolving,
+                    step_key=f"{v.approval_id}:{v.step_no}",
                 )
             )
         lag = self._cfg.price_data_lag_days

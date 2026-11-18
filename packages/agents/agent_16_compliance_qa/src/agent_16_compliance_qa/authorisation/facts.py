@@ -157,6 +157,8 @@ class NhrResolution(Model):
     """The row cites the same evidence row and record key as that step (one record)."""
     resolving_approval: ResolvingApproval | None = None
     """``None`` = the approval named by the row is not visible (G5 FAIL)."""
+    step_key: str | None = None
+    """``<approval_id>:<step_no>`` of the step written with the row; one step backs one row."""
 
 
 class GateFacts(Model):

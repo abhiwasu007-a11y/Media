@@ -37,18 +37,35 @@ def _norm(text: str) -> str:
     return normalise_for_matching(text).text
 
 
+_SPLIT_RUN = re.compile(r"(?<![^\W\d_])[^\W\d_](?:[-._*·•/\s][^\W\d_]){2,}(?![^\W\d_])")
+"""Three or more single letters, each separated by ONE separator (``b-u-y``, ``b.u.y``,
+``b u y``): a word split to dodge the lexicon (re-review m1)."""
+_SEPARATOR = re.compile(r"[-._*·•/\s]")
+
+
+def collapse_split_words(text: str) -> str:
+    """Joins separator-split letter runs back into a word for the lexicon match only (a signal
+    for the pre-filter, not a fold of the text: the judge still reads the original item).
+    Ordinary text has no run of three single letters, so it is unchanged (tested)."""
+    return _SPLIT_RUN.sub(lambda m: _SEPARATOR.sub("", m.group(0)), text)
+
+
 def contains_any(text: str, words: Iterable[str]) -> bool:
-    """Whole-word match for single ASCII words, substring match for phrases and other scripts."""
-    hay = _norm(text)
+    """Whole-word match for single ASCII words, substring match for phrases and other scripts;
+    also on the text with separator-split words joined (``b-u-y`` matches ``buy``)."""
+    plain = _norm(text)
+    joined = collapse_split_words(plain)
+    hays = (plain,) if joined == plain else (plain, joined)
     for w in words:
         needle = _norm(w)
         if not needle:
             continue
-        if needle.isascii() and " " not in needle:
-            if re.search(rf"(?<![\w]){re.escape(needle)}(?![\w])", hay):
+        for hay in hays:
+            if needle.isascii() and " " not in needle:
+                if re.search(rf"(?<![\w]){re.escape(needle)}(?![\w])", hay):
+                    return True
+            elif needle in hay:
                 return True
-        elif needle in hay:
-            return True
     return False
 
 

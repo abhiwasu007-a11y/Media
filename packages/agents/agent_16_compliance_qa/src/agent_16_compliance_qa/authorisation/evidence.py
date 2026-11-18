@@ -360,13 +360,15 @@ def derive_approval_state(
     steps: Sequence[StepFacts],
     accepted_channels: frozenset[ApprovalChannel],
 ) -> VerifiedApprovalState:
-    """F-26 (section 19.3 rule 13, CCR-102): ``APPROVED`` only when the approval has steps and
-    every step is ``APPROVED`` and passes G2 and G4; ``approvals.state = APPROVED`` with a
-    failing or undecided step is ``APPROVED_UNVERIFIED`` (never counted as approved)."""
+    """F-26 (section 19.3 rule 13, CCR-102): ``APPROVED`` only when ``approvals.state`` is
+    ``APPROVED`` (not PENDING / REJECTED / CHANGES_REQUESTED / EXPIRED / WITHDRAWN) **and** the
+    approval has steps and every step is ``APPROVED`` and passes G2 and G4;
+    ``approvals.state = APPROVED`` with a failing or undecided step is ``APPROVED_UNVERIFIED``
+    (never counted as approved)."""
     if state is None:
         return "NONE"
-    if steps_approved(steps, accepted_channels):
-        return "APPROVED"
+    if state is ApprovalState.APPROVED and steps_approved(steps, accepted_channels):
+        return "APPROVED"  # both: the state is necessary, never sufficient (re-review N1)
     if state is ApprovalState.APPROVED:
         return "APPROVED_UNVERIFIED"
     if state is ApprovalState.PENDING:
