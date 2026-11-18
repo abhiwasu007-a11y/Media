@@ -56,7 +56,9 @@ def test_append_chains_from_genesis_and_verifies() -> None:
     assert all(rows[i].prev_hash == rows[i - 1].row_hash for i in range(1, 5))
     assert all(hash_entry(r) == r.row_hash for r in rows)
     v = log.verify_chain(tx)
-    assert v.ok and v.entries_checked == 5 and v.first_bad_seq is None
+    assert v.ok
+    assert v.entries_checked == 5
+    assert v.first_bad_seq is None
 
 
 def test_hash_is_sha256_of_prev_and_canonical_columns() -> None:
@@ -80,7 +82,9 @@ def test_tampered_row_is_detected_at_its_seq() -> None:
     forged = replace(rows[2], entry=replace(rows[2].entry, details={"to": "CANCELLED"}))
     log._tamper(org, 2, forged)
     v = log.verify_chain(tx)
-    assert not v.ok and v.first_bad_seq == 3 and v.entries_checked == 2
+    assert not v.ok
+    assert v.first_bad_seq == 3
+    assert v.entries_checked == 2
 
 
 @pytest.mark.security
@@ -103,7 +107,8 @@ def test_truncation_and_reordering_are_detected() -> None:
     rows = [log.append(tx, _entry(i)) for i in range(4)]
     log._truncate(org, 2)
     v = log.verify_chain(tx)
-    assert not v.ok and v.first_bad_seq == 3  # head says 4, rows end at 2
+    assert not v.ok
+    assert v.first_bad_seq == 3
     assert verify_entries([rows[1], rows[0]], None).first_bad_seq == 1
     assert verify_entries([], None).ok
     assert not verify_entries([], ChainHead(1, rows[0].row_hash)).ok
@@ -116,7 +121,8 @@ def test_chains_are_per_tenant() -> None:
     log.append(a, _entry())
     log.append(a, _entry(1))
     first_b = log.append(b, _entry())
-    assert first_b.seq == 1 and first_b.prev_hash == GENESIS_HASH
+    assert first_b.seq == 1
+    assert first_b.prev_hash == GENESIS_HASH
     assert [r.seq for r in log.export(b)] == [1]
     assert log.verify_chain(a).entries_checked == 2
 
@@ -159,7 +165,7 @@ def test_concurrent_writers_get_a_gap_free_sequence() -> None:
         {"action": ""},
         {"target_kind": "NOT_AN_ENTITY"},
         {"target_kind": "JOB"},  # target_id is a task ID
-        {"occurred_at": datetime(2026, 1, 1)},  # noqa: DTZ001 - naive on purpose
+        {"occurred_at": datetime(2026, 1, 1)},
         {"details": {"ratio": 0.5}},  # floats are not canonical
         {"details": {"x": "a\x00b"}},
         {"details": {1: "x"}},
@@ -169,7 +175,7 @@ def test_concurrent_writers_get_a_gap_free_sequence() -> None:
 )
 def test_invalid_entries_are_refused(change: dict[str, object]) -> None:
     with pytest.raises(InputInvalidError):
-        MemoryAuditLog().append(tx_for(ORG.new()), _entry(**change))
+        MemoryAuditLog().append(tx_for(ORG.new()), _entry(**change))  # type: ignore[arg-type]
 
 
 def test_deep_details_refused() -> None:
@@ -187,9 +193,7 @@ def test_secrets_are_refused_in_details() -> None:
     with pytest.raises(InputInvalidError, match="secret"):
         MemoryAuditLog().append(tx_for(ORG.new()), _entry(details={"api_key": "x"}))
     with pytest.raises(InputInvalidError):
-        MemoryAuditLog().append(
-            tx_for(ORG.new()), _entry(details={"note": "sk-ant-" + "z" * 30})
-        )
+        MemoryAuditLog().append(tx_for(ORG.new()), _entry(details={"note": "sk-ant-" + "z" * 30}))
 
 
 def test_optional_fields_and_human_actor() -> None:
@@ -209,7 +213,8 @@ def test_optional_fields_and_human_actor() -> None:
             details={},
         ),
     )
-    assert log.verify_chain(tx).ok and row.entry.on_behalf_of == user
+    assert log.verify_chain(tx).ok
+    assert row.entry.on_behalf_of == user
 
 
 def test_format_ts_converts_to_utc() -> None:

@@ -55,7 +55,8 @@ def test_policy_defaults_equal_the_07_table() -> None:
             continue
         nums = [int(c.replace(",", "").split()[0]) for c in (cells[1], cells[3], cells[5])]
         assert (p.base_ms, p.cap_ms, p.max_attempts) == tuple(nums), name
-        assert p.multiplier == int(cells[2]) and p.jitter == Decimal(cells[4]), name
+        assert p.multiplier == int(cells[2]), name
+        assert p.jitter == Decimal(cells[4]), name
     assert names == {p.value for p in RetryPolicy}
 
 
@@ -75,11 +76,16 @@ def test_breaker_limits_and_caps_defaults() -> None:
         2,
     )
     lim = cfg.limits
-    assert (lim.max_attempts_per_task, lim.max_revision_loops, lim.max_tasks_per_job) == (10, 3, 200)
+    assert (lim.max_attempts_per_task, lim.max_revision_loops, lim.max_tasks_per_job) == (
+        10,
+        3,
+        200,
+    )
     assert (lim.max_child_jobs_per_job, lim.max_replays_per_item) == (10, 3)
     assert lim.max_job_active_ms == 86_400_000
     assert cfg.caps.lock_conflict_reevaluations == 5
-    assert cfg.reaper.interval_ms == 15_000 and cfg.reaper.lease_ms == 60_000
+    assert cfg.reaper.interval_ms == 15_000
+    assert cfg.reaper.lease_ms == 60_000
 
 
 def test_owner_values_have_no_default() -> None:
@@ -93,7 +99,8 @@ def test_owner_values_have_no_default() -> None:
     assert cfg.secrets == {}
     assert cfg.database.url is None
     assert cfg.storage.root is None
-    assert cfg.llm.tiers == {} and cfg.llm.tasks == {}
+    assert cfg.llm.tiers == {}
+    assert cfg.llm.tasks == {}
 
 
 def test_environment_overrides_nested_values() -> None:
@@ -118,7 +125,7 @@ def test_environment_overrides_nested_values() -> None:
 def test_config_file_then_environment(tmp_path: Path) -> None:
     file = tmp_path / "amw.toml"
     file.write_text(
-        '[limits]\nmax_tasks_per_job = 40\nmax_revision_loops = 2\n'
+        "[limits]\nmax_tasks_per_job = 40\nmax_revision_loops = 2\n"
         '[llm.tiers.MID]\nprovider = "llm_provider"\nmodel = "model-from-config"\n'
         '[llm.tasks."agent_05.script_draft"]\nmodel_tier = "MID"\ncost_budget_micros = 100\n',
         encoding="utf-8",
@@ -127,7 +134,8 @@ def test_config_file_then_environment(tmp_path: Path) -> None:
     assert cfg.limits.max_tasks_per_job == 30
     assert cfg.limits.max_revision_loops == 2
     task = cfg.llm.for_task("agent_05.script_draft")
-    assert isinstance(task, LlmTaskSettings) and task.model_tier is LlmModelTier.MID
+    assert isinstance(task, LlmTaskSettings)
+    assert task.model_tier is LlmModelTier.MID
     assert cfg.llm.resolve(LlmModelTier.MID).model == "model-from-config"
     with pytest.raises(ConfigInvalidError):
         cfg.llm.resolve(LlmModelTier.TOP)
@@ -175,7 +183,8 @@ def test_secrets_come_from_the_environment_and_a_mounted_directory(tmp_path: Pat
     assert cfg.secret("llm_api_key") == CANARY
     assert cfg.secret("tts_api_key") == CANARY + "-tts"
     assert ".hidden" not in cfg.secrets
-    assert CANARY not in repr(cfg) and CANARY not in str(cfg.model_dump())
+    assert CANARY not in repr(cfg)
+    assert CANARY not in str(cfg.model_dump())
     assert set(cfg.secret_values()) == {CANARY, CANARY + "-tts", "postgresql://u:p@h/d"}
     with pytest.raises(ConfigInvalidError):
         load_settings(environ={}, secrets_dir=tmp_path / "missing")
@@ -188,7 +197,8 @@ def test_startup_check_names_missing_secrets_only() -> None:
     with pytest.raises(ConfigInvalidError) as err:
         require_secrets(cfg, ["llm_api_key", "tts_api_key"])
     assert err.value.details == {"names": ["tts_api_key"]}
-    assert CANARY not in str(err.value) and CANARY not in json.dumps(err.value.details)
+    assert CANARY not in str(err.value)
+    assert CANARY not in json.dumps(err.value.details)
     with pytest.raises(ConfigInvalidError):
         cfg.secret("tts_api_key")
 
@@ -202,7 +212,8 @@ def test_invalid_values_report_fields_not_values() -> None:
     with pytest.raises(ConfigInvalidError):
         load_settings(environ={"AMW_LIMITS__MAX_ATTEMPTS_PER_TASK": "11"})  # > DB ceiling 10
     with pytest.raises(ConfigInvalidError):
-        load_settings(environ={"AMW_NOT_A_SECTION": "1"})
+        load_settings(environ={"AMW_LIMITS__NOT_A_LIMIT": "1"})
+    assert load_settings(environ={"AMW_TEST_DATABASE_URL": "x"}).limits.max_tasks_per_job == 200
     with pytest.raises(ConfigInvalidError):
         load_settings(environ={"AMW_BREAKER_DEFAULT__OPEN_MS": "1000000"})  # > open_ms_max
     with pytest.raises(ConfigInvalidError):
@@ -210,7 +221,9 @@ def test_invalid_values_report_fields_not_values() -> None:
 
 
 def test_breaker_override_per_provider_operation() -> None:
-    cfg = load_settings(environ={"AMW_BREAKER": '{"llm_provider.llm.completion": {"min_calls": 9}}'})
+    cfg = load_settings(
+        environ={"AMW_BREAKER": '{"llm_provider.llm.completion": {"min_calls": 9}}'}
+    )
     assert cfg.breaker_for("llm_provider", "llm.completion").min_calls == 9
     assert cfg.breaker_for("tts_provider", "tts.synthesize").min_calls == 5
 

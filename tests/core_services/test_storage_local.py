@@ -50,7 +50,9 @@ def test_is_a_blob_storage(store: LocalDiskStorage) -> None:
     assert isinstance(store, BlobStorage)
 
 
-def test_put_get_head_roundtrip_and_physical_mapping(store: LocalDiskStorage, tmp_path: Path) -> None:
+def test_put_get_head_roundtrip_and_physical_mapping(
+    store: LocalDiskStorage, tmp_path: Path
+) -> None:
     uri = store.blob_uri(A, "jobs", "job_1/renders/master.mp4")
     info = store.put(A, uri, io.BytesIO(DATA))
     assert (info.sha256, info.size_bytes, info.uri) == (SHA, len(DATA), uri)
@@ -58,7 +60,7 @@ def test_put_get_head_roundtrip_and_physical_mapping(store: LocalDiskStorage, tm
     head = store.head(A, uri)
     assert (head.exists, head.sha256, head.size_bytes) == (True, SHA, len(DATA))
     physical = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / "jobs/job_1/renders/master.mp4"
-    assert physical.is_file() and not os.access(physical, os.W_OK) or os.geteuid() == 0
+    assert (physical.is_file() and not os.access(physical, os.W_OK)) or os.geteuid() == 0
     assert oct(physical.stat().st_mode & 0o777) == "0o444"
     assert store.head(A, _uri(A, "jobs/job_1/none.bin")).exists is False
 
@@ -122,10 +124,11 @@ def test_get_verifies_sha_before_the_last_chunk(store: LocalDiskStorage, tmp_pat
     uri = _uri(A)
     store.put(A, uri, io.BytesIO(DATA))
     received: list[bytes] = []
+    chunks = store.get(A, uri, "0" * 64)
     with pytest.raises(CorruptedOutputError):
-        for chunk in store.get(A, uri, "0" * 64):
-            received.append(chunk)
-    assert b"".join(received) != DATA and len(b"".join(received)) < len(DATA)
+        received.extend(chunks)
+    assert b"".join(received) != DATA
+    assert len(b"".join(received)) < len(DATA)
     # tamper with the stored bytes: detected by the reader
     physical = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / "jobs/job_1/renders/master.mp4"
     physical.chmod(0o644)
@@ -171,7 +174,9 @@ class _Exploding(io.RawIOBase):
 
 
 @pytest.mark.failure_injection
-def test_failed_stream_leaves_no_final_and_no_temp_file(store: LocalDiskStorage, tmp_path: Path) -> None:
+def test_failed_stream_leaves_no_final_and_no_temp_file(
+    store: LocalDiskStorage, tmp_path: Path
+) -> None:
     uri = _uri(A, "jobs/j/broken.bin")
     with pytest.raises(StorageUnavailableError):
         store.put(A, uri, _Exploding())
@@ -270,6 +275,9 @@ def test_parse_uri() -> None:
     org = ORG.from_uuid(new_uuid7())
     parsed = parse_uri(f"amw-blob://{org}/jobs/job_1/x.json")
     assert (parsed.owner, parsed.area, parsed.path, parsed.is_platform) == (
-        org, "jobs", "job_1/x.json", False,
-    )  # fmt: skip
+        org,
+        "jobs",
+        "job_1/x.json",
+        False,
+    )
     assert parse_uri("amw-blob://platform/templates/a").is_platform

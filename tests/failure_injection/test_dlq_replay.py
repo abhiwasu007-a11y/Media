@@ -29,10 +29,11 @@ SHA = "ab" * 32
 
 def _item(code: str = "INFRASTRUCTURE.STORAGE_UNAVAILABLE", **kw: object) -> dlq.DeadLetter:
     history = [
-        dlq.AttemptHistoryItem(n, T0 + timedelta(minutes=n), T0 + timedelta(minutes=n, seconds=5),
-                               "wkr_x", code)
+        dlq.AttemptHistoryItem(
+            n, T0 + timedelta(minutes=n), T0 + timedelta(minutes=n, seconds=5), "wkr_x", code
+        )
         for n in (2, 1, 3)
-    ]  # fmt: skip
+    ]
     item = dlq.build_dead_letter(
         task_id=TASK.new(),
         job_id=JOB.new(),
@@ -56,14 +57,24 @@ def test_record_content_from_the_catalogue() -> None:
     assert item.retry_history[0].to_json()["error_code"] == item.error_code
     with pytest.raises(InputInvalidError):
         dlq.build_dead_letter(
-            task_id=TASK.new(), job_id=JOB.new(), error={}, reason="r", payload_ref="x",
-            payload_sha256=SHA, retry_history=[],
-        )  # fmt: skip
+            task_id=TASK.new(),
+            job_id=JOB.new(),
+            error={},
+            reason="r",
+            payload_ref="x",
+            payload_sha256=SHA,
+            retry_history=[],
+        )
     with pytest.raises(InputInvalidError):
         dlq.build_dead_letter(
-            task_id=TASK.new(), job_id=JOB.new(), error={"code": "AGENT.CRASH"}, reason="r",
-            payload_ref="x", payload_sha256="ab", retry_history=[],
-        )  # fmt: skip
+            task_id=TASK.new(),
+            job_id=JOB.new(),
+            error={"code": "AGENT.CRASH"},
+            reason="r",
+            payload_ref="x",
+            payload_sha256="ab",
+            retry_history=[],
+        )
 
 
 def test_full_workflow_to_resolved() -> None:
@@ -71,14 +82,20 @@ def test_full_workflow_to_resolved() -> None:
     item = dlq.request_replay(item, OWNER, ALL, T0)
     item = dlq.approve_replay(item, OWNER, ALL, CFG, T0)
     plan = dlq.plan_replay(item, CFG)
-    assert plan.payload_ref == item.payload_ref and plan.attempt_counter_reset
+    assert plan.payload_ref == item.payload_ref
+    assert plan.attempt_counter_reset
     item = dlq.mark_replayed(item, CFG, T0)
-    assert item.replay_count == 1 and item.recovery_status is DlqRecoveryStatus.REPLAYED
+    assert item.replay_count == 1
+    assert item.recovery_status is DlqRecoveryStatus.REPLAYED
     item = dlq.mark_resolved(item, T0)
     assert item.resolved_at == T0
     assert [e["to"] for e in item.events] == [
-        "TRIAGED", "REPLAY_REQUESTED", "REPLAY_APPROVED", "REPLAYED", "RESOLVED",
-    ]  # fmt: skip
+        "TRIAGED",
+        "REPLAY_REQUESTED",
+        "REPLAY_APPROVED",
+        "REPLAYED",
+        "RESOLVED",
+    ]
     with pytest.raises(InvalidTransitionError):
         dlq.discard(item, OWNER, "late", ALL, T0)
 
@@ -103,14 +120,16 @@ def test_guards_permissions_notes_and_order() -> None:
     with pytest.raises(InputInvalidError):
         dlq.discard(_item(), OWNER, "", ALL, T0)
     gone = dlq.discard(_item(), OWNER, "superseded", ALL, T0)
-    assert gone.recovery_status is DlqRecoveryStatus.DISCARDED and gone.events[-1]["note"]
+    assert gone.recovery_status is DlqRecoveryStatus.DISCARDED
+    assert gone.events[-1]["note"]
 
 
 def test_failed_replay_returns_to_new() -> None:
     item = dlq.triage(_item(), OWNER, "n", ALL, T0)
     item = dlq.approve_replay(dlq.request_replay(item, OWNER, ALL, T0), OWNER, ALL, CFG, T0)
     item = dlq.mark_failed_again(dlq.mark_replayed(item, CFG, T0), T0)
-    assert item.recovery_status is DlqRecoveryStatus.NEW and item.replay_count == 1
+    assert item.recovery_status is DlqRecoveryStatus.NEW
+    assert item.replay_count == 1
 
 
 @pytest.mark.parametrize(
@@ -183,13 +202,18 @@ def test_replayed_delivery_performs_the_effect_once() -> None:
         return store.complete(tx, key, "amw-entity://x/publications/p1", T0).result_ref or ""
 
     first = deliver()
-    item = _item("INFRASTRUCTURE.STORAGE_UNAVAILABLE", idempotency_key=key,
-                 idempotency_scope="delivery.file")  # fmt: skip
+    item = _item(
+        "INFRASTRUCTURE.STORAGE_UNAVAILABLE", idempotency_key=key, idempotency_scope="delivery.file"
+    )
     item = dlq.approve_replay(
         dlq.request_replay(dlq.triage(item, OWNER, "n", ALL, T0), OWNER, ALL, T0),
-        OWNER, ALL, CFG, T0,
-    )  # fmt: skip
+        OWNER,
+        ALL,
+        CFG,
+        T0,
+    )
     plan = dlq.plan_replay(item, CFG)
-    assert plan.idempotency_key == key and plan.reconcile_first
+    assert plan.idempotency_key == key
+    assert plan.reconcile_first
     assert deliver() == first
     assert effects == ["bundle"]

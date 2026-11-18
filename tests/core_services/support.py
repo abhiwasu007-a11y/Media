@@ -59,7 +59,7 @@ def tx_for(org: OrgId, actor: str = ORCH) -> MemoryTransaction:
 def settings(**finance: object) -> AmwSettings:
     """Settings with the INR / USD minor-unit exponents a test needs (test data)."""
     base = load_settings(environ={})
-    fin = FinanceSettings(currency_minor_exponent={"INR": 2, "USD": 2}, **finance)  # type: ignore[arg-type]
+    fin = FinanceSettings(currency_minor_exponent={"INR": 2, "USD": 2}, **finance)  # type: ignore[arg-type,unused-ignore]
     return base.model_copy(update={"finance": fin})
 
 
@@ -98,6 +98,9 @@ class World:
     clock: FixedClock = field(default_factory=FixedClock)
     ledger: MemoryCostLedger = field(default_factory=MemoryCostLedger)
     cfg: AmwSettings = field(default_factory=settings)
+    video: BudgetId = field(default_factory=lambda: BudgetId(""))
+    pilot: BudgetId = field(default_factory=lambda: BudgetId(""))
+    provider: BudgetId = field(default_factory=lambda: BudgetId(""))
 
     def __post_init__(self) -> None:
         from amw_core.audit import MemoryAuditLog

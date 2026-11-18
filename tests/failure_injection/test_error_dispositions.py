@@ -14,8 +14,7 @@ from amw_core.errors import (
     LoopCapExceededError,
     QualityRepeatedFailureError,
 )
-from amw_core.retries import AttemptFailure, decide, decide_for_error
-from amw_core.retries import caps
+from amw_core.retries import AttemptFailure, caps, decide, decide_for_error
 from tests.core_services.support import T0
 from tests.docs_tables import doc_text, section, table_rows
 
@@ -54,7 +53,8 @@ def test_first_failure_disposition(code: str) -> None:
         case ErrorDisposition.RETRY:
             assert doc_disposition.startswith("RETRY")
             assert decision.disposition is ErrorDisposition.RETRY
-            assert decision.next_attempt_at is not None and decision.next_attempt_at >= T0
+            assert decision.next_attempt_at is not None
+            assert decision.next_attempt_at >= T0
             assert decision.consumes_attempt
         case ErrorDisposition.SUSPEND:
             assert doc_disposition.startswith(f"SUSPEND:`{spec.wait_reason}`")
@@ -86,23 +86,31 @@ def test_retryable_codes_stop_at_their_policy_cap(code: str) -> None:
         )
         if k < policy.max_attempts and k < 10:
             assert last.disposition is ErrorDisposition.RETRY, (code, k)
-    assert last is not None and last.disposition is ErrorDisposition.FAIL
+    assert last is not None
+    assert last.disposition is ErrorDisposition.FAIL
     assert last.escalation in (EscalationLevel.L2, EscalationLevel.L3)
 
 
 def test_task_attempt_ceiling_is_a_loop_cap() -> None:
     d = decide(
-        AttemptFailure("TEMPORARY.NETWORK", attempt_count=3, max_attempts=3, class_failures=1, now=T0),
+        AttemptFailure(
+            "TEMPORARY.NETWORK", attempt_count=3, max_attempts=3, class_failures=1, now=T0
+        ),
         CFG,
     )
-    assert d.disposition is ErrorDisposition.FAIL and d.code == "AGENT.LOOP_CAP_EXCEEDED"
+    assert d.disposition is ErrorDisposition.FAIL
+    assert d.code == "AGENT.LOOP_CAP_EXCEEDED"
     assert d.escalation is EscalationLevel.L3
 
 
 def test_hard_cap_flag_fails_the_retry() -> None:
     d = decide(
         AttemptFailure(
-            "AGENT.CRASH", attempt_count=1, max_attempts=5, class_failures=1, now=T0,
+            "AGENT.CRASH",
+            attempt_count=1,
+            max_attempts=5,
+            class_failures=1,
+            now=T0,
             hard_cap_reached=True,
         ),
         CFG,
@@ -112,22 +120,26 @@ def test_hard_cap_flag_fails_the_retry() -> None:
 
 def test_agent_parse_retries_once_immediately_then_dead_letters() -> None:
     first = decide(
-        AttemptFailure("AGENT.INVALID_JSON", attempt_count=1, max_attempts=10, class_failures=1, now=T0),
+        AttemptFailure(
+            "AGENT.INVALID_JSON", attempt_count=1, max_attempts=10, class_failures=1, now=T0
+        ),
         CFG,
     )
-    assert first.disposition is ErrorDisposition.RETRY and first.wait_ms == 0
+    assert first.disposition is ErrorDisposition.RETRY
+    assert first.wait_ms == 0
     second = decide(
-        AttemptFailure("AGENT.INVALID_JSON", attempt_count=2, max_attempts=10, class_failures=2, now=T0),
+        AttemptFailure(
+            "AGENT.INVALID_JSON", attempt_count=2, max_attempts=10, class_failures=2, now=T0
+        ),
         CFG,
     )
-    assert second.disposition is ErrorDisposition.FAIL and second.code == "AGENT.INVALID_JSON"
+    assert second.disposition is ErrorDisposition.FAIL
+    assert second.code == "AGENT.INVALID_JSON"
 
 
 def test_rate_limit_honours_retry_after_and_suspends_beyond_the_maximum() -> None:
     honoured = decide(
-        AttemptFailure(
-            "TEMPORARY.RATE_LIMITED", 1, 10, 1, T0, retry_after_ms=50_000
-        ),
+        AttemptFailure("TEMPORARY.RATE_LIMITED", 1, 10, 1, T0, retry_after_ms=50_000),
         CFG,
         uniform=lambda: 0.0,
     )
@@ -143,13 +155,12 @@ def test_rate_limit_honours_retry_after_and_suspends_beyond_the_maximum() -> Non
 
 def test_deadline_turns_a_retry_into_deadline_exceeded() -> None:
     d = decide(
-        AttemptFailure(
-            "RESOURCE.RENDER_CRASH", 1, 10, 1, T0, deadline=T0 + timedelta(seconds=10)
-        ),
+        AttemptFailure("RESOURCE.RENDER_CRASH", 1, 10, 1, T0, deadline=T0 + timedelta(seconds=10)),
         CFG,
         uniform=lambda: 0.0,
     )
-    assert d.disposition is ErrorDisposition.FAIL and d.code == "PERMANENT.DEADLINE_EXCEEDED"
+    assert d.disposition is ErrorDisposition.FAIL
+    assert d.code == "PERMANENT.DEADLINE_EXCEEDED"
 
 
 def test_window_shifts_the_next_attempt() -> None:

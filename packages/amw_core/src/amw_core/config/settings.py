@@ -333,6 +333,8 @@ def _environ_to_tree(environ: Mapping[str, str]) -> dict[str, Any]:
         if not key.startswith(ENV_PREFIX):
             continue
         parts = [p.lower() for p in key[len(ENV_PREFIX) :].split(ENV_NESTED_DELIMITER)]
+        if parts[0] not in AmwSettings.model_fields:
+            continue  # another component's AMW_* variable (e.g. AMW_TEST_DATABASE_URL)
         node = tree
         for part in parts[:-1]:
             child = node.setdefault(part, {})

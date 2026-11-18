@@ -44,7 +44,8 @@ def test_record_and_read_back() -> None:
     led = MemoryCostLedger()
     tx = tx_for(ORG_A)
     row = led.record(tx, _e())
-    assert led.get(tx, row.id) == row and led.for_job(tx, JOB_A) == [row]
+    assert led.get(tx, row.id) == row
+    assert led.for_job(tx, JOB_A) == [row]
     assert led.for_task(tx, TASK_A) == [row]
     t = led.job_totals(tx, JOB_A)
     assert (t.estimate_micros, t.verified_micros, t.effective_micros, t.rows) == (1000, 0, 1000, 1)
@@ -56,7 +57,8 @@ def test_replay_by_idempotency_key_is_a_no_op_and_conflict_is_refused() -> None:
     key = make_idempotency_key(ORG_A, "llm.call", [TASK_A, "draft", 1])
     first = led.record(tx, _e(idempotency_key=key))
     again = led.record(tx, _e(idempotency_key=key, occurred_at=T0.replace(minute=5)))
-    assert again == first and len(led.all_rows(tx)) == 1
+    assert again == first
+    assert len(led.all_rows(tx)) == 1
     with pytest.raises(IdempotencyConflictError):
         led.record(tx, _e(2_000, idempotency_key=key))
 
@@ -68,9 +70,14 @@ def test_verified_replaces_its_estimate_in_effective_sums() -> None:
     est2 = led.record(tx, _e(500))
     ver = led.record(
         tx,
-        _e(1_200, figure_kind=CostFigureKind.VERIFIED, price_ref=None, estimate_entry_id=est.id,
-           verification_ref="usage-export-1"),
-    )  # fmt: skip
+        _e(
+            1_200,
+            figure_kind=CostFigureKind.VERIFIED,
+            price_ref=None,
+            estimate_entry_id=est.id,
+            verification_ref="usage-export-1",
+        ),
+    )
     t = led.job_totals(tx, JOB_A)
     assert (t.estimate_micros, t.verified_micros, t.effective_micros) == (1500, 1200, 1700)
     assert (t.rows, t.verified_rows) == (2, 1)
@@ -78,11 +85,27 @@ def test_verified_replaces_its_estimate_in_effective_sums() -> None:
     assert {r.id for r in effective_rows(led.all_rows(tx))} == {ver.id, est2.id}
     assert led.get(tx, est.id) is not None  # the estimate is never overwritten
     with pytest.raises(InputInvalidError):  # one VERIFIED per estimate
-        led.record(tx, _e(1, figure_kind=CostFigureKind.VERIFIED, price_ref=None,
-                          estimate_entry_id=est.id, verification_ref="x"))  # fmt: skip
+        led.record(
+            tx,
+            _e(
+                1,
+                figure_kind=CostFigureKind.VERIFIED,
+                price_ref=None,
+                estimate_entry_id=est.id,
+                verification_ref="x",
+            ),
+        )
     with pytest.raises(InputInvalidError):  # must point to an ESTIMATE
-        led.record(tx, _e(1, figure_kind=CostFigureKind.VERIFIED, price_ref=None,
-                          estimate_entry_id=ver.id, verification_ref="x"))  # fmt: skip
+        led.record(
+            tx,
+            _e(
+                1,
+                figure_kind=CostFigureKind.VERIFIED,
+                price_ref=None,
+                estimate_entry_id=ver.id,
+                verification_ref="x",
+            ),
+        )
 
 
 def test_leak_and_labels() -> None:
@@ -119,15 +142,20 @@ def test_leak_and_labels() -> None:
 )
 def test_invalid_rows_are_refused(change: dict[str, object], error: type[Exception]) -> None:
     with pytest.raises(error):
-        MemoryCostLedger().record(tx_for(ORG_A), _e(**change))
+        MemoryCostLedger().record(tx_for(ORG_A), _e(**change))  # type: ignore[arg-type]
 
 
 def test_quota_rows_carry_no_money_and_need_no_price() -> None:
     row = MemoryCostLedger().record(
         tx_for(ORG_A),
-        _e(0, operation=CostOperation.YOUTUBE_QUOTA, price_ref=None, units=Decimal(1600),
-           unit_kind=CostUnitKind.QUOTA_UNITS),
-    )  # fmt: skip
+        _e(
+            0,
+            operation=CostOperation.YOUTUBE_QUOTA,
+            price_ref=None,
+            units=Decimal(1600),
+            unit_kind=CostUnitKind.QUOTA_UNITS,
+        ),
+    )
     assert row.entry.amount_micros == 0
 
 
@@ -136,7 +164,8 @@ def test_rows_are_partitioned_by_tenant() -> None:
     led = MemoryCostLedger()
     a, b = tx_for(ORG_A), tx_for(ORG.new())
     row = led.record(a, _e())
-    assert led.get(b, row.id) is None and led.for_job(b, JOB_A) == []
+    assert led.get(b, row.id) is None
+    assert led.for_job(b, JOB_A) == []
 
 
 def test_currency_rules() -> None:

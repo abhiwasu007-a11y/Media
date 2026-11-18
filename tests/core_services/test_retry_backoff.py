@@ -33,11 +33,14 @@ def test_wait_stays_within_d_k() -> None:
     for k in range(1, 12):
         d_k = min(TEMP.cap_ms, TEMP.base_ms * 2 ** (k - 1))
         low, high = backoff_ms(TEMP, k, 0.0), backoff_ms(TEMP, k, 0.999_999)
-        assert d_k // 2 == low and low <= high < d_k
+        assert d_k // 2 == low
+        assert low <= high < d_k
 
 
 def test_zero_jitter_is_deterministic() -> None:
-    p = RetryPolicySettings(base_ms=100, multiplier=3, cap_ms=10_000, jitter=Decimal(0), max_attempts=3)
+    p = RetryPolicySettings(
+        base_ms=100, multiplier=3, cap_ms=10_000, jitter=Decimal(0), max_attempts=3
+    )
     assert [backoff_ms(p, k, 0.7) for k in (1, 2, 3)] == [100, 300, 900]
 
 

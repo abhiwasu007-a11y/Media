@@ -12,6 +12,7 @@ from amw_core.enums import (
     BudgetScopeKind,
     BudgetState,
     CostFigureKind,
+    CostOperation,
     ErrorDisposition,
     ReservationStatus,
     WaitReason,
@@ -23,8 +24,9 @@ from amw_core.errors import (
     MissingDependencyError,
     PermissionDeniedError,
 )
-from amw_core.ids import CHANNEL, JOB, ORG, USER
+from amw_core.ids import CHANNEL, JOB, ORG, USER, JobId, TaskId
 from amw_core.interfaces.budget_guard import BudgetGuard, CallCheck
+from amw_core.interfaces.cost_ledger import NewCostEntry
 from amw_core.retries import decide_for_error
 from tests.core_services.support import T0, World, budget, settings, tx_for
 
@@ -38,9 +40,14 @@ def world(per_video_rupees: int = 10, pilot_rupees: int = 25) -> World:
     w.video = w.add_budget(budget(w.org, BudgetPeriod.PER_VIDEO, per_video_rupees * 100))
     w.pilot = w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, pilot_rupees * 100))
     w.provider = w.add_budget(
-        budget(w.org, BudgetPeriod.PILOT_TOTAL, 100_000, scope_kind=BudgetScopeKind.PROVIDER,
-               scope_key=PROVIDER)
-    )  # fmt: skip
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            100_000,
+            scope_kind=BudgetScopeKind.PROVIDER,
+            scope_key=PROVIDER,
+        )
+    )
     return w
 
 
@@ -57,7 +64,8 @@ def test_e1_reserves_on_every_applicable_budget() -> None:
     job = w.job()
     task = w.task(job)
     out = w.guard.reserve(w.tx, task, 4 * M, "INR")
-    assert out.granted and {r.budget_id for r in out.reservations} == {w.video, w.pilot}
+    assert out.granted
+    assert {r.budget_id for r in out.reservations} == {w.video, w.pilot}
     assert all(r.status is ReservationStatus.HELD for r in out.reservations)
     again = w.guard.reserve(w.tx, task, 4 * M, "INR")  # a retry reuses the hold
     assert again.reservations == out.reservations
@@ -68,7 +76,8 @@ def test_e1_is_all_or_nothing() -> None:
     w = world(per_video_rupees=10, pilot_rupees=5)
     task = w.task(w.job())
     out = w.guard.reserve(w.tx, task, 6 * M, "INR")
-    assert not out.granted and out.refused_budget_ids == (w.pilot,)
+    assert not out.granted
+    assert out.refused_budget_ids == (w.pilot,)
     assert w.backend.reservations(w.tx, task_id=task) == []
 
 
@@ -83,14 +92,20 @@ def test_b1_breach_blocks_new_paid_tasks_and_they_wait_for_budget() -> None:
     assert w.backend.get_budget(w.tx, w.pilot).budget.state is BudgetState.SUSPENDED_EXCEEDED  # type: ignore[union-attr]
     t2 = w.task(w.job())
     out = w.guard.reserve(w.tx, t2, 1, "INR")
-    assert not out.granted and w.pilot in out.refused_budget_ids
+    assert not out.granted
+    assert w.pilot in out.refused_budget_ids
     # the orchestrator maps the refusal to RESOURCE.BUDGET_EXHAUSTED: SUSPEND, AWAITING_BUDGET
     decision = decide_for_error(
-        BudgetExhaustedError("budget refused"), attempt_count=0, max_attempts=3,
-        class_failures=0, now=T0, settings=w.cfg,
-    )  # fmt: skip
+        BudgetExhaustedError("budget refused"),
+        attempt_count=0,
+        max_attempts=3,
+        class_failures=0,
+        now=T0,
+        settings=w.cfg,
+    )
     assert decision.disposition is ErrorDisposition.SUSPEND
-    assert decision.wait_reason is WaitReason.AWAITING_BUDGET and not decision.consumes_attempt
+    assert decision.wait_reason is WaitReason.AWAITING_BUDGET
+    assert not decision.consumes_attempt
 
 
 def test_b1_fail_closed_without_an_active_budget() -> None:
@@ -166,7 +181,8 @@ def test_b3_completed_work_is_never_deleted() -> None:
         ReservationStatus.CONSUMED
     ] * 2
     released = w.guard.release(w.tx, failing)
-    assert released == [] and len(w.ledger.all_rows(w.tx)) == 1
+    assert released == []
+    assert len(w.ledger.all_rows(w.tx)) == 1
 
 
 def test_release_keeps_incurred_cost() -> None:
@@ -176,7 +192,8 @@ def test_release_keeps_incurred_cost() -> None:
     w.guard.reserve(w.tx, task, 5 * M, "INR")
     w.spend(job, task, 2 * M)
     (rel,) = [r for r in w.guard.release(w.tx, task) if r.budget_id == w.pilot]
-    assert rel.status is ReservationStatus.RELEASED and rel.released_at == T0
+    assert rel.status is ReservationStatus.RELEASED
+    assert rel.released_at == T0
     assert w.guard.status(w.tx, w.pilot).committed_micros == 2 * M
 
 
@@ -190,7 +207,8 @@ def test_b4_non_paid_work_is_not_blocked_by_a_breach() -> None:
     assert w.backend.get_budget(w.tx, w.pilot).budget.state is BudgetState.SUSPENDED_EXCEEDED  # type: ignore[union-attr]
     qc = w.task(job)
     out = w.guard.reserve(w.tx, qc, 0, "INR")
-    assert out.granted and out.reservations == ()
+    assert out.granted
+    assert out.reservations == ()
     with pytest.raises(InputInvalidError):
         w.guard.reserve(w.tx, qc, -1, "INR")
 
@@ -203,24 +221,30 @@ def test_b5_breach_returns_the_changed_budgets_and_is_audited() -> None:
     w.guard.reserve(w.tx, task, 3 * M, "INR")
     row = w.ledger.record(w.tx, _entry(w, job, task, 3 * M))
     changed = w.guard.after_call(w.tx, row)
-    assert [b.id for b in changed] == [w.video] and changed[0].state is BudgetState.SUSPENDED_EXCEEDED
+    assert [b.id for b in changed] == [w.video]
+    assert changed[0].state is BudgetState.SUSPENDED_EXCEEDED
     assert w.guard.after_call(w.tx, row) == []  # already suspended: no second notice
     (audit,) = list(w.audit.export(w.tx))
-    assert audit.entry.action == "budget.suspended" and audit.entry.target_id == w.video
+    assert audit.entry.action == "budget.suspended"
+    assert audit.entry.target_id == w.video
     assert audit.entry.details["enforcement_point"] == "E3"
-    assert audit.entry.details["committed_micros"] == 3 * M and audit.entry.job_id == job
+    assert audit.entry.details["committed_micros"] == 3 * M
+    assert audit.entry.job_id == job
     assert w.audit.verify_chain(w.tx).ok
 
 
-def _entry(w: World, job: str, task: str, micros: int):  # type: ignore[no-untyped-def]
-    from amw_core.enums import CostOperation
-    from amw_core.interfaces.cost_ledger import NewCostEntry
-
+def _entry(w: World, job: JobId | None, task: TaskId | None, micros: int) -> NewCostEntry:
     return NewCostEntry(
-        provider=PROVIDER, operation=CostOperation.LLM_COMPLETION, amount_micros=micros,
-        currency="INR", figure_kind=CostFigureKind.ESTIMATE, occurred_at=w.clock.now(),
-        job_id=job, task_id=task, price_ref="pricing.v1",  # type: ignore[arg-type]
-    )  # fmt: skip
+        provider=PROVIDER,
+        operation=CostOperation.LLM_COMPLETION,
+        amount_micros=micros,
+        currency="INR",
+        figure_kind=CostFigureKind.ESTIMATE,
+        occurred_at=w.clock.now(),
+        job_id=job,
+        task_id=task,
+        price_ref="pricing.v1",
+    )
 
 
 # ---- B6 -------------------------------------------------------------------------------------
@@ -243,7 +267,8 @@ def test_b6_resume_only_after_a_human_action() -> None:
     with pytest.raises(InputInvalidError):
         w.guard.set_limit(owner, w.pilot, 500, " ")
     raised = w.guard.set_limit(owner, w.pilot, 500, "owner raised the pilot limit")
-    assert raised.state is BudgetState.ACTIVE and raised.limit_minor == 500
+    assert raised.state is BudgetState.ACTIVE
+    assert raised.limit_minor == 500
     assert w.guard.reserve(w.tx, waiting, M, "INR").granted  # T15 re-runs E1
     actions = [e.entry.action for e in w.audit.export(w.tx)]
     assert actions == ["budget.suspended", "budget.limit_changed"]
@@ -299,7 +324,8 @@ def test_b7_soft_limit_warns_and_never_blocks() -> None:
     w.guard.reserve(w.tx, task, 9 * M, "INR")
     w.spend(job, task, 9 * M)
     s = w.guard.status(w.tx, w.pilot)
-    assert s.soft_limit_reached and s.budget.state is BudgetState.ACTIVE
+    assert s.soft_limit_reached
+    assert s.budget.state is BudgetState.ACTIVE
     w.guard.consume(w.tx, task)
     assert w.guard.reserve(w.tx, w.task(job), M // 2, "INR").granted
     assert not w.guard.status(w.tx, w.video, job).soft_limit_reached
@@ -326,7 +352,8 @@ def test_b8_a_budget_breach_stops_further_paid_calls() -> None:
         w.spend(job, task, 3 * M)
         calls += 1
         w.guard.consume(w.tx, task)
-    assert calls == 3 and refused is not None  # 3 x 3 = 9; a fourth 3-rupee hold would breach
+    assert calls == 3
+    assert refused is not None
     assert refused.spec.wait_reason is WaitReason.AWAITING_BUDGET
     paid = sum(r.entry.amount_micros for r in w.ledger.all_rows(w.tx))
     assert paid == 9 * M <= w.guard.status(w.tx, w.video, job).budget.limit_minor * 10_000
@@ -340,24 +367,53 @@ def test_provider_gate_requires_an_active_acknowledged_limit() -> None:
     w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000))
     with pytest.raises(BudgetExhaustedError):
         w.guard.check_provider_gate(w.tx, PROVIDER)
-    w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000, scope_kind=BudgetScopeKind.PROVIDER,
-                        scope_key="tts_provider"))  # fmt: skip
+    w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            1000,
+            scope_kind=BudgetScopeKind.PROVIDER,
+            scope_key="tts_provider",
+        )
+    )
     with pytest.raises(BudgetExhaustedError):
         w.guard.check_provider_gate(w.tx, PROVIDER)
-    w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000, scope_kind=BudgetScopeKind.PROVIDER,
-                        scope_key=PROVIDER, state=BudgetState.DISABLED))  # fmt: skip
+    w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            1000,
+            scope_kind=BudgetScopeKind.PROVIDER,
+            scope_key=PROVIDER,
+            state=BudgetState.DISABLED,
+        )
+    )
     with pytest.raises(BudgetExhaustedError):
         w.guard.check_provider_gate(w.tx, PROVIDER)
-    w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000, scope_kind=BudgetScopeKind.PROVIDER,
-                        scope_key=PROVIDER))  # fmt: skip
+    w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            1000,
+            scope_kind=BudgetScopeKind.PROVIDER,
+            scope_key=PROVIDER,
+        )
+    )
     w.guard.check_provider_gate(w.tx, PROVIDER)
 
 
 def test_provider_limit_is_also_a_cap_and_warnings_flag_higher_internal_limits() -> None:
     w = World()
     w.add_budget(budget(w.org, BudgetPeriod.PER_VIDEO, 100_000))
-    prov = w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 200, scope_kind=BudgetScopeKind.PROVIDER,
-                               scope_key=PROVIDER))  # fmt: skip
+    prov = w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            200,
+            scope_kind=BudgetScopeKind.PROVIDER,
+            scope_key=PROVIDER,
+        )
+    )
     job = w.job()
     task = w.task(job)
     w.guard.reserve(w.tx, task, 5 * M, "INR")
@@ -367,12 +423,13 @@ def test_provider_limit_is_also_a_cap_and_warnings_flag_higher_internal_limits()
     with pytest.raises(BudgetExhaustedError):
         check(w, job, task, 1)
     pairs = w.guard.provider_limit_warnings(w.tx)
-    assert len(pairs) == 1 and pairs[0][1] == prov
+    assert len(pairs) == 1
+    assert pairs[0][1] == prov
 
 
 def test_spend_without_a_job_counts_against_org_totals_only() -> None:
     w = world(per_video_rupees=1, pilot_rupees=1)
-    row = w.ledger.record(w.tx, _entry(w, None, None, M))  # type: ignore[arg-type]
+    row = w.ledger.record(w.tx, _entry(w, None, None, M))
     changed = {b.id for b in w.guard.after_call(w.tx, row)}
     assert changed == {w.pilot}
 
@@ -383,14 +440,38 @@ def test_workspace_channel_and_production_type_scopes() -> None:
     chn = CHANNEL.new()
     job = JOB.new()
     w.backend.add_job(w.tx, JobScope(job, w.workspace, chn, "SHORTS"))
-    wsp_b = w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000, scope_kind=BudgetScopeKind.WORKSPACE,
-                                scope_id=w.workspace))  # fmt: skip
-    chn_b = w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000, scope_kind=BudgetScopeKind.CHANNEL,
-                                scope_id=chn))  # fmt: skip
-    pt_b = w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000,
-                               scope_kind=BudgetScopeKind.PRODUCTION_TYPE, scope_key="SHORTS"))  # fmt: skip
-    w.add_budget(budget(w.org, BudgetPeriod.PILOT_TOTAL, 1000,
-                        scope_kind=BudgetScopeKind.PRODUCTION_TYPE, scope_key="AD_SPOT"))  # fmt: skip
+    wsp_b = w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            1000,
+            scope_kind=BudgetScopeKind.WORKSPACE,
+            scope_id=w.workspace,
+        )
+    )
+    chn_b = w.add_budget(
+        budget(
+            w.org, BudgetPeriod.PILOT_TOTAL, 1000, scope_kind=BudgetScopeKind.CHANNEL, scope_id=chn
+        )
+    )
+    pt_b = w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            1000,
+            scope_kind=BudgetScopeKind.PRODUCTION_TYPE,
+            scope_key="SHORTS",
+        )
+    )
+    w.add_budget(
+        budget(
+            w.org,
+            BudgetPeriod.PILOT_TOTAL,
+            1000,
+            scope_kind=BudgetScopeKind.PRODUCTION_TYPE,
+            scope_key="AD_SPOT",
+        )
+    )
     assert {b.id for b in w.guard.applicable_budgets(w.tx, job)} == {wsp_b, chn_b, pt_b}
     task = w.task(job)
     w.guard.reserve(w.tx, task, M, "INR")
@@ -417,8 +498,10 @@ def test_per_video_status_needs_a_job() -> None:
 
 def test_period_bounds() -> None:
     start, end = period_bounds(BudgetPeriod.MONTH, T0, "Asia/Kolkata")
-    assert start is not None and end is not None
-    assert start.isoformat() == "2025-12-31T18:30:00+00:00" and end.isoformat() == "2026-01-31T18:30:00+00:00"
+    assert start is not None
+    assert end is not None
+    assert start.isoformat() == "2025-12-31T18:30:00+00:00"
+    assert end.isoformat() == "2026-01-31T18:30:00+00:00"
     dec = T0.replace(month=12, day=20)
     assert period_bounds(BudgetPeriod.MONTH, dec, "UTC")[1].isoformat().startswith("2027-01-01")  # type: ignore[union-attr]
     day = period_bounds(BudgetPeriod.DAY, T0, "UTC")

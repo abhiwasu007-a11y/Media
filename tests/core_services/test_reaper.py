@@ -37,21 +37,25 @@ def test_running_lease_expired_heartbeat_fresh_is_hang() -> None:
     )
     d = classify(task, T0 + ms(50_000), CFG)
     assert (d.action, d.error_code, d.mark_worker_lost) == (
-        ReaperAction.FAIL_ATTEMPT, "AGENT.HANG", False,
-    )  # fmt: skip
+        ReaperAction.FAIL_ATTEMPT,
+        "AGENT.HANG",
+        False,
+    )
 
 
 def test_running_lease_expired_heartbeat_stale_is_worker_lost() -> None:
     task = TaskSnapshot(TaskState.RUNNING, T0, lease_expires_at=T0, worker_heartbeat_at=T0)
     d = classify(task, T0 + ms(45_001), CFG)
-    assert d.error_code == "INFRASTRUCTURE.WORKER_LOST" and d.mark_worker_lost
+    assert d.error_code == "INFRASTRUCTURE.WORKER_LOST"
+    assert d.mark_worker_lost
     missing = classify(TaskSnapshot(TaskState.RUNNING, T0, lease_expires_at=T0), T0 + ms(1), CFG)
     assert missing.error_code == "INFRASTRUCTURE.WORKER_LOST"
 
 
 def test_running_beyond_wall_budget_and_healthy() -> None:
-    task = TaskSnapshot(TaskState.RUNNING, T0, running_since=T0, max_wall_ms=1000,
-                        lease_expires_at=T0 + ms(60_000))  # fmt: skip
+    task = TaskSnapshot(
+        TaskState.RUNNING, T0, running_since=T0, max_wall_ms=1000, lease_expires_at=T0 + ms(60_000)
+    )
     assert classify(task, T0 + ms(1001), CFG).error_code == "AGENT.HANG"
     assert classify(task, T0 + ms(999), CFG).action is ReaperAction.NONE
 
@@ -62,7 +66,8 @@ def test_validating_rerun_once_then_deadline() -> None:
     assert classify(task, T0 + ms(300_001), CFG).action is ReaperAction.REVALIDATE
     again = TaskSnapshot(TaskState.VALIDATING, T0, validation_reruns=1)
     d = classify(again, T0 + ms(300_001), CFG)
-    assert d.action is ReaperAction.FAIL_TASK and d.error_code == "PERMANENT.DEADLINE_EXCEEDED"
+    assert d.action is ReaperAction.FAIL_TASK
+    assert d.error_code == "PERMANENT.DEADLINE_EXCEEDED"
 
 
 def test_failed_without_dlq_row_completes_t14() -> None:
@@ -77,7 +82,8 @@ def test_failed_without_dlq_row_completes_t14() -> None:
 def test_retry_wait_overdue_and_queued_too_long_alert_only() -> None:
     late = TaskSnapshot(TaskState.RETRY_WAIT, T0, next_attempt_at=T0)
     d = classify(late, T0 + ms(300_001), CFG)
-    assert d.action is ReaperAction.ALERT and d.escalation is EscalationLevel.L2
+    assert d.action is ReaperAction.ALERT
+    assert d.escalation is EscalationLevel.L2
     assert classify(late, T0 + ms(10), CFG).action is ReaperAction.NONE
     queued = TaskSnapshot(TaskState.QUEUED, T0, queue_max_wait_ms=100)
     assert classify(queued, T0 + ms(101), CFG).action is ReaperAction.ALERT
@@ -101,11 +107,16 @@ def test_wait_timeouts_and_reminders() -> None:
     assert classify(ext, T0 + ms(1001), CFG).action is ReaperAction.NONE  # unset: no timeout
     appr = TaskSnapshot(TaskState.CHECKPOINTED, T0, wait_reason=WaitReason.AWAITING_APPROVAL)
     assert classify(appr, T0 + ms(1000), WAITS).action is ReaperAction.REMIND
-    reminded = TaskSnapshot(TaskState.CHECKPOINTED, T0, wait_reason=WaitReason.AWAITING_APPROVAL,
-                            last_reminder_at=T0 + ms(900))  # fmt: skip
+    reminded = TaskSnapshot(
+        TaskState.CHECKPOINTED,
+        T0,
+        wait_reason=WaitReason.AWAITING_APPROVAL,
+        last_reminder_at=T0 + ms(900),
+    )
     assert classify(reminded, T0 + ms(1000), WAITS).action is ReaperAction.NONE
     escalated = classify(appr, T0 + ms(5001), WAITS)
-    assert escalated.action is ReaperAction.ALERT and escalated.escalation is EscalationLevel.L3
+    assert escalated.action is ReaperAction.ALERT
+    assert escalated.escalation is EscalationLevel.L3
     assert classify(appr, T0 + timedelta(days=30), CFG).action is ReaperAction.NONE
     quota = TaskSnapshot(TaskState.CHECKPOINTED, T0, wait_reason=WaitReason.AWAITING_QUOTA)
     assert classify(quota, T0 + timedelta(days=3), WAITS).escalation is EscalationLevel.L3

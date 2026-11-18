@@ -20,7 +20,7 @@ budget returns to ACTIVE only when the period has rolled over since it was suspe
 reserved at T03 (the provider of a task is known only at call time).
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -53,6 +53,7 @@ from amw_core.interfaces.budget_guard import (
     Reservation,
     ReservationOutcome,
 )
+from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.cost_ledger import CostEntry
 from amw_core.interfaces.tenancy_context import TenantTransaction
 
@@ -181,7 +182,7 @@ class BudgetGuardCore:
         self,
         backend: BudgetBackend,
         settings: AmwSettings,
-        clock: ClockLike,
+        clock: Clock,
         audit: AuditLog | None = None,
     ) -> None:
         self._b = backend
@@ -565,11 +566,3 @@ class BudgetGuardCore:
                 details={k: v for k, v in details.items() if v is not None},
             ),
         )
-
-
-class ClockLike(Protocol):
-    def now(self) -> datetime: ...
-
-
-def budgets_by_id(items: Iterable[StoredBudget]) -> dict[BudgetId, StoredBudget]:
-    return {s.budget.id: s for s in items}
