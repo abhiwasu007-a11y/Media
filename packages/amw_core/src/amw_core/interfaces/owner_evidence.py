@@ -1,13 +1,12 @@
 """Owner instruction evidence store (04 section 5.16 ``owner_instruction_evidence``; 03 section
 11.6 rule 6; CCR-010, decision D5).
 
-Verification is code-only and lives in ``amw_core.owner_evidence_verifier``: ``mark_verified``
-accepts only a sealed ``VerifiedEvidence`` produced by ``verify_owner_event`` for this row, and
-``confirm`` fetches the confirmation event through its ``SessionEventSource`` and verifies it
-itself; no caller-built event or verifier result is ever trusted. A human record (approval step,
-editorial contribution, HUMAN score, compliance override) may reference only a ``CONFIRMED`` row.
-Rows are append-only except the forward changes ``PENDING_VERIFICATION -> VERIFIED ->
-CONFIRMED`` or ``-> REFUSED``, each setting its columns once.
+**The store verifies.** ``verify_recorded`` and ``confirm`` fetch the owner's event through the
+store's own ``SessionEventSource`` and run ``amw_core.owner_evidence_verifier.verify_owner_event``
+themselves; no method accepts a verification result, an event or a check list from a caller.
+A human record (approval step, editorial contribution, HUMAN score, compliance override) may
+reference only a ``CONFIRMED`` row. Rows are append-only except the forward changes
+``PENDING_VERIFICATION -> VERIFIED -> CONFIRMED`` or ``-> REFUSED``, each setting its columns once.
 
 **Limitation:** the real session-store adapter is ticket 3A-13; until then only the in-memory
 fake exists, and 3A approvals recorded through it are not production-verified.
@@ -22,12 +21,7 @@ from typing import Protocol, runtime_checkable
 from amw_core.enums import EvidenceState
 from amw_core.ids import OrgId, WireId
 from amw_core.interfaces.tenancy_context import TenantTransaction
-from amw_core.owner_evidence_verifier import (
-    NewEvidence,
-    SessionEvent,
-    SessionEventSource,
-    VerifiedEvidence,
-)
+from amw_core.owner_evidence_verifier import NewEvidence, SessionEvent, SessionEventSource
 
 __all__ = [
     "EvidenceRecord",
@@ -35,7 +29,6 @@ __all__ = [
     "OwnerEvidenceStore",
     "SessionEvent",
     "SessionEventSource",
-    "VerifiedEvidence",
 ]
 
 
@@ -62,12 +55,19 @@ class OwnerEvidenceStore(Protocol):
         subject_id)`` is ``IdempotencyConflictError`` (replay key)."""
         ...
 
-    def mark_verified(
-        self, tx: TenantTransaction, evidence_id: WireId, verified: VerifiedEvidence
+    def verify_recorded(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        request_created_at: datetime,
+        now: datetime,
     ) -> EvidenceRecord:
-        """``PENDING_VERIFICATION -> VERIFIED``. ``verified`` must come from
-        ``verify_recorded_evidence`` for exactly this row (bound by ``evidence_sha256``), else
-        ``InvalidTransitionError``; ``verifier_result`` is ``verified.checks``."""
+        """``PENDING_VERIFICATION -> VERIFIED`` or ``-> REFUSED``, decided by the store: it
+        fetches the row's event through its own source and runs the check (review code and
+        decision mandatory; superseded evidence ordering from ``supersedes_id``).
+        ``request_created_at`` is ``approvals.created_at`` of the row's approval, read by the
+        caller in the same transaction. Unfetchable event -> ``MissingDependencyError`` (the row
+        stays pending)."""
         ...
 
     def confirm(
@@ -79,9 +79,9 @@ class OwnerEvidenceStore(Protocol):
         quote: str,
         now: datetime,
     ) -> EvidenceRecord:
-        """``VERIFIED -> CONFIRMED``. The store fetches the event through its own
-        ``SessionEventSource`` and verifies it with ``verify_confirmation`` (a second, distinct,
-        later owner event). Unfetchable -> ``MissingDependencyError``; a failed check ->
+        """``VERIFIED -> CONFIRMED``. The store fetches the event through its own source and
+        runs the same check: a second, distinct, later owner event with the same review code and
+        the same decision. Unfetchable -> ``MissingDependencyError``; a failed check ->
         ``PermissionDeniedError`` (``details.checks``). The state is unchanged on any error."""
         ...
 

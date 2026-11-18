@@ -1,11 +1,15 @@
-"""R14 owner-evidence verification is enforced in code (03 11.6 rule 6; 04 5.16; CCR-010, D5).
+"""R14 owner-evidence verification (03 11.6 rule 6; 04 5.16; CCR-010, D5).
 
-Every rejection the reviewer listed has a negative test; the store accepts only sealed
-verifier output and fetches confirmation events itself.
+The store verifies: it fetches events through its own source and runs the check itself. Every
+rejection has a negative test, including the strict decision grammar (negations, ambiguity).
 """
 
+import copy
+import dataclasses
+import inspect
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -22,19 +26,20 @@ from amw_core.errors import (
     MissingDependencyError,
     PermissionDeniedError,
 )
-from amw_core.interfaces import OwnerEvidenceStore, SessionEventSource, TenantContext
+from amw_core.interfaces import OwnerEvidenceStore, TenantContext
 from amw_core.owner_evidence_verifier import (
-    CONFIRMATION,
+    DEFAULT_DECISION_WORDS,
+    NEEDS_CLARIFICATION,
+    RECORD,
     EventUnavailable,
     NewEvidence,
     Refusal,
     SessionEvent,
-    VerifiedEvidence,
+    Verified,
     VerifierPolicy,
-    decisions_in,
     evidence_sha256,
+    read_decision,
     verify_owner_event,
-    verify_recorded_evidence,
 )
 from amw_core.testing.memory import (
     MemoryOwnerEvidenceStore,
@@ -47,29 +52,19 @@ SAID = REQUESTED + timedelta(minutes=5)
 NOW = REQUESTED + timedelta(hours=1)
 SECOND = timedelta(seconds=1)
 POLICY = VerifierPolicy(
-    human_inbound_origins=frozenset({"human"}),
-    decision_words={
-        "approve": ApprovalStepState.APPROVED,
-        "मंजूर": ApprovalStepState.APPROVED,
-        "reject": ApprovalStepState.REJECTED,
-        "changes": ApprovalStepState.CHANGES_REQUESTED,
-    },
+    human_inbound_origins=frozenset({"human"}), decision_words=DEFAULT_DECISION_WORDS
 )
 SUBJECT = ids.new_id(ids.Prefix.RENDER)
 OWNER = ids.USER.new()
+APPROVED = ApprovalStepState.APPROVED
 
 
-def event(
-    uuid: str = "ev-1",
-    content: str = "R7K2 approve the final video",
-    at: datetime = SAID,
-    **change: object,
-) -> SessionEvent:
-    base = SessionEvent("ses-1", uuid, "user", False, "human", content, at)
-    return replace(base, **change)  # type: ignore[arg-type]
+def event(uuid: str = "ev-1", **change: Any) -> SessionEvent:
+    base = SessionEvent("ses-1", uuid, "user", False, "human", "Approve R7K2 please", SAID)
+    return replace(base, **change)
 
 
-def evidence(**change: object) -> NewEvidence:
+def evidence(**change: Any) -> NewEvidence:
     base = NewEvidence(
         record_kind=EvidenceRecordKind.STEP_DECISION,
         subject_kind="render",
@@ -77,249 +72,291 @@ def evidence(**change: object) -> NewEvidence:
         source_kind=InstructionSourceKind.OWNER_CHAT_MESSAGE,
         session_id="ses-1",
         event_uuid="ev-1",
-        quote="R7K2 approve",
+        quote="Approve R7K2",
         message_at=SAID,
         recorded_by=ids.ActorRef("sys_operator"),
         on_behalf_of=OWNER,
         review_code="R7K2",
-        parsed_decision=ApprovalStepState.APPROVED,
+        parsed_decision=APPROVED,
     )
-    return replace(base, **change)  # type: ignore[arg-type]
+    return replace(base, **change)
 
 
-def verify(
-    ev: SessionEvent | None,
-    ne: NewEvidence | None = None,
-    superseded: datetime | None = None,
-) -> object:
-    source = MemorySessionEventSource([ev] if ev else [])
-    return verify_recorded_evidence(
-        source,
-        ne or evidence(),
-        POLICY,
-        request_created_at=REQUESTED,
-        superseded_message_at=superseded,
-        now=NOW,
-    )
+def late(**change: Any) -> SessionEvent:
+    return event("ev-2", timestamp=NOW, **change)
 
 
-def refused_by(outcome: object) -> str:
-    assert isinstance(outcome, Refusal), outcome
-    failed = [name for name, ok in outcome.checks.items() if not ok]
-    assert outcome.reason.endswith(failed[0])
-    return failed[0]
+def new_store(*events: SessionEvent) -> tuple[OwnerEvidenceStore, MemoryTransaction]:
+    store = MemoryOwnerEvidenceStore(MemorySessionEventSource(events), POLICY)
+    tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
+    return store, tx
 
 
-def test_valid_owner_message_is_verified() -> None:
-    outcome = verify(event())
-    assert isinstance(outcome, VerifiedEvidence)
-    assert all(outcome.checks.values())
-    assert outcome.bound_sha256 == evidence_sha256(evidence())
-    assert outcome.event_timestamp == SAID
+def verify_via_store(ev: SessionEvent | None, ne: NewEvidence | None = None) -> Any:
+    store, tx = new_store(*([ev] if ev else []))
+    row = store.record(tx, ne or evidence())
+    return store.verify_recorded(tx, row.id, REQUESTED, NOW)
 
 
-def test_devanagari_decision_word() -> None:
-    ev = event(content="R7K2 मंजूर आहे")
-    assert isinstance(verify(ev, evidence(quote="मंजूर")), VerifiedEvidence)
+def refused_with(record: Any, reason: str) -> None:
+    assert record.state is EvidenceState.REFUSED
+    assert record.refused_reason == reason
+    assert record.verifier_result[reason] is False
+
+
+# --- the happy path ------------------------------------------------------------------------
+
+
+def test_store_verifies_and_confirms() -> None:
+    confirmation = event("ev-2", content="R7K2 approve, confirmed", timestamp=SAID + SECOND)
+    store, tx = new_store(event(), confirmation)
+    row = store.record(tx, evidence())
+    with pytest.raises(InvalidTransitionError):
+        store.confirm(tx, row.id, "ses-1", "ev-2", "confirmed", NOW)  # not verified yet
+    verified = store.verify_recorded(tx, row.id, REQUESTED, NOW)
+    assert verified.state is EvidenceState.VERIFIED
+    assert all(verified.verifier_result.values())
+    confirmed = store.confirm(tx, row.id, "ses-1", "ev-2", "confirmed", NOW)
+    assert confirmed.state is EvidenceState.CONFIRMED
+    assert confirmed.confirmation_message_at == SAID + SECOND
+    with pytest.raises(InvalidTransitionError):
+        store.verify_recorded(tx, row.id, REQUESTED, NOW)
+    with pytest.raises(InvalidTransitionError):
+        store.refuse(tx, row.id, "late")
+    with pytest.raises(InvalidTransitionError):
+        store.confirm(tx, row.id, "ses-1", "ev-2", "confirmed", NOW)
 
 
 @pytest.mark.parametrize(
-    ("case", "ev", "expected"),
+    ("content", "quote", "decision"),
+    [
+        ("R7K2 मंजूर", "मंजूर", APPROVED),
+        ("R7K2: approved.", "approved", APPROVED),
+        ("reject R7K2", "reject", ApprovalStepState.REJECTED),
+        ("R7K2 नामंजूर", "नामंजूर", ApprovalStepState.REJECTED),
+        ("changes R7K2, see the intro", "intro", ApprovalStepState.CHANGES_REQUESTED),
+    ],
+)
+def test_grammar_accepts(content: str, quote: str, decision: ApprovalStepState) -> None:
+    ne = evidence(quote=quote, parsed_decision=decision)
+    assert verify_via_store(event(content=content), ne).state is EvidenceState.VERIFIED
+
+
+# --- every rejection ------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("case", "ev", "reason"),
     [
         ("sub-agent message", event(inbound_origin="subagent"), "human_origin"),
         ("peer session message", event(inbound_origin="peer_session"), "human_origin"),
         ("notification", event(inbound_origin="notification"), "human_origin"),
-        ("tool result as user turn", event(inbound_origin="tool_result"), "human_origin"),
+        ("tool result as a user turn", event(inbound_origin="tool_result"), "human_origin"),
         ("document", event(inbound_origin="document"), "human_origin"),
         ("tool-result role", event(role="tool"), "role_user"),
         ("assistant role", event(role="assistant"), "role_user"),
         ("synthetic event", event(is_synthetic=True), "not_synthetic"),
-        ("quote not in content", event(content="approve R7K2"), "quote_verbatim"),
-        ("altered timestamp", event(at=SAID + timedelta(seconds=1)), "timestamp_equal"),
-        ("before the request", event(at=REQUESTED - timedelta(minutes=1)), "timestamp_equal"),
+        ("quote not a substring", event(content="R7K2 approve"), "quote_verbatim"),
+        ("altered timestamp", event(timestamp=SAID + SECOND), "timestamp_equal"),
     ],
 )
-def test_rejections(case: str, ev: SessionEvent, expected: str) -> None:
-    assert refused_by(verify(ev)) == expected, case
+def test_event_rejections(case: str, ev: SessionEvent, reason: str) -> None:
+    refused_with(verify_via_store(ev), reason)
+
+
+def test_event_not_found_keeps_the_row_pending() -> None:
+    store, tx = new_store()
+    row = store.record(tx, evidence())
+    with pytest.raises(MissingDependencyError):
+        store.verify_recorded(tx, row.id, REQUESTED, NOW)
+    current = store.get(tx, row.id)
+    assert current is not None
+    assert current.state is EvidenceState.PENDING_VERIFICATION
 
 
 def test_message_order_violated() -> None:
-    early = REQUESTED - timedelta(minutes=1)
-    outcome = verify(event(at=early), evidence(message_at=early))
-    assert refused_by(outcome) == "message_order"
-    # later than the request but not later than the evidence it supersedes
-    assert refused_by(verify(event(), superseded=SAID)) == "message_order"
-
-
-def test_event_not_found_stays_pending() -> None:
-    outcome = verify(None)
-    assert isinstance(outcome, EventUnavailable)
-
-
-def test_wrong_event_returned_by_source() -> None:
-    class Liar:
-        def fetch(self, session_id: str, event_uuid: str) -> SessionEvent | None:
-            return event(uuid="ev-other")
-
-    assert isinstance(Liar(), SessionEventSource)
-    outcome = verify_recorded_evidence(
-        Liar(),
-        evidence(),
-        POLICY,
-        request_created_at=REQUESTED,
-        superseded_message_at=None,
-        now=NOW,
+    early = REQUESTED - SECOND
+    refused_with(
+        verify_via_store(event(timestamp=early), evidence(message_at=early)), "message_order"
     )
-    assert refused_by(outcome) == "event_identity"
+
+
+def test_superseding_evidence_must_be_later() -> None:
+    store, tx = new_store(event(), event("ev-0"))
+    older = store.record(tx, evidence())
+    store.refuse(tx, older.id, "corrected")
+    newer = store.record(tx, evidence(event_uuid="ev-0", supersedes_id=older.id))
+    refused_with(store.verify_recorded(tx, newer.id, REQUESTED, NOW), "message_order")
 
 
 def test_replay_of_the_same_event_for_another_subject() -> None:
-    # Another approval has another review code; the old message does not contain it.
     other = evidence(subject_id=ids.new_id(ids.Prefix.RENDER), review_code="Q9Z1")
-    assert refused_by(verify(event(), other)) == "review_code_present"
+    refused_with(verify_via_store(event(), other), "review_code_present")
 
 
 @pytest.mark.parametrize(
-    ("content", "decision"),
+    ("field", "reason"),
+    [("review_code", "review_code_given"), ("parsed_decision", "decision_given")],
+)
+def test_review_code_and_decision_are_mandatory(field: str, reason: str) -> None:
+    refused_with(verify_via_store(event(), evidence(**{field: None})), reason)
+
+
+def test_decision_mismatch() -> None:
+    ne = evidence(parsed_decision=ApprovalStepState.REJECTED)
+    refused_with(verify_via_store(event(), ne), "decision_matches")
+
+
+def test_non_owner_source_is_refused() -> None:
+    record = verify_via_store(event(), evidence(source_kind=InstructionSourceKind.TOOL_RESULT))
+    assert record.state is EvidenceState.REFUSED
+
+
+@pytest.mark.parametrize(
+    ("content", "reason"),
     [
-        ("R7K2 reject this", ApprovalStepState.APPROVED),
-        ("R7K2 approve or reject?", ApprovalStepState.APPROVED),
-        ("R7K2 approvement", ApprovalStepState.APPROVED),
-        ("R7K2 approve", ApprovalStepState.REJECTED),
+        ("R7K2 do not approve", NEEDS_CLARIFICATION),
+        ("R7K2 not approved", NEEDS_CLARIFICATION),
+        ("R7K2 don't approve", NEEDS_CLARIFICATION),
+        ("R7K2 don\u2019t approve", NEEDS_CLARIFICATION),
+        ("R7K2 मंजूर नाही", NEEDS_CLARIFICATION),
+        ("R7K2 मंजूर नको", NEEDS_CLARIFICATION),
+        ("approve R7K2 or reject?", NEEDS_CLARIFICATION),
+        ("R7K2 approve, no wait", NEEDS_CLARIFICATION),
+        ("approve R7K2 नामंजूर", NEEDS_CLARIFICATION),
+        ("R7K2 looks fine to me, approve", "decision_adjacent"),
+        ("R7K2 approvement", "decision_matches"),
+        ("R7K2 R7K2 approve", "review_code_present"),
+        ("XR7K2 approve", "review_code_present"),
     ],
 )
-def test_decision_mismatch(content: str, decision: ApprovalStepState) -> None:
-    outcome = verify(event(content=content), evidence(quote="R7K2", parsed_decision=decision))
-    assert refused_by(outcome) == "decision_matches"
-
-
-def test_review_code_must_be_a_whole_token() -> None:
-    outcome = verify(event(content="XR7K2 approve"), evidence(quote="approve"))
-    assert refused_by(outcome) == "review_code_present"
-
-
-def test_non_owner_source_is_refused_without_fetch() -> None:
-    outcome = verify(event(), evidence(source_kind=InstructionSourceKind.TOOL_RESULT))
-    assert isinstance(outcome, Refusal)
-    assert outcome.checks == {"source": False}
-
-
-def test_decisions_in() -> None:
-    assert decisions_in("Approve!", POLICY) == {ApprovalStepState.APPROVED}
-    assert decisions_in("unapproved", POLICY) == frozenset()
-
-
-def test_verified_evidence_cannot_be_forged() -> None:
-    with pytest.raises(TypeError):
-        VerifiedEvidence(
-            object(),
-            purpose="RECORD",
-            bound_sha256="0" * 64,
-            event=event(),
-            checks={},
-            verified_at=NOW,
-        )
-
-
-# --- the store ---------------------------------------------------------------------------
-
-
-def setup(*events: SessionEvent) -> tuple[OwnerEvidenceStore, MemoryTransaction]:
-    store = MemoryOwnerEvidenceStore(MemorySessionEventSource(events), POLICY)
-    return store, MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
-
-
-def verified_for(ne: NewEvidence, ev: SessionEvent) -> VerifiedEvidence:
-    outcome = verify(ev, ne)
-    assert isinstance(outcome, VerifiedEvidence)
-    return outcome
-
-
-def test_two_phase_lifecycle() -> None:
-    confirmation = event(uuid="ev-2", content="R7K2 yes, confirmed", at=SAID + timedelta(minutes=2))
-    store, t = setup(event(), confirmation)
-    row = store.record(t, evidence())
-    with pytest.raises(InvalidTransitionError):
-        store.confirm(t, row.id, "ses-1", "ev-2", "confirmed", NOW)  # not verified yet
-    verified = store.mark_verified(t, row.id, verified_for(evidence(), event()))
-    assert verified.state is EvidenceState.VERIFIED
-    assert verified.verifier_result["human_origin"] is True
-    confirmed = store.confirm(t, row.id, "ses-1", "ev-2", "confirmed", NOW)
-    assert confirmed.state is EvidenceState.CONFIRMED
-    assert confirmed.confirmation_message_at == SAID + timedelta(minutes=2)
-    with pytest.raises(InvalidTransitionError):
-        store.refuse(t, row.id, "too late")
-    with pytest.raises(InvalidTransitionError):
-        store.mark_verified(t, row.id, verified_for(evidence(), event()))
-
-
-def test_mark_verified_rejects_proof_of_another_row() -> None:
-    store, t = setup(event())
-    row = store.record(t, evidence())
-    other = evidence(quote="approve")  # different evidence_sha256
-    with pytest.raises(InvalidTransitionError):
-        store.mark_verified(t, row.id, verified_for(other, event()))
-    confirmation = verify_owner_event(
-        event(),
-        purpose=CONFIRMATION,
-        bound_sha256=row.evidence_sha256,
-        session_id="ses-1",
-        event_uuid="ev-1",
-        quote="R7K2",
-        message_at=None,
-        review_code=None,
-        parsed_decision=None,
-        not_before=REQUESTED,
-        distinct_from_event_uuid=None,
-        policy=POLICY,
-        now=NOW,
-    )
-    assert isinstance(confirmation, VerifiedEvidence)
-    with pytest.raises(InvalidTransitionError):
-        store.mark_verified(t, row.id, confirmation)  # wrong purpose
-    with pytest.raises(InvalidTransitionError):
-        store.mark_verified(t, row.id, {"role_user": True})  # type: ignore[arg-type]
-
-
-def later(**change: object) -> SessionEvent:
-    return replace(event(uuid="ev-2", at=NOW), **change)  # type: ignore[arg-type]
+def test_strict_grammar_refuses(content: str, reason: str) -> None:
+    assert read_decision(content, "R7K2", POLICY) == reason
+    refused_with(verify_via_store(event(content=content), evidence(quote="R7K2")), reason)
 
 
 @pytest.mark.parametrize(
     ("case", "confirmation", "error"),
     [
         ("same event again", event(), PermissionDeniedError),
-        ("earlier than the record", later(timestamp=SAID - SECOND), PermissionDeniedError),
-        ("synthetic", later(is_synthetic=True), PermissionDeniedError),
-        ("from a sub-agent", later(inbound_origin="subagent"), PermissionDeniedError),
-        ("without review code", later(content="yes confirmed"), PermissionDeniedError),
+        ("not later", event("ev-2", timestamp=SAID), PermissionDeniedError),
+        ("synthetic", late(is_synthetic=True), PermissionDeniedError),
+        ("sub-agent", late(inbound_origin="subagent"), PermissionDeniedError),
+        ("no review code", late(content="approve"), PermissionDeniedError),
+        ("other decision", late(content="R7K2 reject"), PermissionDeniedError),
+        ("negated", late(content="R7K2 not approve"), PermissionDeniedError),
         ("not found", None, MissingDependencyError),
     ],
 )  # fmt: skip
 def test_confirmation_rejections(
     case: str, confirmation: SessionEvent | None, error: type[Exception]
 ) -> None:
-    events = [event()] + ([confirmation] if confirmation else [])
-    store, t = setup(*events)
-    row = store.record(t, evidence())
-    store.mark_verified(t, row.id, verified_for(evidence(), event()))
+    store, tx = new_store(event(), *([confirmation] if confirmation else []))
+    row = store.record(tx, evidence())
+    store.verify_recorded(tx, row.id, REQUESTED, NOW)
     uuid = confirmation.event_uuid if confirmation else "ev-missing"
-    content = confirmation.content if confirmation else "R7K2"
-    quote = "R7K2" if "R7K2" in content else "confirmed"
+    quote = (confirmation.content if confirmation else "x")[:4]
     with pytest.raises(error):
-        store.confirm(t, row.id, "ses-1", uuid, quote, NOW)
-    current = store.get(t, row.id)
+        store.confirm(tx, row.id, "ses-1", uuid, quote, NOW)
+    current = store.get(tx, row.id)
     assert current is not None
     assert current.state is EvidenceState.VERIFIED, case
 
 
-def test_replay_key_and_refusal() -> None:
-    store, t = setup(event())
-    first = store.record(t, evidence())
+# --- the store, not a proof object, authorises ----------------------------------------------
+
+
+def test_no_public_method_accepts_a_proof() -> None:
+    assert not hasattr(OwnerEvidenceStore, "mark_verified")
+    for name, member in inspect.getmembers(OwnerEvidenceStore, inspect.isfunction):
+        for annotation in inspect.get_annotations(member).values():
+            assert "Verified" not in str(annotation), name
+            assert "SessionEvent" not in str(annotation), name
+
+
+def test_forged_verification_result_changes_nothing() -> None:
+    store, tx = new_store()  # the store's source has no event at all
+    row = store.record(tx, evidence())
+    forged = verify_owner_event(
+        event(),  # a made-up event handed to the public pure function
+        evidence_id=row.id,
+        purpose=RECORD,
+        bound_sha256=row.evidence_sha256,
+        session_id="ses-1",
+        event_uuid="ev-1",
+        quote="Approve R7K2",
+        message_at=SAID,
+        review_code="R7K2",
+        decision=APPROVED,
+        not_before=REQUESTED,
+        distinct_from_event_uuid=None,
+        policy=POLICY,
+        now=NOW,
+    )
+    assert isinstance(forged, Verified)  # Python cannot stop anyone building this value ...
+    with pytest.raises(MissingDependencyError):
+        store.verify_recorded(tx, row.id, REQUESTED, NOW)  # ... but the store checks itself
+    current = store.get(tx, row.id)
+    assert current is not None
+    assert current.state is EvidenceState.PENDING_VERIFICATION
+
+
+def test_verified_value_is_immutable_and_bound() -> None:
+    outcome = verify_owner_event(
+        event(),
+        evidence_id=ids.OWNER_EVIDENCE.new(),
+        purpose=RECORD,
+        bound_sha256=evidence_sha256(evidence()),
+        session_id="ses-1",
+        event_uuid="ev-1",
+        quote="Approve R7K2",
+        message_at=SAID,
+        review_code="R7K2",
+        decision=APPROVED,
+        not_before=REQUESTED,
+        distinct_from_event_uuid=None,
+        policy=POLICY,
+        now=NOW,
+    )
+    assert isinstance(outcome, Verified)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        outcome.evidence_id = ids.OWNER_EVIDENCE.new()  # type: ignore[misc]
+    assert not hasattr(outcome, "__dict__")
+    assert copy.copy(outcome) == outcome  # a copy is just an equal value; it authorises nothing
+    assert isinstance(outcome.checks, tuple)
+    assert outcome.event_uuid == "ev-1"
+
+
+def test_unfetchable_event_outcome() -> None:
+    outcome = verify_owner_event(
+        None,
+        evidence_id=ids.OWNER_EVIDENCE.new(),
+        purpose=RECORD,
+        bound_sha256="0" * 64,
+        session_id="ses-1",
+        event_uuid="ev-9",
+        quote="q",
+        message_at=SAID,
+        review_code="R7K2",
+        decision=APPROVED,
+        not_before=REQUESTED,
+        distinct_from_event_uuid=None,
+        policy=POLICY,
+        now=NOW,
+    )
+    assert outcome == EventUnavailable("ses-1", "ev-9")
+    assert not isinstance(outcome, Refusal)
+
+
+def test_replay_key_and_tenant_isolation() -> None:
+    store, tx = new_store(event())
+    first = store.record(tx, evidence())
     with pytest.raises(IdempotencyConflictError):
-        store.record(t, evidence())
-    assert store.refuse(t, first.id, "ambiguous").state is EvidenceState.REFUSED
-    assert store.record(t, evidence()).state is EvidenceState.PENDING_VERIFICATION
-    assert len(store.for_subject(t, "render", SUBJECT)) == 2
-    other_tenant = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
-    assert store.get(other_tenant, first.id) is None
+        store.record(tx, evidence())
+    assert store.refuse(tx, first.id, "ambiguous").state is EvidenceState.REFUSED
+    assert store.record(tx, evidence()).state is EvidenceState.PENDING_VERIFICATION
+    assert len(store.for_subject(tx, "render", SUBJECT)) == 2
+    other = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
+    assert store.get(other, first.id) is None
+    with pytest.raises(InvalidTransitionError):
+        store.verify_recorded(other, first.id, REQUESTED, NOW)

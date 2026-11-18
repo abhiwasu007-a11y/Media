@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from amw_core.enums import EvidenceState, IdempotencyStatus
+from amw_core.enums import EvidenceState, IdempotencyStatus, InstructionSourceKind
 from amw_core.errors import (
     IdempotencyConflictError,
     InputInvalidError,
@@ -35,16 +35,17 @@ from amw_core.interfaces.idempotency_store import BeginAction, BeginDecision, Id
 from amw_core.interfaces.owner_evidence import EvidenceRecord
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
 from amw_core.owner_evidence_verifier import (
+    CONFIRMATION,
     RECORD,
     EventUnavailable,
     NewEvidence,
     Refusal,
     SessionEvent,
     SessionEventSource,
-    VerifiedEvidence,
+    Verified,
     VerifierPolicy,
     evidence_sha256,
-    verify_confirmation,
+    verify_owner_event,
 )
 
 
@@ -232,21 +233,86 @@ class MemoryOwnerEvidenceStore:
             raise InvalidTransitionError("evidence state change not allowed")
         return row
 
-    def mark_verified(
-        self, tx: TenantTransaction, evidence_id: WireId, verified: VerifiedEvidence
+    def _check(
+        self,
+        row: EvidenceRecord,
+        purpose: str,
+        event: SessionEvent | None,
+        *,
+        session_id: str,
+        event_uuid: str,
+        quote: str,
+        message_at: datetime | None,
+        not_before: datetime,
+        distinct_from: str | None,
+        now: datetime,
+    ) -> Verified | Refusal | EventUnavailable:
+        outcome = verify_owner_event(
+            event,
+            evidence_id=row.id,
+            purpose=purpose,
+            bound_sha256=row.evidence_sha256,
+            session_id=session_id,
+            event_uuid=event_uuid,
+            quote=quote,
+            message_at=message_at,
+            review_code=row.evidence.review_code,
+            decision=row.evidence.parsed_decision,
+            not_before=not_before,
+            distinct_from_event_uuid=distinct_from,
+            policy=self._policy,
+            now=now,
+        )
+        if isinstance(outcome, Verified) and (
+            outcome.evidence_id != row.id
+            or outcome.event_uuid != event_uuid
+            or outcome.bound_sha256 != row.evidence_sha256
+            or outcome.purpose != purpose
+        ):
+            raise InvalidTransitionError("verification is not bound to this evidence row")
+        return outcome
+
+    def verify_recorded(
+        self,
+        tx: TenantTransaction,
+        evidence_id: WireId,
+        request_created_at: datetime,
+        now: datetime,
     ) -> EvidenceRecord:
         row = self._move(tx, evidence_id, (EvidenceState.PENDING_VERIFICATION,))
-        if (
-            not isinstance(verified, VerifiedEvidence)
-            or verified.purpose != RECORD
-            or verified.bound_sha256 != row.evidence_sha256
-        ):
-            raise InvalidTransitionError("verification does not belong to this evidence row")
+        e = row.evidence
+        if e.source_kind is not InstructionSourceKind.OWNER_CHAT_MESSAGE:
+            return self.refuse(tx, evidence_id, "source is not an owner chat message")
+        not_before = request_created_at
+        if e.supersedes_id is not None:
+            older = self._rows.get((tx.context.org_id, e.supersedes_id))
+            if older is None:
+                raise MissingDependencyError("superseded evidence not found")
+            not_before = max(not_before, older.evidence.message_at)
+        outcome = self._check(
+            row,
+            RECORD,
+            self._source.fetch(e.session_id, e.event_uuid),
+            session_id=e.session_id,
+            event_uuid=e.event_uuid,
+            quote=e.quote,
+            message_at=e.message_at,
+            not_before=not_before,
+            distinct_from=None,
+            now=now,
+        )
+        if isinstance(outcome, EventUnavailable):
+            raise MissingDependencyError("owner event cannot be fetched; evidence stays pending")
+        if isinstance(outcome, Refusal):
+            refused = self.refuse(tx, evidence_id, outcome.reason)
+            refused = replace(refused, verifier_result=dict(outcome.checks))
+            self._rows[(tx.context.org_id, evidence_id)] = refused
+            return refused
         row = replace(
             row,
             state=EvidenceState.VERIFIED,
-            event_verified_at=verified.verified_at,
-            verifier_result=dict(verified.checks),
+            event_verified_at=outcome.verified_at,
+            verifier_result=dict(outcome.checks),
         )
         self._rows[(tx.context.org_id, evidence_id)] = row
         return row
@@ -261,13 +327,16 @@ class MemoryOwnerEvidenceStore:
         now: datetime,
     ) -> EvidenceRecord:
         row = self._move(tx, evidence_id, (EvidenceState.VERIFIED,))
-        outcome = verify_confirmation(
-            self._source,
-            row.evidence,
-            self._policy,
+        outcome = self._check(
+            row,
+            CONFIRMATION,
+            self._source.fetch(session_id, event_uuid),
             session_id=session_id,
             event_uuid=event_uuid,
             quote=quote,
+            message_at=None,
+            not_before=row.evidence.message_at,
+            distinct_from=row.evidence.event_uuid,
             now=now,
         )
         if isinstance(outcome, EventUnavailable):
