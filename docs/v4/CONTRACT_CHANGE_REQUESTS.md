@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Active. Integrator pass 1 (lane L1, 2026-11-18) decided 57 requests (CCR-001…058; 054 unused) in pass 1 and 28 (CCR-059…086) in pass 2, from the independent reviews of blueprints 04–11 and 16, the blueprints' "(pending CCR)" names, 09 §14, ADR-005/007/009/013, 13 and the Step 0 gap list. Software: **Planned** |
+| Status | Active. Integrator pass 1 (lane L1, 2026-11-18) decided 57 requests (CCR-001…058; 054 unused) in pass 1 28 (CCR-059…086) in pass 2 and 13 (CCR-087…099) in pass 3, from the independent reviews of blueprints 04–11 and 16, the blueprints' "(pending CCR)" names, 09 §14, ADR-005/007/009/013, 13 and the Step 0 gap list. Software: **Planned** |
 | Owner | The integrator agent (one, named by the lead for Wave B); owner decision where a request changes scope |
 | Depends on | GLOSSARY_AND_IDS.md, 03_COMMUNICATION_STANDARD.md, 04_DATABASE_ARCHITECTURE.md, 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md, 27_ENGINEERING_STANDARDS.md, prompts/, evals/ |
 | Directive sections covered | §3.3 (one communication standard), §5.5 (compatibility audit: schemas consistent, unique IDs, one standard) |
@@ -148,6 +148,31 @@ CCR-054 is not used (its item, `render.segment`, is part of CCR-015). Every row 
 - **16:** value sets as-is (CCR-069); `quality.machine_scaling` / `quality.score_gate_mode` as-is (CCR-085); `KNOWLEDGE_RELEASE_REQUEST` is a `DECISION` kind (CCR-059); `claimed_scores` integers (CCR-060); `audience_kind` (CCR-081); YTG-R1 (b) at `s16_auth` (CCR-082); "score not computed" (CCR-086); input builders fill `routing` and `frames_ref` (CCR-047, orchestrator).
 - **Step 0 (code):** align `KNOWLEDGE_RELEASE_REQUEST` → DECISION rules, integer scores, `claimed_scores` column and trigger, `NO_ATTEMPT`, `INFRASTRUCTURE.CIRCUIT_OPEN`, `schema_version` in two schemas, new enums.
 
+### 4.5 Pass 3 (integrator L1, 2026-11-18): Step 0 sync after pass 2, re-checks of blueprints 10 and 11
+
+| CCR | Requester | Needed item | Reason | Decided change | Affected docs | Decision | Rationale | Decided by / date | Status |
+|---|---|---|---|---|---|---|---|---|---|
+| CCR-087 | Step 0 sync (round-5 review) | Whitelist grammar for `DECISION` kinds | the 03 row predated the stricter code | normalise (NFKC, case-fold, strip punctuation/emoji); remove exactly one review code; every remaining token from the closed `decision_words` / `neutral_words` sets; exactly one decision word; else, a `?`, or a wholly quoted message ⇒ `NEEDS_CLARIFICATION`; accepted forms `approve R7K2`, `R7K2 मंजूर` | 03 §11.6 rule 7; 08 §5.3 | APPROVED | Docs follow the stricter code | integrator (L1), 2026-11-18 | Applied |
+| CCR-088 | Step 0 sync | Extra refusals for all kinds | code refuses quote/forward markers, past-conditionals, Romanised/inflected negations and withholding words, two review codes | A9 and the `CONTENT` row list them; marker lists are config `approvals.owner_chat.refusal_words.<lang>` | 03 §11.6 rule 7 | APPROVED | — | integrator (L1), 2026-11-18 | Applied |
+| CCR-089 | Step 0 sync | Stage of a `CHANGES_REQUESTED` decision | the whitelist cannot carry a free-text stage | a closed stage-word set (`approvals.owner_chat.stage_words.<lang>`) may accompany `CHANGES_REQUESTED`; code maps it to `parsed_target_stage_id` (new evidence column, in the hash); no stage word ⇒ `NEEDS_CLARIFICATION`; the change details are a separate `REVISION_NOTE` (new `evidence_record_kind`, CONTENT rules) passed as an `APPROVER` feedback item; the operator never picks the stage | 03 §11.6 rule 7; 04 §5.16; GLOSSARY §6.44; 24 §7.1a `a_final` | MODIFIED (stage words in the whitelist rather than an operator-set field) | Keeps the stage deterministic and owner-stated | integrator (L1), 2026-11-18 | Applied |
+| CCR-090 | Step 0 sync | Review-code format | undefined | 4 characters (config `approvals.review_code.length`, default 4) from `23456789ABCDEFGHJKMNPQRSTUVWXYZ`, at least one letter and one digit, regenerated on collision, unique per org, matched case-insensitively | 04 §5.16 | APPROVED (length is an owner-confirmable default, Q-O11) | Unambiguous characters; never a dictionary word | integrator (L1), 2026-11-18 | Applied |
+| CCR-091 | Step 0 sync | Ordering anchor for `OWNER_TOPIC` / `DATASET_INTAKE` | evidence precedes the job | no request anchor; freshness window `approvals.owner_chat.content_max_age_ms` at recording plus the replay key; `CONTRIBUTION` / `HUMAN_SCORE` anchor = the job's creation | 03 §11.6 rule 7 (A7) | APPROVED | — | integrator (L1), 2026-11-18 | Applied |
+| CCR-092 | Step 0 sync | Disabled primary revise target | undefined | the graph is invalid: refused at load (disabled by default) or at J02 → J04 `PERMANENT.CONFIG_INVALID` (disabled for the job) | 24 §3.3 rule 9 | APPROVED | Matches the code | integrator (L1), 2026-11-18 | Applied |
+| CCR-093 | re-check 11 N3 | `s11_thumbs` capabilities | 24 said `llm, media_probe`, blueprint 11 `llm` | `llm` only (thumbnail composition is not media probing) | 24 §7.1a, §7.2a | MODIFIED (pass-2 value corrected) | — | integrator (L1), 2026-11-18 | Applied |
+| CCR-094 | re-check 11 N4 | SHORTS revise target named in blueprint 11 | blueprint says `s05_script` | no contract change: the target is the stage's `on_fail` (`s05_shorts` in SHORTS) | agent_11 (lane) | APPROVED | — | integrator (L1), 2026-11-18 | Applied (lane 11 to align) |
+| CCR-095 | re-check 11 N2 | `hint_id` format | two formats (`hn01…` vs `h1…`) | Agent 09's `hn01…` is the contract; Agent 11 passes it through | agent_11 (lane) | APPROVED | Producer's name wins | integrator (L1), 2026-11-18 | Applied (lane 11 to align) |
+| CCR-096 | re-check 10 N1 | Reveal stills in the Agent 08 manifest | Agent 10 needs per-shot stills with ledger rows | each reveal still is an `IMAGE`/`CODE_GENERATED` asset listed per shot with its step and interval and its own `SHOT` ledger row by Agent 08; field name provisionally `reveal_stills[]`, the exact name of the blueprint-08 fix (branch `claude/v4-bpfix2-10`, not merged yet) is recorded in the next pass | 18 §2.2; agent_08 (lane) | APPROVED (name to confirm) | — | integrator (L1), 2026-11-18 | Applied (name pending) |
+| CCR-097 | re-check 10 N2 | One frames manifest Agent 10 → Agent 16 | `frames_ref` had no single document | agent document `agent_10.frames_manifest` 1.0.0 `{render_id, render_sha256, contact_sheet {uri, sha256}, frames[{frame_ms, shot_id or null, uri, sha256}]}` as a `DATA` output ref; lane 10 publishes the schema | 18 §2.3 | APPROVED | — | integrator (L1), 2026-11-18 | Applied (lane 10 schema) |
+| CCR-098 | fix-up 10 | Placement and operations keys | doc 06 is not merged | `placement` enum (`DEV` · `VPS`, env `AMW_PLACEMENT`, no default); keys `ops.placement`, `ops.market_windows`, `ops.night_window`, `drain.grace_ms` registered now; 06 owns them once merged | GLOSSARY §6.52; 18 §13; 27 §4.2 | APPROVED | — | integrator (L1), 2026-11-18 | Applied |
+| CCR-099 | re-check 11 N1 | Glyph sets `assets.kind` | blueprint 11 uses `IMAGE` | contract stays `TEMPLATE` (CCR-031) | agent_11 (lane) | APPROVED | — | integrator (L1), 2026-11-18 | Applied (lane 11 to align) |
+
+### Resolved in pass 3 for each blueprint
+- **08:** add the reveal-still list per shot with step, interval and asset; write one `SHOT` ledger row per still (CCR-096).
+- **10:** publish `agent_10.frames_manifest` 1.0.0 (CCR-097); placement/ops keys as registered (CCR-098).
+- **11:** capabilities `llm` (CCR-093); "the stage's on_fail target" (CCR-094); pass `hint_id` `hn01…` through (CCR-095); glyph sets `kind = TEMPLATE` (CCR-099).
+- **16:** read `frames_ref` → `agent_10.frames_manifest` (CCR-097); requested changes use `parsed_target_stage_id` and `REVISION_NOTE` (CCR-089).
+- **Step 0 (code):** `REVISION_NOTE` kind, `parsed_target_stage_id` column and hash field, stage-word set, review-code format, `content_max_age_ms`, `placement` enum.
+
 ## 5. Resolved for each blueprint (lane owners align their blueprint, prompts and evals; the integrator does not edit them)
 Format: old name or open item → resolution. "as-is" = the blueprint's proposed name is now real.
 
@@ -240,3 +265,4 @@ Format: old name or open item → resolution. "as-is" = the blueprint's proposed
 | Q-O8 | D6 licensed music source (still open; blocks 3B) | no music bed; 3B blocked |
 | Q-O9 | May one owner message decide both steps of an `owner_sensitive` approval (CCR-083)? | no: one message per step |
 | Q-O10 | Audience level for the quality judge: which values, and is it part of the owner topic (CCR-084)? | not added; the judge gets no level |
+| Q-O11 | Review-code length (CCR-090) and the decision, neutral and stage words in English and Marathi | 4 characters; the Step 0 default word lists |
