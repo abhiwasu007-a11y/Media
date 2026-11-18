@@ -26,9 +26,16 @@ def scene_text(scene: Scene) -> str:
     return " ".join(s.text for s in scene.sentences)
 
 
-def pronunciation_tokens(text: str) -> list[str]:
-    """Latin, English, acronym and numeric tokens of a narration text."""
-    return _LATIN.findall(text) + _NUMBER.findall(text)
+def pronunciation_tokens(text: str, language: str) -> list[str]:
+    """Tokens the voice stage needs a dictionary entry for (blueprint 10.3 ``a05.sec.lang``).
+
+    In ``mr-IN`` / ``hi-IN`` every Latin word (including bracketed English terms), acronym and
+    number; in ``en-IN`` only acronyms and numbers (plain English words need no entry).
+    """
+    latin = _LATIN.findall(text)
+    if language != "en-IN":
+        return latin + _NUMBER.findall(text)
+    return [t for t in latin if len(t) > 1 and t.isupper()] + _NUMBER.findall(text)
 
 
 class SectionChecker:
@@ -114,7 +121,7 @@ class SectionChecker:
             candidates = {
                 w.casefold() for c in scene.pronunciation_candidates for w in c.split()
             } | {c.casefold() for c in scene.pronunciation_candidates}
-            for token in pronunciation_tokens(text):
+            for token in pronunciation_tokens(text, inp.language):
                 if token.casefold() not in candidates and token.casefold() not in allow:
                     problems += 1
                     break

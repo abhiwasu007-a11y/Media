@@ -38,6 +38,7 @@ class CallRecord:
     tokens_out: int
     tokens_cached_in: int
     cost_entry_id: str
+    amount_micros: int = 0
 
     def as_dict(self) -> dict[str, str | int]:
         return {
@@ -49,6 +50,7 @@ class CallRecord:
             "tokens_out": self.tokens_out,
             "tokens_cached_in": self.tokens_cached_in,
             "cost_entry_id": self.cost_entry_id,
+            "amount_micros": self.amount_micros,
         }
 
 
@@ -198,6 +200,7 @@ class StructuredCaller:
                 row.tokens_out,
                 row.tokens_cached_in,
                 row.cost_entry_id,
+                row.amount_micros,
             )
         )
         log_event(
