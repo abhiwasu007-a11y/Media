@@ -1,7 +1,7 @@
 """Circuit breaker state machine (07 section 4; 04 section 5.8 ``circuit_breakers``).
 
 Pure functions over a ``BreakerRow`` that mirrors the table columns. The same rules are
-implemented in SQL by ``amw_breaker_record`` (migration 0054) so every worker shares one state;
+implemented in SQL by ``amw_breaker_record`` (migration 0010) so every worker shares one state;
 ``tests/retries/test_breaker_sql_parity.py`` runs both on the same event sequences.
 
 Window: a fixed window of ``window_ms`` that restarts when it has elapsed (the stored columns are
@@ -129,18 +129,19 @@ def record(
 ) -> BreakerRow:
     """Apply one call outcome (``amw_breaker_record``)."""
     counted = (not succeeded) and counts_as_failure(error_code)
-    if not succeeded:
-        row = replace(row, last_error_code=error_code)
     if row.state is CircuitState.OPEN:
         if row.open_until is None or now < row.open_until:
             return row  # a late result of a call admitted before the breaker opened
         row = _to_half_open(row, now)
+    if not succeeded and not counted:
+        # not a provider fault (07 section 4.3): changes nothing (same rule as the SQL function)
+        return row
+    if not succeeded:
+        row = replace(row, last_error_code=error_code)
     if row.state is CircuitState.HALF_OPEN:
         row = replace(row, half_open_in_flight=max(0, row.half_open_in_flight - 1))
         if counted:
             return _open(row, now, cfg)
-        if not succeeded:
-            return replace(row, window_calls=0)  # a neutral failure breaks the success streak
         row = replace(row, window_calls=row.window_calls + 1)
         if row.window_calls >= cfg.half_open_successes_to_close:
             return replace(
@@ -161,11 +162,7 @@ def record(
         row,
         window_calls=row.window_calls + 1,
         window_failures=row.window_failures + (1 if counted else 0),
-        consecutive_failures=(
-            row.consecutive_failures + 1
-            if counted
-            else (0 if succeeded else row.consecutive_failures)
-        ),
+        consecutive_failures=row.consecutive_failures + 1 if counted else 0,
     )
     ratio_trip = (
         row.window_calls >= cfg.min_calls

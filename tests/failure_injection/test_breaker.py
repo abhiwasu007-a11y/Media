@@ -111,7 +111,7 @@ def test_neutral_failures_never_open_and_do_not_break_a_streak() -> None:
     assert row.consecutive_failures == 4
 
 
-def test_half_open_neutral_failure_resets_the_success_streak() -> None:
+def test_half_open_neutral_failure_changes_nothing() -> None:
     row = new_row(KEY, T0)
     for _ in range(5):
         row = record(row, False, NET, T0, CFG)
@@ -120,17 +120,17 @@ def test_half_open_neutral_failure_resets_the_success_streak() -> None:
     row = record(admit(row, t, CFG).row, True, None, t, CFG)
     row = record(admit(row, t, CFG).row, False, "PERMANENT.PROVIDER_REFUSAL", t, CFG)
     assert row.state is CircuitState.HALF_OPEN
-    assert row.window_calls == 0
+    assert row.window_calls == 1  # an uncounted failure is not a provider fault: no change
 
 
-def test_late_result_while_open_changes_nothing_but_the_error() -> None:
+def test_late_result_while_open_changes_nothing() -> None:
     row = new_row(KEY, T0)
     for _ in range(5):
         row = record(row, False, NET, T0, CFG)
     late = record(row, False, "TEMPORARY.TIMEOUT", T0 + _ms(10), CFG)
     assert late.state is CircuitState.OPEN
     assert late.open_until == row.open_until
-    assert late.last_error_code == "TEMPORARY.TIMEOUT"
+    assert late == row
     # a result recorded after open_until is treated as the first probe outcome
     assert row.open_until is not None
     after = record(row, True, None, row.open_until + _ms(1), CFG)

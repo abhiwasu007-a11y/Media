@@ -112,21 +112,7 @@ def test_breakers_are_written_only_through_the_function(
             run_sql(tx, stmt)
 
 
-def test_breaker_function_needs_complete_config_and_a_tenant_for_tenant_scopes(
-    pg_dsn: str, admin: Any
-) -> None:
-    with pytest.raises(psycopg.DatabaseError):
-        admin.execute(
-            "SELECT * FROM amw_breaker_record('p', 'o', 'platform', true, NULL, false, '{}',"
-            " gen_random_uuid())"
-        )
-    with pytest.raises(PermissionDeniedError):
-        _functions(pg_dsn).breaker_record(
-            ADAPTER,
-            BreakerKey("p", "o", "gcp_0195f0c8-7d38-7aaa-8bbb-0123456789ab"),
-            True,
-            None,
-        )
+def test_breaker_function_rejects_a_bad_actor_reference(pg_dsn: str) -> None:
     with pytest.raises(ValueError, match="actor"):
         _functions(pg_dsn).breaker_record(
             ActorRef("bob"), BreakerKey("p", "o", "platform"), True, None

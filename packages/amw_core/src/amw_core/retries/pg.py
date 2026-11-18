@@ -1,13 +1,12 @@
 """PostgreSQL persistence for breakers and dead letters.
 
 * ``PgBreakerFunctions.breaker_record`` is ``SystemFunctions.breaker_record``: it calls
-  ``amw_breaker_record`` (migration 0050), the only writer of ``circuit_breakers``, in its own
-  short transaction (not bound to a tenant transaction, 04 section 3.6). ``read`` returns the shared
-  row (tenants may read platform rows, 04 section 3.5) for the pure ``admit`` check.
+  ``amw_breaker_record`` (migration 0010, lane L1a), the only writer of ``circuit_breakers``, in
+  its own short transaction (not bound to a tenant transaction, 04 section 3.6). ``read`` returns
+  the shared row (tenants may read platform rows, 04 section 3.5) for the pure ``admit`` check.
 * ``PgDeadLetterStore`` writes the T14 row and moves its workflow columns (07 section 5).
 """
 
-import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import replace
@@ -31,7 +30,6 @@ from amw_core.ids import (
     DeadLetterId,
     IdempotencyKey,
     is_actor_ref,
-    new_uuid7,
 )
 from amw_core.interfaces.system_functions import BreakerKey, BreakerState
 from amw_core.interfaces.tenancy_context import TenantTransaction
@@ -59,22 +57,26 @@ class PgBreakerFunctions:
         if not is_actor_ref(caller):
             raise ValueError("caller must be an actor reference")
         cfg = self._settings.breaker_for(key.provider, key.operation_class)
-        config = json.loads(cfg.model_dump_json())
         try:
             with self._connections() as conn, conn.transaction():
                 conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
                 row = conn.execute(
                     "SELECT state, open_until FROM amw_breaker_record("
-                    "%s, %s, %s, %s, %s, %s, %s, %s)",
+                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     (
                         key.provider,
                         key.operation_class,
                         key.credential_scope,
                         succeeded,
-                        error_code,
                         counts_as_failure(error_code),
-                        Jsonb(config),
-                        new_uuid7(),
+                        error_code,
+                        cfg.window_ms,
+                        cfg.min_calls,
+                        cfg.failure_ratio,
+                        cfg.consecutive_failures,
+                        cfg.open_ms,
+                        cfg.open_ms_max,
+                        cfg.half_open_successes_to_close,
                     ),
                 ).fetchone()
         except psycopg.Error as exc:
