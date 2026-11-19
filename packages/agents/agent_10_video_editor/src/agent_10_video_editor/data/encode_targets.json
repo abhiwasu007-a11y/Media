@@ -1,0 +1,54 @@
+{
+  "schema": "agent_10.encode_targets",
+  "version": "1.0.0",
+  "decision": "docs/v4/adr/ADR-014_video_encode_targets.md (owner decision D10)",
+  "codec": {
+    "profile": "high",
+    "pix_fmt": "yuv420p",
+    "bframes": 2,
+    "cabac": true,
+    "closed_gop": true,
+    "gop_rule": "HALF_FRAME_RATE",
+    "rate_control": "ABR",
+    "source": "RESEARCH_LOG INF-13 (High Profile, 2 consecutive B frames, closed GOP, GOP of half the frame rate, CABAC, 4:2:0) and INF-12 (variable bitrate)"
+  },
+  "targets": [
+    {
+      "width_px": 1920,
+      "height_px": 1080,
+      "fps": [
+        "24/1",
+        "25/1",
+        "30/1"
+      ],
+      "target_bps": 8000000,
+      "source": "RESEARCH_LOG INF-12 (SDR 1080p, standard frame rate 24, 25, 30: 8 Mbps)",
+      "vbv": {
+        "maxrate_bps": 12000000,
+        "bufsize_bps": 16000000,
+        "status": "PROPOSAL, REQUIRES REVIEW (Phase 1): 1.5x / 2x the target; measured 2026-11-19 on 1080p30 random noise (8 s, preset faster): one-pass ABR alone ran 33.6 / 2.1 / 5.1 / 6.6 Mbps per 2 s window (mean 11.87), with this cap 9.3 / 8.5 / 8.2 / 8.1 (mean 8.52); still graphics 0.15 Mbps and testsrc2 8.15 Mbps unchanged; ADR-014 section 3.4"
+      }
+    },
+    {
+      "width_px": 1920,
+      "height_px": 1080,
+      "fps": [
+        "48/1",
+        "50/1",
+        "60/1"
+      ],
+      "target_bps": 12000000,
+      "source": "RESEARCH_LOG INF-12 (SDR 1080p, high frame rate 48, 50, 60: 12 Mbps)",
+      "vbv": {
+        "maxrate_bps": 18000000,
+        "bufsize_bps": 24000000,
+        "status": "PROPOSAL, REQUIRES REVIEW (Phase 1): 1.5x / 2x the target; measured 2026-11-19 on 1080p60 random noise (6 s, preset faster): ABR alone 26.5 / 9.8 / 10.7 Mbps per 2 s window (mean 15.67), with this cap 13.8 / 12.2 / 12.1 (mean 12.72); ADR-014 section 3.4"
+      }
+    }
+  ],
+  "requires_review": [
+    "2560x1440, 3840x2160 and every other size: owner decision D10 covers 1080p only (INF-12 lists other sizes; not adopted)",
+    "1080x1920 (9:16): INF-12 does not say whether the 1080p row applies to vertical video",
+    "fractional frame rates (for example 30000/1001): INF-12 lists 24, 25, 30, 48, 50, 60 only"
+  ]
+}

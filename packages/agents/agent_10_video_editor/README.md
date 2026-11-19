@@ -52,7 +52,7 @@ RESEARCH_LOG entry; the production pin is REQUIRES REVIEW):
 | compiler | `gcc 13 (Ubuntu 13.2.0-23ubuntu3)` |
 | `ffprobe` | `6.1.1-3ubuntu5` |
 | encoder | `libx264` (the build is `--enable-gpl`), native `aac` |
-| filters used | `blackdetect`, `freezedetect`, `silencedetect`, `ebur128`, `select`, `showinfo`, `tile`, `drawtext`, `concat`, `overlay`, `scale`, `apad`, `tpad`, `fps`, `trim` |
+| filters used | `blackdetect`, `freezedetect`, `silencedetect`, `ebur128`, `select`, `showinfo`, `tile`, `drawtext`, `concat`, `overlay`, `scale`, `apad`, `tpad`, `fps`, `trim`, `split`, `ssim` (no `libvmaf` in this build) |
 
 Findings on this build (all recorded in tests):
 
@@ -61,7 +61,24 @@ Findings on this build (all recorded in tests):
   rejects garbage.
 * x264 reports **Constrained Baseline** instead of **High** when `-preset ultrafast` is used (no
   CABAC, B-frames or 8x8dct); `qc.video.codec_profile` caught it. Keep `agent_10.render.x264_preset`
-  at `faster` or slower. Integration tests use `faster`.
+  at `faster` or slower (the configuration now refuses other presets). Integration tests use
+  `faster`.
+* Encode targets (ADR-014, owner decision D10): x264 ABR at the YouTube target of
+  `data/encode_targets.json` (INF-12), never a measured floor and never filler. The x264 SEI
+  (`x264 - core … options: …`) survives `-map_metadata -1` and `+bitexact`, so
+  `qc.video.encoder_settings` reads `rc`, `bitrate`, `bframes`, `cabac`, `open_gop`, `keyint` and
+  VBV from the stream. `-maxrate` equal to `-b:v` makes x264 report `rc=cbr`: a configured cap must
+  be above the target. Each segment also writes the same frames as lossless FFV1 (scratch); the
+  SSIM against it is reported by `qc.video.quality_metric` (report only until 3B).
+* Review of PR #79 (CCR-241): the `ssim` filter pairs frames by timestamp and the Matroska
+  reference has a 1 ms timebase, so both inputs are re-timed by frame index; the reference's decoded frame
+  count and the filter's pair count must both equal the (sampled) frame count (the filter
+  repeats the last frame of a shorter input, so the pair count alone cannot see it). A plain MP4 mux writes an edit list (B-frame delay):
+  `-use_editlist 0 -movflags +negative_cts_offsets` keeps the video at t = 0, and dropping the
+  1024 AAC priming samples keeps the audio in sync (click at 500 ms decodes at 500.42 ms).
+  One-pass ABR bursts then starves on noise at every segment start; the default VBV cap
+  (1.5x / 2x the target, measured proposal) holds it. Every segment's SEI is checked before
+  the concat and bound by `encoder.settings_sha256`.
 * The native AAC encoder's average rate on synthetic signals is about 240 kbps at a configured
   nominal 384 kbps (CCR-055): the nominal rate is gated, the measured average is reported.
 * `sine` and `aevalsrc` mono sources lose 3 dB when up-mixed to stereo; the self-test's "hot"
@@ -97,7 +114,7 @@ uv run pytest tests/agents/agent_10_video_editor -m integration         # real l
 * **Silent audio** (`Peak: -inf`) is stored as -144 dBTP and FAILs `qc.audio.integrated_lufs` (`AUDIO_SILENT`, remedy `s07_voice`).
 * **Process checks.** `a10.q.tenant` is `PASS` only when the caller passes `envelope_org` to `run(...)`; otherwise it is `SKIPPED` (`ENVELOPE_ORG_NOT_SUPPLIED`; the context-ref owner check still runs). `a10.q.hash_chain` compares the render sha across payload, render output and DB row and the timeline sha with its context ref; `a10.q.no_provider_call` reports the recorded cost amount. Still not done: `a10.q.upstream` and `a10.q.segments_verified` are render-stage checks only; the QC stage does not emit them; hash chain does not re-hash every evidence ref.
 * **Self-drain** inside the VPS grace zone acts now (no week-long wrapped delay).
-* **Not changed (listed limits):** `inputs` models still ignore unknown upstream fields; `field_order=None` is read as progressive; chapter tolerance (1000 ms) and several QC defaults (1920x1080, 15/25 Mbps, 384 kbps) are code defaults of `QcConfig`; `edit.end_screen` never receives `other_content`; the hook check knows only `BRAND_STING`; DEV placement without `eta_ms_per_output_s` estimates 1:1 real time instead of failing closed.
+* **Not changed (listed limits):** `inputs` models still ignore unknown upstream fields; `field_order=None` is read as progressive; chapter tolerance (1000 ms) and several QC defaults (1920x1080, 384 kbps) are code defaults of `QcConfig`; `edit.end_screen` never receives `other_content`; the hook check knows only `BRAND_STING`; DEV placement without `eta_ms_per_output_s` estimates 1:1 real time instead of failing closed.
 
 ## Needs from other lanes
 

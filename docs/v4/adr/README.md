@@ -17,6 +17,7 @@ Format of every ADR: header table (status, decider, dependencies, directive sect
 | ADR-011 | n8n | [ADR-011_n8n.md](ADR-011_n8n.md) | **Draft (integrated, lane B2-1; not Proposed until the UNLOGGED facts are logged)** | none in 3A, 3B, 3C (revisit on trigger) | INF-01, INF-05, INF-06; n8n pages UNLOGGED |
 | ADR-012 | Render worker placement (dev environment or VPS night window; movable; never in market hours) | [ADR-012_render_worker_placement.md](ADR-012_render_worker_placement.md) | **Proposed** | 3A; 3C (separate server if needed) | INF-01, INF-02, INF-03, INF-04, INF-09 |
 | ADR-013 | Not defined in `00_EXECUTION_PLAN.md` §3.1 (which lists ADR-001 … ADR-012). **REQUIRES REVIEW (Phase 1): lead to assign the subject.** | — | Not started | — | — |
+| ADR-014 | Video encode targets: YouTube's bitrate is an encoder target (H.264 High VBR); encoder-settings check; SSIM against a lossless intermediate (report only until 3B); no filler | [ADR-014_video_encode_targets.md](ADR-014_video_encode_targets.md) | **Accepted** (owner decision D10) | 3A (threshold 3B) | INF-10, INF-12, INF-13 |
 
 ADR titles 002–011 are taken from `00_EXECUTION_PLAN.md` step 3.1.
 

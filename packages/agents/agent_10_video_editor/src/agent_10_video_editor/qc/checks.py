@@ -15,6 +15,7 @@ from fractions import Fraction
 from typing import Any
 
 from agent_10_video_editor.qc.result import (
+    REMEDY,
     CheckResult,
     failed,
     passed,
@@ -70,16 +71,202 @@ def qc_video_pix_fmt(*, pix_fmt: str | None) -> CheckResult:
     )
 
 
-def qc_video_bitrate(
-    *, video_bitrate_bps: int, min_bps: int, max_bps: int, floor_bps: int
+def x264_expected(
+    *,
+    gop_frames: int,
+    bframes: int,
+    cabac: bool,
+    target_bps: int,
+    maxrate_bps: int | None,
+    bufsize_bps: int | None,
+) -> dict[str, str]:
+    """The x264 SEI options a delivery encode must carry (ADR-014)."""
+    want: dict[str, str] = {
+        "cabac": str(int(cabac)),
+        "bframes": str(bframes),
+        "open_gop": "0",
+        "interlaced": "0",
+        "keyint": str(gop_frames),
+        "rc": "abr",
+        "bitrate": str(target_bps // 1000),
+    }
+    if maxrate_bps is not None and bufsize_bps is not None:
+        want["vbv_maxrate"] = str(maxrate_bps // 1000)
+        want["vbv_bufsize"] = str(bufsize_bps // 1000)
+    return want
+
+
+def sei_mismatches(sei: Mapping[str, str] | None, want: Mapping[str, str]) -> list[str]:
+    """Option names of one segment's x264 SEI that differ from ``want`` (no SEI: missing)."""
+    if sei is None:
+        return ["x264_sei_missing"]
+    bad = [f"sei.{k}" for k, v in want.items() if sei.get(k) != v]
+    if "vbv_maxrate" not in want and sei.get("vbv_maxrate", "0") != "0":
+        bad.append("sei.vbv_maxrate")
+    if sei.get("filler", "0") != "0":
+        bad.append("sei.filler")
+    if sei.get("nal_hrd", "none") != "none":
+        bad.append("sei.nal_hrd")
+    return bad
+
+
+def qc_video_encoder_settings(
+    *,
+    codec_name: str,
+    profile: str | None,
+    pix_fmt: str | None,
+    field_order: str | None,
+    r_frame_rate: Fraction | str,
+    level: int | None,
+    has_b_frames: int | None,
+    edit_list: bool | None,
+    seis: Sequence[Mapping[str, str] | None],
+    expected_segments: int,
+    keyframes: Sequence[int] | None,
+    segment_starts: Sequence[int],
+    total_frames: int,
+    settings_sha256_recorded: str | None,
+    settings_sha256_measured: str | None,
+    fps_num: int,
+    fps_den: int,
+    gop_frames: int,
+    bframes: int,
+    cabac: bool,
+    target_bps: int,
+    maxrate_bps: int | None,
+    bufsize_bps: int | None,
 ) -> CheckResult:
-    """18 section 6: below the floor FAIL; floor..min or above max WARN; min..max PASS."""
-    kw: dict[str, Any] = {"measured": video_bitrate_bps, "unit": "bps"}
-    if video_bitrate_bps < floor_bps:
-        return failed("qc.video.bitrate", threshold=floor_bps, **kw)
-    if video_bitrate_bps < min_bps or video_bitrate_bps > max_bps:
-        return warned("qc.video.bitrate", threshold=None, **kw)
-    return passed("qc.video.bitrate", threshold=floor_bps, **kw)
+    """ADR-014 (replaces the measured-bitrate floor): the delivered stream carries the settings
+    it was encoded with, in EVERY segment.
+
+    Measured facts of the final file (ffprobe): codec, profile, pix_fmt, scan, frame rate,
+    ``has_b_frames``, no MP4 edit list (INF-13), and the GOP structure from the packet keyframe
+    flags (frame 0 and every segment start are keyframes; no keyframe interval above the GOP).
+    Declared settings: one x264 SEI per segment (count = segments of the render), each with the
+    expected rate control, B-frames, CABAC, closed GOP, keyint, VBV and no filler, bound to the
+    render by the hash the render recorded of each segment's SEI before the concat. The SEI is
+    self-declared by the encoder: rate-control values cannot be measured from the stream, which
+    is why the measured facts are checked next to it. Any difference = blocking FAIL. The H.264
+    level is reported only (no sourced value; REQUIRES REVIEW)."""
+    fps = Fraction(r_frame_rate) if isinstance(r_frame_rate, str) else r_frame_rate
+    bad: list[str] = []
+    if codec_name != "h264":
+        bad.append("codec_name")
+    if profile != "High":
+        bad.append("profile")
+    if pix_fmt != "yuv420p":
+        bad.append("pix_fmt")
+    if field_order != "progressive":
+        bad.append("field_order")
+    if fps != Fraction(fps_num, fps_den):
+        bad.append("fps")
+    if bframes > 0 and (has_b_frames is None or has_b_frames < 1):
+        bad.append("has_b_frames")
+    if edit_list is None:
+        bad.append("container.edit_list_unknown")
+    elif edit_list:
+        bad.append("container.edit_list")
+    if keyframes is None:
+        bad.append("gop.keyframes_unknown")
+    else:
+        keys = sorted(set(keyframes))
+        if not keys or keys[0] != 0:
+            bad.append("gop.first_not_key")
+        if any(start not in set(keys) for start in segment_starts):
+            bad.append("gop.segment_start_not_key")
+        gaps = [b - a for a, b in itertools.pairwise([*keys, total_frames])]
+        if any(gap > gop_frames for gap in gaps):
+            bad.append("gop.interval")
+    want = x264_expected(
+        gop_frames=gop_frames,
+        bframes=bframes,
+        cabac=cabac,
+        target_bps=target_bps,
+        maxrate_bps=maxrate_bps,
+        bufsize_bps=bufsize_bps,
+    )
+    if len(seis) != expected_segments:
+        bad.append("sei.count")
+    per_segment = [sei_mismatches(sei, want) for sei in seis]
+    for item in dict.fromkeys(m for ms in per_segment for m in ms):
+        bad.append(item)
+    if settings_sha256_recorded is None or settings_sha256_measured != settings_sha256_recorded:
+        bad.append("sei.binding")
+    first = seis[0] if seis else None
+    measured = f"{codec_name}/{profile}/{pix_fmt}/{fps.numerator}/{fps.denominator}" + (
+        f"/rc={first.get('rc')}/bitrate={first.get('bitrate')}/segments={len(seis)}"
+        if first
+        else "/no_sei"
+    )
+    return CheckResult(
+        "qc.video.encoder_settings",
+        CheckVerdict.PASS if not bad else CheckVerdict.FAIL,
+        True,
+        measured=measured,
+        threshold=f"h264/High/yuv420p/{fps_num}/{fps_den}/rc=abr/bitrate={target_bps // 1000}"
+        f"/segments={expected_segments}",
+        offending=tuple(bad),
+        remedy_stage_id=REMEDY["qc.video.encoder_settings"] if bad else None,
+        details={
+            "level": level,
+            "level_threshold": None,
+            "has_b_frames": has_b_frames,
+            "edit_list": edit_list,
+            "sei_core": first.get("_core") if first else None,
+            "expected_sei": want,
+            "segments_failing": [i for i, ms in enumerate(per_segment) if ms],
+        },
+    )
+
+
+def qc_video_quality_metric(
+    *,
+    ssim_all: str | None,
+    frames_measured: int,
+    frames_total: int,
+    min_ssim: str | None,
+    vmaf_status: str,
+) -> CheckResult:
+    """ADR-014: SSIM of the delivery encode against its lossless reference. REPORT ONLY in 3A:
+    the pass threshold ``qc.video.quality_min_ssim`` is unset until 3B, so the verdict is a
+    non-blocking WARN carrying the measured value; it never blocks the gate."""
+    details: dict[str, Any] = {
+        "report_only": True,
+        "metric": "SSIM",
+        "ssim_all": ssim_all,
+        "frames_measured": frames_measured,
+        "frames_total": frames_total,
+        "vmaf": None,
+        "vmaf_status": vmaf_status,
+    }
+    if ssim_all is None or frames_measured == 0:
+        return warned(
+            "qc.video.quality_metric",
+            threshold=None,
+            remedy_stage_id=None,
+            message="NOT_MEASURED: no segment has an SSIM value (report only)",
+            details=details,
+        )
+    measured = float(ssim_all)
+    if min_ssim is None:
+        return warned(
+            "qc.video.quality_metric",
+            measured=measured,
+            threshold=None,
+            remedy_stage_id=None,
+            message=f"REPORT_ONLY: SSIM {ssim_all}; threshold unset until 3B (ADR-014)",
+            details={**details, "threshold_status": "UNSET_UNTIL_3B"},
+        )
+    ok = Decimal(ssim_all) >= Decimal(min_ssim)
+    return CheckResult(
+        "qc.video.quality_metric",
+        CheckVerdict.PASS if ok else CheckVerdict.WARN,
+        False,
+        measured=measured,
+        threshold=float(min_ssim),
+        message=f"SSIM {ssim_all} vs {min_ssim} (non-blocking until 3B decides)",
+        details={**details, "threshold_status": "SET_NON_BLOCKING"},
+    )
 
 
 class CfrAnalyser:
