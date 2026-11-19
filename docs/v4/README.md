@@ -69,7 +69,7 @@ Documentation status values: **Not started** · **Draft** · **Partial (blocked)
 | File | Status |
 |---|---|
 | BLUEPRINT_COMPATIBILITY_AUDIT.md | Not started |
-| BUILD_BACKLOG.md | Not started |
+| [BUILD_BACKLOG.md](BUILD_BACKLOG.md) | Draft (Wave C: 3A ticket status from `main`, walking skeleton tickets, dry-run / first-real-run milestones, 3B/3C epics, test debt, critical path) |
 | BLUEPRINT_COMPLETION_REPORT.md | Not started |
 
 ## Supporting

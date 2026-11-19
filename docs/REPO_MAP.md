@@ -9,6 +9,7 @@ Use this map instead of scanning. Source code does not exist yet (documentation 
 | Current status, tasks, owner decisions (D1+), open questions | `docs/v4/IMPLEMENTATION_PROGRESS.md` |
 | Plan, phases, defaults Q1–Q20 | `docs/v4/00_EXECUTION_PLAN.md` |
 | Index of every V4 document and its status | `docs/v4/README.md` |
+| Build backlog: 3A ticket status, walking skeleton, milestones, critical path | `docs/v4/BUILD_BACKLOG.md` |
 | External facts (cite by ID) | `docs/v4/RESEARCH_LOG.md` |
 
 ## Contracts (Wave A, single source; never redefine elsewhere)
