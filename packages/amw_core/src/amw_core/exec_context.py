@@ -1,10 +1,12 @@
 """Execution context shared by the stages of one task attempt (CCR-130, ticket P4-17; 19.1).
 
-Tenant scope, typed IDs and the attempt number. ``from_task_input`` is V1 TenantScope: the
-envelope org (required), the Task Input org and every typed ID must agree and be
-well formed, else ``TENANT_MISMATCH`` before any step runs (19.1 layer 1).
+Tenant scope, typed IDs, the attempt number and (CCR-203) the stage ID and iteration.
+``from_task_input`` is V1 TenantScope: the envelope org (required), the Task Input org and
+every typed ID must agree and be well formed, else ``TENANT_MISMATCH`` before any step runs
+(19.1 layer 1).
 """
 
+import re
 from dataclasses import dataclass
 
 from amw_core.contracts.task_input import TaskInput
@@ -26,6 +28,8 @@ from amw_core.ids import (
 )
 from amw_core.interfaces.tenancy_context import TenantContext
 
+_STAGE_ID = re.compile(r"^[a-z0-9_]{2,32}$")
+
 
 @dataclass(frozen=True, slots=True)
 class ExecContext:
@@ -35,6 +39,10 @@ class ExecContext:
     attempt_id: AttemptId
     channel_id: ChannelId | None
     attempt_no: int
+    stage_id: str | None = None
+    """04 section 5.3 ``tasks.stage_id`` (CCR-203, CCR-214); ``None`` for a task outside a stage."""
+    iteration: int = 0
+    """04 section 5.3 ``tasks.iteration`` (revision loop counter, CCR-203)."""
 
     @property
     def org_id(self) -> OrgId:
@@ -55,11 +63,17 @@ class ExecContext:
         agent_id: str,
         *,
         envelope_org_id: str,
+        stage_id: str | None = None,
+        iteration: int = 0,
     ) -> ExecContext:
         if task_input.agent_id != agent_id:
             raise TenantMismatchError(f"task is not addressed to {agent_id}")
         if envelope_org_id != task_input.org_id:
             raise TenantMismatchError("envelope org differs from the Task Input org")
+        if stage_id is not None and not _STAGE_ID.fullmatch(stage_id):
+            raise InputInvalidError("stage_id is malformed", details={"stage_id": stage_id[:64]})
+        if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
+            raise InputInvalidError("iteration must be an integer >= 0")
         try:
             return cls(
                 tenant=TenantContext(
@@ -74,6 +88,8 @@ class ExecContext:
                 if task_input.channel_id is not None
                 else None,
                 attempt_no=task_input.retry_count + 1,
+                stage_id=stage_id,
+                iteration=iteration,
             )
         except InputInvalidError as exc:
             raise TenantMismatchError("a typed ID of the task is malformed") from exc

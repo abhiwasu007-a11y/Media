@@ -32,6 +32,7 @@ from amw_core.ids import ORG, OrgId, Prefix, is_valid_id
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri, ReadableStream
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.observability import get_logger, log_context
+from amw_core.tenancy.storage_paths import check_jobs_subpath
 
 SCHEME = "amw-blob://"
 PLATFORM = "platform"
@@ -68,6 +69,8 @@ def parse_uri(uri: str) -> ParsedUri:
         raise InputInvalidError("blob URI owner is neither an org wire ID nor platform")
     if owner != PLATFORM and area not in TENANT_AREAS:
         raise InputInvalidError(f"unknown storage area {area!r} (03 section 8)")
+    if owner != PLATFORM and area == "jobs":
+        check_jobs_subpath("/".join(rest))
     for segment in (area, *rest):
         if not _SEGMENT_RE.fullmatch(segment) or segment in {".", ".."}:
             raise InputInvalidError("unsafe or empty blob path segment")

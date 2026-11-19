@@ -24,6 +24,43 @@ class Violation(AmwModel):
     message: Annotated[str, StringConstraints(max_length=500)]
 
 
+MAX_VIOLATIONS = 200
+MAX_VIOLATION_MESSAGE = 500
+
+
+def violation(code: str, path: str = "", message: str | None = None) -> Violation:
+    """The one builder of a ``details.violations[]`` item (03 section 6 rule 6, CCR-210).
+
+    ``code`` is the payload-local reason code (``keyword``), ``path`` the JSON Pointer of the
+    failing location or ``""``; ``message`` is a short text without content
+    (default: the code itself).
+    """
+    text = code if message is None else message
+    return Violation(path=path, keyword=code, message=text[:MAX_VIOLATION_MESSAGE])
+
+
+def _violation_item(item: object) -> Violation | dict[str, Any]:
+    """Normalise one ``violations`` item; a bare string becomes ``{"", s, s}`` (CCR-210)."""
+    if isinstance(item, Violation):
+        return item
+    if isinstance(item, Mapping):
+        keyword = str(item.get("keyword", ""))
+        return {
+            "path": str(item.get("path", "")),
+            "keyword": keyword,
+            "message": str(item.get("message", keyword))[:MAX_VIOLATION_MESSAGE],
+        }
+    return violation(str(item))
+
+
+def _normalised_details(details: dict[str, Any]) -> dict[str, Any]:
+    raw = details.get("violations")
+    if raw is None:
+        return details
+    items = [raw] if isinstance(raw, str | Mapping | Violation) else list(raw)
+    return {**details, "violations": [_violation_item(i) for i in items[:MAX_VIOLATIONS]]}
+
+
 class ErrorDetails(AmwModel):
     """``details`` is an open object in the schema; only ``violations`` is typed."""
 
@@ -67,8 +104,11 @@ def error_object_from_exception(
     correlation_id: str,
     extra_details: Mapping[str, Any] | None = None,
 ) -> ErrorObject:
-    """Build the wire Error object from a typed exception (``retryable`` = catalogue default)."""
-    details: dict[str, Any] = {**exc.details, **(extra_details or {})}
+    """Build the wire Error object from a typed exception (``retryable`` = catalogue default).
+
+    Never fails because of ``details``: bare-string violations are converted (03 section 6 rule 6).
+    """
+    details = _normalised_details({**exc.details, **(extra_details or {})})
     return ErrorObject(
         code=exc.code,
         error_class=exc.error_class,
