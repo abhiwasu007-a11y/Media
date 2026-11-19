@@ -30,6 +30,7 @@ from agent_11_thumbnail_design.composer import ImageComposer, RenderResult, Rend
 from agent_11_thumbnail_design.config import Agent11Settings
 from agent_11_thumbnail_design.errors import (
     ComposeFailedError,
+    FontIntegrityError,
     GlyphMissingError,
     TextDoesNotFitError,
 )
@@ -59,6 +60,7 @@ from agent_11_thumbnail_design.payload import (
     PlannerInfo,
     ThumbnailInput,
 )
+from agent_11_thumbnail_design.pinning import render_environment, verify_font
 from agent_11_thumbnail_design.ports import (
     BrandKitView,
     FontRef,
@@ -384,6 +386,7 @@ class _Run:
         self.ti, self.inp, self.tc, self.attempt = ti, inp, tc, attempt
         self.calls = _Calls()
         self.banned_words: tuple[str, ...] = ()
+        self.font_source = "tenant_asset"
         self.scanner = InjectionScanner(
             stage.d.lexicons.injection_markers, stage.d.lexicons.instruction_phrases
         )
@@ -463,13 +466,21 @@ class _Run:
         finance = category in self.d.lexicons.finance_categories
         self._preflight(finance)  # a11.pre.config: fail closed before any model call
         font_bytes = self._read_blob(font.uri, font.sha256)
+        try:
+            # the registered asset's recorded hash must match the bytes (fail closed)
+            self.font_source = verify_font(font_bytes, font.sha256)
+        except FontIntegrityError as exc:
+            raise MissingDependencyError(
+                "the font bytes do not match the recorded hash of the font asset",
+                details={"check_id": "a11.pre.config", "missing": ["font_hash_match"]},
+            ) from exc
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
         self.banned_words = tuple(banned_words)
         covered_text = " ".join(
             [promise.working_title_local, brief.text_idea_local, *promise.promise_key_terms]
         )
-        if self.d.composer.missing_glyphs(self.ti.org_id, font_bytes, covered_text):
+        if self.d.composer.missing_glyphs(self.ti.org_id, font_bytes, covered_text, font.sha256):
             raise MissingDependencyError("no font with glyph coverage for the language")
 
         # Promise material scan: instruction-like content means a human must look (8.4).
@@ -1462,6 +1473,8 @@ class _Run:
             "composer_version": "pillow-raqm",
             "template_set_sha256": template_set_sha256(),
             "font_asset_ids": [font.asset_id],
+            "font_source": self.font_source,
+            "render_environment": render_environment(),
             "calls": self.calls.records,
         }
 

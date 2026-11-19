@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from agent_11_thumbnail_design.errors import FontIntegrityError
 from agent_11_thumbnail_design.models import Brief, Promise
 from agent_11_thumbnail_design.stage import Lexicons, RulePacks, ThumbnailStage
 from agent_11_thumbnail_design.textutil import contains_sequence, folded_words
@@ -98,6 +99,20 @@ def test_m6_missing_raqm_is_permanent_and_precedes_the_paid_call() -> None:
     with pytest.raises(MissingDependencyError) as e:
         env.stage.run(env.ti, "a")
     assert e.value.code == "PERMANENT.MISSING_DEPENDENCY"
+    assert env.llm.calls == 0
+
+
+def test_font_hash_mismatch_is_refused_before_the_paid_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = make_env()
+    monkeypatch.setattr(
+        "agent_11_thumbnail_design.stage.verify_font",
+        lambda *_: (_ for _ in ()).throw(FontIntegrityError("x")),
+    )
+    with pytest.raises(MissingDependencyError) as e:
+        env.stage.run(env.ti, "a")
+    assert e.value.details["missing"] == ["font_hash_match"]
     assert env.llm.calls == 0
 
 
