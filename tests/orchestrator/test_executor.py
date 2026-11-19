@@ -208,8 +208,10 @@ def test_start_up_loads_the_payload_schema_plugins(monkeypatch: pytest.MonkeyPat
     ("raw", "expected"),
     [
         ("finance", ChannelCategory.FINANCE),
-        ("non-finance", ChannelCategory.NON_FINANCE),
-        (" Non_Finance ", ChannelCategory.NON_FINANCE),
+        ("youtube_general", ChannelCategory.NON_FINANCE),
+        ("non-finance", ChannelCategory.FINANCE),  # undocumented label (04 5.2): fail closed
+        ("non_finance", ChannelCategory.FINANCE),
+        (" Non_Finance ", ChannelCategory.FINANCE),
         (None, ChannelCategory.FINANCE),
         ("", ChannelCategory.FINANCE),
         ("philosophy", ChannelCategory.FINANCE),  # unknown label: fail closed

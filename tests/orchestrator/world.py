@@ -393,7 +393,9 @@ class Rig:
         value writes it here as the table owner, outside the code under test."""
         set_channel_category(self.dsn, self.seed.channel_id, category)
 
-    def intake(self, category: str | None = "non-finance", title: str = "Seneca test") -> JobFacts:
+    def intake(
+        self, category: str | None = "youtube_general", title: str = "Seneca test"
+    ) -> JobFacts:
         self.set_channel_category(category)
         topic = OwnerTopic.model_validate(
             {

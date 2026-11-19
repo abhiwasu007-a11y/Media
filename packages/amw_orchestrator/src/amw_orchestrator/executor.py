@@ -52,14 +52,12 @@ class ChannelCategory(StrEnum):
     NON_FINANCE = "non_finance"
 
 
-_NON_FINANCE_LABELS = frozenset({"non_finance", "non-finance"})
-
-
 def resolve_channel_category(
     raw: object, rule_packs: RulePackSettings | None = None
 ) -> ChannelCategory:
-    """Fail closed (CCR-273 item 4): only an explicit non-finance label, or a documented
-    non-finance channel category of the validated rule-pack config (``rule_packs`` is a
+    """Fail closed (CCR-273 item 4): only a documented non-finance channel category (04 section
+    5.2 ``rule_packs.category``: ``youtube_general``, ``health``, ``kids``, ``political_news``;
+    no other label is accepted) of the validated rule-pack config (``rule_packs`` is a
     ``RulePackSettings``: packaged data or its narrowing-only override; exact match, PASS6-N),
     skips the finance rules. ``None``, an empty or non-str value, an unknown value, ``finance`` and
     the advertising categories are FINANCE. The category set is never a caller-built collection:
@@ -73,7 +71,7 @@ def resolve_channel_category(
     if not isinstance(rule_packs, RulePackSettings):
         return ChannelCategory.FINANCE
     allowed = effective_non_finance_categories(rule_packs.non_finance_categories)
-    if raw.strip().lower() in _NON_FINANCE_LABELS or raw in allowed:
+    if raw in allowed:
         return ChannelCategory.NON_FINANCE
     return ChannelCategory.FINANCE
 

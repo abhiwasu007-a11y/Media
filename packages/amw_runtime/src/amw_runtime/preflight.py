@@ -8,10 +8,13 @@ import hmac
 import os
 import secrets
 import sys
+import threading
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from types import CodeType
+from typing import NoReturn, final
 
 from pydantic import ValidationError
 
@@ -44,35 +47,173 @@ CONFIRMED = "CONFIRMED"
 OWNER_CHANNEL = "OWNER_CHAT_OPERATOR"
 
 
-_SCOPE_KEY = object()
+SCOPE_TTL = timedelta(seconds=60)
+"""A job scope is minted and used inside one ``run_job_preflight`` call; it expires after this."""
 
 
-@dataclass(frozen=True, slots=True)
+@final
 class JobPreflightScope:
-    """The job facts a preflight may narrow itself by (CAT-01, D13 item 2, CCR-273 PROPOSED).
+    """The job fact a preflight may narrow itself by (CAT-01, D13 item 2, CCR-273 PROPOSED).
 
     There is no public boolean on ``run_preflight``: the only way to skip the finance-only items is
-    a scope for THIS org and THIS job whose category was resolved as non-finance. It cannot be
-    constructed directly (a wrong key raises ``TypeError``); ``mint_job_scope`` is the one door and
-    belongs to the orchestrator job preflight (``amw_orchestrator.services.run_job_preflight``;
-    a test pins that no other module calls it). This is a convention guard inside one trusted
-    process, not a security boundary: code that can call ``mint_job_scope`` can also build a
-    ``JobFacts``. A confirmation, an evidence row or a config can never produce one."""
+    a scope for THIS org and THIS job whose category was resolved as non-finance by the
+    orchestrator job preflight from the channel row. A scope carries a seal (HMAC) over its fields
+    made with a key that lives only in the closures of ``_build_scope_seal`` (never a module
+    attribute); ``run_preflight`` verifies the seal, the org and job binding and the expiry, and
+    accepts each scope once. It is final, frozen and slotted, and refuses ``copy``, ``deepcopy``,
+    ``pickle`` and ``dataclasses.replace``; a hand-built one (constructor, ``object.__new__`` plus
+    ``object.__setattr__``) carries no valid seal and is refused. The minting door
+    (``mint_job_scope``) works only when called directly from the one registered caller, the
+    orchestrator ``run_job_preflight``. A confirmation, an evidence row or a config can never
+    produce one."""
+
+    __slots__ = ("expires_at", "finance_rules_apply", "job_id", "nonce", "org_id", "seal")
 
     org_id: str
     job_id: str
     finance_rules_apply: bool
-    _key: object = field(default=None, repr=False, compare=False)
+    expires_at: int
+    nonce: str
+    seal: bytes
 
-    def __post_init__(self) -> None:
-        if self._key is not _SCOPE_KEY:
-            raise TypeError("a JobPreflightScope is minted by the orchestrator job preflight only")
+    def __init__(
+        self,
+        *,
+        org_id: str,
+        job_id: str,
+        finance_rules_apply: bool,
+        expires_at: int,
+        nonce: str,
+        seal: bytes,
+    ) -> None:
+        values = {
+            "org_id": org_id,
+            "job_id": job_id,
+            "finance_rules_apply": finance_rules_apply,
+            "expires_at": expires_at,
+            "nonce": nonce,
+            "seal": seal,
+        }
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
+
+    def __init_subclass__(cls, **kwargs: object) -> NoReturn:
+        raise TypeError("JobPreflightScope cannot be subclassed")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("JobPreflightScope is frozen")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("JobPreflightScope is frozen")
+
+    def _refuse(self, *_args: object, **_kwargs: object) -> NoReturn:
+        raise TypeError("a JobPreflightScope cannot be copied, replaced or pickled")
+
+    __copy__ = _refuse
+    __deepcopy__ = _refuse
+    __reduce__ = _refuse
+    __reduce_ex__ = _refuse
+    __replace__ = _refuse
+    __getstate__ = _refuse
+
+    def __repr__(self) -> str:
+        return "JobPreflightScope(<sealed>)"
+
+    def canonical(self) -> bytes:
+        parts = (
+            self.org_id,
+            self.job_id,
+            "1" if self.finance_rules_apply else "0",
+            str(self.expires_at),
+            self.nonce,
+        )
+        return "\x1f".join(parts).encode("utf-8")
+
+
+def _build_scope_seal() -> tuple[
+    Callable[[str, str, bool, datetime], JobPreflightScope],
+    Callable[[object, str | None, str | None, datetime], bool],
+    Callable[[CodeType], None],
+]:
+    """The scope seal key lives ONLY in the closures returned here (PR 96 style). ``mint`` works
+    only when ``mint_job_scope`` is called directly from the one registered code object;
+    ``verify`` (used inside ``run_preflight`` only) checks the seal, the org and job binding, the
+    expiry and that the scope was not used before, and returns ``finance_rules_apply``;
+    ``register`` fixes the one allowed minter (first call wins, later calls are refused)."""
+    key = secrets.token_bytes(32)
+    allowed: list[CodeType] = []
+    used: dict[str, int] = {}
+    lock = threading.Lock()
+
+    def mac(data: bytes) -> bytes:
+        return hmac.new(key, data, sha256).digest()
+
+    def register(code: CodeType) -> None:
+        with lock:
+            if allowed:
+                raise ConfigInvalidError("the job scope minter is already registered")
+            allowed.append(code)
+
+    def mint(
+        org_id: str, job_id: str, finance_rules_apply: bool, now: datetime
+    ) -> JobPreflightScope:
+        if (
+            not allowed
+            or sys._getframe(1).f_code is not mint_job_scope.__code__
+            or sys._getframe(2).f_code is not allowed[0]
+        ):
+            raise ConfigInvalidError("a job scope is minted only by the orchestrator job preflight")
+        if not org_id or not job_id or not isinstance(finance_rules_apply, bool):
+            raise ConfigInvalidError("a job scope needs an org, a job and a decision")
+        expires = int(now.timestamp()) + max(1, int(SCOPE_TTL.total_seconds()))
+        draft = JobPreflightScope(
+            org_id=org_id, job_id=job_id, finance_rules_apply=finance_rules_apply,
+            expires_at=expires, nonce=secrets.token_hex(16), seal=b"\0" * 32,
+        )  # fmt: skip
+        return JobPreflightScope(
+            org_id=org_id, job_id=job_id, finance_rules_apply=finance_rules_apply,
+            expires_at=expires, nonce=draft.nonce, seal=mac(draft.canonical()),
+        )  # fmt: skip
+
+    def verify(scope: object, org_id: str | None, job_id: str | None, now: datetime) -> bool:
+        refusal = ConfigInvalidError("job scope is not valid for this org and job")
+        if type(scope) is not JobPreflightScope:
+            raise refusal
+        try:
+            fields_ok = (
+                isinstance(scope.org_id, str)
+                and isinstance(scope.job_id, str)
+                and isinstance(scope.finance_rules_apply, bool)
+                and isinstance(scope.expires_at, int)
+                and isinstance(scope.nonce, str)
+                and isinstance(scope.seal, bytes)
+            )
+            if not fields_ok or not hmac.compare_digest(mac(scope.canonical()), scope.seal):
+                raise refusal
+        except AttributeError:  # a slot never set (object.__new__ without setattr)
+            raise refusal from None
+        ts = int(now.timestamp())
+        if scope.org_id != org_id or scope.job_id != job_id or ts >= scope.expires_at:
+            raise refusal
+        with lock:
+            for nonce in [n for n, exp in used.items() if exp <= ts]:
+                del used[nonce]  # expired scopes can no longer verify: forget them
+            if scope.nonce in used:
+                raise refusal
+            used[scope.nonce] = scope.expires_at
+        return scope.finance_rules_apply
+
+    return mint, verify, register
+
+
+_mint_scope, _verify_scope, register_job_scope_minter = _build_scope_seal()
 
 
 def mint_job_scope(*, org_id: str, job_id: str, finance_rules_apply: bool) -> JobPreflightScope:
-    """Orchestrator only (see ``JobPreflightScope``): ``finance_rules_apply`` comes from the job's
-    resolved channel category, which fails closed to finance."""
-    return JobPreflightScope(org_id, job_id, finance_rules_apply, _SCOPE_KEY)
+    """Orchestrator job preflight only (frame-checked against the registered code object):
+    ``finance_rules_apply`` is derived there from the channel row, which fails closed to
+    finance."""
+    return _mint_scope(org_id, job_id, finance_rules_apply, datetime.now(UTC))
 
 
 @dataclass(frozen=True)
@@ -307,16 +448,12 @@ def run_preflight(
     authorisations to one job (a job-scoped call guard refuses a token with another or no job)."""
     finance_rules_apply = True
     if job_scope is not None:
-        if (
-            not isinstance(job_scope, JobPreflightScope)
-            or job_scope._key is not _SCOPE_KEY
-            or job_scope.org_id != org_id
-            or job_scope.job_id != job_id
-        ):
+        try:
+            finance_rules_apply = _verify_scope(job_scope, org_id, job_id, datetime.now(UTC))
+        except ConfigInvalidError:
             raise PreflightRefused(
                 (UnmetItem("JOB_SCOPE", "job scope is not minted for this org and job"),)
-            )
-        finance_rules_apply = job_scope.finance_rules_apply
+            ) from None
     environ = os.environ if env is None else env
     unmet: list[UnmetItem] = []
     passed: list[str] = []

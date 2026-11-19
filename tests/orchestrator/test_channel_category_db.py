@@ -30,7 +30,8 @@ def _read(rig: Rig, channel_id: str, *, org_id: str | None = None) -> str | None
         ("health", False),
         ("kids", False),
         ("political_news", False),
-        ("non-finance", False),
+        ("non-finance", True),  # not a documented category (04 5.2): fail closed
+        ("non_finance", True),
         ("finance", True),
         ("advertising", True),
         ("ad_sector", True),

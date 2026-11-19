@@ -41,7 +41,7 @@ EXPECTED = [
 
 def test_non_finance_skeleton_runs_end_to_end(pg_dsn: str, tmp_path: Path) -> None:
     rig = build_rig(pg_dsn, tmp_path)
-    job = rig.intake("non-finance")
+    job = rig.intake("youtube_general")
     assert not job.finance_rules_apply
     graph = rig.graph
     report = rig.runner.start(job, graph)
@@ -124,10 +124,9 @@ def test_intake_keeps_the_channel_row_value_beside_the_resolved_category(
     named = rig.intake("philosophy", title="Row value kept")
     assert named.channel_category_row == "philosophy"
     assert named.finance_rules_apply is True  # unknown free text = finance (CCR-273 item 4)
-    explicit = rig.intake("non-finance", title="Explicit label")
-    assert explicit.channel_category_row == "non-finance"
+    explicit = rig.intake("youtube_general", title="Explicit label")
+    assert explicit.channel_category_row == "youtube_general"
     assert explicit.finance_rules_apply is False
-    unset = rig.intake(None, title="No category")
-    assert unset.channel_category_row is None and unset.finance_rules_apply is True
+    # NULL cannot be stored (channels.category is NOT NULL, 04 5.1): blank is the unset case
     blank = rig.intake("  ", title="Blank category")
     assert blank.channel_category_row is None and blank.finance_rules_apply is True
