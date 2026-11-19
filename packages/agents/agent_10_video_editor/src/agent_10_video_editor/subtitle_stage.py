@@ -25,6 +25,7 @@ from agent_10_video_editor.taskio import (
     continue_action,
     drain_action,
     output_ref,
+    parse_blob,
     to_validation_result,
     usage,
     validate_budget,
@@ -95,13 +96,17 @@ class SubtitleStage:
         except ValidationError as exc:
             raise SchemaInvalidError("subtitles input failed its schema") from exc
         refs = one_ref_per_schema(task_input, SUBTITLE_SCHEMAS)
-        script = ScriptStrings.model_validate_json(
-            scope.read_bytes(*refs["agent_05.script_document"])
+        script = parse_blob(
+            ScriptStrings,
+            scope.read_bytes(*refs["agent_05.script_document"]),
+            "agent_05.script_document",
         )
         if refs["agent_05.script_document"][1] != payload.verified_script_sha256:
             raise input_invalid("SCRIPT_HASH_MISMATCH")
-        timeline = NarrationTimeline.model_validate_json(
-            scope.read_bytes(*refs["agent_07.voice_synthesis.output"])
+        timeline = parse_blob(
+            NarrationTimeline,
+            scope.read_bytes(*refs["agent_07.voice_synthesis.output"]),
+            "agent_07.voice_synthesis.output",
         )
         SubtitleStageCore.check_timeline_source(timeline.source)
         if timeline.language not in (None, payload.language):

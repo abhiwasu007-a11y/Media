@@ -80,6 +80,8 @@ from agent_10_video_editor.taskio import (
     drain_action,
     ffmpeg_cost_entry,
     output_ref,
+    parse_blob,
+    parse_json_object,
     to_validation_result,
     usage,
     validate_budget,
@@ -268,20 +270,30 @@ class _QcRun:
         render_out = _json(self.scope.read_bytes(*refs["agent_10.render.output"]))
         self._render_out = render_out
         timeline = _timeline(self.scope.read_bytes(*refs["agent_10.timeline"]))
-        plan = ShotPlan.model_validate_json(
-            self.scope.read_bytes(*refs["agent_09.shot_plan.output"])
+        plan = parse_blob(
+            ShotPlan,
+            self.scope.read_bytes(*refs["agent_09.shot_plan.output"]),
+            "agent_09.shot_plan.output",
         )
-        manifest = AssetManifest.model_validate_json(
-            self.scope.read_bytes(*refs["agent_08.asset_sourcing.output"])
+        manifest = parse_blob(
+            AssetManifest,
+            self.scope.read_bytes(*refs["agent_08.asset_sourcing.output"]),
+            "agent_08.asset_sourcing.output",
         )
-        audio = AudioMaster.model_validate_json(
-            self.scope.read_bytes(*refs["agent_07.audio_master.output"])
+        audio = parse_blob(
+            AudioMaster,
+            self.scope.read_bytes(*refs["agent_07.audio_master.output"]),
+            "agent_07.audio_master.output",
         )
-        narration = NarrationTimeline.model_validate_json(
-            self.scope.read_bytes(*refs["agent_07.voice_synthesis.output"])
+        narration = parse_blob(
+            NarrationTimeline,
+            self.scope.read_bytes(*refs["agent_07.voice_synthesis.output"]),
+            "agent_07.voice_synthesis.output",
         )
-        script = ScriptStrings.model_validate_json(
-            self.scope.read_bytes(*refs["agent_05.script_document"])
+        script = parse_blob(
+            ScriptStrings,
+            self.scope.read_bytes(*refs["agent_05.script_document"]),
+            "agent_05.script_document",
         )
         subs_out = _json(self.scope.read_bytes(*refs["agent_10.subtitles.output"]))
         with d.tenancy.transaction(self.ctx) as tx:
@@ -1139,16 +1151,11 @@ class _QcState(BaseModel):
 
 
 def _json(data: bytes) -> dict[str, Any]:
-    import json
-
-    value = json.loads(data)
-    if not isinstance(value, dict):
-        raise SchemaInvalidError("expected a JSON object")
-    return value
+    return parse_json_object(data)
 
 
 def _timeline(data: bytes) -> Timeline:
-    return Timeline.model_validate_json(data)
+    return parse_blob(Timeline, data, "agent_10.timeline")
 
 
 def _words(text: str) -> list[str]:

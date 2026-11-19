@@ -92,6 +92,7 @@ from agent_10_video_editor.taskio import (
     drain_action,
     ffmpeg_cost_entry,
     output_ref,
+    parse_blob,
     to_validation_result,
     usage,
     validate_budget,
@@ -165,13 +166,25 @@ def load_inputs(task_input: TaskInput, scope: TenantScope) -> LoadedInputs:
 
     try:
         return LoadedInputs(
-            plan=ShotPlan.model_validate_json(blob("agent_09.shot_plan.output")),
-            manifest=AssetManifest.model_validate_json(blob("agent_08.asset_sourcing.output")),
-            audio=AudioMaster.model_validate_json(blob("agent_07.audio_master.output")),
-            narration=NarrationTimeline.model_validate_json(
-                blob("agent_07.voice_synthesis.output")
+            plan=parse_blob(
+                ShotPlan, blob("agent_09.shot_plan.output"), "agent_09.shot_plan.output"
             ),
-            script=ScriptStrings.model_validate_json(blob("agent_05.script_document")),
+            manifest=parse_blob(
+                AssetManifest,
+                blob("agent_08.asset_sourcing.output"),
+                "agent_08.asset_sourcing.output",
+            ),
+            audio=parse_blob(
+                AudioMaster, blob("agent_07.audio_master.output"), "agent_07.audio_master.output"
+            ),
+            narration=parse_blob(
+                NarrationTimeline,
+                blob("agent_07.voice_synthesis.output"),
+                "agent_07.voice_synthesis.output",
+            ),
+            script=parse_blob(
+                ScriptStrings, blob("agent_05.script_document"), "agent_05.script_document"
+            ),
             script_sha256=refs["agent_05.script_document"][1],
         )
     except ValidationError as exc:
@@ -539,11 +552,14 @@ class _RenderRun:
         # by its recorded SHA-256, so only registered, hash-checked bytes are consulted.
         covered: set[int] = set()
         for font in fonts:
+            # Storage errors (CrossTenantRef, MissingDependency, CorruptedOutput, ...) are typed
+            # AmwErrors: read outside the parse guard so they keep their class.
+            data = self.scope.read_bytes(font.uri, font.sha256)
             try:
-                covered |= reader(self.scope.read_bytes(font.uri, font.sha256))
-            except CorruptedOutputError:
+                covered |= reader(data)
+            except AmwError:
                 raise
-            except Exception as exc:  # an unparsable font file (CCR-206)
+            except Exception as exc:  # only the reader's parse failure: unparsable font (CCR-206)
                 raise config_invalid("FONT_COVERAGE_UNAVAILABLE") from exc
         FontCoverage.check(covered, list(bound.values()))
 

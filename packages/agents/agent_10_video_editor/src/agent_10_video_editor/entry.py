@@ -9,8 +9,6 @@ spent; Agent 10 has no provider spend (``cost_estimate_micros`` is the real figu
 
 from collections.abc import Callable
 
-from pydantic import ValidationError
-
 from agent_10_video_editor.taskio import ACTOR
 from amw_core.contracts.error import error_object_from_exception
 from amw_core.contracts.task_input import TaskInput
@@ -43,12 +41,12 @@ def check_ctx(task_input: TaskInput, ctx: ExecContext) -> None:
 
 
 def classify(exc: BaseException) -> AmwError:
-    """One typed exception to one 07 code; a document that does not parse is ``SCHEMA_INVALID``;
-    anything else is ``AGENT.CRASH`` (no message text of the original is copied)."""
+    """One typed exception to one 07 code. Input validation happens at the parse sites (the Task
+    Input payload and the referenced blobs raise ``SchemaInvalidError`` there), so a bare pydantic
+    ``ValidationError`` reaching here is an INTERNAL model failure and is ``AGENT.CRASH``, never
+    ``SCHEMA_INVALID`` (no message text of the original is copied)."""
     if isinstance(exc, AmwError):
         return exc
-    if isinstance(exc, ValidationError):
-        return SchemaInvalidError("a document does not match its schema")
     return AgentCrashError("unhandled exception in agent_10", details={"type": type(exc).__name__})
 
 
