@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from agent_09_video_director.assemble import plan_hash, sha256_text
 from agent_09_video_director.config import Agent09Config
 from agent_09_video_director.contracts import (
+    HOOK_SECTION_ID,
     AspectRatio,
     HeldReason,
     IntentKind,
@@ -108,7 +109,7 @@ def check_schema(c: CheckContext) -> ValidationResult:
 def check_refs(c: CheckContext) -> ValidationResult:
     sc = {s.scene_id: s for s in c.script.scenes}
     seg_ids = {s.segment_id for s in c.script.segments}
-    sec_ids = {s.section_id for s in c.script.sections}
+    sec_ids = {s.section_id for s in c.script.sections} | {HOOK_SECTION_ID}
     charts = {r.chart_id for r in c.script.chart_requests}
     ids = [s.shot_id for s in c.plan.shots]
     bad = len(ids) != len(set(ids))
