@@ -26,8 +26,10 @@ from amw_core.interfaces.storage import BlobStorage
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
 
 APPROVED_SOURCE_CLASS = "data_pack"
-AUDIT_ACCEPTED = "asset_registrar.intake_accepted"
-AUDIT_REJECTED = "asset_registrar.intake_rejected"
+# Audit verbs of an operator-tool intake (CCR-121, 03 section 11.6 rule 6): ``asset_intake.*``.
+# ``asset_intake.owner_confirmed`` belongs to the owner-evidence flow (Step 0, P4-19), not here.
+AUDIT_ACCEPTED = "asset_intake.recorded_from_owner_chat"
+AUDIT_REJECTED = "asset_intake.record_refused"
 
 
 class IntakeResult(StrEnum):
