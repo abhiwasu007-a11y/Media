@@ -101,7 +101,7 @@ Some platform processes must find work before they know its tenant. They use `SE
 | `amw_quota_reserve(gcp_project_id, bucket, units)` / `amw_quota_release(…)` | publish worker | `ok` / `exhausted` for the PT day (§5.20) |
 | `amw_breaker_admit(provider, operation_class, credential_scope, half_open_max_probes, probe_timeout_ms)` (CCR-108) | adapters | `(admitted, state, open_until, epoch)` under a row lock (§5.8, 07 §4.3); EXECUTE `amw_app`, `amw_publisher` |
 | `amw_breaker_record(provider, operation_class, credential_scope, succeeded, counted, error_code, window_ms, min_calls, failure_ratio, consecutive_failures, open_ms, open_ms_max, half_open_successes_to_close, probe DEFAULT NULL, probe_epoch DEFAULT NULL)` (CCR-108/117: the 07 §4.2 configuration is passed by the caller, the function holds none) | adapters | new breaker state `(state, open_until)` (§5.8, 07 §4.3) |
-| `amw_platform_ops_summary()` (T1) | S8 platform-owner view | per-org aggregates only: queue depth, job counts by state, cost totals, DLQ counts — no content |
+| `amw_platform_ops_summary()` (T1; CCR-149) | S8 platform-owner view | aggregates and identifiers only, no content: one row per org with `org_id`, `slug`, `org_status`, `tier`, queue depth and oldest `READY` age by `resource_class`, job counts by state, pending-approval count, cost totals, DLQ counts; plus one platform row (`org_id` NULL) with the open-breaker count and worker counts by `worker_status` (breakers and workers are platform rows) |
 
 Every call is logged with the caller's actor; `amw_platform_ops_summary` calls are audited.
 
@@ -308,9 +308,21 @@ Keys: `UNIQUE (org_id, user_id)`. Permission matrix per role: 08_SECURITY.md.
 | Column | Type | Null | Constraint / note |
 |---|---|---|---|
 | key | text | no | one of: `agent_enabled.<agent_id>`, `production_schedule`, `daily_production_limit`, `publishing_enabled`, `emergency_stop`, `ip_allowlist` (T3) |
-| value | jsonb | no | validated per key by `amw_core.config` |
+| value | jsonb | no | validated per key by `amw_core.config` against the value table below (CCR-140) |
 | updated_by | text | no | actor ref |
 Keys: `UNIQUE (org_id, key)`. Every change audited (`control.<key>.changed`).
+
+Value per key (CCR-140, CCR-139):
+| Key | Value (JSON) | Missing row |
+|---|---|---|
+| `emergency_stop` | boolean (`true` = stopped); the reason is recorded only in the audit `details` | `false` |
+| `publishing_enabled` | boolean | `false` (publishing off; no upload in 3A, D1) |
+| `agent_enabled.<agent_id>` (`agent_NN` or `svc_sNN`) | boolean | `true` |
+| `daily_production_limit` | integer ≥ 0, or `null` = no limit; counts jobs admitted per calendar day of `organisations.display_timezone` (operational setting) | no limit |
+| `production_schedule` | the window document of 06 §12.2; it is also the tenant-wide window default (resolution: `channels.production_window` → this key → config `night.window.default`; CCR-139). Its JSON Schema is fixed with the first per-tenant window (Tier 1+); until then only the platform default applies | the platform default |
+| `ip_allowlist` (T3) | array of CIDR strings (08 §7.4) | no restriction |
+
+An invalid value is `PERMANENT.CONFIG_INVALID` (07) and the control acts in its closed state: stopped, publishing off, agent disabled, limit 0, window closed, allow-list refusing every address except the break-glass path (08 §7.2, §7.4).
 
 **platform_controls** — GLOBAL · T0 · Std + Mut: `key text UNIQUE`, `value jsonb`, `updated_by text`. Keys: `platform_emergency_stop`, `admission_paused`. Written only by `PLATFORM_OWNER` via `amw_sysfn`; audited in the platform owner org's chain.
 
