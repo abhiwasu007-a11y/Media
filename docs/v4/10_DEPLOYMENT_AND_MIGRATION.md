@@ -139,7 +139,7 @@ The directive requires: discover ports in use before choosing any; bind internal
 |---|---|---|
 | Non-secret configuration | env file / config files under the factory root; `deploy/env.example` lists names only | `resource_class` limits, window times, backend selector, worker `logical_name`, capability list |
 | Secrets | **only** the environment's secret mechanism (D1; 08 §3.1), injected per service at start or mounted as a file | DB passwords per role, provider keys, backup credential, key-encryption key reference (3C) |
-| Deployment profile | one configuration value that selects the placement (shared VPS, own server, dedicated tenant stack); the allowed set of values is **(pending CCR)** `deployment.profile` (see §17) | — |
+| Deployment profile | one configuration value that selects the placement (shared VPS, own server, dedicated tenant stack); the allowed set of values of `deployment.profile` is `shared_vps`, `own_server`, `dedicated_tenant` (CCR-141, Applied; see §17) | — |
 
 3. **Secret scoping.** A secret reaches only the service that uses it (08 §3.1 rule 4): the render worker has no provider key; the orchestrator holds no provider key; `amw_migrator` is used only by the one-shot `migrate` job. No secret in a variable shared by all containers, no secret in logs, images, git or the database in clear text.
 4. **Startup check.** Each service lists the secret names it requires; a missing or unreadable one fails startup with `PERMANENT.CONFIG_INVALID` (08 §3.1 rule 7); the value, its length and prefix are never printed.
@@ -215,7 +215,7 @@ Transport requirements regardless of option: encrypted in transit; least-privile
 | Step | Action |
 |---|---|
 | 1 | Decision recorded: the headroom rule of ADR-012 §1.1 failed, or Tier 1 requires it; the owner approves and purchases any server (rule 8) |
-| 2 | Prepare the target: the same pinned image; configuration with `deployment.profile` (pending CCR), DB and storage endpoints, limits (05 §8 formula re-run on the new host), market-hours calendar; secrets injected for DB and storage only |
+| 2 | Prepare the target: the same pinned image; configuration with `deployment.profile` (CCR-141), DB and storage endpoints, limits (05 §8 formula re-run on the new host), market-hours calendar; secrets injected for DB and storage only |
 | 3 | Register under a **new** `logical_name` (never reuse a name still registered elsewhere) and let it heartbeat; confirm the capability set |
 | 4 | Drain the old worker: set `drain_requested_at`; tasks checkpoint and the lease expires or is released cleanly (T09/T15; 07 §10) |
 | 5 | Verify: a canary render task is claimed by the new worker; the output's SHA-256 is verified through `amw_core.storage`; `renders.content_sha256` stored (04 §5.18) |
@@ -350,14 +350,14 @@ Exports use `list_prefix` for blobs and tenant-scoped database export, never a w
 | §13 Tier plan | recommendation | recommendation | recommendation | 0-3 |
 | §14 Migration | schema migrations, upgrades | backup/restore rehearsal | host move | 0 → 1 |
 
-## 17. Contract requests (pending CCR; not edited into Wave A here)
+## 17. Contract requests (filed: CCR-141, CCR-142)
 
 | # | Needed | Proposed |
 |---|---|---|
-| 1 | A fixed value set for the deployment placement configuration key `deployment.profile` (pending CCR), so tools and runbooks name it identically | Values `shared_vps`, `own_server`, `dedicated_tenant`; documented as a configuration key (not a database enum), in GLOSSARY_AND_IDS.md |
+| 1 | A fixed value set for the deployment placement configuration key `deployment.profile` (CCR-141, MODIFIED and Applied: registered as a config key in the CCR register, not in GLOSSARY; unset or unknown ⇒ the `shared_vps` rules apply), so tools and runbooks name it identically | Values `shared_vps`, `own_server`, `dedicated_tenant`; documented as a configuration key (not a database enum), in GLOSSARY_AND_IDS.md |
 | 2 | Registration check of worker software version against the core release (§14.1) | A rule in 03 §11 admission (T07 guard) or `workers` registration: refuse a worker whose `software_version` is incompatible; no new column (uses 04 §5.4 `software_version`) |
 
-Both are listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md). This document does not depend on them for 3A: the profile can be a free configuration string until the CCR is decided.
+Both are filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5): #1 is CCR-141 (Applied), #2 is CCR-142 (Proposed, deferred to 3C, trigger: the first worker run from a separate image or host). This document does not depend on them for 3A: the profile can be a free configuration string until the CCR is decided.
 
 ## 18. Open items (all REQUIRES REVIEW (Phase 1) unless stated)
 
