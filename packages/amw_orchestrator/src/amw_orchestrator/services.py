@@ -375,7 +375,13 @@ def run_job_preflight(
     non-finance an otherwise-clean refusal that lists only ``FIN_R10`` is waived and says so in
     the report notes; every other unmet item (PROVIDER_LIMIT, secrets, caps, environment, market
     hours) still refuses. A finance job, and any job with an unset or unknown category, gets the
-    refusal unchanged (fail closed). ``amw_runtime`` itself is not category-aware yet (CAT-01)."""
+    refusal unchanged (fail closed). The report of a waived preflight carries NO provider
+    authorisation, so a REAL_RUN of a non-finance job cannot build real providers until
+    ``amw_runtime`` is category-aware (CAT-01; REQUIRES REVIEW, CCR-273)."""
+    # the provider authorisations are bound to this org and this job (a job-scoped call guard
+    # refuses a token with another or no job); the caller may not pass another job's binding
+    kwargs["org_id"] = job.org_id
+    kwargs["job_id"] = job.job_id
     try:
         return run_preflight(config, confirmations, **kwargs)
     except PreflightRefused as refusal:
