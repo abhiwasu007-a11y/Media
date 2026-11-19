@@ -31,7 +31,7 @@ from amw_adapters.llm.protocol import (
     TokenCount,
 )
 from amw_adapters.real.catalogue import AnthropicCatalogue, AnthropicModel
-from amw_adapters.real.guard import CallGuard, PlannedCall, require_guard
+from amw_adapters.real.guard import CallGuard, PlannedCall, delivery_of, require_guard
 from amw_adapters.real.http import (
     DEFAULT_BACKOFF,
     ProviderHttp,
@@ -262,6 +262,7 @@ class AnthropicLlmAdapter:
         try:
             result = self._complete(request, idempotency_key)
         except AmwError as exc:
+            self._guard.failed(idempotency_key, delivered=delivery_of(exc))
             self.memory.failed(OPERATION_COMPLETION, idempotency_key, exc.code)
             raise
         self.memory.store(OPERATION_COMPLETION, idempotency_key, digest, result)
@@ -278,6 +279,8 @@ class AnthropicLlmAdapter:
                 worst_case_micros(model, request, self._cat.worst_case_overhead_tokens),
                 self._cat.currency,
                 key,
+                model=request.model,
+                price_ref=self._cat.price_ref,
             )
         )
         outcome = self._http.send(
@@ -368,6 +371,7 @@ class AnthropicLlmAdapter:
             if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
                 raise CorruptedOutputError("token count missing", provider=PROVIDER)
         except AmwError as exc:
+            self._guard.failed(idempotency_key, delivered=delivery_of(exc))
             self.memory.failed(OPERATION_COUNT_TOKENS, idempotency_key, exc.code)
             raise
         usage = CallUsage(

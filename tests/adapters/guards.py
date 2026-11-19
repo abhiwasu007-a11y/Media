@@ -1,10 +1,11 @@
-"""Test guards. A token is minted here the way the preflight does (tests are the only other
-caller of ``mint_provider_authorisation``); real tokens come only from ``run_preflight``."""
+"""Test guards. Tokens come only from a REAL ``run_preflight`` (they are sealed; nothing else can
+make one)."""
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import timedelta
 
-from amw_adapters.real.authorisation import ProviderAuthorisation, mint_provider_authorisation
+from amw_adapters.real.authorisation import ProviderAuthorisation
 from amw_adapters.real.guard import BudgetCallGuard, CapOnlyCallGuard
 from amw_core.enums import BudgetPeriod, BudgetScopeKind
 from amw_core.errors import CrossTenantRefError
@@ -12,13 +13,22 @@ from amw_core.exec_context import ExecContext
 from amw_core.ids import ATTEMPT, ActorRef, JobId, OrgId, TaskId
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
 from amw_core.testing.memory import MemoryTransaction
+from tests.adapters.preflight_support import ORG_ID, passed_report
 from tests.core_services.support import World, budget
 
 PER_VIDEO_CAP_MICROS = 5_000_000
 
 
-def auth(provider: str, cap: int = PER_VIDEO_CAP_MICROS) -> ProviderAuthorisation:
-    return mint_provider_authorisation(provider, per_video_cap_micros=cap, currency="USD")
+def auth(
+    provider: str,
+    cap: int = PER_VIDEO_CAP_MICROS,
+    *,
+    org_id: str = ORG_ID,
+    job_id: str | None = None,
+    ttl: timedelta | None = None,
+) -> ProviderAuthorisation:
+    report = passed_report(org_id=org_id, job_id=job_id, cap_micros=cap, ttl=ttl)
+    return next(a for a in report.provider_authorisations if a.provider == provider)
 
 
 def cap_guard(provider: str, cap: int = PER_VIDEO_CAP_MICROS) -> CapOnlyCallGuard:
@@ -70,7 +80,8 @@ class GuardedWorld:
 
     def guard(self, provider: str, cap: int = PER_VIDEO_CAP_MICROS) -> BudgetCallGuard:
         return BudgetCallGuard(
-            auth(provider, cap), budget=self.w.guard, ledger=self.w.ledger,
+            auth(provider, cap, org_id=self.w.org, job_id=self.job),
+            budget=self.w.guard, ledger=self.w.ledger,
             tenancy=MemoryTenancy(), clock=self.w.clock,
         )  # fmt: skip
 

@@ -34,7 +34,7 @@ import httpx
 
 from amw_adapters.common import CallUsage
 from amw_adapters.real.catalogue import ElevenLabsCatalogue, ElevenLabsModel
-from amw_adapters.real.guard import CallGuard, PlannedCall, require_guard
+from amw_adapters.real.guard import CallGuard, PlannedCall, delivery_of, require_guard
 from amw_adapters.real.http import (
     DEFAULT_BACKOFF,
     ProviderHttp,
@@ -219,6 +219,7 @@ class ElevenLabsTtsAdapter:
         try:
             result = self._synthesize(request, idempotency_key)
         except AmwError as exc:
+            self._guard.failed(idempotency_key, delivered=delivery_of(exc))
             self.memory.failed(OPERATION_SYNTHESIZE, idempotency_key, exc.code)
             raise
         self.memory.store(OPERATION_SYNTHESIZE, idempotency_key, digest, result)
@@ -230,7 +231,15 @@ class ElevenLabsTtsAdapter:
         characters = len(text)
         amount = -(-characters * model.price_micros_per_1k_chars // 1000)
         self._guard.before(
-            PlannedCall(PROVIDER, OPERATION_SYNTHESIZE, amount, self._cat.currency, key)
+            PlannedCall(
+                PROVIDER,
+                OPERATION_SYNTHESIZE,
+                amount,
+                self._cat.currency,
+                key,
+                model=request.model,
+                price_ref=self._cat.price_ref,
+            )
         )
         headers = {
             "xi-api-key": self._secret.reveal(),
@@ -296,6 +305,7 @@ class ElevenLabsTtsAdapter:
             )
             voices = self._list(request)
         except AmwError as exc:
+            self._guard.failed(idempotency_key, delivered=delivery_of(exc))
             self.memory.failed(OPERATION_LIST_VOICES, idempotency_key, exc.code)
             raise
         usage = CallUsage(

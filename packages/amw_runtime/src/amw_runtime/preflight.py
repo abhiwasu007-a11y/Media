@@ -4,14 +4,22 @@ Dry-run mode skips the secret check (and says so) and may use a TEST confirmatio
 report says so). Real-run mode needs verified, evidence-backed owner confirmations.
 """
 
+import hmac
 import os
-from collections.abc import Mapping, Sequence
+import secrets
+import sys
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 
 from pydantic import ValidationError
 
-from amw_adapters.real.authorisation import ProviderAuthorisation, mint_provider_authorisation
+from amw_adapters.real.authorisation import (
+    ProviderAuthorisation,
+    VerifiedGrant,
+    install_verifier,
+)
 from amw_core.errors import ConfigInvalidError
 from amw_runtime.calendar import MarketCalendar, now_utc
 from amw_runtime.config import ENV_MODE, RunMode, RuntimeConfig, load_runtime_config
@@ -49,6 +57,88 @@ class PreflightReport:
     """One per required provider, minted only by a passing REAL_RUN ``run_preflight`` (after its
     ``PROVIDER_LIMIT:<provider>`` item passed with owner-chat evidence). Empty otherwise. A real
     provider adapter cannot be built or called without its token (amw_adapters.real)."""
+
+
+DEFAULT_AUTHORISATION_TTL = timedelta(hours=4)
+"""How long a provider authorisation stays valid after the preflight that issued it (provisional
+default, CCR-277: the owner may set another value; a run longer than this must preflight again)."""
+
+
+def _build_seal() -> tuple[
+    Callable[
+        [str, str, str | None, int, int, str, datetime, timedelta, Collection[str]],
+        ProviderAuthorisation,
+    ],
+    Callable[[ProviderAuthorisation, datetime], VerifiedGrant],
+]:
+    """The seal key lives ONLY in the closures returned here; it is never a module attribute.
+    ``issue`` works only when called directly from ``run_preflight`` (frame check) and re-checks
+    that the provider limit item passed; ``verify`` is installed into amw_adapters."""
+    key = secrets.token_bytes(32)
+    ceilings: list[tuple[int, int, str]] = []
+
+    def mac(auth_bytes: bytes) -> bytes:
+        return hmac.new(key, auth_bytes, sha256).digest()
+
+    def issue(
+        provider: str,
+        org_id: str,
+        job_id: str | None,
+        per_video: int,
+        total: int,
+        currency: str,
+        now: datetime,
+        ttl: timedelta,
+        passed: Collection[str],
+    ) -> ProviderAuthorisation:
+        if sys._getframe(1).f_code is not run_preflight.__code__:
+            raise ConfigInvalidError("an authorisation is issued only inside run_preflight")
+        if f"PROVIDER_LIMIT:{provider}" not in passed or ttl <= timedelta(0) or not org_id:
+            raise ConfigInvalidError("no passed provider limit for this authorisation")
+        issued = int(now.timestamp())
+        draft = ProviderAuthorisation(
+            provider=provider, org_id=org_id, job_id=job_id, per_video_cap_micros=per_video,
+            total_cap_micros=total, currency=currency, issued_at=issued,
+            expires_at=issued + max(1, int(ttl.total_seconds())),
+            nonce=secrets.token_hex(16), seal=b"\0" * 32,
+        )  # fmt: skip
+        return ProviderAuthorisation(
+            provider=provider, org_id=org_id, job_id=job_id, per_video_cap_micros=per_video,
+            total_cap_micros=total, currency=currency, issued_at=draft.issued_at,
+            expires_at=draft.expires_at, nonce=draft.nonce, seal=mac(draft.canonical()),
+        )  # fmt: skip
+
+    def verify(auth: ProviderAuthorisation, now: datetime) -> VerifiedGrant:
+        if not hmac.compare_digest(mac(auth.canonical()), auth.seal):
+            raise ConfigInvalidError(
+                "provider authorisation seal is invalid (not from a preflight)"
+            )
+        if int(now.timestamp()) >= auth.expires_at:
+            raise ConfigInvalidError("provider authorisation expired; run the preflight again")
+        if not ceilings:
+            try:
+                packaged = load_runtime_config({ENV_MODE: RunMode.REAL_RUN.value})
+            except ConfigInvalidError:
+                raise ConfigInvalidError("owner cap ceilings are not available") from None
+            ceilings.append(
+                (packaged.owner_per_video_cap_micros, packaged.owner_total_cap_micros,
+                 packaged.currency)
+            )  # fmt: skip
+        ceil_pv, ceil_total, ceil_currency = ceilings[0]
+        if auth.currency != ceil_currency:
+            raise ConfigInvalidError("authorisation currency differs from the owner caps")
+        return VerifiedGrant(
+            provider=auth.provider, org_id=auth.org_id, job_id=auth.job_id,
+            per_video_cap_micros=min(auth.per_video_cap_micros, ceil_pv),
+            total_cap_micros=min(auth.total_cap_micros, ceil_total),
+            currency=auth.currency, expires_at=auth.expires_at,
+        )  # fmt: skip
+
+    return issue, verify
+
+
+_issue_authorisation, _verify_authorisation = _build_seal()
+install_verifier(_verify_authorisation)
 
 
 def _truthy(value: str | None) -> bool:
@@ -169,10 +259,13 @@ def run_preflight(
     calendar: MarketCalendar | None = None,
     render_start: datetime | None = None,
     org_id: str | None = None,
+    job_id: str | None = None,
+    authorisation_ttl: timedelta = DEFAULT_AUTHORISATION_TTL,
 ) -> PreflightReport:
     """Raise ``PreflightRefused`` listing every unmet item, else return the report.
     ``env`` is read for NAMES/markers only (default: the process environment). ``org_id`` is the
-    run's org; real-run evidence must be bound to it."""
+    run's org; real-run evidence must be bound to it. ``job_id`` binds the provider
+    authorisations to one job (a job-scoped call guard refuses a token with another or no job)."""
     environ = os.environ if env is None else env
     unmet: list[UnmetItem] = []
     passed: list[str] = []
@@ -331,15 +424,28 @@ def run_preflight(
         raise PreflightRefused(tuple(unmet))
     authorisations: tuple[ProviderAuthorisation, ...] = ()
     if config.mode is RunMode.REAL_RUN and not test_used:  # real run: every item passed above
-        authorisations = tuple(
-            mint_provider_authorisation(
-                prov.name,
-                per_video_cap_micros=config.per_video_cap_micros,
-                currency=config.currency,
+        if not org_id:
+            raise PreflightRefused(
+                (UnmetItem("ORG", "a real run needs the org the authorisations are bound to"),)
             )
-            for prov in config.providers
-            if prov.required and f"PROVIDER_LIMIT:{prov.name}" in passed
-        )
+        issued_at = datetime.now(UTC)
+        issued_list: list[ProviderAuthorisation] = []
+        for prov in config.providers:
+            if prov.required and f"PROVIDER_LIMIT:{prov.name}" in passed:
+                issued_list.append(
+                    _issue_authorisation(
+                        prov.name,
+                        org_id,
+                        job_id,
+                        min(config.per_video_cap_micros, ceiling_pv),
+                        min(config.total_cap_micros, ceiling_total),
+                        config.currency,
+                        issued_at,
+                        authorisation_ttl,
+                        passed,
+                    )
+                )
+        authorisations = tuple(issued_list)
     return PreflightReport(
         mode=config.mode,
         checks_passed=tuple(passed),

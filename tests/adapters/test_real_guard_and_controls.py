@@ -10,7 +10,6 @@ import pytest
 
 from amw_adapters.llm import LlmMessage, LlmRequest
 from amw_adapters.llm.anthropic import AnthropicLlmAdapter, worst_case_micros
-from amw_adapters.real.authorisation import ProviderAuthorisation
 from amw_adapters.real.catalogue import (
     AnthropicModel,
     ElevenLabsCatalogue,
@@ -98,10 +97,6 @@ def tts(
 # ------------------------------------------------------------------ token: no preflight, no adapter
 @pytest.mark.security
 def test_a_token_cannot_be_built_copied_or_changed() -> None:
-    with pytest.raises(ConfigInvalidError):
-        ProviderAuthorisation("anthropic", 5_000_000, "USD")
-    with pytest.raises(ConfigInvalidError):
-        ProviderAuthorisation("anthropic", 5_000_000, "USD", _mint=object())
     token = auth("anthropic")
     with pytest.raises(AttributeError):
         token.per_video_cap_micros = 10**12

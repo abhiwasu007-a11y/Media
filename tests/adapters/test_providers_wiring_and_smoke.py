@@ -3,8 +3,7 @@ live smoke script, both against the real amw_runtime API with mock transports (n
 key, no paid call)."""
 
 import copy
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,92 +12,31 @@ from scripts.provider_smoke import run_smoke
 
 from amw_adapters.llm import FakeLlmAdapter
 from amw_adapters.llm.anthropic import AnthropicLlmAdapter
-from amw_adapters.real.authorisation import ProviderAuthorisation
+from amw_adapters.real.authorisation import ProviderAuthorisation, verify_authorisation
 from amw_adapters.real.guard import CapOnlyCallGuard
 from amw_adapters.tts import FakeTtsAdapter
 from amw_adapters.tts.elevenlabs import ElevenLabsTtsAdapter
 from amw_core.errors import ConfigInvalidError
-from amw_core.ids import ORG
-from amw_core.owner_evidence_status import EvidenceSourceKind, EvidenceStatus
-from amw_runtime.config import DEFAULT_CONFIG_FILE, RunMode, load_runtime_config
+from amw_runtime.config import RunMode, load_runtime_config
 from amw_runtime.confirmations import ConfirmationKind, ConfirmationRecord
 from amw_runtime.preflight import PreflightReport, run_preflight
 from amw_runtime.providers import build_providers
 from tests.adapters.mock_providers import (
-    TEST_ENV,
     TEST_KEY_VALUE,
     MockAnthropic,
     MockElevenLabs,
     Scripted,
 )
+from tests.adapters.preflight_support import (
+    EVENING,
+    ORG_ID,
+    REAL_ENV,
+    Lookup,
+    limits,
+    passed_report,
+)
 
 pytestmark = pytest.mark.integration
-IST = timezone(timedelta(hours=5, minutes=30))
-EVENING = datetime(2026, 11, 19, 20, 0, tzinfo=IST)  # a Thursday, after the guard window
-REAL_ENV = {"AMW_RUNTIME_MODE": "REAL_RUN", "AMW_ENVIRONMENT": "development", **TEST_ENV}
-
-
-ORG_ID = ORG.new()
-
-
-@pytest.fixture(autouse=True)
-def packaged_with_render_minutes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The shipped runtime data has no render duration (REQUIRES REVIEW, owner item), so a
-    REAL_RUN preflight cannot pass on it yet. Tests load a packaged-style file with 60 minutes
-    through the one packaged loader (same approach as tests/runtime)."""
-    data = json.loads(DEFAULT_CONFIG_FILE.read_text(encoding="utf-8"))
-    data["render"]["max_duration_minutes"] = 60
-    path = tmp_path / "packaged_rc.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    monkeypatch.setattr("amw_runtime.config.DEFAULT_CONFIG_FILE", path)
-
-
-class Lookup:
-    """Fake evidence store: each evidence id maps to a CONFIRMED, MAC-valid, REAL row bound to
-    its record (the shared amw_core evidence contract)."""
-
-    def __init__(self, records: list[ConfirmationRecord]) -> None:
-        self.rows = {
-            r.evidence_id: EvidenceStatus(
-                evidence_id=r.evidence_id, evidence_state="CONFIRMED",
-                recorded_from="OWNER_CHAT_OPERATOR", org_id=ORG_ID, kind=r.kind.value,
-                subject_kind="ORG", subject_id=ORG_ID, subject=r.subject(),
-                source_kind=EvidenceSourceKind.REAL, mac_valid=True,
-            )
-            for r in records
-            if r.evidence_id
-        }  # fmt: skip
-
-    def get(self, evidence_id: str) -> EvidenceStatus | None:
-        return self.rows.get(evidence_id)
-
-
-def limits() -> list[ConfirmationRecord]:
-    """The owner confirmations a REAL_RUN preflight needs today: both provider limits and
-    FIN-R10 (the preflight still demands FIN-R10 for every real run; D13 narrows it to finance
-    channels in a separate change, so this lane does not touch that rule)."""
-    records = [
-        ConfirmationRecord(
-            kind=ConfirmationKind.PROVIDER_LIMIT, provider=p, amount_minor=500, currency="USD",
-            org_id=ORG_ID, recorded_from="OWNER_CHAT_OPERATOR", evidence_id=f"ev-{p}",
-            verified=True,
-        )
-        for p in ("anthropic", "elevenlabs")
-    ]  # fmt: skip
-    records.append(
-        ConfirmationRecord(
-            kind=ConfirmationKind.FIN_R10_NOT_SEBI_REGISTERED, org_id=ORG_ID,
-            recorded_from="OWNER_CHAT_OPERATOR", evidence_id="ev-r10", verified=True,
-        )
-    )  # fmt: skip
-    return records
-
-
-def passed_report() -> PreflightReport:
-    return run_preflight(
-        load_runtime_config(REAL_ENV), limits(), env=REAL_ENV, evidence=Lookup(limits()),
-        render_start=EVENING, org_id=ORG_ID,
-    )  # fmt: skip
 
 
 def test_dry_run_gives_fakes_and_reads_no_key() -> None:
@@ -159,22 +97,30 @@ def test_duck_typed_or_hand_built_reports_cannot_open_the_gate() -> None:
     )
     with pytest.raises(ConfigInvalidError, match="provider spending limit"):
         build_providers(cfg, preflight=hand_built, env=REAL_ENV, guard_for=CapOnlyCallGuard)
-    with pytest.raises(ConfigInvalidError, match="authorisation"):  # tokens cannot be forged
-        ProviderAuthorisation("anthropic", 5_000_000, "USD")
+    with pytest.raises(ConfigInvalidError):  # an unsealed hand-built token cannot be forged
+        verify_authorisation(
+            ProviderAuthorisation(
+                provider="anthropic", org_id=ORG_ID, job_id=None, per_video_cap_micros=5_000_000,
+                total_cap_micros=50_000_000, currency="USD", issued_at=1, expires_at=2**40,
+                nonce="n", seal=b"\0" * 32,
+            ),
+            datetime(2026, 1, 1, tzinfo=UTC), provider="anthropic", currency="USD",
+        )  # fmt: skip
     with pytest.raises(TypeError):
         copy.copy(passed_report().provider_authorisations[0])
 
 
 @pytest.mark.security
-def test_the_preflight_is_the_only_source_minting_tokens() -> None:
+def test_no_public_mint_function_exists_in_the_source_tree() -> None:
+    """The old design had a public mint function whose only caller was scanned for; tokens are
+    now sealed with a key held only by amw_runtime.preflight, so no mint function may exist."""
     src = Path(__file__).resolve().parents[2] / "packages"
-    callers = {
+    names = [
         str(p.relative_to(src))
         for p in src.rglob("*.py")
-        if "mint_provider_authorisation(" in p.read_text(encoding="utf-8")
-        and p.name != "authorisation.py"
-    }
-    assert callers == {"amw_runtime/src/amw_runtime/preflight.py"}
+        if "mint_provider_authorisation" in p.read_text(encoding="utf-8")
+    ]
+    assert names == []
 
 
 def test_real_run_with_passed_preflight_gives_real_adapters() -> None:

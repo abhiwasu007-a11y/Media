@@ -165,6 +165,7 @@ class ProviderHttp:
             attempt += 1
             error: AmwError
             retry_allowed = False
+            delivery = "unknown"  # fail closed: only a proven non-delivery releases a hold
             try:
                 response = self._client.request(
                     method, path, headers=dict(headers), json=json_body, params=params,
@@ -173,6 +174,7 @@ class ProviderHttp:
             except httpx.ConnectError, httpx.ConnectTimeout:
                 error = NetworkError("provider connection failed", provider=self.provider)
                 retry_allowed = True
+                delivery = "not_delivered"  # connect phase: nothing was sent
             except httpx.TimeoutException:
                 error = CallTimeoutError("provider call timed out", provider=self.provider)
             except httpx.TransportError:
@@ -181,11 +183,14 @@ class ProviderHttp:
                 if 200 <= response.status_code < 300:
                     return HttpOutcome(response, attempt, self._clock_ms() - started)
                 error = self._classify(response)
+                if 400 <= response.status_code < 500:
+                    delivery = "not_delivered"  # rejected by the provider, not processed
                 if response.status_code == 429:
                     retry_allowed = (
                         error.retry_after_ms is not None
                         or self._retry.retry_429_without_retry_after
                     )
+            error.details["delivery"] = delivery
             wait = self._wait_ms(attempt, error.retry_after_ms) if retry_allowed else 0
             self.log.info(
                 "provider.call_failed",
