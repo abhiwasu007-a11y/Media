@@ -121,6 +121,11 @@ class NewTask:
     deadline: datetime | None
     depends_on: tuple[int, ...] = ()
     """Indexes into the same ``create_tasks`` batch (the graph is a DAG by construction)."""
+    stage_id: str | None = None
+    """04 section 5.3 ``tasks.stage_id`` (CCR-214 (a)): ``^[a-z0-9_]{2,32}$``; set for every task
+    materialised from a production-type graph, ``None`` only outside a graph. A live
+    ``(job, stage_id, iteration)`` exists once (CCR-211); a malformed or duplicate value is
+    ``PERMANENT.INPUT_INVALID``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +136,7 @@ class TaskRecord:
     task_type: str
     agent_id: ExecutorId
     iteration: int
+    stage_id: str | None
     is_required: bool
     state: TaskState
     wait_reason: WaitReason | None
@@ -243,6 +249,21 @@ class JobStore(Protocol):
     ) -> Sequence[TaskRecord]:
         """T01 for a whole graph: insert ``tasks`` + ``task_dependencies``; enforces
         ``limits.max_tasks_per_job`` (``LoopCapExceededError``) and increments ``task_count``."""
+        ...
+
+    def repoint_dependency(
+        self,
+        tx: TenantTransaction,
+        task_id: TaskId,
+        old_upstream_id: TaskId,
+        new_upstream_id: TaskId,
+    ) -> None:
+        """24 section 3.3 rule 1 (CCR-211): replace the edge ``task_id -> old_upstream_id`` by
+        ``task_id -> new_upstream_id``. All three tasks must be visible in the caller's tenant and
+        belong to the same job (``MissingDependencyError`` for a task not found, which is also what
+        another tenant's task looks like; ``InputInvalidError`` for another job, a self edge, equal
+        old and new, or an edge that already exists). The old edge must exist
+        (``MissingDependencyError``)."""
         ...
 
     def get_task(self, tx: TenantTransaction, task_id: TaskId) -> TaskRecord | None: ...
