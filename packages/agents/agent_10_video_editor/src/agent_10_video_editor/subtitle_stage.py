@@ -13,7 +13,7 @@ from agent_10_video_editor.deps import StageDeps
 from agent_10_video_editor.entry import run_task
 from agent_10_video_editor.errors import input_invalid, missing_dependency
 from agent_10_video_editor.guard import DrainSignal, HeavyTaskGuard
-from agent_10_video_editor.inputs import NarrationTimeline, ScriptStrings
+from agent_10_video_editor.inputs import NarrationTimeline, ScriptStrings, parse_script_document
 from agent_10_video_editor.observability import LogContext, emit
 from agent_10_video_editor.ports import SubtitleAsset
 from agent_10_video_editor.qc.result import CheckResult, passed
@@ -96,11 +96,7 @@ class SubtitleStage:
         except ValidationError as exc:
             raise SchemaInvalidError("subtitles input failed its schema") from exc
         refs = one_ref_per_schema(task_input, SUBTITLE_SCHEMAS)
-        script = parse_blob(
-            ScriptStrings,
-            scope.read_bytes(*refs["agent_05.script_document"]),
-            "agent_05.script_document",
-        )
+        script = parse_script_document(scope.read_bytes(*refs["agent_05.script_document"]))
         if refs["agent_05.script_document"][1] != payload.verified_script_sha256:
             raise input_invalid("SCRIPT_HASH_MISMATCH")
         timeline = parse_blob(
