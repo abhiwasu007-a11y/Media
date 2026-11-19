@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "note": "Rendering environments the canary pixel hash was recorded for. Add a row only after running the canary on that environment; no tolerance fallback exists.",
+  "environments": [
+    {
+      "pillow": "13.0.0",
+      "freetype2": "2.14.3",
+      "raqm": "0.11.0",
+      "harfbuzz": "14.5.0",
+      "fribidi": "1.0.13",
+      "machine": "x86_64",
+      "canary_pixel_sha256": "cbf13261f6cc4177249e8358ad65d54a3ccc80d3e17665bac9ec9f3927212800",
+      "recorded_on": "Ubuntu 24.04 (glibc 2.39), CPython 3.14.6, Pillow manylinux_2_28 x86_64 wheel from uv.lock; libfribidi0 1.0.13-3build1 from apt",
+      "png_sha256_on_that_host": "3cbf11eca3b912013ef02294b4c444a2da3954967dee1ad00cb706325356f221"
+    }
+  ]
+}

@@ -82,3 +82,45 @@ jobs:
         with:
           name: docs-lint-report
           path: docs-lint-report.md
+
+  a11-render-determinism:
+    # Proves agent_11 thumbnail rendering does not depend on the host (docs/v4 RV-08, package README
+    # "Determinism"): a clean Ubuntu 24.04 image with only what the package README lists (libfribidi0),
+    # Python and every dependency from uv.lock (--frozen; Pillow wheel only, never built against system libs). The canary raster hash must equal the
+    # one recorded for this exact Pillow/FreeType/Raqm/HarfBuzz/FriBiDi/CPU fingerprint; an unrecorded
+    # environment fails closed. Runs in addition to, never instead of, the gates job.
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    env:
+      UV_PYTHON: "3.14"
+      UV_PYTHON_DOWNLOADS: automatic
+    steps:
+      - name: System packages (the package README list, nothing else)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl libfribidi0
+      # TODO(ci-pin): pin by commit SHA like the other jobs (no network access to actions/* when written).
+      - uses: actions/checkout@v4
+      - name: Install uv (pinned)
+        run: |
+          curl -LsSf https://astral.sh/uv/0.11.32/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install from the lock only
+        run: |
+          uv lock --check
+          uv sync --frozen --no-build-package pillow --all-packages
+      - name: Show the rendering environment
+        run: |
+          uv run --frozen python - <<'PY'
+          from agent_11_thumbnail_design.pinning import current_fingerprint, environment_problem
+          print(current_fingerprint().key)
+          assert environment_problem() is None, environment_problem()
+          PY
+      - name: Determinism and canary tests (three runs, different hash seeds)
+        run: |
+          for seed in 0 1 2; do
+            PYTHONHASHSEED=$seed uv run --frozen pytest -q -p no:cacheprovider --no-cov \
+              tests/agents/agent_11_thumbnail_design/test_composer.py \
+              "tests/agents/agent_11_thumbnail_design/test_stage.py::test_same_inputs_give_byte_identical_files"
+          done

@@ -15,7 +15,7 @@ image-provider call, no real person, no upload. Software status: built in the de
 | Glyph coverage check | fontTools 4.68.0 (MIT), cmap lookup per character (`a11.q.language_glyphs`) |
 | Fallback when Raqm is absent | none. `a11.pre.config` checks `raqm_available()` before any model call and raises the permanent `MISSING_DEPENDENCY`; `render` raises `ComposeFailedError` as a second line (a basic layout would draw unshaped conjuncts) |
 | System dependency | Raqm in the wheel loads the system library `libfribidi.so.0` (not bundled in the wheel): install it (Debian: `libfribidi0`) on every worker, otherwise tasks fail closed with `MISSING_DEPENDENCY` |
-| Output | PNG, 8-bit RGB, no metadata, `compress_level=6`, `optimize=False`; byte-identical for equal inputs (test `test_byte_identical_across_runs_and_instances`, canary `CANARY_SHA256`) |
+| Output | PNG, 8-bit RGB, no metadata, `compress_level=6`, `optimize=False`. Same inputs give the same PNG bytes on one host and the same decoded raster (`pixel_sha256`) on every pinned environment (see Determinism) |
 
 ### Devanagari shaping evidence
 
@@ -32,6 +32,36 @@ The real-font test `test_system_devanagari_font_when_present` is skipped with an
 system Devanagari font exists (open item below). The generated test font is built at test time by code
 (a few kilobytes, box glyphs, no download, no network); nothing large is committed.
 
+## Determinism (host independence)
+
+Cause analysis of the verifier's failures (evidence in the PR description):
+
+| Symptom | Cause | Evidence |
+|---|---|---|
+| `test_same_inputs_give_byte_identical_files` flaked | the generated test font carried the wall-clock time in `head.created` / `head.modified`, so two builds a second apart had different font hashes, hence different `composition_sha256` | two builds 1.1 s apart differ; fixed stamps make them equal; regression test `test_test_font_bytes_do_not_depend_on_the_wall_clock` fails without the fix |
+| canary PNG hash differed on another host | the PNG file bytes depend on the host zlib: the Pillow wheel links the system `libz.so.1` (not bundled), and deflate output differs between zlib builds for identical pixels (a zlib-ng stream of the same canary rows is 8430 bytes against 8714 here) | `ldd` of Pillow's `_imaging` shows host `libz.so.1`; the pixel raster does not change with the encoder |
+
+What is pinned and checked (fail closed, typed errors, `pinning.py`):
+
+- **Raster identity**: `RenderResult.pixel_sha256` (mode, size and the decoded RGB bytes). The canary and cross-host comparisons use it. The PNG
+  file hash (`file.sha256` in the manifest) stays the identity of the stored blob and is stable on one host only. A fixed PNG encoder was
+  rejected: stored (uncompressed) deflate blocks are host independent but make a 1920x1080 file about 6.2 MB instead of about 9 KB.
+- **Environment table** `data/environments.json`: one row per environment the canary was recorded for, keyed by Pillow, FreeType, Raqm,
+  HarfBuzz, FriBiDi and CPU architecture. Any other environment is refused (`RenderEnvironmentError`; stage: `a11.pre.config`,
+  `PERMANENT.MISSING_DEPENDENCY`) before any model call. There is no perceptual tolerance fallback: no cross-environment measurement
+  exists to derive a bound from, so none is claimed. To add an environment: run the canary there and add the row in a reviewed PR.
+- **Fonts** `data/fonts/manifest.json`: only listed fonts (SHA-256) are rasterised; bytes that differ from their claimed hash, or are
+  not listed, raise `FontIntegrityError` (stage: `PERMANENT.MISSING_DEPENDENCY`). Fonts are loaded from memory only, so a system font
+  can never be used.
+- **Lock**: `pillow==13.0.0` exactly in `pyproject.toml` and `uv.lock`; fontTools (the test-font generator) is locked in `uv.lock`.
+  FreeType, HarfBuzz and Raqm come inside the Pillow wheel, so the lock pins them; FriBiDi and zlib are system libraries.
+- **CI**: job `a11-render-determinism` (clean `ubuntu:24.04`, `libfribidi0` only, `uv sync --frozen`) runs the canary and determinism tests.
+
+Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved), so the FriBiDi apt pin for it
+is recorded here only (Ubuntu 24.04 `libfribidi0 1.0.13-3build1`); (2) other CPU architectures (aarch64, macOS arm64) and other FriBiDi
+versions have no recorded canary and are refused until measured; (3) the owner picks the default Devanagari font (Q-O6): the pinned
+OFL candidate below is verified, not chosen.
+
 ## Fonts, templates, glyphs (licence rows)
 
 - Package data (`src/agent_11_thumbnail_design/data/`): `templates.json` (4 templates, geometry in permille of the canvas),
@@ -40,7 +70,10 @@ system Devanagari font exists (open item below). The generated test font is buil
 - Each template, the glyph set (`TEMPLATE`) and the font (`FONT`) are tenant `assets` rows registered once by the shared registry
   (CCR-031). The stage reads them (`ThumbnailRepository.registered_assets`) and writes `licence_ledger` rows without interval
   (`usage_kind` `TEMPLATE`, `FONT`, `IMAGE`); a missing registration is `PERMANENT.MISSING_DEPENDENCY`.
-- The default Devanagari font is a tenant `FONT` asset (an OFL font, owner question Q-O6). **No font file is committed here.**
+- Pinned fonts (`data/fonts/`, manifest with SHA-256, licence and source): Noto Sans Devanagari variable font, Version 2.007, SIL OFL 1.1,
+  unmodified, 641,944 bytes, licence text `OFL-NotoSansDevanagari.txt` (research entry RV-08); and the generated box test font
+  `a11_test_box.ttf` (5.6 KB, no third-party outlines; `test_committed_test_font_equals_generator_and_is_pinned`). The default Devanagari
+  font stays a tenant `FONT` asset chosen by the owner (question Q-O6); its bytes must hash to a manifest entry.
 
 ## Tenant isolation (blueprint 19.1)
 
@@ -68,7 +101,7 @@ injection, revision, replay, tenancy and security tests (`test_stage.py`).
    deterministic baseline only; the baseline is not the model and its pass says nothing about model quality.
 6. The finance marker lists, injection phrases and neutral words are injected (`Lexicons`); production lists are 13 / rule-pack
    content. The lists used in tests are fixtures.
-7. Real-font Devanagari evidence needs a font on the machine (skipped when absent); the OFL default font asset is not chosen.
+7. Real-font Devanagari evidence now uses the pinned OFL font (`test_production_font_is_pinned_ofl_and_shapes_devanagari`); the owner has not yet chosen the default font asset (Q-O6).
 8. Chart stills (3B), AI stills (3C), upload and Studio test are out of scope. `a11.q.chart_still` is emitted `SKIPPED` unless a
    chart is used.
 9. Official thumbnail spec (dimensions, formats) and the preview-size threshold are `REQUIRES REVIEW`; `a11.q.preview_legibility`

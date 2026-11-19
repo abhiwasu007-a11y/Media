@@ -30,6 +30,7 @@ from agent_11_thumbnail_design.composer import ImageComposer, RenderResult, Rend
 from agent_11_thumbnail_design.config import Agent11Settings
 from agent_11_thumbnail_design.errors import (
     ComposeFailedError,
+    FontIntegrityError,
     GlyphMissingError,
     TextDoesNotFitError,
 )
@@ -69,6 +70,7 @@ from agent_11_thumbnail_design.ports import (
     RegisteredAsset,
     ThumbnailRepository,
 )
+from agent_11_thumbnail_design.pinning import verify_font
 from agent_11_thumbnail_design.prompting import PromptBundle, parse_output, render_request
 from agent_11_thumbnail_design.revision import build_previous, canonical_json, set_sha256
 from agent_11_thumbnail_design.scanner import InjectionScanner
@@ -463,6 +465,13 @@ class _Run:
         finance = category in self.d.lexicons.finance_categories
         self._preflight(finance)  # a11.pre.config: fail closed before any model call
         font_bytes = self._read_blob(font.uri, font.sha256)
+        try:
+            verify_font(font_bytes, font.sha256)  # only pinned fonts are rasterised (fail closed)
+        except FontIntegrityError as exc:
+            raise MissingDependencyError(
+                "the font is not in the pinned font manifest",
+                details={"check_id": "a11.pre.config", "missing": ["pinned_font"]},
+            ) from exc
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
         self.banned_words = tuple(banned_words)
@@ -604,6 +613,12 @@ class _Run:
             raise MissingDependencyError(
                 "the Raqm layout engine (libraqm with system libfribidi) is not available",
                 details={"check_id": "a11.pre.config", "missing": ["raqm"]},
+            )
+        problem = d.composer.environment_problem()
+        if problem is not None:  # unpinned Pillow / FreeType / Raqm / HarfBuzz / FriBiDi / CPU
+            raise MissingDependencyError(
+                "the rendering environment is not pinned (no recorded canary)",
+                details={"check_id": "a11.pre.config", "missing": ["pinned_render_environment"]},
             )
 
     def _script_gate(self, script: Any) -> None:

@@ -1,8 +1,9 @@
 """Composer (F-13, F-14; blueprint 4.3, 9, 20): Pillow with the Raqm layout engine (HarfBuzz).
 
 Pure raster: no network, no clock, no random number; temp files are never used (PNG is encoded
-in memory). Same inputs, config, template set, font bytes and library version give identical PNG
-bytes (NFR-1). Caches are per instance and keyed with the org (blueprint 19.1 layer 4).
+in memory). Same inputs, config, template set, pinned font bytes and a pinned rendering environment
+give an identical raster (``pixel_sha256``) on any host and identical PNG bytes on one host (NFR-1;
+see ``pinning``). Caches are per instance and keyed with the org (blueprint 19.1 layer 4).
 """
 
 import hashlib
@@ -16,10 +17,18 @@ from PIL import Image, ImageDraw, ImageFont
 
 from agent_11_thumbnail_design.errors import (
     ComposeFailedError,
+    FontIntegrityError,
     GlyphMissingError,
+    RenderEnvironmentError,
     TextDoesNotFitError,
 )
 from agent_11_thumbnail_design.measure import contrast_ratio, fit_text
+from agent_11_thumbnail_design.pinning import (
+    check_environment,
+    environment_problem,
+    pixel_sha256,
+    verify_font,
+)
 from agent_11_thumbnail_design.revision import canonical_json
 from agent_11_thumbnail_design.templates import GlyphSpec, TemplateSpec
 from agent_11_thumbnail_design.textutil import contains_sequence, folded_words, words
@@ -90,6 +99,8 @@ class TextRun:
 @dataclass(frozen=True, slots=True)
 class RenderResult:
     png: bytes
+    pixel_sha256: str
+    """Host-independent identity of the raster (decoded RGB). ``png`` bytes depend on the host zlib."""
     width: int
     height: int
     runs: tuple[TextRun, ...]
@@ -105,6 +116,7 @@ class ImageComposer(Protocol):
     def render(self, spec: RenderSpec) -> RenderResult: ...
     def missing_glyphs(self, org_id: str, font_bytes: bytes, text: str) -> tuple[str, ...]: ...
     def raqm_available(self) -> bool: ...
+    def environment_problem(self) -> str | None: ...
 
 
 class _Metrics:
@@ -144,6 +156,8 @@ class PillowComposer:
         key = f"amw:{org_id}:a11:{sha}:{px}"
         if key not in self._fonts:
             try:
+                # Always from memory (verified bytes): never a name or path, so no system font
+                # lookup or fallback can happen.
                 self._fonts[key] = ImageFont.truetype(
                     io.BytesIO(data), px, layout_engine=ImageFont.Layout.RAQM
                 )
@@ -167,10 +181,16 @@ class PillowComposer:
 
         return bool(features.check("raqm"))
 
+    def environment_problem(self) -> str | None:
+        """Why this process may not render (not a pinned environment), or None."""
+        return environment_problem()
+
     # --- render --------------------------------------------------------------------------
     def render(self, spec: RenderSpec) -> RenderResult:
         if not self.raqm_available():
             raise ComposeFailedError("the Raqm layout engine is not available")
+        check_environment()  # fail closed: RenderEnvironmentError for an unpinned environment
+        verify_font(spec.font_bytes, spec.font_sha256)  # FontIntegrityError: tampered or unpinned
         text_all = " ".join(spec.lines)
         missing = self.missing_glyphs(spec.org_id, spec.font_bytes, text_all)
         if missing:
@@ -190,6 +210,7 @@ class PillowComposer:
         img.save(out, "PNG", optimize=False, compress_level=6)
         return RenderResult(
             png=out.getvalue(),
+            pixel_sha256=pixel_sha256(img.mode, img.size, img.tobytes()),
             width=w,
             height=h,
             runs=tuple(runs),
@@ -377,8 +398,10 @@ def _make_run(
 
 
 __all__ = [
+    "FontIntegrityError",
     "ImageComposer",
     "PillowComposer",
+    "RenderEnvironmentError",
     "RenderResult",
     "RenderSpec",
     "contains_sequence",

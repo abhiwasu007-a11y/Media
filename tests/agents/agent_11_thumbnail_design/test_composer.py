@@ -2,13 +2,27 @@
 
 import hashlib
 import io
+import time
 from dataclasses import replace
 
 import pytest
 from PIL import Image, ImageFont
 
 from agent_11_thumbnail_design.composer import PillowComposer, RenderSpec, hex_to_rgb, phash64
-from agent_11_thumbnail_design.errors import GlyphMissingError, TextDoesNotFitError
+from agent_11_thumbnail_design import pinning
+from agent_11_thumbnail_design.errors import (
+    FontIntegrityError,
+    GlyphMissingError,
+    RenderEnvironmentError,
+    TextDoesNotFitError,
+)
+from agent_11_thumbnail_design.pinning import (
+    current_fingerprint,
+    font_manifest,
+    pinned_font_bytes,
+    pixel_sha256,
+    recorded_environments,
+)
 from agent_11_thumbnail_design.templates import glyph_catalogue, load_templates, palette
 from tests.agents.agent_11_thumbnail_design.env import png_bytes
 from tests.agents.agent_11_thumbnail_design.fontgen import build_font
@@ -16,9 +30,9 @@ from tests.agents.agent_11_thumbnail_design.fontgen import build_font
 FONT = build_font()
 FONT_SHA = hashlib.sha256(FONT).hexdigest()
 ORG = "org_00000000-0000-7000-8000-000000000001"
-#: Recorded canary (U-169): the fixed fixture below renders to this SHA-256 with Pillow 13.0.0
-#: (Raqm 0.11.0, HarfBuzz 14.5.0, FreeType 2.14.3). A library change re-records it on purpose.
-CANARY_SHA256 = "3cbf11eca3b912013ef02294b4c444a2da3954967dee1ad00cb706325356f221"
+#: Canary (U-169): the fixed fixture below renders to a recorded raster hash per pinned rendering
+#: environment (``data/environments.json``, keyed by the Pillow / FreeType / Raqm / HarfBuzz / FriBiDi /
+#: CPU fingerprint). The PNG file bytes are not the cross-host identity (host zlib), the decoded raster is.
 
 
 def spec(**over: object) -> RenderSpec:
@@ -58,8 +72,80 @@ def test_byte_identical_across_runs_and_instances() -> None:
 
 
 def test_canary_hash_is_recorded() -> None:
-    sha = hashlib.sha256(PillowComposer().render(spec()).png).hexdigest()
-    assert sha == CANARY_SHA256, f"re-record the canary: {sha}"
+    fp = current_fingerprint()
+    recorded = recorded_environments()
+    assert fp.key in recorded, f"unpinned environment, record its canary: {fp.key}"
+    got = PillowComposer().render(spec()).pixel_sha256
+    assert got == recorded[fp.key], f"re-record the canary for {fp.key}: {got}"
+
+
+def test_pixel_hash_is_the_decoded_raster_and_png_encoding_does_not_change_it() -> None:
+    """Same pixels, different zlib level: different file bytes, identical pixel identity."""
+    r = PillowComposer().render(spec())
+    img = Image.open(io.BytesIO(r.png))
+    img.load()
+    assert pixel_sha256(img.mode, img.size, img.tobytes()) == r.pixel_sha256
+    other = io.BytesIO()
+    img.save(other, "PNG", compress_level=1)
+    assert other.getvalue() != r.png
+    again = Image.open(io.BytesIO(other.getvalue()))
+    again.load()
+    assert pixel_sha256(again.mode, again.size, again.tobytes()) == r.pixel_sha256
+    assert not img.info  # no metadata chunks (no time stamp, no profile, no gamma)
+
+
+def test_test_font_bytes_do_not_depend_on_the_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression of the flake: head.created/modified used to carry the build time."""
+    first = build_font()
+    monkeypatch.setattr(time, "time", lambda: 1_900_000_000.0)
+    assert build_font() == first
+
+
+def test_committed_test_font_equals_generator_and_is_pinned() -> None:
+    assert build_font() == build_font()  # no wall-clock time stamp in the font
+    assert pinned_font_bytes("a11_test_box") == build_font()
+    assert FONT_SHA in font_manifest()
+
+
+def test_production_font_is_pinned_ofl_and_shapes_devanagari() -> None:
+    data = pinned_font_bytes("noto_sans_devanagari_vf")
+    pinned = font_manifest()[hashlib.sha256(data).hexdigest()]
+    assert pinned.licence == "OFL-1.1"
+    assert not PillowComposer().missing_glyphs(ORG, data, "ट्रेंड कसा वाचायचा")
+    r = PillowComposer().render(spec(font_bytes=data, font_sha256=pinned.sha256, lines=("ट्रेंड वाचा",)))
+    assert r.font_px >= 48
+
+
+def test_tampered_font_is_refused() -> None:
+    bad = bytearray(FONT)
+    bad[-1] ^= 1
+    with pytest.raises(FontIntegrityError):  # bytes do not match the claimed hash
+        PillowComposer().render(spec(font_bytes=bytes(bad)))
+    with pytest.raises(FontIntegrityError):  # consistent hash, but not in the manifest
+        PillowComposer().render(
+            spec(font_bytes=bytes(bad), font_sha256=hashlib.sha256(bytes(bad)).hexdigest())
+        )
+
+
+def test_system_font_is_never_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+    real = ImageFont.truetype
+
+    def spy(font: object, *a: object, **k: object) -> object:
+        seen.append(font)
+        return real(font, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(ImageFont, "truetype", spy)
+    PillowComposer().render(spec())
+    assert seen and all(isinstance(f, io.BytesIO) for f in seen)  # memory only: no name, no path
+
+
+def test_unpinned_environment_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    fp = current_fingerprint()
+    monkeypatch.setattr(pinning, "current_fingerprint", lambda: replace(fp, freetype2="0.0.0"))
+    assert PillowComposer().environment_problem() is not None
+    with pytest.raises(RenderEnvironmentError):
+        PillowComposer().render(spec())
 
 
 def test_changing_the_text_changes_the_pixels_and_hash() -> None:
