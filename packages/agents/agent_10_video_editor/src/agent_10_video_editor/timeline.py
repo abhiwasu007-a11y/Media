@@ -88,6 +88,7 @@ class TimelineOverlay(_Model):
 
 
 class AudioInfo(_Model):
+    narration_asset_id: str
     master_sha256: str
     duration_ms: StrictInt
     codec_profile_sha256: str
@@ -292,6 +293,8 @@ class TimelineCompiler:
         cfg: AgentTenConfig,
         aspect_ratio: str,
         render_kind: str = "MASTER",
+        *,
+        narration_asset_id: str | None,
     ) -> Timeline:
         fps_num, fps_den = cfg.render.fps_num, cfg.render.fps_den
         TimelineCompiler._check_tiling(plan)
@@ -302,6 +305,9 @@ class TimelineCompiler:
         invalid: list[str] = []
         missing: list[str] = []
         shots: list[TimelineShot] = []
+        if narration_asset_id is None or narration_asset_id not in assets:
+            # agent_07 8.1 narration.asset_id (null for SAMPLE) must be an assets row (CCR-127)
+            missing.append("NO_ASSET:narration")
         for ps in plan.shots:
             start_f, end_f = fr(ps.start_ms), fr(ps.end_ms)
             if end_f <= start_f:
@@ -313,11 +319,7 @@ class TimelineCompiler:
                 continue
             asset_id = entry.asset_id or ""
             record = assets.get(asset_id)
-            sha = (
-                entry.fingerprints.sha256
-                if entry.fingerprints
-                else (record.sha256 if record else None)
-            )
+            sha = record.sha256 if record else None  # assets.content_sha256 (CCR-127)
             if not asset_id or sha is None:
                 missing.append(f"NO_ASSET:{ps.shot_id}")
                 continue
@@ -331,7 +333,7 @@ class TimelineCompiler:
             if ps.intent_kind == "CHART" or entry.reveal_stills:
                 try:
                     steps = TimelineCompiler._reveal(
-                        ps, entry, start_f, end_f, fps_num, fps_den, missing
+                        ps, entry, start_f, end_f, fps_num, fps_den, missing, assets
                     )
                 except Exception as exc:
                     invalid.extend(
@@ -387,6 +389,7 @@ class TimelineCompiler:
             overlays=tuple(overlays),
             end_screen=end_screen,
             audio=AudioInfo(
+                narration_asset_id=narration_asset_id or "",
                 master_sha256=audio.master.sha256,
                 duration_ms=audio.master.duration_ms,
                 codec_profile_sha256=profile_sha,
@@ -405,6 +408,7 @@ class TimelineCompiler:
         fps_num: int,
         fps_den: int,
         missing: list[str],
+        assets: Mapping[str, AssetRecord],
     ) -> tuple[RevealStep, ...]:
         stills = sorted(entry.reveal_stills, key=lambda s: s.k)
         triples = RevealStepBuilder.build(
@@ -419,14 +423,16 @@ class TimelineCompiler:
         for k, start, still in triples:
             if still.k != k or still.start_ms != expected_starts[k]:
                 raise input_invalid(f"REVEAL_COUNT:{ps.shot_id}")
-            if not still.licence_id or not still.ledger_entry_ids:
+            record = assets.get(still.asset_id)
+            if record is None or not still.licence_id or not still.ledger_entry_ids:
                 missing.append(f"NO_ASSET:{ps.shot_id}#{k}")
+                continue
             out.append(
                 RevealStep(
                     k=k,
                     start_frame=start,
                     asset_id=still.asset_id,
-                    asset_sha256=still.sha256,
+                    asset_sha256=record.sha256,  # assets.content_sha256 (CCR-127)
                     asset_uri=still.asset_uri,
                 )
             )

@@ -498,11 +498,7 @@ class _QcRun:
         pr = m.probe
         total_ms = row.duration_ms
         shots_ms = [(s.shot_id, s.plan_start_ms, s.plan_end_ms) for s in timeline.shots]
-        narration_end = (
-            narration.end_ms
-            if narration.end_ms is not None
-            else max((s.end_ms for s in narration.segments), default=0)
-        )
+        narration_end = narration.end_ms
         end_screen_ms = (
             timeline.end_screen.plan_end_ms - timeline.end_screen.plan_start_ms
             if timeline.end_screen
@@ -758,6 +754,14 @@ class _QcRun:
             }
             for o in timeline.overlays
         )
+        elements.append(
+            {
+                "element_id": "narration",
+                "asset_id": timeline.audio.narration_asset_id,
+                "start_ms": 0,
+                "end_ms": timeline.audio.duration_ms,
+            }
+        )
         elements.extend(
             {
                 "element_id": f"font:{f.asset_id}",
@@ -851,17 +855,20 @@ class _QcRun:
         return out
 
     def _is_finance_channel(self, charts: list[dict[str, Any]]) -> bool:
-        """FIN-R9/R11 apply unless the channel is explicitly a non-finance one (fail closed).
+        """FIN-R9/R11 apply unless the channel is known to be non-finance (CCR-128, fail closed).
 
-        The explicit config override wins; a chart in the manifest then makes the render subject to
-        FIN-R9; otherwise only a channel listed in ``qc.non_finance_channel_ids`` is exempt.
+        A channel is finance when ``channels.category = 'finance'`` or ``rp.finance_sebi_in`` is
+        among its active packs; an unreadable channel is finance; a chart in the manifest always
+        makes the render subject to FIN-R9. No per-agent channel list exists.
         """
-        qc = self.d.cfg.qc
-        if qc.finance_channel is not None:
-            return qc.finance_channel
         if charts:
             return True
-        return self.ti.channel_id is None or self.ti.channel_id not in qc.non_finance_channel_ids
+        channels = self.d.channels
+        if channels is None or self.ti.channel_id is None:
+            return True
+        with self.d.tenancy.transaction(self.ctx) as tx:
+            profile = channels.lookup(tx, str(self.ti.channel_id))
+        return profile is None or profile.is_finance
 
     def _edit(
         self,

@@ -10,6 +10,7 @@ from agent_10_video_editor.config import Placement
 from agent_10_video_editor.errors import MeasurementUnavailable
 from agent_10_video_editor.guard import SelfDrainTimer
 from agent_10_video_editor.inputs import AssetManifest, ScriptStrings, ShotPlan
+from agent_10_video_editor.ports import ChannelProfile
 from agent_10_video_editor.probe import SILENCE_FLOOR_DBTP, Ebur128Parser
 from agent_10_video_editor.qc import checks as C  # noqa: N812
 from agent_10_video_editor.qc.stage import QcStage, _word_overlap_permille
@@ -78,28 +79,56 @@ def test_finance_chart_with_unset_lag_is_a_blocking_fail(tmp_path: Path) -> None
     assert result.message == "PRICE_DATA_LAG_UNSET"
 
 
-@pytest.mark.unit
-def test_non_finance_channel_without_charts_is_not_blocked_by_finance_rules(
-    tmp_path: Path,
-) -> None:
+def _world_with_profile(tmp_path: Path, profile: ChannelProfile | None, **kw: Any) -> World:
     channel = str(CHANNEL.new())
-    cfg = make_config(qc={"non_finance_channel_ids": [channel]})
-    world = World(tmp_path, config=cfg, channel_id=channel)
+    world = World(tmp_path, channel_id=channel, **kw)
+    if profile is not None:
+        world.channels.add(world.org, channel, profile)
+    return world
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "profile",
+    [ChannelProfile("education", ()), ChannelProfile("education", ("rp.youtube_general",))],
+)
+def test_non_finance_channel_without_charts_is_not_blocked_by_finance_rules(
+    tmp_path: Path, profile: ChannelProfile
+) -> None:
+    """CCR-128: channels.category / active packs decide; no per-agent channel list."""
+    world = _world_with_profile(tmp_path, profile)
     by_id = _results(world, _chain(world))
     assert by_id["qc.visual.chart_data_age"].verdict == "WARN"
     assert not by_id["qc.visual.chart_data_age"].blocking
 
 
 @pytest.mark.unit
-def test_unlisted_channel_is_a_finance_channel_so_a_presenter_is_blocked(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "profile",
+    [
+        None,  # channel unreadable: unknown means finance
+        ChannelProfile(None, ()),  # no category: unknown means finance
+        ChannelProfile("finance", ()),
+        ChannelProfile("education", ("rp.finance_sebi_in",)),  # the finance pack is active
+    ],
+)
+def test_unknown_or_finance_channel_is_finance_so_a_presenter_is_blocked(
+    tmp_path: Path, profile: ChannelProfile | None
+) -> None:
     person = {"is_realistic_synthetic": True, "depicts_real_person": True}
-    world = World(
-        tmp_path, channel_id=str(CHANNEL.new()),
-        entry_overrides={0: {"tier": "D_AI_VIDEO", "disclosure": person}},
-    )  # fmt: skip
+    world = _world_with_profile(
+        tmp_path, profile, entry_overrides={0: {"tier": "D_AI_VIDEO", "disclosure": person}}
+    )
     result = _results(world, _chain(world))["qc.visual.no_synthetic_presenter"]
     assert result.verdict == "FAIL"
     assert result.blocking
+
+
+@pytest.mark.unit
+def test_finance_decision_without_a_channel_id_or_reader_fails_closed(tmp_path: Path) -> None:
+    person = {"is_realistic_synthetic": True, "depicts_real_person": True}
+    world = World(tmp_path, entry_overrides={0: {"tier": "D_AI_VIDEO", "disclosure": person}})
+    assert _results(world, _chain(world))["qc.visual.no_synthetic_presenter"].blocking
 
 
 @pytest.mark.unit
@@ -167,10 +196,14 @@ def test_a_source_shorter_than_its_shot_is_refused_at_compile_time() -> None:
         )  # fmt: skip
         from agent_10_video_editor.inputs import AssetRecord
 
-        assets = {"a1": AssetRecord(asset_id="a1", uri=entry["asset_uri"], sha256=digest)}
+        assets = {
+            "a1": AssetRecord(asset_id="a1", uri=entry["asset_uri"], sha256=digest),
+            "nar": AssetRecord(asset_id="nar", uri="amw-blob://org_x/nar.wav", sha256="f" * 64),
+        }
         return TimelineCompiler.compile(
             plan, AssetManifest.model_validate({"shots": [entry]}), assets,
             audio_master(3000), make_config(), "16:9",
+            narration_asset_id="nar",
         )  # fmt: skip
 
     assert build(3000).shots[0].shot_id == "sh01"

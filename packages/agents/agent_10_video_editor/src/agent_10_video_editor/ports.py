@@ -12,7 +12,9 @@ from typing import Any, Protocol, runtime_checkable
 
 from agent_10_video_editor.inputs import AssetRecord
 from amw_core.enums import CheckKind, CheckVerdict, RenderStatus
+from amw_core.errors import InputInvalidError
 from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.text_normalise import normalise_for_matching
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,4 +142,44 @@ class LicenceReader(Protocol):
         self, tx: TenantTransaction, job_id: str, render_id: str, asset_ids: Sequence[str]
     ) -> LicenceSnapshot:
         """Rows with ``render_id = R OR (render_id IS NULL AND job_id = J)`` (CCR-030)."""
+        ...
+
+
+FINANCE_PACK_ID = "rp.finance_sebi_in"
+FINANCE_CATEGORY = "finance"
+
+
+@dataclass(frozen=True, slots=True)
+class ChannelProfile:
+    """``channels.category`` and the active rule packs of the channel's compliance profile
+    (04 section 5.1; the ``COMPLIANCE_PROFILE`` context ref), CCR-128."""
+
+    category: str | None
+    active_pack_ids: Sequence[str] = ()
+
+    @property
+    def is_finance(self) -> bool:
+        """Finance when the category says so or the finance pack is active. Fail closed: a
+        missing, empty or unparseable category is unknown and therefore finance. The category
+        and pack IDs are compared after the shared normaliser (case, padding, invisible
+        characters), so ``" Finance"`` is finance."""
+        category = _matching_form(self.category)
+        if not category or category == FINANCE_CATEGORY:
+            return True
+        return any(_matching_form(p) == FINANCE_PACK_ID for p in self.active_pack_ids)
+
+
+def _matching_form(value: str | None) -> str:
+    if value is None:
+        return ""
+    try:
+        return normalise_for_matching(value).text
+    except InputInvalidError:  # over-long or unparseable: unknown
+        return ""
+
+
+@runtime_checkable
+class ChannelProfileReader(Protocol):
+    def lookup(self, tx: TenantTransaction, channel_id: str) -> ChannelProfile | None:
+        """The channel's profile in the tenant, or ``None`` when it cannot be read."""
         ...

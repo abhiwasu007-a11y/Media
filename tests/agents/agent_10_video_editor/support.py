@@ -64,6 +64,9 @@ def compile_case(i: dict[str, Any]) -> Timeline:
             assets[asset_id] = AssetRecord(
                 asset_id=asset_id, uri=f"amw-blob://org_x/assets/{asset_id}.png", sha256=digest
             )
+    assets["nar"] = AssetRecord(
+        asset_id="nar", uri="amw-blob://org_x/assets/nar.wav", sha256="f" * 64
+    )
     content_end = shots[-1]["end_ms"]
     plan = ShotPlan.model_validate(
         {
@@ -77,7 +80,9 @@ def compile_case(i: dict[str, Any]) -> Timeline:
     )
     manifest = AssetManifest.model_validate({"shots": entries})
     cfg = make_config(render={"fps_num": fps_num, "fps_den": fps_den})
-    return TimelineCompiler.compile(plan, manifest, assets, audio_master(total), cfg, "16:9")
+    return TimelineCompiler.compile(
+        plan, manifest, assets, audio_master(total), cfg, "16:9", narration_asset_id="nar"
+    )
 
 
 # ----------------------------------------------------------------------------- stage-level world
@@ -100,6 +105,7 @@ from agent_10_video_editor.testing import (  # noqa: E402
     MemoryAssetCatalog,
     MemoryAuditLog,
     MemoryBlobStorage,
+    MemoryChannelProfiles,
     MemoryCostLedger,
     MemoryLicenceReader,
     MemoryQcResultRepository,
@@ -164,6 +170,7 @@ class World:
         self.clock = FakeClock()
         self.renders = MemoryRenderRepository()
         self.assets = MemoryAssetCatalog()
+        self.channels = MemoryChannelProfiles()
         self.qc_results = MemoryQcResultRepository()
         self.licences = MemoryLicenceReader()
         self.scratch = tmp / "scratch"
@@ -290,6 +297,7 @@ class World:
             "hook": {"end_ms": 8000, "first_payoff_ms": 6000},
             "chapters": [{"section_id": "sec1", "start_ms": 0}],
         }
+        self.narration_asset_id, _, _ = self._asset("narration", b"narration-stem", "wav")
         master_bytes = self.media.master(total) if self.media is not None else b"RIFF-fake-master"
         master_uri, master_sha = self.put("master.wav", master_bytes)
         audio = {
@@ -316,9 +324,9 @@ class World:
             "agent_08.asset_sourcing.output": {"shots": entries},
             "agent_07.audio_master.output": audio,
             "agent_07.voice_synthesis.output": {
-                "source": "PROVIDER_CLIPS",
                 "language": "mr",
-                "segments": narration,
+                "narration": {"asset_id": self.narration_asset_id},
+                "timeline": {"source": "PROVIDER_CLIPS", "segments": narration},
             },
             "agent_05.script_document": {"script_sha256": script_sha, "segments": segments},
         }
@@ -408,6 +416,7 @@ class World:
             assets=self.assets,
             qc_results=self.qc_results,
             licences=self.licences,
+            channels=self.channels,
         )
 
 
@@ -506,6 +515,17 @@ def licensed_snapshot(world: World) -> LicenceSnapshot:
                     "usage_kind": "IMAGE",
                 }
             )
+    assets[world.narration_asset_id] = {"status": "ACTIVE", "ai_item": False}
+    ledger.append(
+        {
+            "asset_id": world.narration_asset_id,
+            "licence_id": "L1",
+            "render_id": None,
+            "used_from_ms": None,
+            "used_to_ms": None,
+            "usage_kind": "VOICE",
+        }
+    )
     licences = {
         "L1": {
             "state": "ACTIVE",
