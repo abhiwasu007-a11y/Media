@@ -36,6 +36,7 @@ from agent_06_fact_checker.models import (
 )
 from agent_06_fact_checker.outputs import (
     check,
+    check_ctx,
     error_output,
     next_action_for,
     success_output,
@@ -48,7 +49,6 @@ from agent_06_fact_checker.rulepack import RulePack, RulePackResolver, ensure_le
 from agent_06_fact_checker.runtime import (
     AGENT_ID,
     PaidCallRunner,
-    RunContext,
     StepCheckpoints,
     UsageTotals,
     task_key,
@@ -68,6 +68,7 @@ from amw_core.errors import (
     SchemaInvalidError,
     SchemaVersionUnsupportedError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import ActorRef, ChannelId
 from amw_core.interfaces import (
     AuditLog,
@@ -137,25 +138,25 @@ class ClaimExtractionStep:
         )
 
     # ------------------------------------------------------------------ entry point
-    def run(self, task: TaskInput, ctx: RunContext) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
         started = self._clock.monotonic_ms()
         state = _State()
         try:
-            return self._run(task, ctx, state, started)
+            return self._run(task_input, ctx, state, started)
         except (PermanentError, AgentError, BudgetExhaustedError) as exc:
             return error_output(
                 exc,
-                task=task,
+                task=task_input,
                 clock=self._clock,
                 started_ms=started,
                 usage=state.usage,
-                attempt_no=task.retry_count,
+                attempt_no=task_input.retry_count,
                 validated=state.validated,
             )
 
     # ------------------------------------------------------------------ E0
     def _validate(
-        self, task: TaskInput, ctx: RunContext
+        self, task: TaskInput, ctx: ExecContext
     ) -> tuple[ExtractionInput, dict[str, RulePack]]:
         if task.agent_id != AGENT_ID:
             raise InputInvalidError("task is not addressed to agent_06")
@@ -188,23 +189,21 @@ class ClaimExtractionStep:
         self._check_script_hash(task, ctx, inp)
         return inp, packs
 
-    def _payload_doc(self, task: TaskInput, ctx: RunContext) -> Mapping[str, Any]:
+    def _payload_doc(self, task: TaskInput, ctx: ExecContext) -> Mapping[str, Any]:
         payload = task.payload
         if payload.data is not None:
             return payload.data
         if payload.data_ref is None or payload.data_sha256 is None:  # PayloadObject rules out
             raise SchemaInvalidError("payload has neither inline data nor a stored reference")
-        raw = b"".join(
-            self._blobs.get(ctx.tenant(task), BlobUri(payload.data_ref), payload.data_sha256)
-        )
+        raw = b"".join(self._blobs.get(ctx.tenant, BlobUri(payload.data_ref), payload.data_sha256))
         loaded = json.loads(raw.decode("utf-8"))
         if not isinstance(loaded, dict):
             raise SchemaInvalidError("payload blob is not a JSON object")
         return loaded
 
-    def _check_script_hash(self, task: TaskInput, ctx: RunContext, inp: ExtractionInput) -> None:
+    def _check_script_hash(self, task: TaskInput, ctx: ExecContext, inp: ExtractionInput) -> None:
         """E0: the script blob's SHA-256 equals ``scripts.content_sha256`` (blueprint 7.1)."""
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         with self._tenancy.transaction(tenant) as tx:
             self._tenancy.require_same_tenant(tx, task.org_id)
             expected = self._scripts.content_sha256(
@@ -225,11 +224,12 @@ class ClaimExtractionStep:
             raise InputInvalidError("script blob hash differs from scripts.content_sha256")
 
     # ------------------------------------------------------------------ the run
-    def _run(self, task: TaskInput, ctx: RunContext, state: _State, started: int) -> TaskOutput:
+    def _run(self, task: TaskInput, ctx: ExecContext, state: _State, started: int) -> TaskOutput:
+        check_ctx(task, ctx)
         inp, packs = self._validate(task, ctx)
         state.validated = True
         settings = self._settings
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         saved = StepCheckpoints(
             store=self._checkpoints,
             blobs=self._blobs,
@@ -362,7 +362,7 @@ class ClaimExtractionStep:
     def _extract_batch(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         state: _State,
         inp: ExtractionInput,
         aged_refs: tuple[Any, ...],
@@ -406,7 +406,7 @@ class ClaimExtractionStep:
     def _assemble(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         state: _State,
         started: int,
         inp: ExtractionInput,
@@ -416,7 +416,7 @@ class ClaimExtractionStep:
         finance: bool,
         report: ExtractionReport,
     ) -> TaskOutput:
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         doc = final.to_doc()
         refs = [write_blob(self._blobs, tenant, task, ctx, "claim_extraction_output.json", doc)]
         refs.append(write_blob(self._blobs, tenant, task, ctx, "claim_ids.json", dict(ids)))
