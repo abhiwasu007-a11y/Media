@@ -2,7 +2,7 @@
 name = "amw-core"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["pydantic>=2.10", "pydantic-settings>=2.6", "psycopg[binary]>=3.2", "jsonschema>=4.23"]
+dependencies = ["pydantic>=2.10", "pydantic-settings>=2.6", "psycopg[binary]>=3.2", "jsonschema>=4.23", "fonttools>=4.55"]
 
 [build-system]
 requires = ["hatchling"]

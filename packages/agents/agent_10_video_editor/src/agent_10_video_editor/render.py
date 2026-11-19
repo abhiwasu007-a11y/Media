@@ -517,8 +517,13 @@ class _RenderRun:
         fonts = [assets[f.asset_id] for f in loaded.manifest.fonts if f.asset_id in assets]
         if reader is None or not fonts:
             raise config_invalid("FONT_COVERAGE_UNAVAILABLE")
-        data = self.scope.read_bytes(fonts[0].uri, fonts[0].sha256)
-        FontCoverage.check(reader(data), list(bound.values()))
+        # Brand font first, then the fallback fonts of the manifest: a code point is covered when
+        # any listed font has it (per-glyph fallback; owner decision WS-06). Each font is read
+        # by its recorded SHA-256, so only registered, hash-checked bytes are consulted.
+        covered: set[int] = set()
+        for font in fonts:
+            covered |= reader(self.scope.read_bytes(font.uri, font.sha256))
+        FontCoverage.check(covered, list(bound.values()))
 
     def _existing_render(self, timeline_sha: str, preset_key: str) -> RenderRow | None:
         with self.d.tenancy.transaction(self.ctx) as tx:

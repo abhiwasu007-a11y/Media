@@ -26,6 +26,7 @@ from agent_10_video_editor.inputs import (
     ScriptStrings,
     ShotPlan,
 )
+from amw_core.font_coverage import uncovered_code_points
 
 END_SCREEN_SHOT_ID = "end_screen"
 
@@ -528,8 +529,6 @@ class FontCoverage:
 
     @staticmethod
     def check(font_code_points: set[int] | frozenset[int], texts: Sequence[str]) -> None:
-        missing = sorted(
-            {ord(ch) for text in texts for ch in text if not ch.isspace()} - set(font_code_points)
-        )
+        missing = sorted(uncovered_code_points(texts, [frozenset(font_code_points)]))
         if missing:
             raise input_invalid(*(f"GLYPH_MISSING:U+{cp:04X}" for cp in missing))
