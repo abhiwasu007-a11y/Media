@@ -68,6 +68,8 @@ def parse_blob[M: BaseModel](model: type[M], data: bytes, what: str = "an input 
     try:
         return model.model_validate_json(data)
     except ValidationError as exc:
+        if any(e["type"] == "json_invalid" for e in exc.errors()):  # e.g. nesting too deep
+            raise _not_json(what) from None
         raise SchemaInvalidError(
             f"{what} does not match its schema",
             details={
