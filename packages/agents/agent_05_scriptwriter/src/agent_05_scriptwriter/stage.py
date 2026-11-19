@@ -150,7 +150,13 @@ class _Stage[D: (ScriptDraftInput, ShortsAdaptationInput)](ABC):
                     details={"violations": [violation("PAYLOAD_EMPTY", "/payload")]},
                 )
             chunks = self._storage.get(ctx.tenant, BlobUri(payload.data_ref), payload.data_sha256)
-            raw = json.loads(b"".join(chunks))
+            try:
+                raw = json.loads(b"".join(chunks))
+            except ValueError, RecursionError:  # not JSON, not UTF-8, empty or too deep
+                raise SchemaInvalidError(
+                    "data_ref blob is not valid JSON",
+                    details={"violations": [violation("PAYLOAD_NOT_JSON", "/payload/data_ref")]},
+                ) from None
         try:
             return self.input_model.model_validate(raw)
         except ValidationError as exc:

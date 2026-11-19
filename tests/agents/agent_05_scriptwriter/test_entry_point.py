@@ -392,6 +392,43 @@ def test_payload_by_reference_is_read_and_hash_verified(tmp_path: Path) -> None:
     assert out.error.code == "AGENT.CORRUPTED_OUTPUT"
 
 
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        (b"this is not json", "PAYLOAD_NOT_JSON"),
+        (b"", "PAYLOAD_NOT_JSON"),
+        (b"\xff\xfe\x00{", "PAYLOAD_NOT_JSON"),
+        (b"[" * 100000, "PAYLOAD_NOT_JSON"),
+        (b'{"unexpected": 1}', "missing"),
+        (b"[1, 2, 3]", "model_type"),
+    ],
+    ids=["non_json", "empty", "not_utf8", "too_deep", "wrong_shape_object", "wrong_shape_list"],
+)
+def test_hash_valid_but_unusable_blob_is_returned_as_schema_invalid(
+    tmp_path: Path, body: bytes, code: str
+) -> None:
+    w = build_world(tmp_path)
+    ti0 = task_input()
+    uri = BlobUri(
+        f"amw-blob://{sp._Ids.org}/jobs/{sp._Ids.job}/tasks/{ti0.task_id}/attempts/"
+        f"{ids.ATTEMPT.new()}/artifacts/input_data.json"
+    )
+    info = w.storage.put(exec_ctx(ti0).tenant, uri, BytesIO(body))
+    ti = task_input(
+        payload={
+            "payload_schema": "agent_05.script_draft.input",
+            "payload_schema_version": "1.0.0",
+            "data_ref": str(uri),
+            "data_sha256": info.sha256,
+        }
+    )
+    out = w.draft.run(ti, exec_ctx(ti))
+    _rejected(out, "PERMANENT.SCHEMA_INVALID")
+    assert out.error is not None
+    assert code in {v.keyword for v in out.error.details.violations or ()}
+    assert not w.llm.requests and w.resolver.calls == 0
+
+
 def test_cross_tenant_reference_from_the_resolver_is_rejected(tmp_path: Path) -> None:
     w = build_world(tmp_path)
     w.resolver.error = CrossTenantRef("reference belongs to another tenant")
