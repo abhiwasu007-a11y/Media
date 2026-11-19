@@ -115,6 +115,17 @@ Recorded from the owner's chat message (R14: owner decisions are taken from chat
 - **FIN-R10 disclaimer (owner-provided Marathi DRAFT text):** valid only if the owner is not SEBI-registered. **Owner confirmation item (open):** registration status. The text is stored as a versioned data file, not in code.
 - Overseer note (same message): independent verification of main on another machine found 1 failing thumbnail canary test and 1 flaky determinism test (P1).
 
+### D10 (2026-11-19, owner chat message): decisions on the dry-run list
+Recorded from the owner's chat message (R14: operator's record, not production-verified evidence until ticket 3A-13).
+1. **APPROVED:** orchestrator PR #73 scope (minimal 3A driver of 3A-01, not the full Agent 01 blueprint) and the integration fixes of dry-run breaks 1 and 9.
+2. **Brand font (WS-06):** **Mukta** (OFL-1.1, Devanagari + Latin) primary, **Noto Sans Devanagari** (OFL-1.1) fallback. Font files and licences are committed to the repo and only these are used (this also closes the thumbnail determinism issue and the tofu boxes of dry-run break 14). Open point for the owner: "use only these" is applied to the owner channel; tenant brand-kit fonts for other tenants stay allowed under the licence-row rule of PR #72.
+3. **Bitrate (dry-run break 8):** YouTube's 8 Mbps (1080p, 24-30 fps; 12 Mbps at 48-60 fps) is an encoder **target**, not a measured floor. Encode H.264 High VBR at that target. The measured-bitrate floor is replaced by an encoder-settings check plus a quality metric (SSIM or VMAF) against the lossless intermediate, threshold set in 3B; no filler padding; recorded in an ADR. The YouTube figures are verified from the official page by the lane (RESEARCH_LOG), not taken on trust.
+4. **Providers:** LLM = Anthropic per ADR-007; TTS = ElevenLabs Eleven v3/v4 class (Marathi supported; **never** Multilingual v2). The owner sets provider spending limits and adds keys himself.
+5. **Music (D6):** YouTube Audio Library, owner channels only. The licence type is recorded per track in the licence ledger (standard = YouTube-only; CC-BY 4.0 = attribution required, attribution text added to the description automatically; any NC track rejected). Client and ad work needs a commercial licence (later decision). The owner downloads the chosen tracks from YouTube Studio and hands them over. The licence terms are to be verified from the official source (REQUIRES REVIEW until logged). Not used in the first sample.
+6. **TEST confirmation fixtures:** allowed for the dry run only. Real runs need the real evidence path.
+7. **Before the real skeleton run:** the 15 integration breaks become contract-level fixes (CCRs plus agent PRs), not dry-run wrappers. The real run must include data_pack chart scenes (Agent 08 tier C charts from historical data, SEBI lag enforced), which the dry run did not have.
+- Overseer note: dry-run bundle independently verified (1920x1080 H.264 High 30 fps, AAC-LC 48 kHz, -14.0 LUFS, manifest hashes match).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
