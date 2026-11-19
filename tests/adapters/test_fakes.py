@@ -174,3 +174,41 @@ def test_web_fetch_https_only_and_size_cap() -> None:
     )
     assert ok.usage.unit_kind is CostUnitKind.BYTES
     assert ok.usage.amount_micros == 0
+
+
+def test_tts_capabilities_and_style_controls() -> None:
+    """CCR-130: ``capabilities()`` is declared; a style control the adapter lacks is refused."""
+    from amw_adapters.tts import ControlSupport, TtsEmotion, TtsPace
+    from amw_core.errors import InputInvalidError
+
+    default = FakeTtsAdapter()
+    assert default.capabilities().pace_control is ControlSupport.NONE  # conservative default
+    assert default.capabilities().emotion_control is ControlSupport.NONE
+    assert default.capabilities().phoneme_support is False
+    full = FakeTtsAdapter(
+        pace_control=ControlSupport.NATIVE,
+        emotion_control=ControlSupport.NATIVE,
+        markup_delimiters=("[", "]"),
+    )
+    caps = full.capabilities()
+    assert caps.pace_control is ControlSupport.NATIVE
+    assert caps.markup_delimiters == ("[", "]")
+    assert caps.languages == ("en", "hi", "mr")
+    styled = TtsRequest(
+        text="x",
+        voice_ref="v",
+        model="m",
+        language="mr",
+        pace=TtsPace.SLOW,
+        emotion=TtsEmotion.WARM,
+    )
+    assert full.synthesize(styled, idempotency_key=K).duration_ms > 0
+    bare = FakeTtsAdapter(pace_control=ControlSupport.NONE, emotion_control=ControlSupport.NONE)
+    assert bare.capabilities().emotion_control is ControlSupport.NONE
+    with pytest.raises(InputInvalidError):
+        bare.synthesize(styled, idempotency_key=K)
+    plain = TtsRequest(text="x", voice_ref="v", model="m", language="mr")
+    assert plain.pace is None
+    assert bare.synthesize(plain, idempotency_key=K).duration_ms > 0
+    with pytest.raises(ValidationError):
+        TtsRequest(text="x", voice_ref="v", model="m", language="mr", pace="TURBO")

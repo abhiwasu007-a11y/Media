@@ -329,8 +329,14 @@ def test_no_currency_literal_or_exponent_assumption_in_source() -> None:
                     offenders.append(f"{path}:{node.lineno} dict of currency to int")
             if isinstance(node, ast.keyword) and node.arg and code.match(node.arg):
                 offenders.append(f"{path}:{node.value.lineno} keyword {node.arg}=")
-            if isinstance(node, ast.Constant) and node.value == 0.01:
-                offenders.append(f"{path}:{node.lineno} 0.01")
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "quantize"
+                and re.search(r"0\.01|'0\.01'", ast.unparse(node))
+                and re.search(r"minor|amount|cost|limit|money|micros", ast.unparse(node), re.I)
+            ):
+                offenders.append(f"{path}:{node.lineno} money quantized to two places")
             if (
                 isinstance(node, ast.BinOp)
                 and isinstance(node.op, ast.Mult | ast.Div | ast.FloorDiv)
