@@ -75,6 +75,7 @@ from amw_core.interfaces.system_functions import (
 )
 from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
 from amw_core.interfaces.voices import VoiceConsentRecord, VoiceRecord, VoiceRegistry
+from amw_core.interfaces.worker import TaskWorker
 
 __all__ = [
     "AttemptRecord",
@@ -148,6 +149,7 @@ __all__ = [
     "TaskQueue",
     "TaskRecord",
     "TaskTransition",
+    "TaskWorker",
     "TenancyContext",
     "TenantContext",
     "TenantRepository",
