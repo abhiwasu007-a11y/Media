@@ -43,6 +43,11 @@ COLUMNS = {
     ("licences", "state"): "licence_state",
     ("quality_scores", "dimension"): "quality_dimension",
     ("compliance_verdicts", "verdict"): "compliance_verdict",
+    ("claims", "claim_type"): "claim_type",
+    ("claims", "time_reference_kind"): "time_reference_kind",
+    ("claims", "status"): "claim_status",
+    ("claims", "proposed_verdict"): "compliance_verdict",
+    ("claims", "final_verdict"): "compliance_verdict",
 }
 
 
