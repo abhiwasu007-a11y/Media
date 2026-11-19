@@ -10,6 +10,11 @@ format, duration within tolerance, audio present, and optionally loudness within
 Nothing from Agent 10 was reused: its render module covers only the 16:9 / preset path and holds no
 re-frame code (it only names the ``shorts_9x16`` preset), and its runner is bound to its segment
 plan. This module is a small, self-contained argument-list builder with no shell.
+
+The video encode follows ADR-014 / CCR-240/241 through Agent 10's ``encode.resolve`` (x264 High,
+average-bitrate VBR at the target, 2 B-frames, CABAC, closed GOP of half the frame rate, optional
+VBV, no edit lists); there is no CRF mode. The Agent 10 table has no 1080x1920 row, so the 9:16
+bitrate target is an operator value and REQUIRES REVIEW (Phase 1).
 """
 
 import json
@@ -18,11 +23,13 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_10_video_editor.encode import EncodeSettings, resolve
 from amw_core.errors import (
     AgentHangError,
     CorruptedOutputError,
@@ -55,9 +62,16 @@ class VerticalSpec(_M):
     mode: Literal["blur_pad", "crop"]
     focus_x: Annotated[float, Field(ge=0.0, le=1.0)] = 0.5
     blur_radius: Annotated[int, Field(ge=1)]
-    video_crf: Annotated[int, Field(ge=0, le=51)]
+    video_bitrate_bps: Annotated[int, Field(ge=1)] | None = None
+    """Operator encoder target (Agent 10 ``video_bitrate_bps`` knob, Q-D10-2). The Agent 10 table
+    (ADR-014) has no 1080x1920 row: INF-12 does not say whether the 1080p row applies to vertical
+    video, so this stays REQUIRES REVIEW (Phase 1) and ``None`` is refused (``INPUT_INVALID``)."""
+    video_maxrate_bps: Annotated[int, Field(ge=1)] | None = None
+    video_bufsize_bps: Annotated[int, Field(ge=1)] | None = None
+    """Optional VBV cap (both or neither; maxrate above the target), as in Agent 10."""
+    gop_frames: Annotated[int, Field(ge=1)] | None = None
+    """Only for a frame rate whose half is fractional (INF-13 says half the frame rate)."""
     x264_preset: str
-    h264_profile: Literal["baseline", "main", "high"]
     subtitle_font_size: Annotated[int, Field(ge=1)]
     duration_tolerance_ms: Annotated[int, Field(ge=0)]
     loudness_tolerance_lu: Annotated[float, Field(ge=0)] | None = None
@@ -66,6 +80,25 @@ class VerticalSpec(_M):
     timeout_s: Annotated[int, Field(ge=1)]
     nice: int | None = 10
     """Run FFmpeg under ``nice -n <value>`` when the tool exists (shared CPU); ``None`` = off."""
+
+
+def resolve_encode(spec: VerticalSpec) -> EncodeSettings:
+    """ADR-014 settings through Agent 10's ``encode.resolve`` (no private policy here): x264
+    High, average-bitrate (VBR) at the target, 2 B-frames, CABAC, closed GOP of half the frame
+    rate, optional VBV. A refusal of ``resolve`` is ``INPUT_INVALID`` with its stable reason."""
+    try:
+        return resolve(
+            width_px=spec.width_px,
+            height_px=spec.height_px,
+            fps=Fraction(spec.fps),
+            video_bitrate_bps=spec.video_bitrate_bps,
+            video_maxrate_bps=spec.video_maxrate_bps,
+            video_bufsize_bps=spec.video_bufsize_bps,
+            gop_frames=spec.gop_frames,
+            x264_preset=spec.x264_preset,
+        )
+    except ValueError as exc:
+        raise InputInvalidError("encode settings refused", details={"reason": str(exc)}) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +226,12 @@ def build_filter(spec: VerticalSpec, *, subtitles_name: str | None) -> str:
     return f"{base};{tail}[v]"
 
 
+def _vbv_args(enc: EncodeSettings) -> list[str]:
+    if enc.maxrate_bps is None or enc.bufsize_bps is None:
+        return []
+    return ["-maxrate", str(enc.maxrate_bps), "-bufsize", str(enc.bufsize_bps)]
+
+
 def make_9x16(
     input_mp4: Path,
     out_mp4: Path,
@@ -207,6 +246,7 @@ def make_9x16(
     ``AgentHangError`` (timeout) or ``CorruptedOutputError`` (output fails the probe:
     size, fps, profile, duration, audio, loudness); a failing output file is removed.
     """
+    enc = resolve_encode(spec)
     src = probe_media(input_mp4)
     if src.audio_codec is None:
         raise InputInvalidError("the 16:9 master has no audio stream")
@@ -224,9 +264,15 @@ def make_9x16(
         argv = [
             _tool("ffmpeg"), "-hide_banner", "-nostdin", "-y", "-protocol_whitelist", "file",
             "-i", "in.mp4", "-filter_complex", build_filter(spec, subtitles_name=sub_name),
-            "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-profile:v", spec.h264_profile,
-            "-preset", spec.x264_preset, "-crf", str(spec.video_crf), "-r", str(spec.fps),
-            "-threads", str(spec.threads), "-c:a", "copy", "-movflags", "+faststart", "out.mp4",
+            "-map", "[v]", "-map", "0:a:0", "-c:v", "libx264", "-profile:v", "high",
+            "-pix_fmt", "yuv420p", "-preset", enc.x264_preset, "-b:v", str(enc.target_bps),
+            *_vbv_args(enc),
+            "-g", str(enc.gop_frames), "-sc_threshold", "0", "-bf", str(enc.bframes),
+            "-x264-params",
+            f"keyint={enc.gop_frames}:scenecut=0:open-gop=0:bframes={enc.bframes}"
+            f":cabac={int(enc.cabac)}:threads={spec.threads}",
+            "-r", str(spec.fps), "-threads", str(spec.threads), "-c:a", "copy",
+            "-use_editlist", "0", "-movflags", "+faststart+negative_cts_offsets", "out.mp4",
         ]  # fmt: skip
         res = _run(argv, cwd=scratch, timeout_s=spec.timeout_s, nice=spec.nice)
         if res.returncode != 0 or not (scratch / "out.mp4").is_file():
@@ -252,7 +298,7 @@ def _verify(src: MediaProbe, src_path: Path, path: Path, spec: VerticalSpec) -> 
         problems.append(f"fps {out.fps_num}/{out.fps_den}")
     if out.video_codec != "h264":
         problems.append(f"codec {out.video_codec}")
-    if not (out.video_profile or "").lower().endswith(spec.h264_profile):
+    if (out.video_profile or "").lower() != "high":
         problems.append(f"profile {out.video_profile}")
     if out.pix_fmt != "yuv420p":
         problems.append(f"pix_fmt {out.pix_fmt}")

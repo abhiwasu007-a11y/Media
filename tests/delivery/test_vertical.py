@@ -1,5 +1,7 @@
 """9:16 cut with REAL FFmpeg on tiny synthetic inputs (no network, no paid call)."""
 
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -89,15 +91,20 @@ def test_input_without_audio_is_refused(tmp_path: Path) -> None:
         make_9x16(src, tmp_path / "o.mp4", SMALL)
 
 
-def test_ffmpeg_failure_is_typed(tmp_path: Path) -> None:
+def test_ffmpeg_failure_is_typed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bad = tmp_path / "garbage.mp4"
     bad.write_bytes(b"not a video")
     with pytest.raises(InputInvalidError):
         make_9x16(bad, tmp_path / "o.mp4", SMALL)
     src = make_mp4(tmp_path / "in.mp4")
-    broken = SMALL.model_copy(update={"x264_preset": "no_such_preset"})
+    real_tool = vertical._tool
+    # ffmpeg itself exits non-zero (the former "no_such_preset" case is now refused earlier by the
+    # ADR-014 preset allow-list, see test_encode_settings_refusals)
+    monkeypatch.setattr(
+        vertical, "_tool", lambda name: "false" if name == "ffmpeg" else real_tool(name)
+    )
     with pytest.raises(RenderCrashError):
-        make_9x16(src, tmp_path / "o.mp4", broken)
+        make_9x16(src, tmp_path / "o.mp4", SMALL)
     assert not (tmp_path / "o.mp4").exists()
 
 
@@ -132,3 +139,53 @@ def test_probe_mismatch_is_reported(tmp_path: Path) -> None:
 def test_spec_requires_every_policy_value() -> None:
     with pytest.raises(ValueError, match="Field required"):
         VerticalSpec.model_validate({"width_px": 1080})
+
+
+@pytest.mark.parametrize(
+    ("update", "reason"),
+    [
+        ({"video_bitrate_bps": None}, "ENCODE_TARGET_REQUIRES_REVIEW"),
+        ({"gop_frames": None}, "GOP_REQUIRES_REVIEW"),
+        ({"x264_preset": "ultrafast"}, "X264_PRESET_NOT_ALLOWED"),
+        ({"x264_preset": "no_such_preset"}, "X264_PRESET_NOT_ALLOWED"),
+        ({"video_maxrate_bps": 4_000_000_000}, "VBV_MAXRATE_WITHOUT_BUFSIZE"),
+        ({"video_maxrate_bps": 1_000, "video_bufsize_bps": 2_000}, "VBR_MAXRATE_NOT_ABOVE_TARGET"),
+    ],
+)
+def test_encode_settings_refusals(tmp_path: Path, update: dict[str, object], reason: str) -> None:
+    """ADR-014 through Agent 10's resolve: no silent default for a missing or odd policy value."""
+    src = make_mp4(tmp_path / "in.mp4")
+    with pytest.raises(InputInvalidError) as err:
+        make_9x16(src, tmp_path / "o.mp4", SMALL.model_copy(update=update))
+    assert err.value.details["reason"] == reason
+    assert not (tmp_path / "o.mp4").exists()
+
+
+def test_derived_gop_needs_no_operator_value() -> None:
+    thirty = SMALL.model_copy(update={"fps": 30, "gop_frames": None})
+    assert vertical.resolve_encode(thirty).gop_frames == 15
+    with pytest.raises(InputInvalidError):  # an operator GOP that contradicts "half the rate"
+        vertical.resolve_encode(thirty.model_copy(update={"gop_frames": 10}))
+
+
+def test_output_follows_the_encode_policy(tmp_path: Path) -> None:
+    """x264 High, 2 B-frames, CABAC, GOP of half the rate (12 at 25 fps, operator value), VBV."""
+    src = make_mp4(tmp_path / "in.mp4", seconds=3)
+    spec = SMALL.model_copy(update={"video_maxrate_bps": 12_000_000, "video_bufsize_bps": 16_000_000})
+    out = tmp_path / "o.mp4"
+    make_9x16(src, out, spec)
+    res = subprocess.run(  # noqa: S603
+        ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_frames",
+         "-select_streams", "v:0", "-show_entries",
+         "stream=profile,has_b_frames:frame=pict_type,key_frame", str(out)],  # noqa: S607
+        capture_output=True, text=True, check=True, timeout=60,
+    )  # fmt: skip
+    data = json.loads(res.stdout)
+    assert data["streams"][0]["profile"] == "High"
+    assert data["streams"][0]["has_b_frames"] >= 1
+    types = [f["pict_type"] for f in data["frames"]]
+    assert "B" in types
+    keys = [i for i, f in enumerate(data["frames"]) if f["key_frame"] == 1]
+    assert len(keys) > 1
+    assert max(b - a for a, b in zip(keys, keys[1:], strict=False)) <= 12
+    assert b"elst" not in out.read_bytes()  # no edit lists (INF-13)

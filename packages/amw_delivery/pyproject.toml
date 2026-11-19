@@ -2,7 +2,7 @@
 name = "amw-delivery"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core", "amw-adapters"]
+dependencies = ["amw-core", "amw-adapters", "agent-10-video-editor"]
 
 [build-system]
 requires = ["hatchling"]
@@ -14,3 +14,4 @@ packages = ["src/amw_delivery"]
 [tool.uv.sources]
 amw-core = { workspace = true }
 amw-adapters = { workspace = true }
+agent-10-video-editor = { workspace = true }

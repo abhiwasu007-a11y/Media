@@ -1,6 +1,7 @@
 """Delivery bundle: happy path from in-memory fakes and the fail-closed cases."""
 
 import hashlib
+import io
 import json
 import zipfile
 from pathlib import Path
@@ -17,6 +18,7 @@ from amw_core.errors import (
     NotAuthorisedError,
     TenantMismatchError,
 )
+from amw_core.interfaces.storage import BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_delivery.bundle import build_bundle
 from amw_delivery.models import (
@@ -240,7 +242,7 @@ def test_bad_subtitle_refused(tmp_path: Path) -> None:
     w = World(tmp_path)
     inputs = w.inputs()
     subs = (
-        inputs.subtitles[0].model_copy(update={"ref": w.put("subs/bad.srt", b"no cues here")}),
+        inputs.subtitles[0].model_copy(update={"ref": w.put("renders/subs-bad.srt", b"no cues here")}),
         inputs.subtitles[1],
     )
     _fails(tmp_path, w, InputInvalidError, subtitles=subs)
@@ -272,6 +274,6 @@ def test_works_with_local_disk_storage(tmp_path: Path) -> None:
     disk = LocalDiskStorage(tmp_path / "blobs")
     inputs = w.inputs()
     for uri, data in w.storage.blobs.items():
-        disk.put(w.context, uri, __import__("io").BytesIO(data))  # type: ignore[arg-type]
+        disk.put(w.context, BlobUri(uri), io.BytesIO(data))
     m = build_bundle(inputs, tmp_path / "b", storage=disk, context=w.context)
     assert m.files

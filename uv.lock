@@ -188,12 +188,14 @@ name = "amw-delivery"
 version = "0.0.0"
 source = { editable = "packages/amw_delivery" }
 dependencies = [
+    { name = "agent-10-video-editor" },
     { name = "amw-adapters" },
     { name = "amw-core" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-10-video-editor", editable = "packages/agents/agent_10_video_editor" },
     { name = "amw-adapters", editable = "packages/amw_adapters" },
     { name = "amw-core", editable = "packages/amw_core" },
 ]

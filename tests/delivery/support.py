@@ -79,7 +79,7 @@ class World:
         return ArtefactRef(uri=uri, sha256=sha256_hex(data), size_bytes=len(data))
 
     def inputs(self, **over: object) -> BundleInputs:
-        video = self.put("render/master.mp4", self.video)
+        video = self.put("renders/master.mp4", self.video)
         data: dict[str, object] = {
             "org_id": self.org,
             "job_id": self.job,
@@ -94,20 +94,20 @@ class World:
             ),
             "disclosure_note": "Altered or synthetic content: the owner sets the label by hand.",
             "video_16x9": video,
-            "video_9x16": self.put("render/vert.mp4", self.vertical) if self.shorts else None,
+            "video_9x16": self.put("renders/vert.mp4", self.vertical) if self.shorts else None,
             "shorts_wanted": self.shorts,
             "thumbnails": tuple(
                 ThumbnailOption(
                     option_id=f"v{i}",
-                    ref=self.put(f"thumbs/v{i}.png", b"\x89PNG" + bytes([i])),
+                    ref=self.put(f"renders/thumb-v{i}.png", b"\x89PNG" + bytes([i])),
                     media_type="image/png",
                 )
                 for i in (1, 2, 3)
             ),
             "chosen_thumbnail_id": "v2",
             "subtitles": (
-                SubtitleFile(language="en", ref=self.put("subs/en.srt", SRT.encode())),
-                SubtitleFile(language="hi", ref=self.put("subs/hi.srt", SRT.encode())),
+                SubtitleFile(language="en", ref=self.put("renders/subs-en.srt", SRT.encode())),
+                SubtitleFile(language="hi", ref=self.put("renders/subs-hi.srt", SRT.encode())),
             ),
             "primary_language": "en",
             "qc_checks": (

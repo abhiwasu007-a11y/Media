@@ -20,6 +20,9 @@ from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri, ReadableStr
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_delivery.vertical import SafeArea, VerticalSpec
 
+# Plumbing placeholders, all REQUIRES REVIEW (Phase 1): the bitrate is the Agent 10 INF-12 value of
+# the same frame-rate class (1080p, 25 fps: 8 Mbps), the table has no 9:16 row; the GOP is the whole
+# number nearest half of 25 fps (INF-13 says half the rate, which is fractional here).
 PLUMBING_VERTICAL_SPEC = VerticalSpec(
     width_px=1080,
     height_px=1920,
@@ -27,9 +30,9 @@ PLUMBING_VERTICAL_SPEC = VerticalSpec(
     safe_area=SafeArea(top_px=150, bottom_px=300, left_px=60, right_px=120),
     mode="blur_pad",
     blur_radius=20,
-    video_crf=28,
-    x264_preset="veryfast",
-    h264_profile="high",
+    video_bitrate_bps=8_000_000,
+    gop_frames=12,
+    x264_preset="faster",
     subtitle_font_size=14,
     duration_tolerance_ms=200,
     timeout_s=300,
