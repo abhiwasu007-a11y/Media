@@ -1,6 +1,7 @@
 """S4 budget guard: blocking tests for 09 section 4 rules B1-B8, the provider start gate (09 8),
 E1 all-or-nothing reservations, E2 per-call checks and E3 breach detection."""
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -568,3 +569,15 @@ def test_e2_per_video_cap_refuses_a_call_that_would_cross_it_inside_the_hold() -
     with pytest.raises(BudgetExhaustedError) as err:
         check(w, job, task, 2 * M)
     assert "per-job cap" in str(err.value)
+
+
+def test_currency_without_exponent_entry_fails_closed_config_invalid() -> None:
+    """CCR-133: empty map (no code default) and an unlisted currency are both CONFIG_INVALID."""
+    from amw_core.budget_guard.core import limit_micros
+
+    row = budget(ORG.new(), BudgetPeriod.PILOT_TOTAL, 500)
+    with pytest.raises(ConfigInvalidError):
+        limit_micros(row, load_settings(environ={}))  # empty map: no default
+    with pytest.raises(ConfigInvalidError):
+        limit_micros(replace(row, currency="EUR"), settings())  # INR / USD listed, EUR not
+    assert limit_micros(row, settings()) == 500 * 10_000

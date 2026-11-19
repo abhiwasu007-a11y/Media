@@ -263,3 +263,25 @@ def test_registry_rejects_a_key_declared_twice() -> None:
         reg.declare("finance.x", "agent_09")
     reg.declare_all(["retry.temporary.base_ms", "breaker.x.y.window_ms"], "amw_core")
     assert reg.keys["agent_05.max_hooks"] == "agent_05"
+
+
+def test_currency_exponent_fixture_is_config_data_cited_to_rv07() -> None:
+    """CCR-133 / P4-07: INR 2 and USD 2 exist only as config data (RV-07, REQUIRES REVIEW)."""
+    from tests.core_services.support import CURRENCY_EXPONENT_FIXTURE
+
+    text = CURRENCY_EXPONENT_FIXTURE.read_text(encoding="utf-8")
+    assert "RV-07" in text
+    assert "REQUIRES REVIEW" in text
+    cfg = load_settings(environ={}, config_file=CURRENCY_EXPONENT_FIXTURE)
+    assert cfg.finance.currency_minor_exponent == {"INR": 2, "USD": 2}
+    assert load_settings(environ={}).finance.currency_minor_exponent == {}
+
+
+def test_no_code_default_currency_exponent_in_source() -> None:
+    """No source file under packages/*/src maps a currency code to its exponent."""
+    import re
+
+    pattern = re.compile(r"[\"'](INR|USD)[\"']\s*:\s*[0-9]")
+    root = Path(__file__).resolve().parents[2] / "packages"
+    hits = [str(p) for p in root.glob("**/src/**/*.py") if pattern.search(p.read_text("utf-8"))]
+    assert hits == []

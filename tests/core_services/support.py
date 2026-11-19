@@ -3,9 +3,10 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 from amw_core.budget_guard import BudgetGuardCore, JobScope, MemoryBudgetBackend
-from amw_core.config import AmwSettings, FinanceSettings, load_settings
+from amw_core.config import AmwSettings, load_settings
 from amw_core.cost import MemoryCostLedger
 from amw_core.enums import (
     BudgetPeriod,
@@ -56,10 +57,17 @@ def tx_for(org: OrgId, actor: str = ORCH) -> MemoryTransaction:
     return MemoryTransaction(TenantContext(org, ActorRef(actor)))
 
 
+CURRENCY_EXPONENT_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "finance_currency_minor_exponent.toml"
+)
+"""Config data, not a code default: RV-07 (INR 2, USD 2); REQUIRES REVIEW (Q-O12, CCR-133)."""
+
+
 def settings(**finance: object) -> AmwSettings:
-    """Settings with the INR / USD minor-unit exponents a test needs (test data)."""
-    base = load_settings(environ={})
-    fin = FinanceSettings(currency_minor_exponent={"INR": 2, "USD": 2}, **finance)  # type: ignore[arg-type,unused-ignore]
+    """Settings with the INR / USD minor-unit exponents a test needs, loaded from the config
+    data fixture (the code itself has no default for ``finance.currency_minor_exponent``)."""
+    base = load_settings(environ={}, config_file=CURRENCY_EXPONENT_FIXTURE)
+    fin = base.finance.model_copy(update=finance)
     return base.model_copy(update={"finance": fin})
 
 

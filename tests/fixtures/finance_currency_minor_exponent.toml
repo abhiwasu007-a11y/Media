@@ -1,0 +1,8 @@
+# Config DATA for tests only (CCR-133, P4-07). The code has no default for this key (empty map,
+# a currency with no entry is refused CONFIG_INVALID).
+# Source: RV-07 (docs/v4/RESEARCH_LOG.md) - ISO 4217 list one, INR and USD minor units 2.
+# REQUIRES REVIEW (owner decision, Q-O12): which currencies budgets and ledger rows use; the set
+# becomes final when the owner answers.
+[finance.currency_minor_exponent]
+INR = 2
+USD = 2
