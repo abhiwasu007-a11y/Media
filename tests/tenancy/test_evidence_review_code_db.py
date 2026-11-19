@@ -150,3 +150,95 @@ def test_concurrent_writers_of_one_code_are_serialised(
         with pytest.raises(psycopg.Error) as err:
             _own(second, world, "Q7Z3")
         assert err.value.sqlstate == "AMW02"
+
+
+# --- review reply P4-01: one registry, approval-bound rows, isolation, format ------------------
+def _own_extra(code: str | None) -> dict[str, Any]:
+    return {"approval_id": None, "step_no": None, "job_id": None, "review_code": code}
+
+
+@pytest.mark.parametrize("kind", ["CONTRIBUTION", "OWNER_TOPIC", "STEP_DECISION"])
+def test_approval_bound_evidence_cannot_carry_another_rows_code(
+    admin: Conn, world: World, kind: str
+) -> None:
+    """Without the binding, 'confirm Q9Z3' meant for the own-code topic evidence could be bound as
+    the confirmation of an approval-bound row that merely copied the code."""
+    _own(admin, world, "Q9Z3")
+    decision = "APPROVED" if kind == "STEP_DECISION" else None
+    for code in ("Q9Z3", "Q8Z3", None):
+        with pytest.raises(psycopg.Error) as err, as_role(admin, "amw_operator", world.tenant) as c:
+            _insert_evidence(c, world, kind=kind, decision=decision, extra={"review_code": code})
+        assert err.value.sqlstate == "AMW02", code
+
+
+def test_approval_bound_evidence_code_is_checked_case_insensitively(
+    admin: Conn, world: World
+) -> None:
+    row = admin.execute("SELECT review_code FROM approvals WHERE id = %s", (world.approval,))
+    code = str(row.fetchone()[0])  # type: ignore[index]
+    with as_role(admin, "amw_operator", world.tenant) as c:
+        ev = _insert_evidence(c, world, extra={"review_code": code.lower()})
+    assert _code(admin, ev) == code.lower()
+
+
+def test_a_code_resolves_to_exactly_one_owner(admin: Conn, world: World) -> None:
+    ev = _own(admin, world, "Q9Z3")
+    _approval(admin, world, "Q8Z3")
+    with as_role(admin, "amw_operator", world.tenant) as c:
+        own = c.execute(
+            "SELECT owner_kind, owner_id FROM amw_review_code_owner(%s, %s)",
+            (world.tenant.org_uuid, "q9z3"),
+        ).fetchall()
+        appr = c.execute(
+            "SELECT owner_kind FROM amw_review_code_owner(%s, %s)",
+            (world.tenant.org_uuid, "Q8Z3"),
+        ).fetchall()
+        none = c.execute(
+            "SELECT 1 FROM amw_review_code_owner(%s, %s)", (world.tenant.org_uuid, "Q7Z3")
+        ).fetchall()
+    assert own == [("EVIDENCE", ev)]
+    assert appr == [("APPROVAL",)]
+    assert none == []
+
+
+@pytest.mark.parametrize("code", ["Q9", "Q9Z", "Q9Z3Q9Z3Z", "Q9Z3" * 8, "Q9 Z3", "Q9Z3\n"])
+def test_own_code_length_and_format_are_enforced_by_the_database(
+    admin: Conn, world: World, code: str
+) -> None:
+    with pytest.raises(psycopg.Error) as err:
+        _own(admin, world, code)
+    assert err.value.sqlstate == "AMW02"
+
+
+@pytest.mark.parametrize("code", ["Q9Z3", "Q9Z3K", "Q9Z3KMNP"])
+def test_own_code_length_range_is_accepted(admin: Conn, world: World, code: str) -> None:
+    assert _code(admin, _own(admin, world, code)) == code
+
+
+def test_approval_code_is_immutable(admin: Conn, world: World) -> None:
+    with pytest.raises(psycopg.Error) as err, as_role(admin, "amw_app", world.tenant) as c:
+        c.execute("UPDATE approvals SET review_code = 'Z9Z9' WHERE id = %s", (world.approval,))
+    assert err.value.sqlstate == "AMW02"
+
+
+def test_repeatable_read_cannot_share_a_code_across_tables(
+    pg_dsn: str, admin: Conn, world: World
+) -> None:
+    """The evidence transaction's snapshot predates a committed approval holding the code: the
+    registry's unique key still refuses it (a table-scan check would not)."""
+    with psycopg.connect(pg_dsn) as reader:
+        reader.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        reader.execute("SET SESSION AUTHORIZATION amw_operator")
+        reader.execute("SELECT set_config('app.org_id', %s, false)", (str(world.tenant.org_uuid),))
+        reader.execute("SELECT count(*) FROM approvals").fetchone()  # snapshot taken here
+        _approval(admin, world, "Q4Z3")  # committed after the snapshot
+        with pytest.raises(psycopg.Error) as err:
+            _insert_evidence(
+                reader, world, kind="OWNER_TOPIC", decision=None, extra=_own_extra("Q4Z3")
+            )
+        assert err.value.sqlstate in ("AMW02", "40001")
+    total = admin.execute(
+        "SELECT (SELECT count(*) FROM approvals WHERE upper(review_code) = 'Q4Z3')"
+        " + (SELECT count(*) FROM owner_instruction_evidence WHERE review_code = 'Q4Z3')"
+    ).fetchone()
+    assert total == (1,)

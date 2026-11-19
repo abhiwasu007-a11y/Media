@@ -53,6 +53,8 @@ from amw_core.owner_evidence_review_code import (
     ALPHABET,
     DEFAULT_LENGTH,
     DIGITS,
+    MAX_LENGTH,
+    MIN_LENGTH,
     generate_review_code,
 )
 from amw_core.owner_evidence_verifier import (
@@ -133,6 +135,7 @@ class FakeEvidenceDatabase:
         self._rows: dict[tuple[OrgId, WireId], EvidenceRecord] = {}
         self._applied: dict[tuple[OrgId, WireId], HumanRecord] = {}
         self._approval_codes: dict[OrgId, set[str]] = {}
+        self._approval_code_of: dict[tuple[OrgId, str], str] = {}
 
     # --- sessions -----------------------------------------------------------------------
     def login(self, role: DbRole, password: str) -> FakeDbSession:
@@ -188,18 +191,42 @@ class FakeEvidenceDatabase:
         }
         return own | self._approval_codes.get(org, set())
 
-    def register_approval_code(self, tx: TenantTransaction, code: str) -> None:
-        """Models an ``approvals`` row's ``review_code`` (``UNIQUE (org_id, review_code)`` plus
-        the 0052 cross-table trigger): refused when any approval or evidence code of the org
-        equals it, case-insensitively."""
+    def register_approval_code(
+        self, tx: TenantTransaction, code: str, approval_id: str | None = None
+    ) -> None:
+        """Models an ``approvals`` row's ``review_code`` (the 0052 ``review_codes`` registry):
+        refused when any approval or evidence code of the org equals it, case-insensitively.
+        With ``approval_id``, evidence tied to that approval must carry exactly this code."""
         org = tx.context.org_id
         if code.upper() in self._codes_in_use(org):
             raise IdempotencyConflictError("review code already used in this org")
         self._approval_codes.setdefault(org, set()).add(code.upper())
+        if approval_id is not None:
+            self._approval_code_of[(org, approval_id)] = code.upper()
+
+    def _check_approval_code(self, org: OrgId, evidence: NewEvidence, state: EvidenceState) -> None:
+        """0052: evidence tied to an approval carries that approval's code and never another
+        row's code (an own code, or another approval's), so a code resolves to one row."""
+        code = (evidence.review_code or "").upper()
+        if not code:
+            return
+        expected = self._approval_code_of.get((org, str(evidence.approval_id)))
+        if expected is not None and code != expected:
+            raise PermissionDeniedError("evidence must carry its approval's review code")
+        own = {
+            r.evidence.review_code.upper()
+            for (o, _), r in self._rows.items()
+            if o == org and r.evidence.approval_id is None and r.evidence.review_code
+        }
+        if code in own:
+            raise PermissionDeniedError("evidence must carry its approval's review code")
 
     def _own_code(self, org: OrgId, evidence: NewEvidence, state: EvidenceState) -> NewEvidence:
         """The store's own review code for evidence without an approval (CCR-116)."""
-        if evidence.approval_id is not None or not needs_own_review_code(evidence.record_kind):
+        if evidence.approval_id is not None:
+            self._check_approval_code(org, evidence, state)
+            return evidence
+        if not needs_own_review_code(evidence.record_kind):
             return evidence
         taken = self._codes_in_use(org)
         code = evidence.review_code
@@ -211,7 +238,8 @@ class FakeEvidenceDatabase:
             )
             return replace(evidence, review_code=fresh)
         well_formed = (
-            all(c in ALPHABET for c in code)
+            MIN_LENGTH <= len(code) <= MAX_LENGTH
+            and all(c in ALPHABET for c in code)
             and any(c in DIGITS for c in code)
             and any(c not in DIGITS for c in code)
         )

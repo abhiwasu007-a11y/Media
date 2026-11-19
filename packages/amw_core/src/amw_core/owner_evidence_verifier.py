@@ -493,6 +493,17 @@ def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
     return None
 
 
+_ALNUM_RUN = re.compile(r"[^\W_]+")
+
+
+def _strict_words(content: str) -> list[str]:
+    """Strict token boundary: invisible (``Cf``) characters are removed, then every run of letters
+    and digits is a word (an apostrophe, underscore or any punctuation ends it), so ``R7K2's``,
+    ``R7K2_`` and ``R<ZWSP>7K2`` all contain the code-shaped word ``r7k2``."""
+    folded = normalise("".join(c for c in content if unicodedata.category(c) != "Cf"))
+    return _ALNUM_RUN.findall(folded)
+
+
 def _subject_reference(content: str, evidence: NewEvidence, policy: VerifierPolicy) -> bool:
     """A8 for CONTENT / SCORE: the review code exactly once (and no other code-shaped token) or
     the job wire ID. Exception (CCR-116): ``OWNER_TOPIC`` / ``DATASET_INTAKE`` precede the job and
@@ -503,7 +514,11 @@ def _subject_reference(content: str, evidence: NewEvidence, policy: VerifierPoli
         if evidence.job_id is not None and evidence.job_id in content:
             return False
         job_prefix = f"{Prefix.JOB.value}_"
-        return not any(shape.fullmatch(w) or w.startswith(job_prefix) for w in tokens(content))
+        strict = _strict_words(content)
+        clean = normalise("".join(c for c in content if unicodedata.category(c) != "Cf"))
+        return job_prefix not in clean and not any(
+            shape.fullmatch(w) for w in (*tokens(content), *strict)
+        )
     text = content.replace(evidence.job_id, " ") if evidence.job_id else content
     words = tokens(text)
     code = normalise(evidence.review_code) if evidence.review_code else None

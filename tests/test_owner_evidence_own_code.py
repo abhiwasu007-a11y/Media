@@ -141,3 +141,54 @@ def test_refused_row_needs_no_code_and_approval_rows_keep_the_approval_code() ->
     assert h.record(t, bound).evidence.review_code == "R7K2"
     decision = topic(record_kind=EvidenceRecordKind.STEP_DECISION, event_uuid="ev-9")
     assert h.record(t, decision).evidence.review_code is None
+
+
+def test_approval_bound_evidence_cannot_carry_another_rows_code() -> None:
+    """A code resolves to one row: copying an own code (or another approval's) into evidence tied
+    to an approval is refused (0052; the fake models the trigger)."""
+    h, t = harness(), tx()
+    h.record(t, topic(review_code="Q9Z3"))
+    approval = ids.APPROVAL.new()
+    h.db.register_approval_code(t, "R7K2", str(approval))
+    base = {"record_kind": EvidenceRecordKind.CONTRIBUTION, "approval_id": approval}
+    with pytest.raises(PermissionDeniedError):
+        h.record(t, topic(**base, review_code="Q9Z3", event_uuid="ev-10"))
+    with pytest.raises(PermissionDeniedError):
+        h.record(t, topic(**base, review_code="Q8Z3", event_uuid="ev-11"))
+    ok = h.record(t, topic(**base, review_code="r7k2", event_uuid="ev-12"))
+    assert ok.evidence.review_code == "r7k2"
+
+
+@pytest.mark.parametrize("code", ["Q9Z", "Q9Z3Q9Z3Z", "Q9Z3" * 8])
+def test_own_code_length_is_bounded(code: str) -> None:
+    with pytest.raises(PermissionDeniedError):
+        harness().record(tx(), topic(review_code=code))
+    assert harness().record(tx(), topic(review_code="Q9Z3KMNP")).evidence.review_code
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "R7K2's note: " + TOPIC,
+        "R7K2_ " + TOPIC,
+        "R​7K2 " + TOPIC,
+        "R7K2⁠ " + TOPIC,
+        "r7k2. " + TOPIC,
+        "(R7K2) " + TOPIC,
+        "job​_0190aaaa " + TOPIC,
+    ],
+)
+def test_first_message_with_a_code_shaped_word_is_refused_at_a_strict_boundary(
+    message: str,
+) -> None:
+    h, t = harness(event(message)), tx()
+    row = h.record(t, topic())
+    out = h.verify_recorded(t, row.id, None, NOW)
+    assert out.state is EvidenceState.REFUSED
+    assert out.refused_reason == "subject_reference"
+
+
+def test_plain_first_message_still_verifies() -> None:
+    h, t = harness(event(TOPIC)), tx()
+    row = h.record(t, topic())
+    assert h.verify_recorded(t, row.id, None, NOW).state is EvidenceState.VERIFIED
