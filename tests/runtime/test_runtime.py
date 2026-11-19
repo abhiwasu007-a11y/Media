@@ -11,10 +11,11 @@ from typing import Any
 import pytest
 
 from amw_core.errors import ConfigInvalidError
+from amw_core.owner_evidence_status import EvidenceSourceKind, EvidenceStatus
 from amw_runtime.calendar import MarketCalendar
 from amw_runtime.chartdata import ChartDataPolicy, assert_bars_older_than_lag
 from amw_runtime.config import DEFAULT_CONFIG_FILE, RuntimeConfig, load_runtime_config
-from amw_runtime.confirmations import SUBJECT_KIND, ConfirmationKind, ConfirmationRecord
+from amw_runtime.confirmations import ConfirmationKind, ConfirmationRecord
 from amw_runtime.data_files import DATA_DIR
 from amw_runtime.disclaimer import DRAFT_STATUS, get_disclaimer
 from amw_runtime.errors import (
@@ -94,9 +95,10 @@ class Row:
             "recorded_from": "OWNER_CHAT_OPERATOR",
             "org_id": rec.org_id,
             "kind": rec.kind.value,
-            "subject_kind": SUBJECT_KIND,
-            "subject_id": rec.subject(),
-            "source_kind": "REAL",
+            "subject_kind": "OWNER_STATEMENT",
+            "subject_id": "subject-1",
+            "subject": rec.subject(),
+            "source_kind": EvidenceSourceKind.REAL,
             "mac_valid": True,
             **over,
         }
@@ -329,17 +331,19 @@ def test_real_run_refuses_without_evidence_backed_fin_r10(case: str) -> None:
     "over",
     [
         {"org_id": "org-9"},
-        {"subject_id": "other"},
+        {"subject": "other"},
+        {"subject": None},
+        {"kind": None},
         {"kind": "PROVIDER_LIMIT"},
-        {"subject_kind": "OTHER"},
         {"mac_valid": False},
-        {"source_kind": "TEST_FIXTURE"},
+        {"source_kind": EvidenceSourceKind.TEST_FIXTURE},
         {"source_kind": "?"},
         {"evidence_id": "ev-other"},
         {"org_id": MISSING},
         {"kind": MISSING},
         {"subject_kind": MISSING},
         {"subject_id": MISSING},
+        {"subject": MISSING},
         {"source_kind": MISSING},
         {"mac_valid": MISSING},
         {"evidence_id": MISSING},
@@ -372,13 +376,13 @@ def test_minimal_old_status_row_is_a_typed_refusal() -> None:
 
 def test_test_fixture_evidence_row_only_in_dry_run_and_never_clears_fin_r10() -> None:
     recs = [limit(p) for p in ("anthropic", "elevenlabs")]
-    ev = Lookup(recs, source_kind="TEST_FIXTURE")
+    ev = Lookup(recs, source_kind=EvidenceSourceKind.TEST_FIXTURE)
     rep = run_preflight(cfg(), recs, env=DEV, evidence=ev, render_start=EVENING, org_id=ORG)
     assert "PROVIDER_LIMIT:anthropic" in rep.checks_passed
     with pytest.raises(PreflightRefused) as exc:
         real(recs, evidence=ev)
     assert {"PROVIDER_LIMIT:anthropic", "PROVIDER_LIMIT:elevenlabs"} <= codes(exc)
-    ev_r10 = Lookup([*recs, r10()], source_kind="TEST_FIXTURE")
+    ev_r10 = Lookup([*recs, r10()], source_kind=EvidenceSourceKind.TEST_FIXTURE)
     dry = run_preflight(
         cfg(), [*recs, r10()], env=DEV, evidence=ev_r10, render_start=EVENING, org_id=ORG
     )
@@ -441,9 +445,9 @@ def test_evidence_for_another_provider_or_amount_is_refused() -> None:
     recs = [*real_limits(), r10()]
     ev = Lookup(recs)
     ev.rows["ev-anthropic"] = Row(
-        limit("anthropic"), subject_id=limit("anthropic", amount_minor=1).subject()
+        limit("anthropic"), subject=limit("anthropic", amount_minor=1).subject()
     )
-    ev.rows["ev-elevenlabs"] = Row(limit("elevenlabs"), subject_id=limit("anthropic").subject())
+    ev.rows["ev-elevenlabs"] = Row(limit("elevenlabs"), subject=limit("anthropic").subject())
     with pytest.raises(PreflightRefused) as exc:
         real(recs, evidence=ev)
     assert codes(exc) == {"PROVIDER_LIMIT:anthropic", "PROVIDER_LIMIT:elevenlabs"}
@@ -796,3 +800,26 @@ def test_override_path_must_be_absolute_and_fully_resolved(tmp_path: Path) -> No
     ):
         with pytest.raises(ConfigInvalidError):
             load_runtime_config(env, override_path=bad)
+
+
+def test_real_contract_type_is_accepted() -> None:
+    """The shared amw_core EvidenceStatus is what a real lookup returns."""
+    recs = [*real_limits(), r10()]
+
+    class Real:
+        def get(self, evidence_id: str) -> EvidenceStatus | None:
+            rec = next(r for r in recs if r.evidence_id == evidence_id)
+            return EvidenceStatus(
+                evidence_id=evidence_id,
+                evidence_state="CONFIRMED",
+                recorded_from="OWNER_CHAT_OPERATOR",
+                org_id=ORG,
+                kind=rec.kind.value,
+                subject_kind="OWNER_STATEMENT",
+                subject_id="s",
+                subject=rec.subject(),
+                source_kind=EvidenceSourceKind.REAL,
+                mac_valid=True,
+            )
+
+    assert "FIN_R10" in real(recs, evidence=Real()).checks_passed

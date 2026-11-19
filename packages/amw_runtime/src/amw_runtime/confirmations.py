@@ -1,16 +1,33 @@
 """Owner confirmation records and the evidence lookup Protocol (reuses the owner-evidence model
 of 08/04: a CONFIRMED row verified by the verifier; R14 is not weakened).
 
-Binding (review M2): each record has a ``subject()`` key built from (kind, provider, amount,
-currency, org). A real-run preflight requires the evidence row to report the same org, kind and
-subject, a valid MAC and a REAL source, and distinct evidence per record, so one evidence id
-cannot clear two items. A row that lacks any attribute is refused with a typed item (fail closed).
+Binding (review M2): each record has a ``subject()`` key (``subject_key`` of amw_core: kind,
+provider, amount, currency, org). A real-run preflight requires the evidence row to report
+the same org, kind and subject, a valid MAC and a REAL source, and distinct evidence per
+record, so one evidence id cannot clear two items. A row that lacks any attribute is refused
+with a typed item (fail closed).
 """
 
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
+
+from amw_core.owner_evidence_status import (
+    EvidenceSourceKind,
+    EvidenceStatus,
+    EvidenceStatusLookup,
+    subject_key,
+)
+
+# The evidence-status contract is owned by amw_core (PR #77, CCR-260/261); re-exported here.
+__all__ = [
+    "ConfirmationKind",
+    "ConfirmationRecord",
+    "EvidenceSourceKind",
+    "EvidenceStatus",
+    "EvidenceStatusLookup",
+]
 
 
 class ConfirmationKind(StrEnum):
@@ -47,53 +64,6 @@ class ConfirmationRecord(BaseModel):
 
     def subject(self) -> str:
         """Stable key the evidence row must carry (kind, provider, amount, currency, org)."""
-        return (
-            f"{self.kind.value}|{self.provider or '-'}|"
-            f"{'-' if self.amount_minor is None else self.amount_minor}|"
-            f"{self.currency or '-'}|{self.org_id or '-'}"
+        return subject_key(
+            self.kind.value, self.provider, self.amount_minor, self.currency, self.org_id
         )
-
-
-# Binding constants (provisional until PR #77 / CCR-260 fixes the shared evidence contract in
-# amw_core; the attribute NAMES below are the agreed ones). The row's subject is the preflight
-# confirmation identified by ``ConfirmationRecord.subject()``.
-SUBJECT_KIND = "PREFLIGHT_CONFIRMATION"
-SOURCE_REAL = "REAL"
-SOURCE_TEST_FIXTURE = "TEST_FIXTURE"
-
-
-class EvidenceView(Protocol):
-    """What the runtime needs of an owner-evidence row. The attribute names are those of the
-    shared evidence contract owned by PR #77 (``amw_core``, CCR-260/261). The runtime reads every
-    attribute defensively: a missing or wrongly typed one is a typed refusal, never an error."""
-
-    @property
-    def evidence_id(self) -> str: ...
-
-    @property
-    def evidence_state(self) -> str: ...  # "CONFIRMED" once the verifier confirmed it
-
-    @property
-    def recorded_from(self) -> str: ...  # "OWNER_CHAT_OPERATOR"
-
-    @property
-    def org_id(self) -> str: ...
-
-    @property
-    def kind(self) -> str: ...  # the ConfirmationKind value
-
-    @property
-    def subject_kind(self) -> str: ...
-
-    @property
-    def subject_id(self) -> str: ...
-
-    @property
-    def source_kind(self) -> str: ...  # REAL | TEST_FIXTURE
-
-    @property
-    def mac_valid(self) -> bool: ...
-
-
-class EvidenceLookup(Protocol):
-    def get(self, evidence_id: str) -> EvidenceView | None: ...

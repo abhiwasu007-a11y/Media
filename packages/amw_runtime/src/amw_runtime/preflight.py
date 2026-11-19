@@ -15,12 +15,10 @@ from amw_core.errors import ConfigInvalidError
 from amw_runtime.calendar import MarketCalendar, now_utc
 from amw_runtime.config import ENV_MODE, RunMode, RuntimeConfig, load_runtime_config
 from amw_runtime.confirmations import (
-    SOURCE_REAL,
-    SOURCE_TEST_FIXTURE,
-    SUBJECT_KIND,
     ConfirmationKind,
     ConfirmationRecord,
-    EvidenceLookup,
+    EvidenceSourceKind,
+    EvidenceStatusLookup,
 )
 from amw_runtime.disclaimer import Disclaimer, get_disclaimer
 from amw_runtime.errors import DisclaimerError, PreflightRefused, UnmetItem
@@ -62,7 +60,7 @@ def _attrs(row: object, *names: str) -> dict[str, object] | None:
 
 def _evidence_problem(
     rec: ConfirmationRecord,
-    evidence: EvidenceLookup | None,
+    evidence: EvidenceStatusLookup | None,
     org_id: str | None,
     used_ids: set[str],
     *,
@@ -93,6 +91,7 @@ def _evidence_problem(
         "kind",
         "subject_kind",
         "subject_id",
+        "subject",
         "source_kind",
         "mac_valid",
     )
@@ -102,17 +101,16 @@ def _evidence_problem(
         return "evidence row MAC is not valid"
     if a["evidence_state"] != CONFIRMED or a["recorded_from"] != OWNER_CHANNEL:
         return "evidence row is not CONFIRMED from the owner chat channel"
-    if a["source_kind"] == SOURCE_TEST_FIXTURE:
+    if a["source_kind"] == EvidenceSourceKind.TEST_FIXTURE:
         if real_run:
             return "TEST_FIXTURE evidence refused in real-run mode"
-    elif a["source_kind"] != SOURCE_REAL:
+    elif a["source_kind"] != EvidenceSourceKind.REAL:
         return "evidence row source is neither REAL nor TEST_FIXTURE"
     if (
         a["evidence_id"] != rec.evidence_id
         or a["org_id"] != org_id
-        or a["kind"] != rec.kind.value
-        or a["subject_kind"] != SUBJECT_KIND
-        or a["subject_id"] != rec.subject()
+        or a["kind"] != rec.kind.value  # None: the row does not state this claim
+        or a["subject"] != rec.subject()  # None: unbound
     ):
         return "evidence row is not bound to this org, kind and subject"
     used_ids.add(rec.evidence_id)
@@ -123,7 +121,7 @@ def _limit_problem(
     config: RuntimeConfig,
     provider: str,
     records: Sequence[ConfirmationRecord],
-    evidence: EvidenceLookup | None,
+    evidence: EvidenceStatusLookup | None,
     org_id: str | None,
     used_ids: set[str],
 ) -> tuple[str | None, bool]:
@@ -162,7 +160,7 @@ def run_preflight(
     confirmations: Sequence[ConfirmationRecord],
     *,
     env: Mapping[str, str] | None = None,
-    evidence: EvidenceLookup | None = None,
+    evidence: EvidenceStatusLookup | None = None,
     calendar: MarketCalendar | None = None,
     render_start: datetime | None = None,
     org_id: str | None = None,
