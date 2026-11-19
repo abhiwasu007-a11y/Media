@@ -12,6 +12,7 @@ ever touches a price.
 import csv
 import hashlib
 import io
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -54,13 +55,23 @@ class BarSeries:
         return self.bars[first : last + 1]
 
 
+_PLAIN_DECIMAL = re.compile(r"^[0-9]{1,12}(\.[0-9]{1,8})?$")
+
+
 def _decimal(raw: str) -> Decimal:
+    """A plain positive decimal price: no sign, no exponent, no NaN or infinity, not zero."""
+    text = raw.strip()
+    if not _PLAIN_DECIMAL.match(text):
+        lowered = text.lower()
+        if lowered in ("nan", "inf", "infinity", "-inf", "+inf"):
+            raise InputInvalidError("dataset holds a non-finite price")
+        raise InputInvalidError("dataset holds a non-decimal or signed price")
     try:
-        value = Decimal(raw.strip())
-    except InvalidOperation:
+        value = Decimal(text)
+    except InvalidOperation:  # pragma: no cover - the pattern admits only valid decimals
         raise InputInvalidError("dataset holds a non-decimal price") from None
-    if not value.is_finite():
-        raise InputInvalidError("dataset holds a non-finite price")
+    if value <= 0:
+        raise InputInvalidError("dataset holds a zero price")
     return value
 
 

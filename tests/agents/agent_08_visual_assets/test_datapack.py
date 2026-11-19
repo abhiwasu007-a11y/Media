@@ -1,15 +1,20 @@
 # mypy: disable-error-code="arg-type,attr-defined,misc,has-type,no-untyped-def,no-any-return"
 # mypy: disable-error-code="assignment,union-attr,index,call-arg,no-untyped-call,type-arg"
 # (test helpers feed dataset dicts and fakes into typed APIs; the package is strict clean)
-"""data_pack chart scenes (tier C): reader port, per-bar lag, RSI, rendering, facts, registration.
+"""data_pack chart scenes (tier C): guarded intake, per-bar lag from the system clock, RSI,
+rendering, chart facts, stage wiring.
 
 Every bar here is SYNTHETIC, generated at test time; no market data is read or committed.
 """
 
+import hashlib
+import inspect
 import io
+import json
+import os
 import random
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,7 +24,8 @@ from pydantic import ValidationError
 
 from agent_06_fact_checker.models import DataAge
 from agent_06_fact_checker.price_age import classify
-from agent_08_visual_assets.charts.annotations import Annotation
+from agent_08_visual_assets.charts.annotations import Annotation, Connector
+from agent_08_visual_assets.charts.cases import ChartCase
 from agent_08_visual_assets.charts.datapack import (
     DataPackSettings,
     FileDataPackReader,
@@ -28,21 +34,30 @@ from agent_08_visual_assets.charts.datapack import (
 from agent_08_visual_assets.charts.datapack_builder import (
     SOURCE_LABEL,
     ChartFontCheck,
-    Connector,
     DataPackChartBuilder,
-    DataPackChartRegistrar,
     DataPackChartRequest,
     DataPackLagGuard,
+    RegisteredDataset,
     is_data_within_lag,
+    ist_today,
     provenance_json,
 )
-from agent_08_visual_assets.charts.dataset import Bar
+from agent_08_visual_assets.charts.dataset import Bar, DatasetLoader
 from agent_08_visual_assets.charts.fonts import PinnedFontResolver
 from agent_08_visual_assets.charts.render import rsi
-from amw_core.enums import AssetKind, DataAgeVsLag, LicenceSourceType, VisualSourceTier
-from amw_core.errors import ConfigInvalidError, InputInvalidError, MissingDependencyError
-from tests.agents.agent_08_visual_assets.fixtures import PALETTE, World
+from agent_08_visual_assets.persistence.records import NewAsset
+from agent_08_visual_assets.registrar import AssetRegistrar, Intake
+from amw_core.enums import ActorKind, AssetKind, DataAgeVsLag, LicenceSourceType
+from amw_core.errors import (
+    ConfigInvalidError,
+    CorruptedOutputError,
+    InputInvalidError,
+    MissingDependencyError,
+    PermissionDeniedError,
+)
+from tests.agents.agent_08_visual_assets.fixtures import PALETTE, FixedClock, World
 from tests.agents.agent_08_visual_assets.schemas import facts_schema
+from tests.agents.agent_08_visual_assets.test_stage import OVERLAYS, Env, plan
 
 ROOT = Path(__file__).resolve().parents[3]
 FONT_MANIFEST = (
@@ -52,15 +67,14 @@ FONT_MANIFEST = (
 )
 DS_ID = "ast_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e0c"
 AS_OF = date(2026, 6, 1)
+CLOCK = FixedClock(datetime(2026, 6, 1, 6, 0, tzinfo=UTC))  # IST date 2026-06-01
 
 
-def pack_csv(
-    n: int = 260, start: date = date(2025, 1, 1), step: int = 1, seed: int = 11, header: str = ""
-) -> bytes:
+def pack_csv(n: int = 260, start: date = date(2025, 1, 1), step: int = 1, seed: int = 11) -> bytes:
     """Synthetic daily rows in the data_pack layout (``timestamp`` first, extra columns)."""
     rnd = random.Random(seed)  # noqa: S311
     price = 100.0
-    rows = [header or "timestamp,open,high,low,close,volume"]
+    rows = ["timestamp,open,high,low,close,volume"]
     for i in range(n):
         o, c = price, price + rnd.uniform(-2, 2)
         h, low = max(o, c) + rnd.uniform(0, 1), min(o, c) - rnd.uniform(0, 1)
@@ -69,15 +83,29 @@ def pack_csv(
     return ("\n".join(rows) + "\n").encode()
 
 
+def registered(content: bytes | None = None, **attrs: object) -> RegisteredDataset:
+    content = content or pack_csv()
+    sha = hashlib.sha256(content).hexdigest()
+    series = DatasetLoader.parse(content, max_bars=10000, sha256=sha)
+    base = {
+        "doc_kind": "DATASET",
+        "source_path_class": "data_pack",
+        "instrument": "SYN",
+        "timeframe": "1D",
+        "data_pack_manifest_sha256": "a" * 64,
+    }
+    return RegisteredDataset(DS_ID, sha, {**base, **attrs}, series)
+
+
 def palette():
     font = PinnedFontResolver.resolve(FONT_MANIFEST)
     return replace(PALETTE, font_path=str(font.path), font_sha256=font.sha256)
 
 
-def builder(reader=None, **over):
+def builder(**over):
     kw = {
-        "reader": reader or MemoryDataPackReader({"SYN@1D": pack_csv()}),
         "palette": palette(),
+        "clock": CLOCK,
         "lag_days": 30,
         "platform_min_lag_days": 30,
         "width_px": 1920,
@@ -113,6 +141,17 @@ def bars_ending(last: date, n: int = 5, step: int = 1) -> list[Bar]:
     return [Bar(last - timedelta(days=(n - 1 - i) * step), d, d, d, d) for i in range(n)]
 
 
+def _check(bars, timeframe="1D", clip=False):
+    return DataPackLagGuard.check(
+        bars,
+        timeframe=timeframe,
+        as_of=AS_OF,
+        lag_days=30,
+        platform_min_lag_days=30,
+        clip_to_lag=clip,
+    )
+
+
 # -- lag per bar -------------------------------------------------------------------------------
 
 
@@ -120,15 +159,8 @@ def bars_ending(last: date, n: int = 5, step: int = 1) -> list[Bar]:
 @pytest.mark.parametrize(("age", "ok"), [(30, True), (29, False), (31, True)])
 def test_lag_boundary_daily(age: int, ok: bool) -> None:
     bars = bars_ending(AS_OF - timedelta(days=age))
-    kw = {
-        "timeframe": "1D",
-        "as_of": AS_OF,
-        "lag_days": 30,
-        "platform_min_lag_days": 30,
-        "clip_to_lag": False,
-    }
     if ok:
-        keep, proof = DataPackLagGuard.check(bars, **kw)
+        keep, proof = _check(bars)
         assert keep == len(bars)
         assert proof.age_days == age
         assert proof.data_age_vs_lag is DataAgeVsLag.OLDER_THAN_LAG
@@ -137,7 +169,7 @@ def test_lag_boundary_daily(age: int, ok: bool) -> None:
         assert proof.earliest_compliant_publish_date == proof.data_end_date + timedelta(days=30)
     else:
         with pytest.raises(InputInvalidError) as exc:
-            DataPackLagGuard.check(bars, **kw)
+            _check(bars)
         assert is_data_within_lag(exc.value)
         assert exc.value.details["bars_within_lag"] == 1
 
@@ -148,14 +180,7 @@ def test_lag_arithmetic_matches_agent_06_classify(age: int) -> None:
     last = AS_OF - timedelta(days=age)
     ours = True
     try:
-        DataPackLagGuard.check(
-            bars_ending(last),
-            timeframe="1D",
-            as_of=AS_OF,
-            lag_days=30,
-            platform_min_lag_days=30,
-            clip_to_lag=False,
-        )
+        _check(bars_ending(last))
     except InputInvalidError:
         ours = False
     assert ours == (classify(last, AS_OF, 30) is DataAge.OLDER_THAN_LAG)
@@ -165,66 +190,141 @@ def test_lag_arithmetic_matches_agent_06_classify(age: int) -> None:
 @pytest.mark.parametrize(("bar_age", "ok"), [(36, True), (35, False)])
 def test_weekly_bar_covers_its_whole_week(bar_age: int, ok: bool) -> None:
     bars = bars_ending(AS_OF - timedelta(days=bar_age), n=3, step=7)
-    kw = {"as_of": AS_OF, "lag_days": 30, "platform_min_lag_days": 30, "clip_to_lag": False}
     if ok:
-        assert DataPackLagGuard.check(bars, timeframe="1W", **kw)[1].age_days == 30
+        assert _check(bars, "1W")[1].age_days == 30
     else:
         with pytest.raises(InputInvalidError):
-            DataPackLagGuard.check(bars, timeframe="1W", **kw)
+            _check(bars, "1W")
 
 
 @pytest.mark.unit
 def test_window_with_newer_bars_is_refused_never_truncated() -> None:
-    b = builder()
-    # the series runs 2025-01-01 + 259 days; as_of puts its last 9 bars (ages 21..29 days)
-    # inside the lag
     last_bar = date(2025, 1, 1) + timedelta(days=259)
-    as_of = last_bar + timedelta(days=21)
+    clock = FixedClock(datetime.combine(last_bar + timedelta(days=21), datetime.min.time(), UTC))
+    b = builder(clock=clock)
     req = request(window_end=last_bar)
+    # the last 9 bars (ages 21..29 days) are inside the lag
     with pytest.raises(InputInvalidError) as exc:
-        b.build(req, as_of=as_of, dataset_asset_id=DS_ID)
+        b.build(req, registered())
     assert is_data_within_lag(exc.value)
     assert exc.value.details["bars_within_lag"] == 9
-    assert exc.value.details["cutoff_date"] == (as_of - timedelta(days=30)).isoformat()
-    clipped = b.build(
-        req.model_copy(update={"clip_to_lag": True}), as_of=as_of, dataset_asset_id=DS_ID
-    )
+    clipped = b.build(req.model_copy(update={"clip_to_lag": True}), registered())
     assert clipped.lag.bars_clipped == 9
     assert clipped.lag.last_bar_date == last_bar - timedelta(days=9)
     assert clipped.provenance["lag_check"]["bars_clipped"] == 9
+    assert clipped.provenance["requested_window"] == ["2025-03-01", last_bar.isoformat()]
 
 
 @pytest.mark.unit
-def test_clip_with_no_old_bar_left_is_refused() -> None:
-    bars = bars_ending(AS_OF - timedelta(days=3))
+def test_clip_never_hides_a_future_bar_or_an_all_new_window() -> None:
+    bars = bars_ending(AS_OF - timedelta(days=40), n=3) + bars_ending(
+        AS_OF + timedelta(days=1), n=1
+    )
+    with pytest.raises(InputInvalidError, match="after the as-of date"):
+        _check(bars, clip=True)
     with pytest.raises(InputInvalidError) as exc:
-        DataPackLagGuard.check(
-            bars,
-            timeframe="1D",
-            as_of=AS_OF,
-            lag_days=30,
-            platform_min_lag_days=30,
-            clip_to_lag=True,
-        )
+        _check(bars_ending(AS_OF - timedelta(days=3)), clip=True)
     assert is_data_within_lag(exc.value)
-
-
-@pytest.mark.unit
-def test_future_bar_and_low_lag_are_refused() -> None:
-    with pytest.raises(InputInvalidError):
-        DataPackLagGuard.check(
-            bars_ending(AS_OF + timedelta(days=1)),
-            timeframe="1D",
-            as_of=AS_OF,
-            lag_days=30,
-            platform_min_lag_days=30,
-            clip_to_lag=True,
-        )
     with pytest.raises(ConfigInvalidError):
         builder(lag_days=29)
 
 
-# -- configuration and reader ------------------------------------------------------------------
+# -- as-of date comes from the system clock only (MAJOR-2) ---------------------------------------
+
+
+@pytest.mark.security
+def test_caller_cannot_pass_an_as_of_date() -> None:
+    assert "as_of" not in inspect.signature(DataPackChartBuilder.build).parameters
+    with pytest.raises(TypeError):
+        builder().build(request(), registered(), as_of=date(2099, 1, 1))
+
+
+@pytest.mark.security
+def test_payload_cannot_carry_an_as_of_date() -> None:
+    with pytest.raises(ValidationError):
+        request(as_of=date(2099, 1, 1))
+    case = json.loads(
+        json.dumps(
+            {
+                "case_id": "c",
+                "data_kind": "REAL_HISTORICAL",
+                "instrument": "SYN",
+                "timeframe": "1D",
+                "dataset_asset_id": DS_ID,
+                "window": None,
+                "window_dates": {"start_date": "2025-03-01", "end_date": "2025-06-30"},
+                "indicators": [],
+                "pattern_concept_ids": ["k"],
+                "outcome": "WORKED",
+                "annotations": [],
+                "method_content": False,
+                "template_id": "chart_datapack",
+            }
+        )
+    )
+    ChartCase.model_validate(case)
+    with pytest.raises(ValidationError):
+        ChartCase.model_validate({**case, "as_of": "2099-01-01"})
+
+
+@pytest.mark.security
+def test_an_old_clock_date_cannot_be_injected_through_the_request() -> None:
+    """A late clock passes a window, the real clock refuses it: only the clock decides."""
+    last_bar = date(2025, 1, 1) + timedelta(days=259)
+    req = request(window_end=last_bar)
+    late = FixedClock(datetime(2030, 1, 1, tzinfo=UTC))
+    real = FixedClock(datetime.combine(last_bar + timedelta(days=5), datetime.min.time(), UTC))
+    assert builder(clock=late).build(req, registered()).lag.as_of == date(2030, 1, 1)
+    with pytest.raises(InputInvalidError):
+        builder(clock=real).build(req, registered())
+
+
+@pytest.mark.unit
+def test_as_of_is_the_ist_calendar_date_of_the_utc_clock() -> None:
+    assert ist_today(FixedClock(datetime(2026, 5, 31, 18, 29, tzinfo=UTC))) == date(2026, 5, 31)
+    assert ist_today(FixedClock(datetime(2026, 5, 31, 18, 30, tzinfo=UTC))) == date(2026, 6, 1)
+    with pytest.raises(ConfigInvalidError):
+        ist_today(FixedClock(datetime(2026, 5, 31, 18, 30)))
+
+
+# -- the dataset actually read (MAJOR-1) ---------------------------------------------------------
+
+
+@pytest.mark.security
+@pytest.mark.parametrize(
+    ("ds_over", "exc"),
+    [
+        ({"content_sha256": "b" * 64}, CorruptedOutputError),
+        ({"attrs": {"source_path_class": "research"}}, InputInvalidError),
+        ({"attrs": {"doc_kind": "CHART_CASE"}}, InputInvalidError),
+        ({"attrs": {"instrument": "OTHER"}}, InputInvalidError),
+        ({"attrs": {"timeframe": "1W"}}, InputInvalidError),
+        ({"attrs": {"data_pack_manifest_sha256": None}}, InputInvalidError),
+    ],
+)
+def test_dataset_must_be_the_registered_data_pack_bytes(ds_over: dict, exc: type) -> None:
+    ds = registered(**ds_over.get("attrs", {}))
+    if "content_sha256" in ds_over:
+        ds = replace(ds, content_sha256=ds_over["content_sha256"])
+    with pytest.raises(exc):
+        builder().build(request(), ds)
+
+
+def _pack_dir(tmp_path: Path) -> Path:
+    root = tmp_path / "course" / "data_pack"
+    root.mkdir(parents=True)
+    (root / "syn.csv").write_bytes(pack_csv(50))
+    return root
+
+
+def _settings(root: Path, files: dict | None = None, max_bars: int = 1000) -> DataPackSettings:
+    return DataPackSettings.from_mapping(
+        {
+            "charts.data_pack_root": str(root),
+            "charts.data_pack_files": files or {"SYN@1D": "syn.csv"},
+        },
+        max_bars=max_bars,
+    )
 
 
 @pytest.mark.unit
@@ -236,6 +336,7 @@ def test_future_bar_and_low_lag_are_refused() -> None:
         {"charts.data_pack_root": "/x"},
         {"charts.data_pack_root": "/x", "charts.data_pack_files": {}},
         {"charts.data_pack_root": "/x", "charts.data_pack_files": {"SYN@1D": "../a.csv"}},
+        {"charts.data_pack_root": "/x", "charts.data_pack_files": {"SYN@1D": "d/a.csv"}},
         {"charts.data_pack_root": "/x", "charts.data_pack_files": {"SYN@5M": "a.csv"}},
     ],
 )
@@ -244,44 +345,86 @@ def test_missing_or_bad_data_pack_config_fails_closed(raw: dict) -> None:
         DataPackSettings.from_mapping(raw, max_bars=1000)
 
 
-@pytest.mark.unit
-def test_root_that_is_not_a_directory_is_config_invalid(tmp_path: Path) -> None:
-    s = DataPackSettings.from_mapping(
-        {
-            "charts.data_pack_root": str(tmp_path / "absent"),
-            "charts.data_pack_files": {"SYN@1D": "syn.csv"},
-        },
-        max_bars=1000,
-    )
-    with pytest.raises(ConfigInvalidError):
-        FileDataPackReader(s)
+@pytest.mark.security
+def test_root_must_be_the_course_data_pack_folder(tmp_path: Path) -> None:
+    root = _pack_dir(tmp_path)
+    FileDataPackReader(_settings(root))
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    for bad in (tmp_path / "absent", other, tmp_path / "course"):
+        with pytest.raises(ConfigInvalidError):
+            FileDataPackReader(_settings(bad))
+    for area in ("HOLDOUT", "IS", "val", "oos", "holdout_2024"):
+        sealed = tmp_path / area / "course" / "data_pack"
+        sealed.mkdir(parents=True)
+        with pytest.raises(ConfigInvalidError, match="research area"):
+            FileDataPackReader(_settings(sealed))
+
+
+@pytest.mark.security
+def test_symlinked_root_or_file_and_oversize_file_are_refused(tmp_path: Path) -> None:
+    root = _pack_dir(tmp_path)
+    link_parent = tmp_path / "alias" / "course"
+    link_parent.mkdir(parents=True)
+    os.symlink(root, link_parent / "data_pack")
+    with pytest.raises(ConfigInvalidError, match="symbolic link"):
+        FileDataPackReader(_settings(link_parent / "data_pack"))
+    outside = tmp_path / "outside.csv"
+    outside.write_bytes(pack_csv(10))
+    os.symlink(outside, root / "linked.csv")
+    with pytest.raises(ConfigInvalidError, match="not a regular file"):
+        FileDataPackReader(_settings(root, {"SYN@1D": "linked.csv"})).read("SYN", "1D")
+    with pytest.raises(ConfigInvalidError, match="size cap"):
+        FileDataPackReader(_settings(root, max_bars=2)).read("SYN", "1D")
 
 
 @pytest.mark.unit
 def test_file_reader_reads_configured_files_only(tmp_path: Path) -> None:
-    (tmp_path / "syn.csv").write_bytes(pack_csv(50))
-    s = DataPackSettings.from_mapping(
-        {
-            "charts.data_pack_root": str(tmp_path),
-            "charts.data_pack_files": {"SYN@1D": "syn.csv", "OTH@1D": "missing.csv"},
-        },
-        max_bars=1000,
-    )
-    reader = FileDataPackReader(s)
+    root = _pack_dir(tmp_path)
+    s = _settings(root, {"SYN@1D": "syn.csv", "OTH@1D": "missing.csv"})
     with pytest.raises(ConfigInvalidError):  # every configured file must exist (manifest)
-        reader.load("SYN", "1D")
-    (tmp_path / "missing.csv").write_bytes(pack_csv(10, seed=3))
+        FileDataPackReader(s).read("SYN", "1D")
+    (root / "missing.csv").write_bytes(pack_csv(10, seed=3))
     reader = FileDataPackReader(s)
-    series = reader.load("SYN", "1D")
-    assert len(series.bars) == 50
+    pack = reader.read("SYN", "1D")
+    assert pack.sha256 == hashlib.sha256(pack.content).hexdigest()
     first = reader.manifest_sha256()
-    assert series.manifest_sha256 == first
+    assert pack.manifest_sha256 == first
     with pytest.raises(MissingDependencyError):
-        reader.load("NONE", "1D")
+        reader.read("NONE", "1D")
     with pytest.raises(InputInvalidError):
-        reader.load("SYN", "5M")
-    (tmp_path / "missing.csv").write_bytes(pack_csv(11, seed=3))
+        reader.read("SYN", "5M")
+    (root / "missing.csv").write_bytes(pack_csv(11, seed=3))
     assert FileDataPackReader(s).manifest_sha256() != first
+
+
+@pytest.mark.security
+def test_intake_guard_runs_before_the_pack_is_read() -> None:
+    w = World()
+    reg = AssetRegistrar(assets=w.assets, blobs=w.blobs, audit=w.audit, max_dataset_bars=5000)
+    reader = MemoryDataPackReader({"SYN@1D": pack_csv(80)})
+    for intake, exc in (
+        (Intake(ActorKind.AGENT, w.ctx.actor, True, "data_pack"), PermissionDeniedError),
+        (Intake(ActorKind.HUMAN, w.ctx.actor, False, "data_pack"), PermissionDeniedError),
+        (Intake(ActorKind.HUMAN, w.ctx.actor, True, "research"), InputInvalidError),
+    ):
+        with pytest.raises(exc):
+            reg.register_data_pack_series(
+                w.tx, intake, reader, instrument="SYN", timeframe="1D", title="d"
+            )
+    assert reader.reads == []  # refused before any read
+    rec = reg.register_data_pack_series(
+        w.tx,
+        Intake(ActorKind.HUMAN, w.ctx.actor, True, "data_pack"),
+        reader,
+        instrument="SYN",
+        timeframe="1D",
+        title="d",
+    )
+    assert rec.asset.content_sha256 == hashlib.sha256(pack_csv(80)).hexdigest()
+    assert rec.asset.attributes["data_pack_manifest_sha256"] == reader.manifest_sha256()
+    assert rec.asset.attributes["source_path_class"] == "data_pack"
+    assert rec.asset.source_type is LicenceSourceType.OWNER_MADE
 
 
 @pytest.mark.unit
@@ -296,31 +439,22 @@ def test_file_reader_reads_configured_files_only(tmp_path: Path) -> None:
         "01/01/2025,1,2,0.5,1.5,0",
         "2025-01-02,1,2,0.5,1.5,0\n2025-01-01,1,2,0.5,1.5,0",
         "2025-01-01,1,2,0.5,nan,0",
+        "2025-01-01,0,2,0,1,0",
+        "2025-01-01,-1,2,0.5,1,0",
+        "2025-01-01,1E+3,2E+3,0.5,1,0",
     ],
 )
-def test_malformed_rows_are_refused(body: str) -> None:
-    reader = MemoryDataPackReader(
-        {"SYN@1D": ("timestamp,open,high,low,close,volume\n" + body + "\n").encode()}
-    )
+def test_malformed_rows_and_non_positive_prices_are_refused(body: str) -> None:
+    content = ("timestamp,open,high,low,close,volume\n" + body + "\n").encode()
     with pytest.raises(InputInvalidError):
-        reader.load("SYN", "1D")
-
-
-@pytest.mark.unit
-def test_bad_header_and_bar_cap_are_refused() -> None:
-    with pytest.raises(InputInvalidError):
-        MemoryDataPackReader({"SYN@1D": b"when,open,high,low,close\n"}).load("SYN", "1D")
-    with pytest.raises(InputInvalidError):
-        MemoryDataPackReader({"SYN@1D": pack_csv(20)}, max_bars=10).load("SYN", "1D")
+        DatasetLoader.parse(content, max_bars=100, sha256="0" * 64)
 
 
 @pytest.mark.unit
 def test_window_without_bars_is_refused() -> None:
     with pytest.raises(InputInvalidError):
         builder().build(
-            request(window_start=date(2030, 1, 1), window_end=date(2030, 2, 1)),
-            as_of=AS_OF,
-            dataset_asset_id=DS_ID,
+            request(window_start=date(2030, 1, 1), window_end=date(2030, 2, 1)), registered()
         )
 
 
@@ -342,14 +476,38 @@ def test_rsi_matches_hand_computed_wilder_values() -> None:
     assert rsi([1.0, 2.0], 3) == [None, None]
 
 
+@pytest.mark.unit
+def test_rsi_of_a_flat_span_is_undefined_and_cannot_be_marked() -> None:
+    assert rsi([5.0] * 6, 3) == [None] * 6
+    # after movement the value returns: 0/0 only while both averages are zero
+    assert rsi([5.0, 5.0, 5.0, 5.0, 6.0], 3)[4] == 100.0
+    flat = "timestamp,open,high,low,close\n" + "".join(
+        f"{date(2025, 1, 1) + timedelta(days=i)},5,5,5,5\n" for i in range(40)
+    )
+    with pytest.raises(InputInvalidError, match="no RSI value"):
+        builder().build(
+            request(
+                window_start=date(2025, 1, 1),
+                window_end=date(2025, 2, 9),
+                connectors=(Connector(from_offset=20, to_offset=30, panel="RSI"),),
+                annotations=(),
+            ),
+            registered(flat.encode()),
+        )
+
+
 # -- rendering, fonts, facts -------------------------------------------------------------------
+
+
+def _overlap(a, b) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
 @pytest.mark.unit
 def test_render_is_byte_identical_and_layout_holds() -> None:
     b = builder()
-    one = b.build(request(reveal_steps=3), as_of=AS_OF, dataset_asset_id=DS_ID)
-    two = b.build(request(reveal_steps=3), as_of=AS_OF, dataset_asset_id=DS_ID)
+    one = b.build(request(reveal_steps=3), registered())
+    two = b.build(request(reveal_steps=3), registered())
     assert [s.png for s in one.stills] == [s.png for s in two.stills]
     assert one.spec_sha256 == two.spec_sha256
     assert len(one.stills) == 3
@@ -357,25 +515,40 @@ def test_render_is_byte_identical_and_layout_holds() -> None:
     assert img.size == (1920, 1080)
     assert "Software" not in img.info
     boxes = dict(one.stills[-1].text_boxes)
-    assert set(boxes) == {"title", "footer_0", "footer_1"}
-    for x0, y0, x1, y1 in boxes.values():  # every template text is inside the canvas
-        assert 0 <= x0 < x1 <= 1920
-        assert 0 <= y0 < y1 <= 1080
-    assert boxes["footer_0"][1] >= boxes["footer_1"][3]  # the two footer lines do not overlap
+    assert set(boxes) == {"title", "price_axes", "label_0", "footer_0", "footer_1"}
+    for role, (x0, y0, x1, y1) in boxes.items():  # every text is inside the canvas
+        assert 0 <= x0 < x1 <= 1920, role
+        assert 0 <= y0 < y1 <= 1080, role
+    axes = boxes["price_axes"]
+    # the label sits above the plot area: it never covers a candle, a line or a connector point
+    assert boxes["label_0"][1] >= axes[3] - 1
+    assert not _overlap(boxes["label_0"], boxes["title"])
+    assert not _overlap(boxes["footer_0"], boxes["footer_1"])
     assert boxes["footer_0"][3] < 0.17 * 1080  # below the plot area
-    assert boxes["title"][1] > 0.90 * 1080  # above the plot area
-    other = b.build(
-        request(connectors=()), as_of=AS_OF, dataset_asset_id=DS_ID
-    )  # a different spec changes the image and the spec hash
+    other = b.build(request(connectors=()), registered())
     assert other.png != one.png
     assert other.spec_sha256 != one.spec_sha256
 
 
 @pytest.mark.unit
-def test_as_of_does_not_change_the_image() -> None:
-    b = builder()
-    a = b.build(request(), as_of=AS_OF, dataset_asset_id=DS_ID)
-    c = b.build(request(), as_of=AS_OF + timedelta(days=40), dataset_asset_id=DS_ID)
+def test_label_near_the_edges_stays_inside_the_canvas() -> None:
+    for bar in (0, 80):
+        chart = builder().build(
+            request(
+                connectors=(),
+                annotations=(Annotation(kind="LABEL", bar=bar, text="Historical example"),),
+            ),
+            registered(),
+        )
+        x0, _, x1, _ = dict(chart.stills[-1].text_boxes)["label_0"]
+        assert 0 <= x0 < x1 <= 1920
+
+
+@pytest.mark.unit
+def test_clock_date_does_not_change_the_image() -> None:
+    a = builder().build(request(), registered())
+    later = FixedClock(datetime(2026, 7, 11, 6, 0, tzinfo=UTC))
+    c = builder(clock=later).build(request(), registered())
     assert a.png == c.png
     assert a.lag.age_days + 40 == c.lag.age_days
 
@@ -392,7 +565,6 @@ def test_devanagari_label_has_no_notdef_glyph() -> None:
     glyphs = list(helpers.layout(SOURCE_LABEL, font))
     assert glyphs
     assert all(g.glyph_index != 0 for g in glyphs)
-    # shaping happened: the pre-base vowel sign of "ति" is placed before its consonant
     deva = list(helpers.layout("ति", font))
     first = min(deva, key=lambda g: g.x)
     assert first.glyph_index != font.get_char_index(ord("त"))  # unshaped text would start with त
@@ -410,9 +582,7 @@ def test_font_without_devanagari_or_no_font_is_refused() -> None:
     with pytest.raises(ConfigInvalidError):
         ChartFontCheck.verify(PALETTE, [SOURCE_LABEL])
     with pytest.raises(ConfigInvalidError):
-        builder(palette=replace(PALETTE, font_path=dejavu)).build(
-            request(), as_of=AS_OF, dataset_asset_id=DS_ID
-        )
+        builder(palette=replace(PALETTE, font_path=dejavu)).build(request(), registered())
 
 
 @pytest.mark.unit
@@ -433,15 +603,17 @@ def test_pinned_font_resolver_checks_the_hash(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_chart_facts_document_is_contract_valid_and_provenance_complete() -> None:
-    chart = builder().build(request(), as_of=AS_OF, dataset_asset_id=DS_ID)
+    chart = builder().build(request(), registered())
     doc = chart.facts.model_dump(mode="json")
     Draft202012Validator(facts_schema()).validate(doc)
     assert [f["fact_id"] for f in doc["facts"]] == ["f01", "f02", "f03", "f04"]
     assert doc["data_end_date"] == chart.lag.data_end_date.isoformat()
+    assert doc["dataset_sha256"] == chart.dataset.content_sha256
     assert f"{chart.bars_count} daily bars" in doc["facts"][0]["statement"]
     prov = chart.provenance
-    assert prov["data_pack_manifest_sha256"] == chart.manifest_sha256
+    assert prov["data_pack_manifest_sha256"] == "a" * 64
     assert prov["lag_check"]["data_age_vs_lag"] == "OLDER_THAN_LAG"
+    assert prov["lag_check"]["as_of_source"] == "system_clock_ist"
     assert prov["source_label"] == SOURCE_LABEL
     assert prov["chart_sha256"] == chart.stills[-1].sha256
     attrs = chart.attributes()
@@ -463,13 +635,11 @@ def test_chart_facts_document_is_contract_valid_and_provenance_complete() -> Non
 def test_forward_looking_or_unlisted_annotations_are_refused(over: dict) -> None:
     # window starts at the first bar so offset 0 is inside the RSI warm-up
     with pytest.raises(InputInvalidError):
-        builder().build(
-            request(window_start=date(2025, 1, 1), **over), as_of=AS_OF, dataset_asset_id=DS_ID
-        )
+        builder().build(request(window_start=date(2025, 1, 1), **over), registered())
 
 
 @pytest.mark.unit
-def test_request_model_rules() -> None:
+def test_request_and_case_model_rules() -> None:
     with pytest.raises(ValidationError):
         request(connectors=(Connector(from_offset=0, to_offset=5, panel="RSI"),), indicators=())
     with pytest.raises(ValidationError):
@@ -480,36 +650,101 @@ def test_request_model_rules() -> None:
         request(timeframe="5M")
 
 
-# -- registration ------------------------------------------------------------------------------
+# -- stage wiring ------------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-def test_registration_writes_a_code_generated_tier_c_chart() -> None:
-    w = World()
-    chart = builder().build(request(reveal_steps=2), as_of=AS_OF, dataset_asset_id=DS_ID)
-    reg = DataPackChartRegistrar(assets=w.assets, blobs=w.blobs, licences=w.licences).register(
-        w.tx, chart, "shot_1"
+def _datapack_env(start: date = date(2025, 1, 1), n: int = 200) -> Env:
+    env = Env()
+    w = env.w
+    reg = AssetRegistrar(assets=w.assets, blobs=w.blobs, audit=w.audit, max_dataset_bars=5000)
+    reader = MemoryDataPackReader({"EXAMPLE_X@1D": pack_csv(n, start=start)})
+    ds = reg.register_data_pack_series(
+        w.tx, env.intake, reader, instrument="EXAMPLE_X", timeframe="1D", title="pack"
     )
-    rec = reg.asset
+    case = {
+        "case_id": "case_0",  # sorts before the bar-index case of Env: this one matches first
+        "data_kind": "REAL_HISTORICAL",
+        "instrument": "EXAMPLE_X",
+        "timeframe": "1D",
+        "dataset_asset_id": ds.asset_id,
+        "window": None,
+        "window_dates": {
+            "start_date": (start + timedelta(days=40)).isoformat(),
+            "end_date": (start + timedelta(days=n - 1)).isoformat(),
+        },
+        "indicators": ["SMA_10", "RSI_14"],
+        "pattern_concept_ids": ["k1"],
+        "outcome": "WORKED",
+        "annotations": [{"kind": "LABEL", "bar": 50, "text": "Historical example"}],
+        "connectors": [
+            {"from_offset": 10, "to_offset": 50, "panel": "PRICE", "anchor": "HIGH"},
+            {"from_offset": 10, "to_offset": 50, "panel": "RSI"},
+        ],
+        "rsi_guides": [30, 70],
+        "method_content": False,
+        "template_id": "chart_datapack",
+    }
+    reg.register_chart_case(w.tx, env.intake, document=json.dumps(case).encode(), title="dp")
+    font = PinnedFontResolver.resolve(FONT_MANIFEST)
+    data = font.path.read_bytes()
+    uri = w.blobs.blob_uri(w.ctx, "assets", f"fonts/{font.sha256}.ttf")
+    w.blobs.put(w.ctx, uri, io.BytesIO(data))
+    env.latin_font = env.font  # Env's DejaVu font asset
+    env.font = w.assets.insert(
+        w.tx,
+        NewAsset(
+            kind=AssetKind.FONT,
+            source_type=LicenceSourceType.FONT,
+            content_sha256=font.sha256,
+            uri=str(uri),
+            size_bytes=len(data),
+            title="brand font",
+        ),
+    ).asset_id
+    env.dataset = ds
+    return env
+
+
+@pytest.mark.integration
+def test_stage_draws_a_data_pack_chart_scene_with_facts() -> None:
+    env = _datapack_env()
+    res = env.run(plan(), OVERLAYS)
+    out = res.payload
+    assert res.task_status == "SUCCEEDED"
+    assert out.gate_verdict == "PASSED"
+    s1 = out.shots[0]
+    assert s1.chart is not None
+    assert s1.chart.template_id == "chart_datapack"
+    assert s1.chart.dataset_asset_id == env.dataset.asset_id
+    assert s1.chart.dataset_sha256 == env.dataset.asset.content_sha256
+    assert s1.chart.data_age_vs_lag == "OLDER_THAN_LAG"
+    rec = env.w.assets.get(env.w.tx, s1.asset_id)
     assert rec.asset.kind is AssetKind.CHART
     assert rec.asset.source_type is LicenceSourceType.CODE_GENERATED
-    assert rec.asset.visual_source_tier is VisualSourceTier.C_CODE_MOTION
-    assert rec.asset.content_sha256 == chart.stills[-1].sha256
-    assert rec.asset.licence_id is not None
-    assert rec.asset.attributes["data_pack_manifest_sha256"] == chart.manifest_sha256
-    assert len(reg.reveal) == 1
-    assert reg.reveal[0].asset.kind is AssetKind.IMAGE
-    assert reg.facts_uri.endswith(".json")
-    assert reg.provenance_uri.endswith(".json")
+    assert rec.asset.attributes["source_path_class"] == "data_pack"
+    assert rec.asset.attributes["lag_check"]["as_of"] == "2026-06-01"
+    assert (
+        rec.asset.attributes["data_pack_manifest_sha256"]
+        == (env.dataset.asset.attributes["data_pack_manifest_sha256"])
+    )
+    assert out.chart_facts[0].fact_count == 4
+    assert len(s1.reveal_stills) == 2
 
 
-@pytest.mark.unit
-def test_registration_without_self_grant_row_is_missing_dependency() -> None:
-    from agent_08_visual_assets.testing.memory import MemoryLicenceRepository
+@pytest.mark.integration
+def test_stage_data_pack_scene_within_lag_routes_to_script_stage() -> None:
+    env = _datapack_env(start=date(2025, 11, 20), n=180)  # last bar 2026-05-18, 14 days old
+    res = env.run(plan(), OVERLAYS)
+    assert res.task_status == "SUCCEEDED"
+    assert res.gate_verdict == "FAILED"
+    assert res.unresolved[0].reason.value == "DATA_WITHIN_LAG"
+    gate = next(v for v in res.validation_results if v.gate)
+    assert gate.remedy_stage_id == "s05_script"
 
-    w = World()
-    chart = builder().build(request(), as_of=AS_OF, dataset_asset_id=DS_ID)
-    with pytest.raises(MissingDependencyError):
-        DataPackChartRegistrar(
-            assets=w.assets, blobs=w.blobs, licences=MemoryLicenceRepository()
-        ).register(w.tx, chart, "shot_1")
+
+@pytest.mark.integration
+def test_stage_data_pack_scene_with_a_latin_only_brand_font_fails_closed() -> None:
+    env = _datapack_env()
+    env.font = env.latin_font  # DejaVu: no Devanagari glyphs
+    with pytest.raises(ConfigInvalidError):
+        env.run(plan(), OVERLAYS)

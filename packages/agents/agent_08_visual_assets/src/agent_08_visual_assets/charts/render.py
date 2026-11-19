@@ -19,6 +19,7 @@ import io
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 import matplotlib as mpl
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -115,7 +116,9 @@ def rsi(values: Sequence[float], period: int) -> list[float | None]:
     The first average gain/loss is the simple mean of the first ``period`` gains/losses and gives
     the
     RSI of bar ``period``; after that ``avg = (prev_avg * (period - 1) + current) / period``.
-    ``RS = avg_gain / avg_loss``; ``RSI = 100 - 100 / (1 + RS)``; ``avg_loss == 0`` gives 100.
+    ``RS = avg_gain / avg_loss``; ``RSI = 100 - 100 / (1 + RS)``; ``avg_loss == 0`` with a positive
+    ``avg_gain`` gives 100. Convention for a flat span (both averages 0, RS = 0/0): the value is
+    undefined (``None``, not drawn, a connector there is refused), never 100 and never 50.
     Bars before index ``period`` have no value (``None``)."""
     out: list[float | None] = [None] * len(values)
     if len(values) <= period:
@@ -128,7 +131,12 @@ def rsi(values: Sequence[float], period: int) -> list[float | None]:
         if i > period:
             avg_gain = (avg_gain * (period - 1) + gains[i - 1]) / period
             avg_loss = (avg_loss * (period - 1) + losses[i - 1]) / period
-        out[i] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+        if avg_loss == 0 and avg_gain == 0:
+            out[i] = None  # no movement over the smoothing span: RS is 0/0, RSI undefined
+        elif avg_loss == 0:
+            out[i] = 100.0
+        else:
+            out[i] = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
     return out
 
 
@@ -169,8 +177,6 @@ class ChartRenderInput:
     """Segments between two bars inside the window (proposed kind ``CONNECT_BARS``, CCR-255)."""
     rsi_guides: tuple[float, ...] = ()
     rsi_caption: str | None = None
-    labels_below: frozenset[int] = frozenset()
-    """Dataset bar indexes whose LABEL sits under the bar (footer template only)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,7 +227,7 @@ class ChartRenderer:
             height_ratios=[3, 1] if has_rsi else [1],
             left=0.10 if vertical else 0.07,
             right=0.97,
-            top=0.90,
+            top=0.85 if spec.footer_lines else 0.90,
             bottom=0.17 if spec.footer_lines else 0.10,
             hspace=0.08,
         )
@@ -266,7 +272,7 @@ class ChartRenderer:
                     linewidth=2.0 * scale,
                     label=name,
                 )
-        ChartRenderer._annotations(ax, spec, window, shown, y_lo - pad, y_hi + pad, scale)
+        labels = ChartRenderer._annotations(ax, spec, window, shown, y_lo - pad, y_hi + pad, scale)
         ChartRenderer._price_connectors(ax, spec, window, shown, scale)
         ticks = _tick_positions(n, 4 if vertical else 7)
         tick_font = font_props(palette, 20 * scale)
@@ -297,14 +303,15 @@ class ChartRenderer:
         )
         if not spec.footer_lines:
             return RenderedImage(figure_png(fig), spec.width_px, spec.height_px)
-        texts = [("title", title)]
+        texts: list[tuple[str, Any]] = [("title", title), ("price_axes", ax)]
+        texts.extend((f"label_{k}", t) for k, t in enumerate(labels))
         for k, footer_text in enumerate(spec.footer_lines):
             texts.append(
                 (
                     f"footer_{k}",
                     fig.text(
                         0.01,
-                        0.08 - k * 0.045,
+                        0.085 - k * 0.05,
                         footer_text,
                         ha="left",
                         va="center",
@@ -336,9 +343,11 @@ class ChartRenderer:
         y_lo: float,
         y_hi: float,
         scale: float,
-    ) -> None:
+    ) -> list[Any]:
         palette = spec.palette
         first = spec.first_bar_index
+        n_all = spec.last_bar_index - first + 1
+        labels: list[Any] = []
         for a in spec.annotations:
             kind = AnnotationKind(a.kind)
             if kind is AnnotationKind.MARK_BAR and a.bar is not None:
@@ -374,24 +383,33 @@ class ChartRenderer:
             elif kind is AnnotationKind.LABEL and a.bar is not None and a.text is not None:
                 i = a.bar - first
                 if i < shown and spec.footer_lines:
-                    below = a.bar in spec.labels_below
-                    bar = window[i]
-                    ax.annotate(
-                        a.text,
-                        (i, float(bar.low if below else bar.high)),
-                        xytext=(i, 0.03 if below else 0.97),
-                        textcoords=("data", "axes fraction"),
-                        ha="center",
-                        va="bottom" if below else "top",
-                        color=palette.foreground,
-                        fontproperties=font_props(palette, 22 * scale),
-                        arrowprops={"arrowstyle": "-", "color": palette.accent, "linewidth": 1.2},
-                        bbox={
-                            "boxstyle": "round,pad=0.3",
-                            "facecolor": palette.background,
-                            "edgecolor": palette.accent,
-                            "linewidth": 1.0,
-                        },
+                    # footer template: the label sits ABOVE the plot area (never over a candle,
+                    # an indicator line or a connector point) with a short leader to the bar
+                    ha = "left" if i < 0.12 * n_all else "right" if i > 0.88 * n_all else "center"
+                    labels.append(
+                        ax.annotate(
+                            a.text,
+                            (i, 1.0),
+                            xycoords=("data", "axes fraction"),
+                            xytext=(i, 1.035),
+                            textcoords=("data", "axes fraction"),
+                            ha=ha,
+                            va="bottom",
+                            color=palette.foreground,
+                            fontproperties=font_props(palette, 22 * scale),
+                            arrowprops={
+                                "arrowstyle": "-",
+                                "color": palette.accent,
+                                "linewidth": 1.2,
+                            },
+                            bbox={
+                                "boxstyle": "round,pad=0.3",
+                                "facecolor": palette.background,
+                                "edgecolor": palette.accent,
+                                "linewidth": 1.0,
+                            },
+                            annotation_clip=False,
+                        )
                     )
                 elif i < shown:
                     ax.annotate(
@@ -403,6 +421,7 @@ class ChartRenderer:
                         color=palette.foreground,
                         fontproperties=font_props(palette, 22 * scale),
                     )
+        return labels
 
     @staticmethod
     def _price_connectors(

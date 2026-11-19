@@ -1,28 +1,38 @@
-"""Course ``data_pack`` reader port (Q22, 3A_SLICE R20, CCR-257/258).
+"""Course ``data_pack`` reader port for the operator intake (Q22, 3A_SLICE R20, CCR-257/258).
 
 Channel charts use the owner's course ``data_pack`` under the same allowance as the course, and
-only rows older than the SEBI price-data lag (IN-02). The data never enters git: the pack lives at
-a configured location outside the repository (``charts.data_pack_root``, unset = fail closed with
-``PERMANENT.CONFIG_INVALID``) and the configured file map (``charts.data_pack_files``, key
-``<INSTRUMENT>@<TIMEFRAME>`` to a file name inside the root) says which file holds which series. No
-file name of the pack is written in this repository. Files are opened read-only and never written;
-the reader never lists or walks the root, it only opens the configured names.
+only rows older than the SEBI price-data lag (IN-02). The pack never enters git and is never read
+at render time: the operator tool registers a pack file as an owner-made ``DATASET`` asset through
+``AssetRegistrar.register_data_pack_series`` (human actor, ``SourceIntakeGuard`` first, audited),
+and charts are drawn from that registered blob, hash-verified (``DataPackChartBuilder``).
+
+``FileDataPackReader`` guards the location (MAJOR-1 of the PR #75 review):
+
+* the root comes from ``charts.data_pack_root`` (unset = ``PERMANENT.CONFIG_INVALID``, fail closed);
+* the root must contain no symbolic link (its real path equals its absolute path), must end in the
+  allow-listed folders ``course/data_pack`` (the layout stated in 00_REPO_AND_SERVER_AUDIT) and must
+  not pass through a Trade research area (a path component ``IS``, ``VAL``, ``OOS`` or one holding
+  ``holdout``, any case); the factory never reads those folders;
+* only the configured bare file names are opened (``charts.data_pack_files``: key
+  ``<INSTRUMENT>@<1D|1W>``), never a listing; a file must be a regular file directly in the root,
+  not a symbolic link (opened with ``O_NOFOLLOW``), and not larger than ``max_bars`` rows of at most
+  ``MAX_ROW_BYTES`` bytes;
+* files are opened read-only and never written.
 
 ``manifest_sha256`` is the SHA-256 of the canonical JSON ``{file name: file SHA-256}`` over every
-configured file: it pins the exact pack contents a chart was drawn from (chart provenance,
-CCR-256). Rows are parsed by ``DatasetLoader.parse`` (one parser for registered datasets and the
-pack): ISO dates strictly ascending, decimal prices, no NaN, bounded bar count.
+configured file: it pins the pack contents a dataset was registered from (CCR-256). No file name of
+the pack is written in this repository.
 """
 
 import hashlib
+import os
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, Self, runtime_checkable
 
-from agent_08_visual_assets.charts.dataset import Bar, DatasetLoader
 from agent_08_visual_assets.charts.spec import canonical_json
 from amw_core.errors import ConfigInvalidError, InputInvalidError, MissingDependencyError
 
@@ -31,6 +41,11 @@ DATA_PACK_TIMEFRAMES = ("1D", "1W")
 of the pack are not used by the chart path, CCR-259)."""
 ROOT_KEY = "charts.data_pack_root"
 FILES_KEY = "charts.data_pack_files"
+ALLOWED_ROOT_SUFFIX = ("course", "data_pack")
+_RESEARCH_PARTS = frozenset({"is", "val", "oos"})
+MAX_ROW_BYTES = 256
+"""Upper bound of one CSV row (``timestamp,open,high,low,close[,volume,oi]``) used for the file
+size cap ``max_bars * MAX_ROW_BYTES``; a format bound, not a policy value."""
 _FILE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}\.csv$")
 _SERIES_KEY = re.compile(r"^[A-Za-z0-9_.-]{1,64}@(1D|1W)$")
 
@@ -69,42 +84,27 @@ class DataPackSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class DataPackSeries:
+class DataPackFile:
+    """One pack file as read: its bytes, their SHA-256 and the manifest of the whole pack."""
+
     instrument: str
     timeframe: str
-    bars: tuple[Bar, ...]
-    file_sha256: str
+    content: bytes
+    sha256: str
     manifest_sha256: str
-
-    def index_window(self, start: date, end: date) -> tuple[int, int]:
-        """Dataset bar indexes of the first and last bar dated inside ``[start, end]``."""
-        if end < start:
-            raise InputInvalidError("chart window ends before it starts")
-        idx = [i for i, b in enumerate(self.bars) if start <= b.date <= end]
-        if not idx:
-            raise InputInvalidError("chart window holds no bar of the data_pack series")
-        return idx[0], idx[-1]
 
 
 @runtime_checkable
 class DataPackReader(Protocol):
-    """Read-only port to the course data_pack."""
+    """Read-only port to the course data_pack (operator intake only)."""
 
     def manifest_sha256(self) -> str: ...
 
-    def load(self, instrument: str, timeframe: str) -> DataPackSeries: ...
+    def read(self, instrument: str, timeframe: str) -> DataPackFile: ...
 
 
 def _manifest(file_hashes: Mapping[str, str]) -> str:
     return hashlib.sha256(canonical_json(dict(file_hashes)).encode("utf-8")).hexdigest()
-
-
-def _parse(
-    instrument: str, timeframe: str, content: bytes, max_bars: int, manifest: str
-) -> DataPackSeries:
-    digest = DatasetLoader.sha256(content)
-    series = DatasetLoader.parse(content, max_bars=max_bars, sha256=digest)
-    return DataPackSeries(instrument, timeframe, series.bars, digest, manifest)
 
 
 def _check_timeframe(timeframe: str) -> None:
@@ -112,22 +112,51 @@ def _check_timeframe(timeframe: str) -> None:
         raise InputInvalidError("timeframe is not supported for data_pack charts")
 
 
+def check_root(root: Path) -> Path:
+    """The guarded real path of the pack root, or ``CONFIG_INVALID``."""
+    absolute = Path(os.path.abspath(root))
+    try:
+        real = absolute.resolve(strict=True)
+    except OSError:
+        raise ConfigInvalidError(f"{ROOT_KEY} does not point to a readable directory") from None
+    if not real.is_dir():
+        raise ConfigInvalidError(f"{ROOT_KEY} does not point to a readable directory")
+    if real != absolute:
+        raise ConfigInvalidError(f"{ROOT_KEY} passes through a symbolic link")
+    parts = [p.lower() for p in real.parts]
+    if any(p in _RESEARCH_PARTS or "holdout" in p for p in parts):
+        raise ConfigInvalidError(f"{ROOT_KEY} lies in a Trade research area")
+    if tuple(real.parts[-len(ALLOWED_ROOT_SUFFIX) :]) != ALLOWED_ROOT_SUFFIX:
+        raise ConfigInvalidError(f"{ROOT_KEY} is not the course data_pack folder")
+    return real
+
+
 class FileDataPackReader:
-    """File-backed implementation: opens only the configured file names under the root."""
+    """File-backed implementation: opens only the configured file names under the guarded root."""
 
     def __init__(self, settings: DataPackSettings) -> None:
-        if not settings.root.is_dir():
-            raise ConfigInvalidError(f"{ROOT_KEY} does not point to a readable directory")
+        self._root = check_root(settings.root)
         self._s = settings
         self._hashes: dict[str, str] | None = None
 
     def _read(self, name: str) -> bytes:
-        path = self._s.root / name
+        path = self._root / name
         try:
-            with path.open("rb") as fh:  # read-only; the pack is never written
-                return fh.read()
+            info = os.lstat(path)
         except OSError:
             raise ConfigInvalidError("a configured data_pack file cannot be read") from None
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise ConfigInvalidError("a configured data_pack file is not a regular file")
+        if path.resolve(strict=True).parent != self._root:
+            raise ConfigInvalidError("a configured data_pack file lies outside the root")
+        if info.st_size > self._s.max_bars * MAX_ROW_BYTES:
+            raise ConfigInvalidError("a configured data_pack file exceeds the size cap")
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
+            raise ConfigInvalidError("a configured data_pack file cannot be read") from None
+        with os.fdopen(fd, "rb") as fh:  # read-only; the pack is never written
+            return fh.read(self._s.max_bars * MAX_ROW_BYTES + 1)
 
     def _file_hashes(self) -> dict[str, str]:
         if self._hashes is None:
@@ -138,15 +167,16 @@ class FileDataPackReader:
     def manifest_sha256(self) -> str:
         return _manifest(self._file_hashes())
 
-    def load(self, instrument: str, timeframe: str) -> DataPackSeries:
+    def read(self, instrument: str, timeframe: str) -> DataPackFile:
         _check_timeframe(timeframe)
         name = self._s.files.get(series_key(instrument, timeframe))
         if name is None:
             raise MissingDependencyError("no data_pack series is configured for this request")
         content = self._read(name)
-        if hashlib.sha256(content).hexdigest() != self._file_hashes()[name]:
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != self._file_hashes()[name]:
             raise ConfigInvalidError("a data_pack file changed while it was read")
-        return _parse(instrument, timeframe, content, self._s.max_bars, self.manifest_sha256())
+        return DataPackFile(instrument, timeframe, content, digest, self.manifest_sha256())
 
 
 @dataclass
@@ -154,16 +184,22 @@ class MemoryDataPackReader:
     """In-memory test double (synthetic bars only): series key to CSV bytes."""
 
     files: Mapping[str, bytes]
-    max_bars: int = 100_000
     reads: list[str] = field(default_factory=list)
 
     def manifest_sha256(self) -> str:
         return _manifest({k: hashlib.sha256(v).hexdigest() for k, v in sorted(self.files.items())})
 
-    def load(self, instrument: str, timeframe: str) -> DataPackSeries:
+    def read(self, instrument: str, timeframe: str) -> DataPackFile:
         _check_timeframe(timeframe)
         key = series_key(instrument, timeframe)
         if key not in self.files:
             raise MissingDependencyError("no data_pack series is configured for this request")
         self.reads.append(key)
-        return _parse(instrument, timeframe, self.files[key], self.max_bars, self.manifest_sha256())
+        content = self.files[key]
+        return DataPackFile(
+            instrument,
+            timeframe,
+            content,
+            hashlib.sha256(content).hexdigest(),
+            self.manifest_sha256(),
+        )
