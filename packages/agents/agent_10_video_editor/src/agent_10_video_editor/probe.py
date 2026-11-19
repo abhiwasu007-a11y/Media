@@ -56,6 +56,8 @@ class VideoStream:
     start_time: str | None
     duration: str | None
     colour: dict[str, str | None]
+    level: int | None = None
+    has_b_frames: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +136,8 @@ class ProbeParser:
                 "matrix": video_raw.get("color_space"),
                 "range": video_raw.get("color_range"),
             },
+            level=_int(video_raw.get("level")),
+            has_b_frames=_int(video_raw.get("has_b_frames")),
         )
         audio = None
         if audio_raw is not None:
@@ -332,6 +336,23 @@ class PacketParser:
         return sum(1 for line in csv_text.splitlines() if line.strip() and line.strip() != "N/A")
 
 
+def keyframe_indices(csv_text: str) -> list[int]:
+    """Frame indices (presentation order) of the packets flagged ``K`` (``pts_time,flags``)."""
+    rows: list[tuple[Decimal, bool]] = []
+    for line in csv_text.splitlines():
+        parts = line.strip().split(",")
+        if len(parts) < 2 or parts[0] in ("", "N/A"):
+            continue
+        try:
+            rows.append((Decimal(parts[0]), "K" in parts[1]))
+        except InvalidOperation as exc:
+            raise MeasurementUnavailable(["packet_flags"]) from exc
+    if not rows:
+        raise MeasurementUnavailable(["packet_flags"])
+    rows.sort(key=lambda r: r[0])
+    return [i for i, (_, key) in enumerate(rows) if key]
+
+
 class AtomOrderChecker:
     """F-24 faststart: ``moov`` precedes ``mdat`` among the top-level boxes of the file head."""
 
@@ -368,3 +389,129 @@ def parse_stream_times(csv_text: str) -> dict[str, tuple[str, str]]:
     if "video" not in out or "audio" not in out:
         raise MeasurementUnavailable(["stream_times"])
     return out
+
+
+# ----------------------------------------------------------------------------- encoder settings
+
+_SSIM_ALL = re.compile(r"SSIM Y:[0-9.]+ .*?All:([0-9]+\.[0-9]+)")
+_X264_SEI = b"x264 - core "
+_X264_OPTIONS = re.compile(r"([a-z0-9_]+)=([^ ]+)")
+
+
+class SsimParser:
+    """The ``ssim`` filter summary ``SSIM Y:… U:… V:… All:<mean> (<dB>)`` (last line wins)."""
+
+    @staticmethod
+    def parse(stderr: str) -> str:
+        found = _SSIM_ALL.findall(stderr)
+        if not found:
+            raise MeasurementUnavailable(["ssim_all"])
+        return str(found[-1])
+
+
+class X264SeiParser:
+    """The x264 user-data SEI (``x264 - core … - options: k=v …``) that libx264 writes into the
+    first access unit of every encode; ``-map_metadata -1`` and ``+bitexact`` do not remove it
+    (measured on FFmpeg 6.1.1). Returns the option map, or ``None`` when no SEI is present."""
+
+    @staticmethod
+    def parse_text(text: str) -> dict[str, str] | None:
+        if " options: " not in text:
+            return None
+        parsed = dict(_X264_OPTIONS.findall(text.split(" options: ", 1)[1]))
+        parsed["_core"] = text[len("x264 - core ") :].split(" - ", 1)[0]
+        return parsed
+
+    @staticmethod
+    def _text_at(data: bytes, at: int) -> str:
+        end = data.find(b"\x00", at)
+        return data[at : end if end >= 0 else at + 4096].decode("ascii", errors="replace")
+
+    @staticmethod
+    def find(data: bytes) -> dict[str, str] | None:
+        at = data.find(_X264_SEI)
+        return None if at < 0 else X264SeiParser.parse_text(X264SeiParser._text_at(data, at))
+
+    @staticmethod
+    def texts_in_file(path: Any, chunk: int = 1 << 20) -> list[str]:
+        """Every x264 SEI text in the file, in file order (one per encoded segment: each
+        segment is a separate encode and ``-c copy`` keeps its SEI). Chunked, with overlap."""
+        texts: list[str] = []
+        keep = 8192
+        offset = 0  # file offset of data[0]
+        data = b""
+        seen: set[int] = set()
+        with open(path, "rb") as handle:
+            while True:
+                block = handle.read(chunk)
+                data += block
+                at = data.find(_X264_SEI)
+                while at >= 0:
+                    if not block or len(data) - at >= keep:
+                        if offset + at not in seen:
+                            seen.add(offset + at)
+                            texts.append(X264SeiParser._text_at(data, at))
+                    else:
+                        break  # the text may continue in the next block
+                    at = data.find(_X264_SEI, at + 1)
+                if not block:
+                    return texts
+                cut = max(len(data) - keep, 0)
+                offset += cut
+                data = data[cut:]
+
+    @staticmethod
+    def scan_file(path: Any) -> dict[str, str] | None:
+        """The first SEI of the file (used by the self-test fixtures)."""
+        texts = X264SeiParser.texts_in_file(path)
+        return X264SeiParser.parse_text(texts[0]) if texts else None
+
+
+class EditListChecker:
+    """INF-13 "No Edit Lists": is there an ``edts`` box in any ``trak`` of ``moov``?"""
+
+    @staticmethod
+    def _boxes(data: bytes, start: int, end: int) -> list[tuple[str, int, int]]:
+        out: list[tuple[str, int, int]] = []
+        pos = start
+        while pos + 8 <= end:
+            size = int.from_bytes(data[pos : pos + 4], "big")
+            kind = data[pos + 4 : pos + 8].decode("latin-1")
+            head = 8
+            if size == 1:
+                size, head = int.from_bytes(data[pos + 8 : pos + 16], "big"), 16
+            elif size == 0:
+                size = end - pos
+            if size < head:
+                break
+            out.append((kind, pos + head, min(pos + size, end)))
+            pos += size
+        return out
+
+    @staticmethod
+    def has_edit_list(path: Any) -> bool:
+        with open(path, "rb") as handle:
+            pos = 0
+            while True:
+                handle.seek(pos)
+                header = handle.read(16)
+                if len(header) < 8:
+                    raise MeasurementUnavailable(["moov"])
+                size = int.from_bytes(header[:4], "big")
+                kind = header[4:8]
+                head = 8
+                if size == 1:
+                    size, head = int.from_bytes(header[8:16], "big"), 16
+                if size < head:
+                    raise MeasurementUnavailable(["mp4_boxes"])
+                if kind == b"moov":
+                    handle.seek(pos)
+                    moov = handle.read(size)
+                    break
+                pos += size
+        for name, start, end in EditListChecker._boxes(moov, head, len(moov)):
+            if name == "trak" and any(
+                k == "edts" for k, _, _ in EditListChecker._boxes(moov, start, end)
+            ):
+                return True
+        return False

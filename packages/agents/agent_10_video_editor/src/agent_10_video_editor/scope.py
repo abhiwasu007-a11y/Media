@@ -13,9 +13,10 @@ from pathlib import Path
 from agent_10_video_editor.errors import input_invalid
 from amw_core.contracts.task_input import TaskInput
 from amw_core.errors import CrossTenantRefError, TenantMismatchError
-from amw_core.ids import Prefix, parse_id
+from amw_core.ids import AttemptId, JobId, Prefix, TaskId, parse_id
 from amw_core.interfaces.storage import BlobInfo, BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
+from amw_core.tenancy import storage_paths
 
 
 class TenantScope:
@@ -45,6 +46,26 @@ class TenantScope:
             if segment in ("", ".", "..") or segment.startswith("/"):
                 raise input_invalid("PATH_SEGMENT_REJECTED")
         return self.storage.blob_uri(self.context, area, path)
+
+    # Every path below is built by the ``amw_core`` storage path builders (03 section 8 rule 5,
+    # CCR-208); this agent never assembles a ``jobs`` sub-path by hand.
+
+    def checkpoint_uri(self, job_id: str, task_id: str, name: str) -> BlobUri:
+        """``jobs/<job>/checkpoints/<task>/<name>``."""
+        org = self.context.org_id
+        return BlobUri(storage_paths.checkpoint_uri(org, JobId(job_id), TaskId(task_id), name))
+
+    def artifact_uri(self, job_id: str, task_id: str, attempt_id: str, name: str) -> BlobUri:
+        """``jobs/<job>/tasks/<task>/attempts/<att>/artifacts/<name>`` (write-once task file)."""
+        return BlobUri(
+            storage_paths.task_artifact_uri(
+                self.context.org_id, JobId(job_id), TaskId(task_id), AttemptId(attempt_id), name
+            )
+        )
+
+    def render_uri(self, job_id: str, name: str) -> BlobUri:
+        """``jobs/<job>/renders/<name>``."""
+        return BlobUri(storage_paths.render_uri(self.context.org_id, JobId(job_id), name))
 
     def read_bytes(self, uri: str, sha256: str) -> bytes:
         return b"".join(self.storage.get(self.context, BlobUri(uri), sha256))

@@ -14,7 +14,7 @@ from tests.agents.agent_10_video_editor.support import World, payload_data
 
 
 def _run(world: World) -> object:
-    return RenderStage(world.deps()).run(
+    return RenderStage(world.deps()).execute(
         world.render_input(), world.attempt, envelope_org=world.org
     )
 
@@ -22,7 +22,9 @@ def _run(world: World) -> object:
 @pytest.mark.unit
 def test_render_completes_and_registers(tmp_path: Path) -> None:
     world = World(tmp_path, shots=4)  # 4 x 4 s, target 8 s -> 2 segments
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt, envelope_org=world.org)
+    out = RenderStage(world.deps()).execute(
+        world.render_input(), world.attempt, envelope_org=world.org
+    )
     assert out.status is OutputStatus.SUCCEEDED
     data = payload_data(out)
     assert data["segments"] == {
@@ -35,7 +37,7 @@ def test_render_completes_and_registers(tmp_path: Path) -> None:
     assert data["duration_ms"] == 16000
     assert data["encoder"]["audio_bitrate_nominal_bps"] == 384000
     assert data["encoder"]["gop"] == {
-        "gop_frames": 60,
+        "gop_frames": 15,
         "closed_gop": True,
         "idr_at_segment_start": True,
     }
@@ -56,8 +58,8 @@ def test_render_is_deterministic_across_runs(tmp_path: Path) -> None:
     a = World(tmp_path / "a", shots=4)
     b = World(tmp_path / "b", shots=4)
     # same inputs, same encoder arguments (random ids differ, content hashes must not)
-    out_a = RenderStage(a.deps()).run(a.render_input(), a.attempt)
-    out_b = RenderStage(b.deps()).run(b.render_input(), b.attempt)
+    out_a = RenderStage(a.deps()).execute(a.render_input(), a.attempt)
+    out_b = RenderStage(b.deps()).execute(b.render_input(), b.attempt)
     assert payload_data(out_a)["frame_count"] == payload_data(out_b)["frame_count"]
     assert (
         payload_data(out_a)["encoder"]["args_sha256"]
@@ -68,7 +70,7 @@ def test_render_is_deterministic_across_runs(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_reveal_stills_are_inputs_of_the_chart_shot(tmp_path: Path) -> None:
     world = World(tmp_path, shots=3, chart=True)
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert out.status is OutputStatus.SUCCEEDED
     segment_argvs = [c.argv for c in world.runner.calls if c.kind == "segment"]
     inputs = [a for argv in segment_argvs for a in argv if a.startswith("in_")]
@@ -114,14 +116,14 @@ def test_nonzero_llm_budget_and_cost_budget_are_rejected(tmp_path: Path) -> None
         update={"resource_budget": ti.resource_budget.model_copy(update={"max_cost_micros": 1})}
     )
     with pytest.raises(InputInvalidError):
-        RenderStage(world.deps()).run(bad, world.attempt)
+        RenderStage(world.deps()).execute(bad, world.attempt)
 
 
 @pytest.mark.unit
 def test_missing_asset_for_aspect_is_missing_dependency(tmp_path: Path) -> None:
     world = World(tmp_path)
     with pytest.raises(MissingDependencyError):
-        RenderStage(world.deps()).run(
+        RenderStage(world.deps()).execute(
             world.render_input(aspect_ratio="9:16", preset_key="shorts_9x16"), world.attempt
         )
     assert world.runner.calls == []
@@ -131,7 +133,7 @@ def test_missing_asset_for_aspect_is_missing_dependency(tmp_path: Path) -> None:
 def test_script_hash_mismatch(tmp_path: Path) -> None:
     world = World(tmp_path)
     with pytest.raises(InputInvalidError):
-        RenderStage(world.deps()).run(
+        RenderStage(world.deps()).execute(
             world.render_input(verified_script_sha256="9" * 64), world.attempt
         )
 
@@ -142,14 +144,14 @@ def test_guard_fails_closed_without_a_calendar(tmp_path: Path) -> None:
     cfg = cfg.model_copy(update={"guard": GuardConfig(market_windows=None, night_window=None)})
     world = World(tmp_path, config=cfg)
     with pytest.raises(ConfigInvalidError):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert not [c for c in world.runner.calls if c.kind in ("segment", "mux")]
 
 
 @pytest.mark.unit
 def test_no_segment_starts_inside_market_hours(tmp_path: Path) -> None:
     world = World(tmp_path, now=LocalTime.parse("TUE", "10:00"))
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert out.status is OutputStatus.SUSPENDED
     assert out.next_action.wait_reason is not None
     assert not [c for c in world.runner.calls if c.kind in ("segment", "mux")]
@@ -159,10 +161,10 @@ def test_no_segment_starts_inside_market_hours(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_replay_creates_no_second_row_blob_or_cost_row(tmp_path: Path) -> None:
     world = World(tmp_path)
-    first = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    first = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     blobs, rows, costs = len(world.storage.blobs), len(world.renders.rows), len(world.cost.rows)
     encodes = world.runner.encode_calls
-    again = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    again = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert again.status is OutputStatus.SUCCEEDED
     assert payload_data(again)["render_ref"] == payload_data(first)["render_ref"]
     assert (len(world.renders.rows), len(world.cost.rows)) == (rows, costs)
@@ -180,11 +182,11 @@ def test_drain_mid_render_checkpoints_and_resume_reuses_finished_segments(tmp_pa
 
     world.hook_checkpoints(on_write)
     stage = RenderStage(world.deps())
-    suspended = stage.run(world.render_input(), world.attempt)
+    suspended = stage.execute(world.render_input(), world.attempt)
     assert suspended.status is OutputStatus.SUSPENDED
     assert [c.kind for c in world.runner.calls].count("segment") == 1
     world.probe.drain = False
-    done = stage.run(world.render_input(), world.attempt)
+    done = stage.execute(world.render_input(), world.attempt)
     assert done.status is OutputStatus.SUCCEEDED
     segs = payload_data(done)["segments"]
     assert segs["resumed_from_checkpoint"] is True
@@ -197,7 +199,7 @@ def test_drain_mid_render_checkpoints_and_resume_reuses_finished_segments(tmp_pa
 @pytest.mark.unit
 def test_audit_entries_idempotency_rows_and_metrics_of_a_render(tmp_path: Path) -> None:
     world = World(tmp_path, shots=4)
-    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert world.audit.actions == ["render.started", "render.completed"]
     entry = world.audit.entries[1][1]
     assert set(entry.details) == {"content_sha256", "duration_ms"}  # IDs, hashes, numbers only
@@ -210,7 +212,7 @@ def test_audit_entries_idempotency_rows_and_metrics_of_a_render(tmp_path: Path) 
 @pytest.mark.unit
 def test_guard_refusal_is_audited(tmp_path: Path) -> None:
     world = World(tmp_path, now=LocalTime.parse("TUE", "10:00"))
-    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert "render.guard_refused" in world.audit.actions
 
 
@@ -230,7 +232,7 @@ def test_same_master_key_with_other_content_is_an_idempotency_conflict(tmp_path:
 
     world.idempotency.begin = begin  # type: ignore[method-assign]
     with pytest.raises(IdempotencyConflictError):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert world.renders.rows == {}
 
 
@@ -248,5 +250,5 @@ def test_a_segment_held_by_another_attempt_is_a_lock_conflict(tmp_path: Path) ->
 
     world.idempotency.begin = begin  # type: ignore[method-assign]
     with pytest.raises(LockConflictError):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert not [u for u in world.storage.blobs if "/segments/" in u]

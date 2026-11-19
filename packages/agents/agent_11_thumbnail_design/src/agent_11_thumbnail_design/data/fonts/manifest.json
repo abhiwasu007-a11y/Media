@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "note": "Fonts listed here are the repo-pinned fonts. A font is rasterised only if its bytes hash to the hash recorded for it; a tenant brand-kit font (registered asset, licence row) may also be used only when the channel's agent_11.fonts.policy is TENANT_ALLOWED (the code default is MANIFEST_ONLY: manifest fonts only, the owner channel). Add a manifest font only with a verified licence and a RESEARCH_LOG.md entry.",
+  "fonts": [
+    {
+      "key": "mukta_regular",
+      "file": "Mukta-Regular.ttf",
+      "sha256": "2958e4af564507df2a856164df6f9978dacb03f999a4f34a0c269dc8a4de9688",
+      "bytes": 432248,
+      "purpose": "brand_primary",
+      "weight": 400,
+      "licence": "OFL-1.1",
+      "licence_file": "OFL-Mukta.txt",
+      "copyright": "Copyright (c) 2014, Girish Dalvi, Ek Type. All rights reserved.",
+      "version": "Version 2.538",
+      "unmodified": true,
+      "upstream": "https://github.com/EkType/Mukta (commit 418021bbb8f5e7bf0bfd96296f9e015bf953efed per the METADATA.pb of google/fonts; the upstream repository holds sources only, binaries are GitHub releases)",
+      "research_id": "RV-09",
+      "fetched": "2026-11-19",
+      "owner_decision": "Owner decision 2026-11-19 (WS-06): brand font of the owner channel (primary)",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/mukta/Mukta-Regular.ttf"
+    },
+    {
+      "key": "mukta_bold",
+      "file": "Mukta-Bold.ttf",
+      "sha256": "7d22891cd57507b04af95a67ffaf59b7073b3595a27d1cfbbcefb418de820a12",
+      "bytes": 418416,
+      "purpose": "brand_primary",
+      "weight": 700,
+      "licence": "OFL-1.1",
+      "licence_file": "OFL-Mukta.txt",
+      "copyright": "Copyright (c) 2014, Girish Dalvi, Ek Type. All rights reserved.",
+      "version": "Version 2.538",
+      "unmodified": true,
+      "upstream": "https://github.com/EkType/Mukta (commit 418021bbb8f5e7bf0bfd96296f9e015bf953efed per the METADATA.pb of google/fonts; the upstream repository holds sources only, binaries are GitHub releases)",
+      "research_id": "RV-09",
+      "fetched": "2026-11-19",
+      "owner_decision": "Owner decision 2026-11-19 (WS-06): brand font of the owner channel (primary)",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/mukta/Mukta-Bold.ttf"
+    },
+    {
+      "key": "noto_sans_devanagari_vf",
+      "file": "NotoSansDevanagari-VF.ttf",
+      "sha256": "14ec4af41f27482216d1c2229f417ff9b1425e1babb014e57d1d40d03229853e",
+      "bytes": 641944,
+      "purpose": "brand_fallback",
+      "licence": "OFL-1.1",
+      "licence_file": "OFL-NotoSansDevanagari.txt",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)",
+      "version": "Version 2.007",
+      "unmodified": true,
+      "source_url": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari[wdth,wght].ttf",
+      "upstream": "https://github.com/notofonts/devanagari (commit e123d230c160ebe949d731cc19017cdb354180d1 per the METADATA.pb of google/fonts)",
+      "research_id": "RV-08",
+      "fetched": "2026-11-19",
+      "owner_decision": "Owner decision 2026-11-19 (WS-06): fallback to the brand font Mukta, per glyph (Mukta lacks a code point -> this font)"
+    },
+    {
+      "key": "a11_test_box",
+      "file": "a11_test_box.ttf",
+      "sha256": "474983940a1877fe017cf9bf53ea11da1dc32b4cc2847687b1335dbcf0021035",
+      "bytes": 5620,
+      "purpose": "test_fixture",
+      "licence": "none needed: generated box glyphs, no third-party outlines",
+      "licence_file": null,
+      "source_url": null,
+      "generator": "tests/agents/agent_11_thumbnail_design/fontgen.py (test test_committed_test_font_equals_generator)",
+      "research_id": null
+    }
+  ]
+}

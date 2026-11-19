@@ -9,18 +9,26 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from amw_core.contracts import violation
 from amw_core.errors import InputInvalidError
 
 
-def _reject_floats(value: Any, path: str = "$") -> None:
+def _reject_floats(value: Any, path: str = "") -> None:
     if isinstance(value, float):
-        raise InputInvalidError("float in a canonical structure", details={"violations": [path]})
+        raise InputInvalidError(
+            "float in a canonical structure",
+            details={
+                "violations": [
+                    violation("FLOAT_NOT_ALLOWED", path, "float in a canonical structure")
+                ]
+            },
+        )
     if isinstance(value, Mapping):
         for key, item in value.items():
-            _reject_floats(item, f"{path}.{key}")
+            _reject_floats(item, f"{path}/{str(key).replace('~', '~0').replace('/', '~1')}")
     elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
         for index, item in enumerate(value):
-            _reject_floats(item, f"{path}[{index}]")
+            _reject_floats(item, f"{path}/{index}")
 
 
 def canonical_json(value: Any) -> bytes:

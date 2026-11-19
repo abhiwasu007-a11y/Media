@@ -14,6 +14,7 @@ from amw_core.contracts.error import (
     ErrorObject,
     Violation,
     error_object_from_exception,
+    violation,
 )
 from amw_core.contracts.owner_topic import CourseChapterPointer, OwnerReference, OwnerTopic
 from amw_core.contracts.production_type import (
@@ -87,4 +88,5 @@ __all__ = [
     "validate_production_type",
     "validate_task_input",
     "validate_task_output",
+    "violation",
 ]

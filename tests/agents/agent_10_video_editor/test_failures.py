@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_10_video_editor.errors import violations_of
 from agent_10_video_editor.ffmpeg import (
     ProcessFfmpegRunner,
     ProcessResult,
@@ -35,7 +36,7 @@ def _final_bytes(world: World, out: object) -> bytes:
 @pytest.mark.failure_injection
 def test_fi02_kill_between_segment_rename_and_checkpoint_adopts_the_orphan(tmp_path: Path) -> None:
     reference = World(tmp_path / "ref", shots=4)
-    ref_out = RenderStage(reference.deps()).run(reference.render_input(), reference.attempt)
+    ref_out = RenderStage(reference.deps()).execute(reference.render_input(), reference.attempt)
     world = World(tmp_path / "run", shots=4)
 
     def die_after_first_segment(uri: str) -> None:
@@ -45,9 +46,9 @@ def test_fi02_kill_between_segment_rename_and_checkpoint_adopts_the_orphan(tmp_p
 
     world.storage.after_put = die_after_first_segment
     with pytest.raises(_Died):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert any("/segments/" in uri for uri in world.storage.blobs)
-    done = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    done = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     segs = payload_data(done)["segments"]
     assert segs["reused"] == 1
     assert segs["encoded"] == 1
@@ -60,7 +61,7 @@ def test_fi03_a_kill_during_the_final_store_leaves_no_file_at_the_final_path(
     tmp_path: Path,
 ) -> None:
     reference = World(tmp_path / "ref")
-    ref_out = RenderStage(reference.deps()).run(reference.render_input(), reference.attempt)
+    ref_out = RenderStage(reference.deps()).execute(reference.render_input(), reference.attempt)
     world = World(tmp_path / "run")
 
     def die(uri: str) -> None:
@@ -70,10 +71,10 @@ def test_fi03_a_kill_during_the_final_store_leaves_no_file_at_the_final_path(
 
     world.storage.before_put = die
     with pytest.raises(_Died):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert not [u for u in world.storage.blobs if "/renders/rnd_" in u]
     assert world.renders.rows == {}
-    done = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    done = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert done.status is OutputStatus.SUCCEEDED
     assert payload_data(done)["segments"]["reused"] == payload_data(done)["segments"]["planned"]
     assert _final_bytes(world, done) == _final_bytes(reference, ref_out)
@@ -93,11 +94,11 @@ def test_fi11_a_corrupt_segment_blob_is_detected_and_reencoded(tmp_path: Path) -
 
     world.hook_checkpoints(drain)
     stage = RenderStage(world.deps())
-    assert stage.run(world.render_input(), world.attempt).status is OutputStatus.SUSPENDED
+    assert stage.execute(world.render_input(), world.attempt).status is OutputStatus.SUSPENDED
     first = next(u for u in world.storage.blobs if "/segments/" in u)
     world.storage.corrupt(first)
     world.probe.drain = False
-    done = stage.run(world.render_input(), world.attempt)
+    done = stage.execute(world.render_input(), world.attempt)
     assert done.status is OutputStatus.SUCCEEDED
     segs = payload_data(done)["segments"]
     assert segs["reused"] == 0
@@ -110,8 +111,8 @@ def test_fi12_unreadable_input_asset_is_input_invalid_not_a_skipped_shot(tmp_pat
     world = World(tmp_path)
     world.runner.unreadable_inputs = {"in_0.png"}
     with pytest.raises(InputInvalidError) as info:
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
-    assert info.value.details["violations"][0].startswith("ASSET_UNREADABLE:")
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
+    assert violations_of(info.value)[0].startswith("ASSET_UNREADABLE:")
     assert world.renders.rows == {}
 
 
@@ -122,17 +123,17 @@ def test_fi10_crash_and_failed_verification_are_render_crashes_and_store_nothing
     crash = World(tmp_path / "a")
     crash.runner.crash_on_encode = {1}
     with pytest.raises(RenderCrashError):
-        RenderStage(crash.deps()).run(crash.render_input(), crash.attempt)
+        RenderStage(crash.deps()).execute(crash.render_input(), crash.attempt)
     assert not [u for u in crash.storage.blobs if "/segments/" in u]
     idr = World(tmp_path / "b")
     idr.runner.bad_idr = True
     with pytest.raises(RenderCrashError):
-        RenderStage(idr.deps()).run(idr.render_input(), idr.attempt)
+        RenderStage(idr.deps()).execute(idr.render_input(), idr.attempt)
     assert not [u for u in idr.storage.blobs if "/segments/" in u]
     # a retry after the crash resumes and completes (the bad .part was discarded)
     crash.runner.crash_on_encode = set()
     assert (
-        RenderStage(crash.deps()).run(crash.render_input(), crash.attempt).status
+        RenderStage(crash.deps()).execute(crash.render_input(), crash.attempt).status
         is OutputStatus.SUCCEEDED
     )
 
@@ -185,12 +186,12 @@ def test_process_runner_runs_stops_and_times_out(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_scratch_is_cleaned_after_success_and_after_failure(tmp_path: Path) -> None:
     world = World(tmp_path)
-    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert not (world.scratch / world.org.removeprefix("org_") / world.task).exists()
     crash = World(tmp_path / "x")
     crash.runner.crash_on_encode = {1}
     with pytest.raises(RenderCrashError):
-        RenderStage(crash.deps()).run(crash.render_input(), crash.attempt)
+        RenderStage(crash.deps()).execute(crash.render_input(), crash.attempt)
     assert not (crash.scratch / crash.org.removeprefix("org_") / crash.task).exists()
 
 
@@ -199,7 +200,7 @@ def test_cost_row_is_a_render_ms_estimate_with_no_money(tmp_path: Path) -> None:
     from amw_core.enums import CostFigureKind, CostOperation, CostUnitKind
 
     world = World(tmp_path)
-    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     (row,) = world.cost.rows
     e = row.entry
     assert (e.provider, e.operation, e.unit_kind, e.amount_micros, e.figure_kind) == (

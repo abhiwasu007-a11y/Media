@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from agent_10_video_editor.config import Placement
-from agent_10_video_editor.errors import MeasurementUnavailable
+from agent_10_video_editor.errors import MeasurementUnavailable, violations_of
 from agent_10_video_editor.guard import SelfDrainTimer
 from agent_10_video_editor.inputs import AssetManifest, ScriptStrings, ShotPlan
 from agent_10_video_editor.probe import SILENCE_FLOOR_DBTP, Ebur128Parser
@@ -176,7 +176,7 @@ def test_a_source_shorter_than_its_shot_is_refused_at_compile_time() -> None:
     assert build(3000).shots[0].shot_id == "sh01"
     with pytest.raises(InputInvalidError) as err:
         build(2000)
-    assert "SOURCE_TOO_SHORT:sh01" in err.value.details["violations"]
+    assert "SOURCE_TOO_SHORT:sh01" in violations_of(err.value)
     with pytest.raises(InputInvalidError):
         build(3000, source_in_ms=500)  # in-point eats into the length
 
@@ -203,17 +203,17 @@ def test_watermark_visual_is_honestly_skipped_and_accuracy_is_computed(tmp_path:
 def test_process_checks_are_computed_and_tenant_needs_the_envelope(tmp_path: Path) -> None:
     world = World(tmp_path)
     chain = _chain(world)
-    skipped = QcStage(world.deps(), _selftests()).run(chain["qc_input"], world.attempt)
+    skipped = QcStage(world.deps(), _selftests()).execute(chain["qc_input"], world.attempt)
     by_id = {r.check_id: r for r in skipped.validation_results}
     assert by_id["a10.q.tenant"].verdict == "SKIPPED"
     assert by_id["a10.q.no_provider_call"].measured == 0
     with pytest.raises(TenantMismatchError):
-        QcStage(world.deps(), _selftests()).run(
+        QcStage(world.deps(), _selftests()).execute(
             chain["qc_input"], world.attempt, envelope_org=str(ORG.new())
         )
     world2 = World(tmp_path / "b")
     chain2 = _chain(world2)
-    checked = QcStage(world2.deps(), _selftests()).run(
+    checked = QcStage(world2.deps(), _selftests()).execute(
         chain2["qc_input"], world2.attempt, envelope_org=world2.org
     )
     assert {r.check_id: r for r in checked.validation_results}["a10.q.tenant"].verdict == "PASS"

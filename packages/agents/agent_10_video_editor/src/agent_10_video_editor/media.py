@@ -11,7 +11,7 @@ from agent_10_video_editor.ffmpeg import (
     RunLimits,
     error_for_result,
 )
-from agent_10_video_editor.probe import PacketParser, ProbeParser, ProbeResult
+from agent_10_video_editor.probe import PacketParser, ProbeParser, ProbeResult, keyframe_indices
 
 
 class StopRequested(Exception):  # noqa: N818 - control flow, not an error
@@ -69,6 +69,9 @@ class ProbeService:
 
     def packet_count(self, name: str) -> int:
         return PacketParser.count(self.packets_csv(name))
+
+    def keyframes(self, name: str) -> list[int]:
+        return keyframe_indices(self._run(self._argv.probe_packet_flags(name)))
 
     def stream_times_csv(self, name: str) -> str:
         return self._run(self._argv.probe_stream_times(name))

@@ -26,7 +26,7 @@ DOCUMENTATION AND DESIGN ONLY (rule 1). No code, migrations, configs, deployment
 - SEBI: education only. 30-day price-data lag (IN-02). No calls, levels, live sessions or return claims. **No forward-looking statements on named securities even in historical case studies** (IN-03). No regulated-entity association (IN-01).
 
 ## Quality (§1A)
-Visual hierarchy: owner/real material → licensed stock → code-made motion graphics → AI video B-roll → AI stills last. Hook in 30 s; a visual change every 3–5 s. Audio −14 LUFS / −1 dBTP / 48 kHz / AAC-LC ≥384 kbps. Video ≥1080p H.264 High 15–25 Mbps CFR, SRT per language. Blocking FFmpeg QC (INF-09). 100-point score, publish at ≥85; any compliance failure rejects. Golden-sample pilot before scaling.
+Visual hierarchy: owner/real material → licensed stock → code-made motion graphics → AI video B-roll → AI stills last. Hook in 30 s; a visual change every 3–5 s. Audio −14 LUFS / −1 dBTP / 48 kHz / AAC-LC ≥384 kbps. Video ≥1080p H.264 High, VBR at YouTube's encoder target (8 Mbps at 1080p30; owner decision D10, ADR-014; no measured floor), CFR, SRT per language. Blocking FFmpeg QC (INF-09). 100-point score, publish at ≥85; any compliance failure rejects. Golden-sample pilot before scaling.
 
 ## Business (§1B, §1C, §1D, §1E)
 First channel: Marathi-first trading **education**, funnel to the owner's course + ATP; no broker affiliate income. Enterprise tiers 0→3, each built only when a paying client needs it (§1C.15). Ads production line under the ASCI rules (IN-04/05). Growth lines are scored, not built.

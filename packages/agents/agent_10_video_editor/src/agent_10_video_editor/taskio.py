@@ -1,13 +1,17 @@
 """Task Output envelope helpers shared by the three stages (03 section 5; blueprint 10 s8)."""
 
+import json
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from agent_10_video_editor.errors import input_invalid
 from agent_10_video_editor.qc.result import CheckResult
 from amw_core.contracts.common import PayloadObject
+from amw_core.contracts.error import violation
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import (
     NextAction,
@@ -27,11 +31,58 @@ from amw_core.enums import (
     OutputStatus,
     WaitReason,
 )
+from amw_core.errors import SchemaInvalidError
 from amw_core.ids import AttemptId, ChannelId, ExecutorId, JobId, TaskId, make_idempotency_key
 from amw_core.interfaces.cost_ledger import NewCostEntry
 
 ACTOR = "agent_10"
 SCHEMA_VERSION = "1.0.0"
+
+
+def _not_json(what: str) -> SchemaInvalidError:
+    return SchemaInvalidError(
+        f"{what} is not valid JSON",
+        details={"violations": [violation("PAYLOAD_NOT_JSON", "/context_refs")]},
+    )
+
+
+def parse_json_object(data: bytes, what: str = "an input blob") -> dict[str, Any]:
+    """A referenced blob as a JSON object. Not JSON (also empty, not UTF-8, too deep) or not an
+    object is ``SCHEMA_INVALID`` (``PAYLOAD_NOT_JSON``): the input is bad, not the agent."""
+    try:
+        value = json.loads(data)
+    except ValueError, RecursionError:
+        raise _not_json(what) from None
+    if not isinstance(value, dict):
+        raise _not_json(what)
+    return value
+
+
+def parse_blob[M: BaseModel](model: type[M], data: bytes, what: str = "an input blob") -> M:
+    """A referenced blob parsed into its typed model; every parse or schema failure of the blob
+    is ``SCHEMA_INVALID`` (never a bare ``ValidationError``, which would read as a crash)."""
+    try:
+        json.loads(data)
+    except ValueError, RecursionError:
+        raise _not_json(what) from None
+    try:
+        return model.model_validate_json(data)
+    except ValidationError as exc:
+        if any(e["type"] == "json_invalid" for e in exc.errors()):  # e.g. nesting too deep
+            raise _not_json(what) from None
+        raise SchemaInvalidError(
+            f"{what} does not match its schema",
+            details={
+                "violations": [
+                    violation(
+                        str(e["type"]),
+                        "/context_refs/" + "/".join(str(p) for p in e["loc"]),
+                        str(e["msg"])[:200],
+                    )
+                    for e in exc.errors()[:50]
+                ]
+            },
+        ) from None
 
 
 def validate_budget(task_input: TaskInput) -> None:

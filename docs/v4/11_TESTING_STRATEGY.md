@@ -332,7 +332,7 @@ The bundle of 3A_SLICE_SPEC §4 is checked by an automated verifier used by E1 a
 5. The cost report follows 09 §12: header, per-stage table, budget status per limit, ESTIMATE/VERIFIED labels, **unknown values printed as REQUIRES REVIEW, never as zero**.
 6. The bundle contains no keys, account IDs, server addresses or prompt text (09 §12.3 item 5); the canary scan of S6 runs over it.
 7. The export of the `audit_log` chain and the `cost_ledger` rows as JSON verifies (27 §9 "Records").
-8. Technical specification of each media file measured, not trusted: container, H.264 profile, resolution, frame rate (CFR), video bitrate against the directive target (INF-10 notes YouTube's own floor is lower), audio −14 LUFS / −1 dBTP / 48 kHz / AAC-LC ≥ 384 kbps, `faststart` (18 §5–§7; INF-09 filters).
+8. Technical specification of each media file measured, not trusted: container, H.264 profile, resolution, frame rate (CFR), encoder settings of every segment against YouTube's encoder target and codec settings (INF-12, INF-13, ADR-014; the bitrate is not a measured floor), SSIM reported against the lossless intermediate, audio −14 LUFS / −1 dBTP / 48 kHz / AAC-LC ≥ 384 kbps, `faststart` (18 §5–§7; INF-09 filters).
 9. The 3A flow records `SKIPPED` for the cross-video uniqueness part (no prior videos), and the verifier asserts it is recorded, not omitted (3A_SLICE_SPEC §2.4).
 
 ### 12.4 Negative end-to-end scenarios [3A]

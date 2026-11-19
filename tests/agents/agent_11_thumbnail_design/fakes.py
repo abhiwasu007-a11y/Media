@@ -314,6 +314,7 @@ def settings(**over: Any) -> Agent11Settings:
         "agent_11.distinct.min_hash_distance_bits": 1,
         "agent_11.asset.min_width_px": 1280,
         "agent_11.asset.min_height_px": 720,
+        "agent_11.fonts.policy": "TENANT_ALLOWED",  # a tenant channel; the default is MANIFEST_ONLY
         "agent_11.llm.enabled": True,
         "agent_11.llm.max_rationale_chars": 160,
         "llm.agent_11.thumbnail_variants.concepts.model_tier": "MID",
@@ -328,7 +329,10 @@ def settings(**over: Any) -> Agent11Settings:
         "llm.tiers.MID.currency": "USD",
     }
     for k, v in over.items():
-        flat[k.replace("__", ".")] = v
+        if v is None and k.endswith("fonts__policy"):
+            flat.pop(k.replace("__", "."), None)  # None = leave the key out: the code default
+        else:
+            flat[k.replace("__", ".")] = v
     return Agent11Settings.load(flat)
 
 

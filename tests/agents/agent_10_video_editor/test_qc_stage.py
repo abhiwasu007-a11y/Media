@@ -33,7 +33,9 @@ class _SelfTests:
 
 
 def _qc(world: World, chain: dict[str, Any], selftests: _SelfTests | None = None) -> TaskOutput:
-    return QcStage(world.deps(), selftests or _SelfTests()).run(chain["qc_input"], world.attempt)
+    return QcStage(world.deps(), selftests or _SelfTests()).execute(
+        chain["qc_input"], world.attempt
+    )
 
 
 @pytest.mark.unit
@@ -158,7 +160,7 @@ def test_hash_chain_mismatch_is_incomplete_output(tmp_path: Path) -> None:
         }
     )
     with pytest.raises(IncompleteOutputError):
-        QcStage(world.deps(), _SelfTests()).run(bad, world.attempt)
+        QcStage(world.deps(), _SelfTests()).execute(bad, world.attempt)
 
 
 @pytest.mark.unit

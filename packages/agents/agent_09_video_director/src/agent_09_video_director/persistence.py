@@ -7,13 +7,16 @@ from datetime import datetime
 from io import BytesIO
 
 from agent_09_video_director.assemble import canonical_json
-from agent_09_video_director.contracts import Model, ShotPlan
+from agent_09_video_director.contracts import Model
 from agent_09_video_director.direction.runner import ResumeState
 from amw_core.errors import CorruptedOutputError
-from amw_core.ids import AttemptId, TaskId
+from amw_core.ids import AttemptId, JobId, TaskId
 from amw_core.interfaces.checkpoint_store import CheckpointRecord, CheckpointStore, NewCheckpoint
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
+from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri
+
+PLAN_ARTIFACT = "shot_plan.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,14 +27,21 @@ class OutputRefData:
 
 
 def persist_plan(
-    storage: BlobStorage, ctx: TenantContext, plan: ShotPlan, *, task_path: str
+    storage: BlobStorage,
+    ctx: TenantContext,
+    document: Model,
+    *,
+    job_id: JobId,
+    task_id: TaskId,
+    attempt_id: AttemptId,
 ) -> OutputRefData:
-    """Write the plan blob once. A repeat with the same content returns the stored ref; a
-    different content under the same path is refused by the storage (write-once, 03 section 8.2).
-    The path is built by core (``blob_uri``), never by string formatting here."""
-    body = canonical_json(plan.model_dump(mode="json")).encode("utf-8")
+    """Write the plan blob once at ``artifacts/shot_plan.json`` of this attempt (03 section 8
+    rule 5, CCR-203 / CCR-208). ``document`` is the whole output document without ``plan_ref``.
+    A repeat with the same content returns the stored ref; a different content under the same
+    path is refused (write-once, 03 section 8.2). The path is built by the core path helper."""
+    body = canonical_json(document.model_dump(mode="json")).encode("utf-8")
     sha = hashlib.sha256(body).hexdigest()
-    uri: BlobUri = storage.blob_uri(ctx, "jobs", task_path)
+    uri = BlobUri(task_artifact_uri(ctx.org_id, job_id, task_id, attempt_id, PLAN_ARTIFACT))
     head = storage.head(ctx, uri)
     if head.exists:
         if head.sha256 != sha:
@@ -58,15 +68,17 @@ def save_checkpoint(
     storage: BlobStorage,
     ctx: TenantContext,
     *,
+    job_id: JobId,
     task_id: TaskId,
     attempt_id: AttemptId,
     state: ResumeState,
     now: datetime,
 ) -> CheckpointRecord:
-    """F-28: state blob written write-once first, then the ``checkpoints`` row (04 5.7)."""
+    """F-28: state blob written write-once first at ``checkpoints/<task>/`` (03 section 8 rule 5),
+    then the ``checkpoints`` row (04 5.7)."""
     body = state.model_dump_json().encode("utf-8")
     sha = hashlib.sha256(body).hexdigest()
-    uri = storage.blob_uri(ctx, "jobs", f"{task_id}/checkpoints/{sha[:32]}.json")
+    uri = BlobUri(checkpoint_uri(ctx.org_id, job_id, task_id, f"{sha[:32]}.json"))
     if not storage.head(ctx, uri).exists:
         storage.put(ctx, uri, BytesIO(body))
     return store.write(

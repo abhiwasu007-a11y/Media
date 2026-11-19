@@ -36,6 +36,7 @@ _EXTENSIONS = frozenset(
     {"png", "jpg", "jpeg", "webp", "mp4", "mov", "mkv", "wav", "ttf", "otf", "flac"}
 )
 _IMAGE_EXTENSIONS = IMAGE_EXTENSIONS
+REFERENCE_NAME = "segment_ref.part"
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +163,8 @@ class SegmentCommand:
     video_needs: tuple[tuple[str, str, int], ...] = ()
     """(staged input name, shot_id, source ms the shot consumes) of every moving-video input: the
     render probes each staged input against it, because ``tpad=clone`` would freeze a short one."""
+    reference_name: str = ""
+    """The lossless FFV1 reference of the same frames (scratch only; ADR-014 quality metric)."""
 
 
 def _ext_of(uri: str) -> str:
@@ -282,10 +285,25 @@ class ArgvBuilder:
                 f":enable='between(n,{start},{end})'[vc{n + 1}]"
             )
             current = f"vc{n + 1}"
+        enc = cfg.encode
+        # INF-13: closed GOP of half the frame rate, 2 consecutive B-frames, CABAC; INF-12 /
+        # ADR-014: average-bitrate (VBR) rate control at the target, no filler (nal-hrd unset)
         x264 = (
-            f"keyint={cfg.gop_frames}:min-keyint={cfg.gop_frames}:scenecut=0:open-gop=0"
-            f":threads={cfg.threads}"
+            # (no min-keyint: x264 clamps it to keyint/2+1 whatever is asked; measured)
+            f"keyint={enc.gop_frames}:scenecut=0:open-gop=0"
+            f":bframes={enc.bframes}:cabac={int(enc.cabac)}:threads={cfg.threads}"
         )
+        rate = ["-b:v", str(enc.target_bps)]
+        if enc.maxrate_bps is not None and enc.bufsize_bps is not None:
+            rate += ["-maxrate", str(enc.maxrate_bps), "-bufsize", str(enc.bufsize_bps)]
+        # the filtered frames go twice: to the delivery encode and to a lossless FFV1 reference
+        # (the intermediate the quality metric compares against, ADR-014)
+        every = cfg.quality_sample_every
+        sampled = "" if every == 1 else f",select='not(mod(n,{every}))',setpts=N/FRAME_RATE/TB"
+        graph.append(f"[{current}]split=2[venc][vraw]")
+        graph.append(f"[vraw]null{sampled}[vref]")
+        frames = str(slice_.segment.frames)
+        ref_frames = str(-(-slice_.segment.frames // every))
         argv = [
             self.ffmpeg_bin,
             "-hide_banner",
@@ -297,9 +315,9 @@ class ArgvBuilder:
             "-filter_complex",
             ";".join(graph),
             "-map",
-            f"[{current}]",
+            "[venc]",
             "-frames:v",
-            str(slice_.segment.frames),
+            frames,
             "-fps_mode",
             "cfr",
             "-r",
@@ -307,23 +325,18 @@ class ArgvBuilder:
             "-c:v",
             cfg.video_encoder,
             "-preset",
-            cfg.x264_preset,
+            enc.x264_preset,
             "-profile:v",
             "high",
             "-pix_fmt",
             "yuv420p",
-            "-b:v",
-            str(cfg.video_bitrate_bps),
-            "-maxrate",
-            str(cfg.video_maxrate_bps),
-            "-bufsize",
-            str(cfg.video_maxrate_bps * 2),
+            *rate,
             "-g",
-            str(cfg.gop_frames),
-            "-keyint_min",
-            str(cfg.gop_frames),
+            str(enc.gop_frames),
             "-sc_threshold",
             "0",
+            "-bf",
+            str(enc.bframes),
             "-x264-params",
             x264,
             "-color_primaries",
@@ -344,6 +357,32 @@ class ArgvBuilder:
             "-f",
             "mp4",
             "segment.part",
+            "-map",
+            "[vref]",
+            "-frames:v",
+            ref_frames,
+            "-fps_mode",
+            "cfr",
+            "-r",
+            fps,
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-g",
+            "1",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            "-map_metadata",
+            "-1",
+            "-fflags",
+            "+bitexact",
+            "-flags:v",
+            "+bitexact",
+            "-f",
+            "matroska",
+            REFERENCE_NAME,
         ]
         return SegmentCommand(
             argv=tuple(argv),
@@ -352,12 +391,44 @@ class ArgvBuilder:
             args_sha256=canonical_sha256(argv),
             warnings=tuple(dict.fromkeys(warnings)),
             gop={
-                "gop_frames": cfg.gop_frames,
+                "gop_frames": enc.gop_frames,
                 "closed_gop": True,
                 "idr_at_segment_start": True,
             },
             video_needs=tuple(needs),
+            reference_name=REFERENCE_NAME,
         )
+
+    def ssim(self, encoded: str, reference: str, sample_every: int = 1) -> list[str]:
+        """SSIM of the delivery encode against its lossless reference (ffmpeg ``ssim`` filter).
+
+        Both inputs are re-timed by frame index (``setpts=N/FRAME_RATE/TB``): the Matroska
+        reference has a 1 ms timebase and the MP4 an exact one, and the filter pairs frames by
+        timestamp, so without this it pairs some frames wrongly (review of PR #79). Per-frame
+        lines go to stdout (``stats_file=-``) so the caller can count the pairs; the summary
+        ``SSIM Y:... All:<mean>`` goes to stderr. ``sample_every`` > 1 selects every n-th frame
+        of the encode, as the reference was written."""
+        pick = "" if sample_every == 1 else f"select='not(mod(n,{sample_every}))',"
+        retime = "settb=AVTB,setpts=N/FRAME_RATE/TB"
+        return [
+            self.ffmpeg_bin,
+            "-hide_banner",
+            "-nostdin",
+            "-nostats",
+            "-protocol_whitelist",
+            "file",
+            "-i",
+            encoded,
+            "-protocol_whitelist",
+            "file",
+            "-i",
+            reference,
+            "-lavfi",
+            f"[0:v]{pick}{retime}[a];[1:v]{retime}[b];[a][b]ssim=stats_file=-",
+            "-f",
+            "null",
+            "-",
+        ]
 
     # -- mux -------------------------------------------------------------------------------
 
@@ -378,6 +449,16 @@ class ArgvBuilder:
             raise input_invalid("CODEC_PROFILE_UNSUPPORTED")
         colour = self._cfg.colour
         listing = "".join(f"file '{name}'\n" for name in segment_names)
+        # No edit lists (INF-13): the encoder's priming samples are no longer hidden by an audio
+        # edit list, so the same number of samples is dropped from the start of the master and
+        # the stream is cut to the video length (measured: a click at 500 ms then decodes at
+        # 500.42 ms and the audio duration equals the video; ADR-014 section 3.5)
+        priming = self._cfg.aac_priming_samples
+        total = duration_ms * codec_profile.sample_rate_hz // 1000
+        audio_filter = (
+            f"atrim=start_sample={priming},asetpts=N/SR/TB,apad,"
+            f"atrim=end_sample={max(total - priming, 0)}"
+        )
         argv = [
             self.ffmpeg_bin,
             "-hide_banner",
@@ -414,7 +495,7 @@ class ArgvBuilder:
             "-ac",
             str(codec_profile.channels),
             "-af",
-            "apad",
+            audio_filter,
             "-t",
             ms_to_seconds_text(duration_ms),
             "-color_primaries",
@@ -431,8 +512,12 @@ class ArgvBuilder:
             "+bitexact",
             "-flags:a",
             "+bitexact",
+            # INF-13: "No Edit Lists"; negative CTS offsets keep the first video frame at 0
+            # despite the B-frame delay (measured: without them video starts 2 frames late)
+            "-use_editlist",
+            "0",
             "-movflags",
-            "+faststart",
+            "+faststart+negative_cts_offsets",
             "-f",
             "mp4",
             "final.part",
@@ -443,7 +528,8 @@ class ArgvBuilder:
 
     def probe_full(self, name: str) -> list[str]:
         entries = (
-            "stream=index,codec_type,codec_name,profile,pix_fmt,width,height,field_order,"
+            "stream=index,codec_type,codec_name,profile,level,has_b_frames,pix_fmt,width,height,"
+            "field_order,"
             "r_frame_rate,avg_frame_rate,bit_rate,sample_rate,channels,start_time,duration,"
             "color_range,color_space,color_transfer,color_primaries"
             ":format=duration,bit_rate,format_name,size"
@@ -508,6 +594,23 @@ class ArgvBuilder:
             "v:0",
             "-show_entries",
             "packet=pts_time",
+            "-of",
+            "csv=p=0",
+            name,
+        ]
+
+    def probe_packet_flags(self, name: str) -> list[str]:
+        """``pts_time,flags`` of every video packet (keyframe flag ``K``; GOP structure)."""
+        return [
+            self.ffprobe_bin,
+            "-v",
+            "error",
+            "-protocol_whitelist",
+            "file",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,flags",
             "-of",
             "csv=p=0",
             name,
@@ -623,6 +726,9 @@ class ArgvBuilder:
 
     def version(self) -> list[str]:
         return [self.ffmpeg_bin, "-hide_banner", "-version"]
+
+    def filters(self) -> list[str]:
+        return [self.ffmpeg_bin, "-hide_banner", "-filters"]
 
 
 def _warn_part(part: TimelineShot, warnings: list[str]) -> None:

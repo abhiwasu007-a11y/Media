@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from amw_core.config.settings import MAX_MINOR_EXPONENT
 from amw_core.cost.ledger import effective_rows, figure_kind_label, totals
 from amw_core.enums import BudgetPeriod, BudgetScopeKind, BudgetState, CostFigureKind
 from amw_core.errors import ConfigInvalidError, InputInvalidError
@@ -184,6 +185,11 @@ def to_minor(micros: int, currency: str, exponents: Mapping[str, int]) -> int | 
     exp = exponents.get(currency)
     if exp is None:
         return review(f"minor-unit exponent of {currency} in finance.currency_minor_exponent")
+    if isinstance(exp, bool) or not isinstance(exp, int) or not 0 <= exp <= MAX_MINOR_EXPONENT:
+        return review(
+            f"minor-unit exponent of {currency} outside 0..{MAX_MINOR_EXPONENT} in "
+            "finance.currency_minor_exponent"
+        )
     value = Decimal(micros) / (Decimal(10) ** (6 - exp))
     return int(value.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 

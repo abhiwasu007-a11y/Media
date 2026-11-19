@@ -6,10 +6,13 @@ It runs under the ``amw_verifier`` database role: it fetches the owner's event t
 verification result, event or check list from a caller, and it is the only component that holds
 the verifier session; the operator tool holds only an ``amw_operator`` session.
 
-**Limitation:** the real session-store adapter is ticket 3A-13; until then only the in-memory
-fake exists, and 3A approvals recorded through it are not production-verified.
+**Session record (3A-13 / WS-08):** the real source is
+``amw_adapters.session_record.ClaudeSessionJsonlSource`` (wired by
+``amw_core.owner_evidence_real``); approvals recorded through the in-memory fake are TEST
+fixtures (dry run only). Residual risks: ``docs/v4/runtime/EVIDENCE_PATH.md``.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 
 from amw_core.enums import EvidenceState, InstructionSourceKind
@@ -45,6 +48,7 @@ class EvidenceVerifierService:
         session: DbSession,
         source: SessionEventSource,
         policy: VerifierPolicy,
+        marks: Mapping[str, bool] | None = None,
     ) -> None:
         if session.role is not DbRole.VERIFIER:
             raise PermissionDeniedError("the verifier component runs as amw_verifier")
@@ -52,6 +56,9 @@ class EvidenceVerifierService:
         self._session = session
         self._source = source
         self._policy = policy
+        self._marks = dict(marks or {})
+        """Fixed entries added to every ``verifier_result`` this service writes (inside the MAC),
+        e.g. which kind of session source verified the row (``owner_evidence_real``)."""
 
     def _bound(self, outcome: Verified, row: EvidenceRecord, event_uuid: str, purpose: str) -> None:
         if (
@@ -113,7 +120,7 @@ class EvidenceVerifierService:
             return self._db.refuse(self._session, tx, row.id, outcome.reason, dict(outcome.checks))
         self._bound(outcome, row, e.event_uuid, RECORD)
         return self._db.mark_verified(
-            self._session, tx, row.id, dict(outcome.checks), outcome.verified_at
+            self._session, tx, row.id, dict(outcome.checks) | self._marks, outcome.verified_at
         )
 
     def confirm(
@@ -124,6 +131,8 @@ class EvidenceVerifierService:
         event_uuid: str,
         quote: str,
         now: datetime,
+        *,
+        decision_form: bool = False,
     ) -> EvidenceRecord:
         """``VERIFIED -> CONFIRMED`` only for a second, distinct, later owner event that passes
         the authenticity tests and the confirmation whitelist (``confirm R7K2``). Anything else
@@ -145,6 +154,7 @@ class EvidenceVerifierService:
             distinct_from_event_uuid=row.evidence.event_uuid,
             policy=self._policy,
             now=now,
+            confirm_decision=row.evidence.parsed_decision if decision_form else None,
         )
         if isinstance(outcome, EventUnavailable):
             raise MissingDependencyError("confirmation event cannot be fetched")
@@ -158,5 +168,5 @@ class EvidenceVerifierService:
             outcome.event_uuid,
             quote,
             outcome.event_timestamp,
-            dict(outcome.checks),
+            dict(outcome.checks) | self._marks,
         )

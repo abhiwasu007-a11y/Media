@@ -11,6 +11,7 @@ import pytest
 
 from agent_10_video_editor.config import AgentTenConfig
 from agent_10_video_editor.contracts import TechnicalQcOutput
+from agent_10_video_editor.errors import violations_of
 from agent_10_video_editor.ffmpeg import ArgvBuilder, ProcessFfmpegRunner, ProcessResult, RunLimits
 from agent_10_video_editor.qc.gate import PROFILE_CHECKS
 from agent_10_video_editor.qc.selftest import QcSelfTest, SelfTestRecord
@@ -34,10 +35,9 @@ pytestmark = [
 
 
 def _config() -> AgentTenConfig:
-    # test values: 4 s segments, 1 s closed GOP; "faster" keeps x264 at the High profile
-    return make_config(
-        render={"segment_target_ms": 4000, "gop_frames": 30, "x264_preset": "faster"}
-    )
+    # test values: 4 s segments; the closed GOP (15 frames, half of 30 fps) and the 8 Mbps
+    # target come from data/encode_targets.json (ADR-014); "faster" keeps x264 at High
+    return make_config(render={"segment_target_ms": 4000, "x264_preset": "faster"})
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +90,9 @@ def test_it01_it03_whole_render_and_qc_on_synthetic_media(
         "a10.q.gop_settings",
     }
     assert all(r.verdict == "PASS" for r in chain["render"].validation_results)
-    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).run(chain["qc_input"], world.attempt)
+    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).execute(
+        chain["qc_input"], world.attempt
+    )
     assert qc.status is OutputStatus.SUCCEEDED
     out = TechnicalQcOutput.model_validate(payload_data(qc))
     assert out.gate_verdict == "PASSED", out.failures
@@ -118,11 +120,11 @@ def test_it04_revision_iteration_reuses_unchanged_segments(
     tmp_path: Path, media: LavfiMedia
 ) -> None:
     world = _world(tmp_path, media)
-    first = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    first = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert payload_data(first)["segments"]["encoded"] == 2
     data, ext = media.shot("sh04-revised", 2000)
     world.revise_shot(3, data, ext)  # only the last shot changes
-    second = RenderStage(world.deps()).run(world.render_input(iteration=1), world.attempt)
+    second = RenderStage(world.deps()).execute(world.render_input(iteration=1), world.attempt)
     segs = payload_data(second)["segments"]
     assert segs["reused"] == 1
     assert segs["encoded"] == 1
@@ -158,18 +160,18 @@ class _StoppingRunner:
 @pytest.mark.failure_injection
 def test_fi01_kill_mid_segment_resume_is_byte_identical(tmp_path: Path, media: LavfiMedia) -> None:
     reference = _world(tmp_path / "ref", media)
-    ref_out = RenderStage(reference.deps()).run(reference.render_input(), reference.attempt)
+    ref_out = RenderStage(reference.deps()).execute(reference.render_input(), reference.attempt)
     world = _world(tmp_path / "run", media)
     killer = _StoppingRunner(after_s=0.3)
     world.runner = killer  # type: ignore[assignment]
     stage = RenderStage(world.deps())
-    interrupted = stage.run(world.render_input(), world.attempt)
+    interrupted = stage.execute(world.render_input(), world.attempt)
     assert killer.stopped == 1
     assert interrupted.status is OutputStatus.SUSPENDED
     assert not any(
         "segments" in uri for uri in world.storage.blobs
     )  # the .part never became a blob
-    done = stage.run(world.render_input(), world.attempt)
+    done = stage.execute(world.render_input(), world.attempt)
     assert done.status is OutputStatus.SUCCEEDED
     assert _final_bytes(world, done) == _final_bytes(reference, ref_out)
     assert (
@@ -194,11 +196,11 @@ def test_fi13_self_drain_timer_stops_a_running_segment_before_the_window(
 
     world.runner = _TimerRunner(0)  # type: ignore[assignment]
     stage = RenderStage(world.deps())
-    out = stage.run(world.render_input(), world.attempt)
+    out = stage.execute(world.render_input(), world.attempt)
     assert out.status is OutputStatus.SUSPENDED
     assert out.next_action.wait_reason is not None
     assert not list((world.scratch).rglob("segment.part"))  # the .part was discarded
-    done = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    done = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert done.status is OutputStatus.SUCCEEDED
 
 
@@ -227,7 +229,9 @@ def test_r02_selftest_fixtures_yield_their_asserted_verdicts(tmp_path: Path) -> 
         "silent.silence",
         "offset.av_start",
         "srt.overlap",
-        "rate.bitrate",
+        "settings.encoder_settings",
+        "baseline.encoder_settings",
+        "settings.quality_metric",
     }
 
 
@@ -260,7 +264,9 @@ def test_failing_gate_end_to_end_with_real_ffmpeg(tmp_path: Path) -> None:
     world = _world(tmp_path, hot)
     world.licences.snapshot_value = licensed_snapshot(world)
     chain = run_chain(world)
-    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).run(chain["qc_input"], world.attempt)
+    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).execute(
+        chain["qc_input"], world.attempt
+    )
     assert qc.status is OutputStatus.SUCCEEDED  # a failed gate is not a failed task
     out = TechnicalQcOutput.model_validate(payload_data(qc))
     assert out.gate_verdict == "FAILED"
@@ -282,7 +288,9 @@ def test_silent_audio_end_to_end_is_a_gate_fail_not_a_crash(tmp_path: Path) -> N
     world = _world(tmp_path, silent)
     world.licences.snapshot_value = licensed_snapshot(world)
     chain = run_chain(world)
-    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).run(chain["qc_input"], world.attempt)
+    qc = QcStage(world.deps(), _SelfTests(world, tmp_path)).execute(
+        chain["qc_input"], world.attempt
+    )
     assert qc.status is OutputStatus.SUCCEEDED
     out = TechnicalQcOutput.model_validate(payload_data(qc))
     assert out.gate_verdict == "FAILED"
@@ -297,5 +305,5 @@ def test_a_source_clip_shorter_than_its_shot_is_refused_not_frozen(
     data, ext = media.shot("too-short", 800)  # the last shot needs 2 s
     world.revise_shot(3, data, ext)
     with pytest.raises(InputInvalidError) as err:
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
-    assert "SOURCE_TOO_SHORT:sh04" in err.value.details["violations"]
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
+    assert "SOURCE_TOO_SHORT:sh04" in violations_of(err.value)

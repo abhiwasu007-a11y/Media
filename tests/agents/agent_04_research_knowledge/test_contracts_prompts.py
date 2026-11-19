@@ -30,7 +30,7 @@ from agent_04_research_knowledge.steps.validate_pack import CHECK_IDS, GATE_CHEC
 from amw_core.contracts import registry
 from amw_core.enums import RulePackScope
 from amw_evals.prompt_doc import parse_prompt
-from tests.agents.agent_04_research_knowledge.conftest import PROMPTS, build_world
+from tests.agents.agent_04_research_knowledge.conftest import PROMPTS, build_world, exec_ctx
 
 DOCS = Path(__file__).resolve().parents[3] / "docs" / "v4"
 BLUEPRINT = (DOCS / "agents" / "agent_04_research_knowledge.md").read_text(encoding="utf-8")
@@ -88,10 +88,9 @@ def test_c07_owner_references_equal_owner_topic_item_schema() -> None:
 
 
 def test_pack_output_validates_and_roundtrips() -> None:
-    from amw_core.ids import ATTEMPT
-
     w = build_world()
-    out = w.step().run(w.task_input(), ATTEMPT.new())
+    ti = w.task_input()
+    out = w.step().run(ti, exec_ctx(ti))
     assert out.payload is not None and out.payload.data is not None
     schema = doc_schema("urn:amw:schema:agent_04.research_pack.output:1.0.0")
     assert_valid(schema, out.payload.data)

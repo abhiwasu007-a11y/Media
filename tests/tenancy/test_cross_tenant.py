@@ -46,6 +46,7 @@ GLOBAL_ALLOW_LIST = frozenset(
         "workers",
         "plans",
         "evidence_mac_keys",
+        "evidence_db_profile",  # 0059, one row: the database's REAL / TEST profile (CCR-265)
         "amw_schema_migrations",
     }
 )
@@ -494,6 +495,9 @@ def test_job_store_methods_see_nothing_of_a(worlds: tuple[World, World], b_tx: A
             ),
         ),
         lambda: store.create_tasks(b_tx, job, []),
+        lambda: store.repoint_dependency(
+            b_tx, TASK.from_uuid(a["task1"]), TASK.from_uuid(a["task"]), TASK.new()
+        ),
     ):
         with pytest.raises(MissingDependencyError):
             call()

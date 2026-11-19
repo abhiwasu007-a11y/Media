@@ -1,0 +1,15 @@
+{
+  "_comment": "Operator echo texts (approvals.owner_chat.echo.<lang>); OWNER TO CONFIRM every text. Placeholders: {quote} {code} {kind} {reason}. The confirmation forms must pass the confirmation whitelist (confirm words of owner_evidence_verifier).",
+  "en": {
+    "ask_decision": "Review code {code}. Reply `approve {code}` or `reject {code}`.",
+    "recorded": "Recorded: «{quote}» ({kind}). Nothing is applied until you confirm: reply exactly `confirm {code}`. If this is not what you meant, reply with the correction.",
+    "needs_clarification": "I could not record this ({reason}). Please restate it in one message, for example `approve {code}`.",
+    "refused": "Not recorded: «{quote}» ({reason})."
+  },
+  "mr": {
+    "ask_decision": "पुनरावलोकन कोड {code}. उत्तर द्या: `{code} मंजूर` किंवा `{code} नामंजूर`.",
+    "recorded": "नोंद केली: «{quote}» ({kind}). तुम्ही पक्के करेपर्यंत काहीही लागू होणार नाही: नेमके `{code} पक्के` (किंवा `confirm {code}`) असे उत्तर द्या. हे तुम्हाला अपेक्षित नसल्यास दुरुस्ती लिहा.",
+    "needs_clarification": "हे नोंदवता आले नाही ({reason}). कृपया एकाच संदेशात पुन्हा लिहा, उदा. `{code} मंजूर`.",
+    "refused": "नोंद नाही: «{quote}» ({reason})."
+  }
+}
