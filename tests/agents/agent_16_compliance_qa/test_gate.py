@@ -93,6 +93,16 @@ def pack(
     return row, body
 
 
+def subject() -> dict[str, str]:
+    """A schema-valid gate subject (8.2): the payload is validated by its model on emission."""
+    return {
+        "render_id": ids.new_id(ids.Prefix.RENDER),
+        "render_sha256": "a" * 64,
+        "script_id": ids.new_id(ids.Prefix.SCRIPT),
+        "script_sha256": "b" * 64,
+    }
+
+
 def packs(finance: bool = True) -> Any:
     yt, ybody = pack("rp.youtube_general", YTG)
     rows, files = [yt], {yt.rule_pack_id: ybody}
@@ -685,7 +695,7 @@ def test_uniqueness_verdict_is_a_gate_row_and_blocked_never_passes(
     d = gate().evaluate(clean_inputs(uniqueness_verdict=verdict))
     assert d.verdict is verdict
     vr = validation_results(d, ROUTING, packs())
-    payload = gate_payload(d, {}, ROUTING, packs(), [], {})
+    payload = gate_payload(d, subject(), ROUTING, packs(), [], {})
     na = next_action_for(d.verdict, vr)
     if verdict is ComplianceVerdict.BLOCKED:
         assert payload["gate_verdict"] == "FAILED"
@@ -710,7 +720,7 @@ def test_warning_severity_fail_is_warn_and_never_blocks() -> None:
     r9 = next(r for r in vr if r.rule_id == "FIN-R9")
     assert r9.verdict.value == "WARN" and not r9.blocking
     assert d.verdict is not ComplianceVerdict.BLOCKED
-    assert gate_payload(d, {}, ROUTING, p, [], {})["gate_verdict"] == "PASSED"
+    assert gate_payload(d, subject(), ROUTING, p, [], {})["gate_verdict"] == "PASSED"
 
 
 def test_blocked_verdict_without_a_blocking_row_fails_closed() -> None:

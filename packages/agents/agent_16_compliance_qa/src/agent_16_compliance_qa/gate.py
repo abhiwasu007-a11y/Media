@@ -37,6 +37,7 @@ from agent_16_compliance_qa.judge.models import (
 from agent_16_compliance_qa.judge.paraphrase import QuotationApproval, apply_paraphrase
 from agent_16_compliance_qa.nearcopy import NearCopyResult
 from agent_16_compliance_qa.packs import LoadedPacks
+from agent_16_compliance_qa.payload_models import ComplianceGateOutput, emit
 from agent_16_compliance_qa.prefilter import select_rules
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import (
@@ -542,51 +543,56 @@ def gate_payload(
         for ref in (r.item_refs or (r.rule_id,))
     ]
     gate_failed = any(v.blocking for v in validation_results(decision, routing, packs))
-    return {
-        "verdict": decision.verdict.value,
-        "subject": dict(subject),
-        "packs": pack_rows,
-        "rules": [
-            {
-                "rule_id": r.rule_id,
-                "check_verdict": r.check_verdict.value,
-                "compliance_verdict": r.compliance_verdict.value if r.compliance_verdict else None,
-                "kind": r.kind.value,
-                "rationale": r.rationale[:1000],
-                "evidence": {**r.evidence, "item_refs": list(r.item_refs)},
-                "precondition": r.precondition,
-                "remedy_stage_id": remedy_stage(r, routing),
-            }
-            for r in rows
-        ],
-        "frame_checks": [
-            {
-                "check_id": f.check_id,
-                "finding": f.finding,
-                "frame_ids": list(f.frame_ids),
-                "verdict": f.verdict.value,
-                "rationale": f.rationale[:500],
-            }
-            for f in decision.frame_checks
-        ],
-        "disclosure": {
-            "decision": decision.disclosure.disclosure_decision.value,
-            "rationale": decision.disclosure.rationale,
-            "report_text_key": _DISCLOSURE_KEYS[decision.disclosure.disclosure_decision],
+    return emit(
+        ComplianceGateOutput,
+        {
+            "verdict": decision.verdict.value,
+            "subject": dict(subject),
+            "packs": pack_rows,
+            "rules": [
+                {
+                    "rule_id": r.rule_id,
+                    "check_verdict": r.check_verdict.value,
+                    "compliance_verdict": r.compliance_verdict.value
+                    if r.compliance_verdict
+                    else None,
+                    "kind": r.kind.value,
+                    "rationale": r.rationale[:1000],
+                    "evidence": {**r.evidence, "item_refs": list(r.item_refs)},
+                    "precondition": r.precondition,
+                    "remedy_stage_id": remedy_stage(r, routing),
+                }
+                for r in rows
+            ],
+            "frame_checks": [
+                {
+                    "check_id": f.check_id,
+                    "finding": f.finding,
+                    "frame_ids": list(f.frame_ids),
+                    "verdict": f.verdict.value,
+                    "rationale": f.rationale[:500],
+                }
+                for f in decision.frame_checks
+            ],
+            "disclosure": {
+                "decision": decision.disclosure.disclosure_decision.value,
+                "rationale": decision.disclosure.rationale,
+                "report_text_key": _DISCLOSURE_KEYS[decision.disclosure.disclosure_decision],
+            },
+            "earliest_compliant_publish_date": (
+                decision.earliest_compliant_publish_date.isoformat()
+                if decision.earliest_compliant_publish_date
+                else None
+            ),
+            "review_requests": review_requests(decision),
+            "revision_findings": findings,
+            "verdict_ids": list(verdict_ids),
+            "gate_verdict": "FAILED" if gate_failed else "PASSED",
+            "provenance": dict(provenance)
+            | {
+                "judge_calls": decision.judge_calls,
+                "quote_verification_failures": decision.quote_failures,
+                "injection_suspected": list(decision.injection_items),
+            },
         },
-        "earliest_compliant_publish_date": (
-            decision.earliest_compliant_publish_date.isoformat()
-            if decision.earliest_compliant_publish_date
-            else None
-        ),
-        "review_requests": review_requests(decision),
-        "revision_findings": findings,
-        "verdict_ids": list(verdict_ids),
-        "gate_verdict": "FAILED" if gate_failed else "PASSED",
-        "provenance": dict(provenance)
-        | {
-            "judge_calls": decision.judge_calls,
-            "quote_verification_failures": decision.quote_failures,
-            "injection_suspected": list(decision.injection_items),
-        },
-    }
+    )
