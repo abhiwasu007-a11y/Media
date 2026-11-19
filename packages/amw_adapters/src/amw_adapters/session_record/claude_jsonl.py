@@ -22,8 +22,21 @@ one of these holds (the field names are the transcript schema observed on the se
 * ``uuid``, ``timestamp`` and ``sessionId`` are present, and ``sessionId`` is the requested one;
 * the event UUID occurs exactly once in the file.
 
+An owner message typed while the assistant is busy is stored differently and is accepted with
+the same strictness: ``type == "attachment"``, ``attachment.type == "queued_command"``,
+``attachment.commandMode == "prompt"``, ``attachment.humanTurn is True``, ``attachment.origin``
+exactly ``{"kind": "human"}``, no ``isMeta``, not a sidechain, known keys only (record and
+attachment), text in ``attachment.prompt``; file / image attachment keys mark it as embedding
+content.
+
+Reading never raises on file content: a final line without its newline is still being written
+and is ignored until the next read; any other line that is not valid UTF-8 JSON, or repeats a
+JSON key, is corrupt and never a message (an event whose UUID occurs in a corrupt line is refused
+as ``corrupt_record``). The file is opened without following a symlink and checked as a regular
+file on the open descriptor.
+
 A text test is used only to **refuse** more, never to accept: a message that contains a harness
-wrapper tag (``<system-reminder>``, ``<task-notification>``, ...) is refused.
+wrapper tag (case-insensitive) (``<system-reminder>``, ``<task-notification>``, ...) is refused.
 
 Pasted or attached content (a ``pastedContents`` / ``imagePasteIds`` key, or a non-text content
 block) is marked ``embeds_earlier_message`` with no owner-authored part, so the verifier refuses
@@ -42,7 +55,9 @@ before it reads the file. REQUIRES REVIEW (owner): the residual risks listed the
 
 import hashlib
 import json
+import os
 import re
+import stat
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -83,6 +98,30 @@ _REFUSING_FLAGS: Final = (
     "agentId",
 )
 _PASTE_KEYS: Final = ("pastedContents", "imagePasteIds")
+DEFAULT_QUEUED_KEYS: Final = frozenset(
+    {
+        "type", "parentUuid", "isSidechain", "attachment", "uuid", "timestamp", "sessionId",
+        "cwd", "gitBranch", "entrypoint", "rendered", "renderedRole", "renderedInHumanTurn",
+        "slug", "userType", "version",
+    }
+)  # fmt: skip
+"""Top-level keys of an owner message queued while the assistant was busy (observed schema)."""
+DEFAULT_QUEUED_ATTACHMENT_KEYS: Final = frozenset(
+    {
+        "type", "commandMode", "delivery_id", "humanTurn", "origin", "prompt", "source_uuid",
+        "timestamp",
+        # attachment markers: allowed as keys, but they mark the event as embedding content
+        "fileAttachments", "imageFileUuids", "inlinedImageNames", "inlinedImagePaths",
+        "savedFiles",
+    }
+)  # fmt: skip
+_QUEUED_FILE_KEYS: Final = (
+    "fileAttachments",
+    "imageFileUuids",
+    "inlinedImageNames",
+    "inlinedImagePaths",
+    "savedFiles",
+)
 DEFAULT_WRAPPER_TAGS: Final = (
     "<system-reminder",
     "<task-notification",
@@ -121,6 +160,7 @@ class Verdict(StrEnum):
     MALFORMED = "malformed_record"
     SESSION_MISMATCH = "session_mismatch"
     DUPLICATE_EVENT = "duplicate_event_uuid"
+    CORRUPT_RECORD = "corrupt_record"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +183,31 @@ class OwnerChatEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class AssistantText:
+    """One assistant message of the main session (used only to find the operator's echo; it is
+    never evidence)."""
+
+    session_id: str
+    event_uuid: str
+    timestamp: datetime
+    content: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Corrupt:
+    """A line that is not valid UTF-8 JSON (or has duplicate keys): never a message."""
+
+    raw: bytes
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate JSON key")
+    return dict(pairs)
+
+
+@dataclass(frozen=True, slots=True)
 class JsonlSourceConfig:
     """Verifier-side configuration (never from the operator or the model)."""
 
@@ -152,6 +217,8 @@ class JsonlSourceConfig:
     top_level_session_ids: frozenset[str] = frozenset()
     """Sessions the owner declared top level; any other session gets ``UNVERIFIED_PARENT``."""
     allowed_keys: frozenset[str] = DEFAULT_ALLOWED_KEYS
+    allowed_queued_keys: frozenset[str] = DEFAULT_QUEUED_KEYS
+    allowed_queued_attachment_keys: frozenset[str] = DEFAULT_QUEUED_ATTACHMENT_KEYS
     wrapper_tags: tuple[str, ...] = DEFAULT_WRAPPER_TAGS
     max_file_bytes: int = 256 * 1024 * 1024
 
@@ -182,6 +249,8 @@ def classify(record: Mapping[str, Any], config: JsonlSourceConfig) -> Classified
     kind = record.get("type")
     if kind == "assistant":
         return Classified(Verdict.ASSISTANT)
+    if kind == "attachment":
+        return _classify_queued(record, config)
     if kind != "user":
         return Classified(Verdict.NOT_A_MESSAGE)
     message = record.get("message")
@@ -209,10 +278,54 @@ def classify(record: Mapping[str, Any], config: JsonlSourceConfig) -> Classified
     text, non_text = shaped
     if not all(isinstance(record.get(k), str) for k in ("uuid", "timestamp", "sessionId")):
         return Classified(Verdict.MALFORMED)
-    if any(tag in text for tag in config.wrapper_tags):
+    if _has_wrapper(text, config):
         return Classified(Verdict.WRAPPER_TEXT)
     pasted = non_text or any(record.get(k) for k in _PASTE_KEYS)
     return Classified(Verdict.OWNER_CHAT, text, pasted)
+
+
+def _has_wrapper(text: str, config: JsonlSourceConfig) -> bool:
+    folded = text.casefold()
+    return any(tag.casefold() in folded for tag in config.wrapper_tags)
+
+
+def _classify_queued(record: Mapping[str, Any], config: JsonlSourceConfig) -> Classified:
+    """An owner message typed while the assistant was busy: ``type:"attachment"`` with
+    ``attachment.type:"queued_command"``, ``commandMode:"prompt"``, ``humanTurn:true`` and
+    ``attachment.origin`` exactly ``{"kind":"human"}``; same strictness as a user record."""
+    att = record.get("attachment")
+    if not isinstance(att, dict) or att.get("type") != "queued_command":
+        return Classified(Verdict.NOT_A_MESSAGE)
+    if record.get("isSidechain") is not False or "agentId" in record:
+        return Classified(Verdict.SIDECHAIN)
+    origin = att.get("origin")
+    origin_kind = origin.get("kind") if isinstance(origin, dict) else None
+    if origin_kind == "peer":
+        return Classified(Verdict.PEER_OR_HANDBACK)
+    if origin_kind == "task-notification":
+        return Classified(Verdict.TASK_NOTIFICATION)
+    if att.get("isMeta") or any(record.get(flag) for flag in _REFUSING_FLAGS):
+        return Classified(Verdict.META_OR_INJECTED)
+    if (
+        origin != {"kind": "human"}
+        or att.get("humanTurn") is not True
+        or att.get("commandMode") != "prompt"
+    ):
+        return Classified(Verdict.NOT_HUMAN_ORIGIN)
+    if not set(record) <= config.allowed_queued_keys or not (
+        set(att) <= config.allowed_queued_attachment_keys
+    ):
+        return Classified(Verdict.UNKNOWN_SHAPE)
+    shaped = _content_of({"content": att.get("prompt")})
+    if shaped is None:
+        return Classified(Verdict.MALFORMED)
+    text, non_text = shaped
+    if not all(isinstance(record.get(k), str) for k in ("uuid", "timestamp", "sessionId")):
+        return Classified(Verdict.MALFORMED)
+    if _has_wrapper(text, config):
+        return Classified(Verdict.WRAPPER_TEXT)
+    attached = non_text or any(att.get(k) for k in _QUEUED_FILE_KEYS)
+    return Classified(Verdict.OWNER_CHAT, text, attached)
 
 
 def _has_tool_block(message: Mapping[str, Any]) -> bool:
@@ -247,38 +360,69 @@ class ClaudeSessionJsonlSource:
     def __init__(self, config: JsonlSourceConfig) -> None:
         self._config = config
 
-    def _path(self, session_id: str) -> Path | None:
+    def _read(self, session_id: str) -> bytes | None:
+        """The file's bytes, opened without following a symlink in the final component (the
+        root is resolved first) and checked as a regular file on the open descriptor."""
         if not _SESSION_ID.match(session_id):
             return None
-        path = self._config.transcript_root / f"{session_id}.jsonl"
-        if path.is_symlink() or not path.is_file():
+        try:
+            root = self._config.transcript_root.resolve(strict=True)
+            fd = os.open(root / f"{session_id}.jsonl", os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
             return None
-        if path.stat().st_size > self._config.max_file_bytes:
-            return None
-        return path
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > self._config.max_file_bytes:
+                return None
+            chunks: list[bytes] = []
+            remaining = self._config.max_file_bytes + 1
+            while remaining > 0 and (chunk := os.read(fd, min(remaining, 1 << 20))):
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            return b"".join(chunks)
+        finally:
+            os.close(fd)
+
+    def _lines(self, session_id: str) -> list[Mapping[str, Any] | _Corrupt]:
+        """Parsed records and corrupt lines, in file order. A final line without its newline is
+        still being written and is ignored (read again later); any other line that is not
+        valid UTF-8 JSON, or repeats a key, is a ``_Corrupt`` entry. Never raises."""
+        data = self._read(session_id)
+        if data is None or len(data) > self._config.max_file_bytes:
+            return []
+        pieces = data.split(b"\n")
+        complete = pieces[:-1]  # the last piece is empty or an incomplete line
+        out: list[Mapping[str, Any] | _Corrupt] = []
+        for raw in complete:
+            if not raw.strip():
+                continue
+            try:
+                record = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicate_keys)
+            except UnicodeDecodeError, ValueError, RecursionError:
+                out.append(_Corrupt(raw))
+                continue
+            if isinstance(record, dict):
+                out.append(record)
+            else:
+                out.append(_Corrupt(raw))
+        return out
 
     def _records(self, session_id: str) -> Iterator[Mapping[str, Any]]:
-        path = self._path(session_id)
-        if path is None:
-            return
-        with path.open("r", encoding="utf-8", errors="strict") as handle:
-            for line in handle:
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue  # a partly written last line, or garbage: never an owner message
-                if isinstance(record, dict):
-                    yield record
+        for line in self._lines(session_id):
+            if not isinstance(line, _Corrupt):
+                yield line
 
     def _refused(
         self, session_id: str, event_uuid: str, verdict: Verdict, record: Any
     ) -> SessionEvent:
         stamp = _timestamp(record.get("timestamp")) if isinstance(record, dict) else None
         role = "assistant" if verdict is Verdict.ASSISTANT else "user"
+        if verdict in (Verdict.DUPLICATE_EVENT, Verdict.CORRUPT_RECORD):
+            role = "unknown"
         return SessionEvent(
             session_id=session_id,
             event_uuid=event_uuid,
-            role=role if verdict is not Verdict.DUPLICATE_EVENT else "unknown",
+            role=role,
             is_synthetic=True,
             inbound_origin=f"{REFUSED_PREFIX}{verdict.value}",
             content="",
@@ -294,7 +438,11 @@ class ClaudeSessionJsonlSource:
         """The event as the verifier sees it; ``None`` if the session or event is not there."""
         if not _EVENT_UUID.match(event_uuid):
             return None
-        matches = [r for r in self._records(session_id) if r.get("uuid") == event_uuid]
+        lines = self._lines(session_id)
+        needle = event_uuid.encode("ascii")
+        if any(isinstance(line, _Corrupt) and needle in line.raw for line in lines):
+            return self._refused(session_id, event_uuid, Verdict.CORRUPT_RECORD, None)
+        matches = [r for r in lines if not isinstance(r, _Corrupt) and r.get("uuid") == event_uuid]
         if not matches:
             return None
         if len(matches) > 1:
@@ -347,3 +495,28 @@ class ClaudeSessionJsonlSource:
                     content_sha256=content_sha256(verdict.content),
                     embeds_earlier_message=verdict.embeds,
                 )
+
+    def assistant_messages(self, session_id: str) -> Iterator[AssistantText]:
+        """The assistant's own messages of the main session, in file order (to find the echo).
+        They are never owner evidence."""
+        for record in self._records(session_id):
+            if record.get("type") != "assistant" or record.get("isSidechain") is not False:
+                continue
+            if "agentId" in record or record.get("sessionId") != session_id:
+                continue
+            message = record.get("message")
+            uid = record.get("uuid")
+            stamp = _timestamp(record.get("timestamp"))
+            if not isinstance(message, dict) or not isinstance(uid, str) or stamp is None:
+                continue
+            content = message.get("content")
+            blocks = content if isinstance(content, list) else []
+            text = "\n".join(
+                b["text"]
+                for b in blocks
+                if isinstance(b, dict)
+                and b.get("type") == "text"
+                and isinstance(b.get("text"), str)
+            )
+            if text:
+                yield AssistantText(session_id, uid, stamp, text)

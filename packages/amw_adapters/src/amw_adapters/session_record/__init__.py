@@ -2,6 +2,7 @@
 
 from amw_adapters.session_record.claude_jsonl import (
     HUMAN_ORIGIN,
+    AssistantText,
     ClaudeSessionJsonlSource,
     JsonlSourceConfig,
     OwnerChatEvent,
@@ -11,6 +12,7 @@ from amw_adapters.session_record.claude_jsonl import (
 
 __all__ = [
     "HUMAN_ORIGIN",
+    "AssistantText",
     "ClaudeSessionJsonlSource",
     "JsonlSourceConfig",
     "OwnerChatEvent",

@@ -122,7 +122,57 @@ REFUSED_KINDS: dict[str, tuple[Builder, Verdict]] = {
         Verdict.META_OR_INJECTED,
     ),
     "sidechain_subagent_prompt": (lambda t: t.sidechain(GRAMMAR, minutes(5)), Verdict.SIDECHAIN),
-    "queue_operation": (lambda t: t.queued(GRAMMAR, minutes(5)), Verdict.NOT_A_MESSAGE),
+    "queue_operation": (lambda t: t.queue_operation(GRAMMAR, minutes(5)), Verdict.NOT_A_MESSAGE),
+    "mixed_case_wrapper_in_human_record": (
+        lambda t: t.human(f"{GRAMMAR}\n<System-Reminder>x</System-Reminder>", minutes(5)),
+        Verdict.WRAPPER_TEXT,
+    ),
+    "queued_peer_message": (
+        lambda t: t.queued(GRAMMAR, minutes(5), origin={"kind": "peer", "from": "a1"}, isMeta=True),
+        Verdict.PEER_OR_HANDBACK,
+    ),
+    "queued_task_notification": (
+        lambda t: t.queued(
+            GRAMMAR,
+            minutes(5),
+            origin={"kind": "task-notification"},
+            commandMode="task-notification",
+        ),
+        Verdict.TASK_NOTIFICATION,
+    ),
+    "queued_human_marked_meta": (
+        lambda t: t.queued(GRAMMAR, minutes(5), isMeta=True),
+        Verdict.META_OR_INJECTED,
+    ),
+    "queued_not_a_human_turn": (
+        lambda t: t.queued(GRAMMAR, minutes(5), humanTurn=False),
+        Verdict.NOT_HUMAN_ORIGIN,
+    ),
+    "queued_other_command_mode": (
+        lambda t: t.queued(GRAMMAR, minutes(5), commandMode="bash"),
+        Verdict.NOT_HUMAN_ORIGIN,
+    ),
+    "queued_origin_extra_field": (
+        lambda t: t.queued(GRAMMAR, minutes(5), origin={"kind": "human", "via": "x"}),
+        Verdict.NOT_HUMAN_ORIGIN,
+    ),
+    "queued_unknown_attachment_key": (
+        lambda t: t.queued(GRAMMAR, minutes(5), injected=True),
+        Verdict.UNKNOWN_SHAPE,
+    ),
+    "queued_unknown_record_key": (
+        lambda t: t.queued(GRAMMAR, minutes(5), record_extra={"injectedBy": "x"}),
+        Verdict.UNKNOWN_SHAPE,
+    ),
+    "queued_sidechain": (
+        lambda t: t.queued(GRAMMAR, minutes(5), record_extra={"isSidechain": True}),
+        Verdict.SIDECHAIN,
+    ),
+    "queued_wrapper_text": (
+        lambda t: t.queued(f"<task-notification>{GRAMMAR}</task-notification>", minutes(5)),
+        Verdict.WRAPPER_TEXT,
+    ),
+    "queued_no_prompt": (lambda t: t.queued([], minutes(5)), Verdict.MALFORMED),
     "attachment": (lambda t: t.attachment(GRAMMAR, minutes(5)), Verdict.NOT_A_MESSAGE),
     "wrapper_text_in_human_record": (
         lambda t: t.human(f"{GRAMMAR}\n<system-reminder>x</system-reminder>", minutes(5)),
@@ -309,3 +359,96 @@ def test_owner_messages_lists_only_owner_messages_in_order(tmp_path: Path) -> No
     t.write(tmp_path)
     listed = [m.event_uuid for m in source(tmp_path, t).owner_messages(t.session_id)]
     assert listed == [first, second]
+
+
+def test_queued_owner_message_is_accepted(tmp_path: Path) -> None:
+    """An owner message typed while the assistant is busy (attachment / queued_command)."""
+    t = Transcript()
+    uid = t.queued(GRAMMAR, minutes(5))
+    t.write(tmp_path)
+    src = source(tmp_path, t)
+    event = src.fetch(t.session_id, uid)
+    assert event is not None
+    assert (event.inbound_origin, event.content, event.is_synthetic) == (
+        HUMAN_ORIGIN,
+        GRAMMAR,
+        False,
+    )
+    assert isinstance(check(src, t, uid, minutes(5)), Verified)
+    assert [m.event_uuid for m in src.owner_messages(t.session_id)] == [uid]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"fileAttachments": [{"name": "x"}]}, {"imageFileUuids": ["u"]}, {"savedFiles": ["f"]}],
+)
+def test_queued_attachments_need_restatement(tmp_path: Path, extra: dict[str, Any]) -> None:
+    t = Transcript()
+    uid = t.queued(GRAMMAR, minutes(5), **extra)
+    t.write(tmp_path)
+    outcome = check(source(tmp_path, t), t, uid, minutes(5))
+    assert isinstance(outcome, Refusal)
+    assert outcome.reason == EMBEDDED_PART_UNMARKED
+
+
+def test_line_still_being_written_is_ignored_not_raised(tmp_path: Path) -> None:
+    """The CLI may be mid-write: the last line is cut inside a Devanagari character."""
+    t = Transcript()
+    first = t.human("R7K2 मंजूर", minutes(5))
+    t.write(tmp_path, tail='{"type": "user", "message": {"content": "मंजूर'.encode()[:-1])
+    src = source(tmp_path, t)
+    assert [m.event_uuid for m in src.owner_messages(t.session_id)] == [first]
+    event = src.fetch(t.session_id, first)
+    assert event is not None
+    assert event.content == "R7K2 मंजूर"
+
+
+def test_corrupt_lines_never_raise_and_refuse_their_event(tmp_path: Path) -> None:
+    t = Transcript()
+    good = t.human(GRAMMAR, minutes(5))
+    bad_uid = "22222222-2222-4222-8222-222222222222"
+    invalid_byte = b'{"type":"user","uuid":"' + bad_uid.encode() + b'","x":"\xff"}'
+    dup_key = (
+        '{"type":"user","origin":{"kind":"peer"},"origin":{"kind":"human"},'
+        f'"uuid":"{bad_uid[:-1]}3"}}'
+    )
+    path = t.write(tmp_path, extra_lines=[dup_key])
+    path.write_bytes(path.read_bytes() + invalid_byte + b"\n")
+    src = source(tmp_path, t)
+    assert [m.event_uuid for m in src.owner_messages(t.session_id)] == [good]
+    for uid in (bad_uid, bad_uid[:-1] + "3"):
+        event = src.fetch(t.session_id, uid)
+        assert event is not None
+        assert event.inbound_origin == "refused:corrupt_record"
+        assert event.role == "unknown"
+
+
+def test_symlinked_root_is_resolved_but_a_symlinked_file_is_not(tmp_path: Path) -> None:
+    t = Transcript()
+    uid = t.human(GRAMMAR, minutes(5))
+    real = tmp_path / "real"
+    real.mkdir()
+    t.write(real)
+    os.symlink(real, tmp_path / "root_link")
+    linked_root = ClaudeSessionJsonlSource(JsonlSourceConfig(tmp_path / "root_link", OWNER_ACCOUNT))
+    assert linked_root.fetch(t.session_id, uid) is not None
+    missing = ClaudeSessionJsonlSource(JsonlSourceConfig(tmp_path / "absent", OWNER_ACCOUNT))
+    assert missing.fetch(t.session_id, uid) is None
+    folder = tmp_path / "folder"
+    (folder / f"{t.session_id}.jsonl").mkdir(parents=True)
+    assert (
+        ClaudeSessionJsonlSource(JsonlSourceConfig(folder, OWNER_ACCOUNT)).fetch(t.session_id, uid)
+        is None
+    )
+
+
+def test_assistant_messages_are_listed_for_the_echo_only(tmp_path: Path) -> None:
+    t = Transcript()
+    t.human(GRAMMAR, minutes(1))
+    echo = t.assistant("Recorded: approve R7K2", minutes(2))
+    t.add(dict(t.records[-1], uuid="33333333-3333-4333-8333-333333333333", isSidechain=True))
+    t.add(dict(t.records[-2], uuid="44444444-4444-4444-8444-444444444444", message={"content": []}))
+    t.write(tmp_path)
+    src = source(tmp_path, t)
+    assert [m.event_uuid for m in src.assistant_messages(t.session_id)] == [echo]
+    assert [m.content for m in src.owner_messages(t.session_id)] == [GRAMMAR]

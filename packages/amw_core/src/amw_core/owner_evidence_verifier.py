@@ -525,10 +525,21 @@ def read_decision(
     return reading[0] if reading else None
 
 
-def is_confirmation(content: str, review_code: str | None, policy: VerifierPolicy) -> bool:
+def is_confirmation(
+    content: str,
+    review_code: str | None,
+    policy: VerifierPolicy,
+    *,
+    decision: ApprovalStepState | None = None,
+) -> bool:
     """Confirmation whitelist (CCR-101): exactly the record's own review code, exactly one confirm
     word, every other token neutral. A dispute, correction, new decision or second code is never a
-    confirmation."""
+    confirmation.
+
+    ``decision`` (PROPOSED CCR-264, used only by the verifier worker for a reply that comes after
+    the operator's echo): the owner's established decision form for the same decision also
+    confirms, under the full decision whitelist (exactly the code, exactly one decision word of
+    that class, neutral words only; ``CHANGES_REQUESTED`` never)."""
     if not review_code:
         return False
     rest = _without_code(content, review_code)
@@ -537,7 +548,11 @@ def is_confirmation(content: str, review_code: str | None, policy: VerifierPolic
     confirm = {" ".join(whitelist_tokens(w)) for w in policy.confirm_words}
     neutral = {" ".join(whitelist_tokens(n)) for n in policy.neutral_tokens}
     hits = [w for w in rest if w in confirm]
-    return len(hits) == 1 and all(w in confirm or w in neutral for w in rest)
+    if len(hits) == 1 and all(w in confirm or w in neutral for w in rest):
+        return True
+    if decision not in (ApprovalStepState.APPROVED, ApprovalStepState.REJECTED):
+        return False
+    return read_decision_message(content, review_code, policy) == (decision, None)
 
 
 def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
@@ -630,6 +645,7 @@ def verify_owner_event(
     policy: VerifierPolicy,
     now: datetime,
     allowed_stages: frozenset[str] | None = None,
+    confirm_decision: ApprovalStepState | None = None,
 ) -> VerificationOutcome:
     """Pure check of one fetched event against the operator's claims (03 section 11.6 rule 7).
 
@@ -674,7 +690,9 @@ def verify_owner_event(
         or event.event_uuid != distinct_from_event_uuid,
     }
     if purpose == CONFIRMATION:
-        confirmed = is_confirmation(content, evidence.review_code, policy)
+        confirmed = is_confirmation(
+            content, evidence.review_code, policy, decision=confirm_decision
+        )
         checks["confirmation_grammar"] = confirmed
         checks["subject_reference"] = confirmed
         checks["clarity"] = confirmed

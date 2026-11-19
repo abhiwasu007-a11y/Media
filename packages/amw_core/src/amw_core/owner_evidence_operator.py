@@ -6,11 +6,12 @@ attempt it refuses itself (``record`` / ``refuse``), and produce the text it pos
 owner (``echo_*``). It cannot verify, confirm or stamp a MAC: those are the verifier's
 (``amw_core.owner_evidence_real.VerifierWorker``, ``amw_verifier`` login).
 
-The echo is part of the threat model (``docs/v4/runtime/EVIDENCE_PATH.md``): it shows the owner,
-on his phone, the verbatim quote and the review code it was recorded under, so a record he did
-not make is visible to him and he can dispute it; nothing is applied until his own ``confirm``
-reply is found by the verifier in the session record. Texts are configuration
-(``owner_evidence_echo.json``; owner to confirm), English and Marathi.
+The echo is an owner-visible **disclosure, not an independent control**
+(``docs/v4/runtime/EVIDENCE_PATH.md`` section 5): this module only returns its text, and the
+same assistant decides whether and what to post. It shows the owner the verbatim quote, the
+review code and the exact reply; the verifier counts a reply only after an echo of that row is
+in the session record. Texts are configuration (``owner_evidence_echo.json``; owner to
+confirm), English and Marathi.
 """
 
 import json

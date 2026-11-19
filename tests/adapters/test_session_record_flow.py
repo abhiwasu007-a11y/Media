@@ -8,7 +8,7 @@ own message) never verifies or confirms anything.
 """
 
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,12 @@ from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.owner_evidence_fake import FakeEvidenceDatabase, MemorySessionEventSource
 from amw_core.owner_evidence_mac import MacKeyring
 from amw_core.owner_evidence_operator import OperatorDesk, load_echo_templates, locate
+from amw_core.owner_evidence_pg import PgEvidenceDatabase
 from amw_core.owner_evidence_real import (
+    FIN_R10,
+    PROVIDER_LIMIT,
+    TEST_MARK,
+    ConfirmationBinding,
     ConfirmationOutcome,
     ConfirmedEvidenceLookup,
     EvidenceMode,
@@ -44,7 +49,7 @@ from amw_core.owner_evidence_real import (
     dry_run_verifier_service,
     is_production_source,
 )
-from amw_core.owner_evidence_verifier import VerifierPolicy, is_confirmation
+from amw_core.owner_evidence_verifier import SessionEvent, VerifierPolicy, is_confirmation
 from amw_core.testing.memory import MemoryTransaction
 from tests.evidence_support import PASSWORDS, TEST_KEY
 from tests.fake_audit import RecordingAuditLog
@@ -59,6 +64,7 @@ POLICY = VerifierPolicy(
 APPROVAL = ids.new_id(ids.Prefix.APPROVAL)
 SUBJECT = ids.new_id(ids.Prefix.RENDER)
 OWNER = ids.USER.new()
+ANY_KIND = frozenset(EvidenceRecordKind)
 
 
 def requested(tx: TenantTransaction, row: EvidenceRecord) -> datetime | None:
@@ -99,11 +105,23 @@ class World:
         )
         return replace(base, **change)
 
-    def record(self, uid: str, quote: str, said: datetime, **change: Any) -> EvidenceRecord:
+    def record(
+        self, uid: str, quote: str, said: datetime, *, post_echo: bool = True, **change: Any
+    ) -> EvidenceRecord:
+        """Operator insert; by default the operator then posts the echo 30 s later."""
         echo = self.desk.record(self.tx, self.draft(uid, quote, said, **change))
         assert echo.row is not None
         assert echo.row.state is EvidenceState.PENDING_VERIFICATION
+        if post_echo:
+            self.post_echo(echo.text, said + timedelta(seconds=30))
         return echo.row
+
+    def post_echo(self, text: str, at: datetime) -> None:
+        self.t.assistant(text, at)
+        self.write()
+
+    def scan(self, row: EvidenceRecord, now: datetime | None = None) -> Any:
+        return self.worker.confirm_from_chat(self.tx, row.id, now or minutes(30))
 
     def verify(self, row: EvidenceRecord) -> EvidenceRecord:
         return self.worker.verify(self.tx, row.id, requested, minutes(30))
@@ -136,7 +154,6 @@ def test_owner_approval_is_recorded_verified_and_confirmed(
 ) -> None:
     w = make_world(tmp_path)
     uid = w.t.human(decision, minutes(5))
-    w.t.assistant(f"Recorded: «{decision}». Reply `{confirmation}`.", minutes(6))
     w.write()
     src = w.src
     found = locate(src, w.t.session_id, decision)
@@ -234,17 +251,102 @@ def test_message_before_the_request_is_refused(tmp_path: Path) -> None:
     assert refused.refused_reason == "message_order"
 
 
-def test_dispute_leaves_the_row_verified(tmp_path: Path) -> None:
+@pytest.mark.parametrize("dispute_text", ["R7K2 नाही", "reject R7K2", "R7K2 change the title"])
+def test_dispute_refuses_the_row_so_the_owner_restates(tmp_path: Path, dispute_text: str) -> None:
     w = make_world(tmp_path)
     uid = w.t.human("approve R7K2", minutes(5))
-    dispute = w.t.human("R7K2 नाही", minutes(7))
-    w.t.human("confirm R7K2", minutes(8))
     w.write()
     row = w.record(uid, "approve R7K2", minutes(5))
+    dispute = w.t.human(dispute_text, minutes(7))
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
     w.verify(row)
-    scan = w.worker.confirm_from_chat(w.tx, row.id, minutes(30))
+    scan = w.scan(row)
     assert (scan.outcome, scan.event_uuid) == (ConfirmationOutcome.DISPUTED, dispute)
+    assert (scan.row.state, scan.row.refused_reason) == (EvidenceState.REFUSED, "owner_disputed")
+    with pytest.raises(InvalidTransitionError):
+        w.scan(row)
+
+
+@pytest.mark.parametrize(
+    ("decision", "reply"),
+    [("approve R7K2", "approve R7K2"), ("R7K2 मंजूर", "R7K2 मंजूर"), ("reject R7K2", "R7K2 नामंजूर")],
+)
+def test_the_owners_decision_form_after_the_echo_confirms(
+    tmp_path: Path, decision: str, reply: str
+) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human(decision, minutes(5))
+    w.write()
+    parsed = ApprovalStepState.REJECTED if "reject" in decision else ApprovalStepState.APPROVED
+    row = w.record(uid, decision, minutes(5), parsed_decision=parsed)
+    conf = w.t.human(reply, minutes(8))
+    w.write()
+    w.verify(row)
+    scan = w.scan(row)
+    assert (scan.outcome, scan.event_uuid) == (ConfirmationOutcome.CONFIRMED, conf)
+
+
+def test_a_reply_before_the_echo_does_not_count(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.t.human("approve R7K2", minutes(5.2))  # the owner repeats before seeing any echo
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5), post_echo=False)
+    w.verify(row)
+    assert w.scan(row).outcome is ConfirmationOutcome.AWAITING_ECHO
+    w.post_echo("Recorded: «approve R7K2» (STEP_DECISION). Reply `confirm R7K2`.", minutes(6))
+    assert w.scan(row).outcome is ConfirmationOutcome.NO_REPLY_YET
+    conf = w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    scan = w.scan(row)
+    assert (scan.outcome, scan.event_uuid) == (ConfirmationOutcome.CONFIRMED, conf)
+
+
+def test_an_echo_without_the_quote_is_not_the_echo(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5), post_echo=False)
+    w.post_echo("Review code R7K2. Reply `confirm R7K2`.", minutes(6))
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    w.verify(row)
+    assert w.scan(row).outcome is ConfirmationOutcome.AWAITING_ECHO
+
+
+@pytest.mark.parametrize(
+    "question", ["R7K2 काय आहे?", "is R7K2 the thumbnail", "confirm R7K2 later"]
+)
+def test_a_question_does_not_end_the_row(tmp_path: Path, question: str) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5))
+    asked = w.t.human(question, minutes(7))
+    w.write()
+    w.verify(row)
+    scan = w.scan(row)
+    assert (scan.outcome, scan.event_uuid) == (ConfirmationOutcome.NEEDS_CLARIFICATION, asked)
     assert scan.row.state is EvidenceState.VERIFIED
+    conf = w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    done = w.scan(row)
+    assert (done.outcome, done.event_uuid) == (ConfirmationOutcome.CONFIRMED, conf)
+
+
+def test_time_order_not_file_order_and_no_future_messages(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5))
+    w.t.human("confirm R7K2", minutes(9))
+    dispute = w.t.human("R7K2 नाही", minutes(7))  # written later, said earlier
+    w.write()
+    w.verify(row)
+    assert w.scan(row, now=minutes(6)).outcome is ConfirmationOutcome.NO_REPLY_YET  # future
+    scan = w.scan(row)
+    assert (scan.outcome, scan.event_uuid) == (ConfirmationOutcome.DISPUTED, dispute)
 
 
 def test_confirmation_refused_by_the_check(tmp_path: Path) -> None:
@@ -252,9 +354,10 @@ def test_confirmation_refused_by_the_check(tmp_path: Path) -> None:
     policy) is reported, and the row stays VERIFIED."""
     w = make_world(tmp_path)
     uid = w.t.human("approve R7K2", minutes(5))
-    w.t.human("confirm R7K2", minutes(8), pastedContents={"1": {"content": "x"}})
     w.write()
     row = w.record(uid, "approve R7K2", minutes(5))
+    w.t.human("confirm R7K2", minutes(8), pastedContents={"1": {"content": "x"}})
+    w.write()
     w.verify(row)
     scan = w.worker.confirm_from_chat(w.tx, row.id, minutes(30))
     assert scan.outcome is ConfirmationOutcome.REFUSED_CHECK
@@ -352,13 +455,15 @@ def test_preflight_lookup_reports_only_mac_valid_owner_chat_confirmations(tmp_pa
     w.write()
     row = w.record(uid, "approve R7K2", minutes(5))
     app = w.db.login(DbRole.APP, PASSWORDS[DbRole.APP])
-    lookup = ConfirmedEvidenceLookup(w.db, app, w.tx)
+    lookup = ConfirmedEvidenceLookup(
+        w.db, app, w.tx, [ConfirmationBinding(row.id, FIN_R10)], allowed_kinds=ANY_KIND
+    )
     status = lookup.get(row.id)
     assert status is not None
     assert status.evidence_state == "MAC_INVALID"  # pending: no MAC yet, never CONFIRMED
     w.verify(row)
     w.worker.confirm_from_chat(w.tx, row.id, minutes(30))
-    assert lookup.get(row.id) == EvidenceStatus("CONFIRMED", "OWNER_CHAT_OPERATOR")
+    assert lookup.get(row.id) == EvidenceStatus("BINDING_MISMATCH", "OWNER_CHAT_OPERATOR")
     w.db.superuser_tamper(w.tx, row.id, confirmation_quote="forged")
     tampered = lookup.get(row.id)
     assert tampered is not None
@@ -370,6 +475,131 @@ def test_preflight_lookup_reports_only_mac_valid_owner_chat_confirmations(tmp_pa
     draft = w.draft(tool, "x", minutes(9), source_kind=InstructionSourceKind.TOOL_RESULT)
     refused = w.desk.refuse(w.tx, draft, "source_owner_chat", minutes(9))
     assert refused.row is not None
-    other = lookup.get(refused.row.id)
+    tool_lookup = ConfirmedEvidenceLookup(
+        w.db, app, w.tx, [ConfirmationBinding(refused.row.id, FIN_R10)], allowed_kinds=ANY_KIND
+    )
+    other = tool_lookup.get(refused.row.id)
     assert other is not None
     assert other.recorded_from == "TOOL_RESULT"
+    with pytest.raises(ConfigInvalidError):  # one row cannot back two confirmations
+        ConfirmedEvidenceLookup(
+            w.db, app, w.tx, [ConfirmationBinding(row.id, FIN_R10)] * 2, allowed_kinds=ANY_KIND
+        )
+
+
+LIMIT_QUOTE = "R7K2 anthropic spending limit is 10.00 USD"
+
+
+def limit_world(tmp_path: Path) -> tuple[World, EvidenceRecord]:
+    w = make_world(tmp_path)
+    uid = w.t.human(LIMIT_QUOTE, minutes(5))
+    w.write()
+    row = w.record(
+        uid, LIMIT_QUOTE, minutes(5), record_kind=EvidenceRecordKind.CONTRIBUTION,
+        parsed_decision=None, job_id=ids.JOB.new(),
+    )  # fmt: skip
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    assert w.verify(row).state is EvidenceState.VERIFIED
+    assert w.scan(row).outcome is ConfirmationOutcome.CONFIRMED
+    return w, row
+
+
+@pytest.mark.parametrize(
+    ("binding", "kinds", "state"),
+    [
+        (("anthropic", 1000, "USD"), {EvidenceRecordKind.CONTRIBUTION}, "CONFIRMED"),
+        (("anthropic", 1000, "USD"), set(), "BINDING_MISMATCH"),  # default: no kind allowed
+        (("anthropic", 2000, "USD"), {EvidenceRecordKind.CONTRIBUTION}, "BINDING_MISMATCH"),
+        (("elevenlabs", 1000, "USD"), {EvidenceRecordKind.CONTRIBUTION}, "BINDING_MISMATCH"),
+        (("anthropic", 1000, "INR"), {EvidenceRecordKind.CONTRIBUTION}, "BINDING_MISMATCH"),
+        (("anthropic", 1000, "EUR"), {EvidenceRecordKind.CONTRIBUTION}, "BINDING_MISMATCH"),
+        ((None, 1000, "USD"), {EvidenceRecordKind.CONTRIBUTION}, "BINDING_MISMATCH"),
+    ],
+)
+def test_provider_limit_evidence_is_bound_to_provider_amount_and_currency(
+    tmp_path: Path,
+    binding: tuple[str | None, int, str],
+    kinds: set[EvidenceRecordKind],
+    state: str,
+) -> None:
+    w, row = limit_world(tmp_path)
+    app = w.db.login(DbRole.APP, PASSWORDS[DbRole.APP])
+    provider, amount, currency = binding
+    lookup = ConfirmedEvidenceLookup(
+        w.db, app, w.tx,
+        [ConfirmationBinding(row.id, PROVIDER_LIMIT, provider, amount, currency)],
+        allowed_kinds=frozenset(kinds),
+    )  # fmt: skip
+    got = lookup.get(row.id)
+    assert got is not None
+    assert got.evidence_state == state
+
+
+def test_dry_run_rows_are_marked_and_never_confirmed_for_a_real_run(tmp_path: Path) -> None:
+    db = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}))
+    tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
+    db.register_approval_code(tx, CODE, APPROVAL)
+    said, later = minutes(5), minutes(8)
+    memory = MemorySessionEventSource(
+        [
+            SessionEvent("ses-1", "ev-1", "user", False, "human", LIMIT_QUOTE, said, "acct", None),
+            SessionEvent(
+                "ses-1", "ev-2", "user", False, "human", "confirm R7K2", later, "acct", None
+            ),
+        ]
+    )
+    policy = VerifierPolicy(frozenset({"human"}), frozenset({"acct"}))
+    verifier = db.login(DbRole.VERIFIER, PASSWORDS[DbRole.VERIFIER])
+    service = dry_run_verifier_service(db, verifier, memory, policy)
+    operator = db.login(DbRole.OPERATOR, PASSWORDS[DbRole.OPERATOR])
+    draft = NewEvidence(
+        record_kind=EvidenceRecordKind.CONTRIBUTION, subject_kind="render", subject_id=SUBJECT,
+        source_kind=InstructionSourceKind.OWNER_CHAT_MESSAGE, session_id="ses-1",
+        event_uuid="ev-1", quote=LIMIT_QUOTE, message_at=said,
+        recorded_by=ids.ActorRef("sys_operator"), on_behalf_of=OWNER, job_id=ids.JOB.new(),
+        approval_id=ids.ApprovalId(APPROVAL), step_no=1, review_code=CODE,
+    )  # fmt: skip
+    row = db.insert_evidence(operator, tx, draft)
+    service.verify_recorded(tx, row.id, minutes(0), minutes(30))
+    done = service.confirm(tx, row.id, "ses-1", "ev-2", "confirm R7K2", minutes(30))
+    assert done.state is EvidenceState.CONFIRMED
+    assert done.verifier_result[TEST_MARK] is True
+    app = db.login(DbRole.APP, PASSWORDS[DbRole.APP])
+    lookup = ConfirmedEvidenceLookup(
+        db, app, tx,
+        [ConfirmationBinding(row.id, PROVIDER_LIMIT, "anthropic", 1000, "USD")],
+        allowed_kinds=frozenset({EvidenceRecordKind.CONTRIBUTION}),
+    )  # fmt: skip
+    assert lookup.get(row.id) == EvidenceStatus("TEST_FIXTURE", "OWNER_CHAT_OPERATOR")
+
+
+def test_dry_run_factory_refuses_a_real_database() -> None:
+    db = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}))
+    verifier = db.login(DbRole.VERIFIER, PASSWORDS[DbRole.VERIFIER])
+    policy = VerifierPolicy(frozenset({"human"}), frozenset({"acct"}))
+    with pytest.raises(ConfigInvalidError):
+        dry_run_verifier_service(PgEvidenceDatabase(), verifier, MemorySessionEventSource(), policy)
+
+
+def test_lookup_from_confirmation_records(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    w, row = limit_world(tmp_path)
+    app = w.db.login(DbRole.APP, PASSWORDS[DbRole.APP])
+    rec = SimpleNamespace(
+        kind=PROVIDER_LIMIT, provider="anthropic", amount_minor=1000, currency="USD",
+        evidence_id=row.id,
+    )  # fmt: skip
+    no_evidence = SimpleNamespace(kind=FIN_R10, evidence_id=None)
+    lookup = ConfirmedEvidenceLookup.for_confirmations(
+        w.db, app, w.tx, [rec, no_evidence],
+        allowed_kinds=frozenset({EvidenceRecordKind.CONTRIBUTION}),
+    )  # fmt: skip
+    assert lookup.get(row.id) == EvidenceStatus("CONFIRMED", "OWNER_CHAT_OPERATOR")
+    with pytest.raises(ConfigInvalidError):
+        ConfirmedEvidenceLookup.for_confirmations(w.db, app, w.tx, [rec, rec])
+    sebi = ConfirmedEvidenceLookup(
+        w.db, app, w.tx, [ConfirmationBinding(row.id, "OTHER_KIND")], allowed_kinds=ANY_KIND
+    )
+    assert sebi.get(row.id) == EvidenceStatus("BINDING_MISMATCH", "OWNER_CHAT_OPERATOR")

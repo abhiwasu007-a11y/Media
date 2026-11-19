@@ -160,20 +160,51 @@ class Transcript:
         }
         return self.add(r)
 
-    def queued(self, text: str, at: datetime) -> str:
+    def queue_operation(self, text: str, at: datetime) -> str:
         r = {"type": "queue-operation", "operation": "enqueue", "timestamp": stamp(at)}
         r |= {"sessionId": self.session_id, "content": text, "uuid": str(uuid.uuid4())}
         return self.add(r)
 
     def attachment(self, text: str, at: datetime) -> str:
+        """A harness attachment that is not a queued command (e.g. a reminder)."""
         r = self._base("attachment", at, None)
-        r |= {"attachment": {"type": "queued_command", "prompt": text}, "renderedRole": "user"}
+        r |= {"attachment": {"type": "task_reminder", "content": text}, "renderedRole": "system"}
         return self.add(r)
 
-    def write(self, root: Path, extra_lines: Iterable[str] = ()) -> Path:
+    def queued(
+        self,
+        text: str | list[dict[str, Any]],
+        at: datetime,
+        *,
+        origin: dict[str, Any] | None = None,
+        record_extra: Mapping[str, Any] | None = None,
+        **attachment_extra: Any,
+    ) -> str:
+        """A message queued while the assistant was busy: ``type:"attachment"`` /
+        ``queued_command``; by default typed by the owner (``origin.kind = human``)."""
+        r = self._base("attachment", at, None)
+        att: dict[str, Any] = {
+            "type": "queued_command",
+            "commandMode": "prompt",
+            "delivery_id": str(uuid.uuid4()),
+            "humanTurn": True,
+            "origin": origin if origin is not None else {"kind": "human"},
+            "prompt": text,
+            "source_uuid": str(uuid.uuid4()),
+            "timestamp": r["timestamp"],
+        }
+        att |= attachment_extra
+        r |= {"attachment": att, "renderedRole": "system", "rendered": []}
+        r |= dict(record_extra or {})
+        return self.add(r)
+
+    def write(self, root: Path, extra_lines: Iterable[str] = (), *, tail: bytes = b"") -> Path:
+        """``extra_lines`` are appended as complete lines; ``tail`` as raw bytes after the last
+        newline (a line the CLI is still writing)."""
         path = root / f"{self.session_id}.jsonl"
         lines = [json.dumps(r, ensure_ascii=False) for r in self.records]
-        path.write_text("\n".join([*lines, *extra_lines]) + "\n", encoding="utf-8")
+        body = ("\n".join([*lines, *extra_lines]) + "\n").encode("utf-8")
+        path.write_bytes(body + tail)
         return path
 
 

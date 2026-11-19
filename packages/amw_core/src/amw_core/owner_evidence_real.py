@@ -3,29 +3,44 @@
 Flow (each step in its own process and database login):
 
 1. **Operator** (``amw_operator`` DSN; the assistant's tool) inserts ``PENDING_VERIFICATION``
-   evidence with the owner's verbatim quote and the event's identifiers, then echoes it to the
-   owner (``amw_core.owner_evidence_operator``). It never verifies.
-2. **Verifier** (``amw_verifier`` DSN; this module's ``VerifierWorker``) reads the event from its
-   own ``SessionEventSource``, runs 03 section 11.6 rule 7 (``EvidenceVerifierService``) and calls
+   evidence with the owner's verbatim quote and the event's identifiers, then posts the echo
+   (``amw_core.owner_evidence_operator``). It never verifies.
+2. **Verifier** (``amw_verifier`` DSN; ``VerifierWorker``) reads the event from its own
+   ``SessionEventSource``, runs 03 section 11.6 rule 7 (``EvidenceVerifierService``) and calls
    ``amw_evidence_mark_verified`` (MAC stamped in the database) or ``amw_evidence_refuse``.
-3. The owner replies ``confirm <code>`` (or ``<code> पक्के``). The verifier **finds** that reply in
-   the session record itself (``confirm_from_chat``): it is not told which message it is. The
-   first later owner message that names the code decides: a confirmation -> ``CONFIRMED``; any
-   other mention (a dispute, a correction) -> the row stays ``VERIFIED`` and the operator must
-   ask the owner again.
+3. The verifier **finds** the owner's reply itself (``confirm_from_chat``), in time order, among
+   owner messages that name the row's code and come after the echo (an assistant message of the
+   same session that shows the code and the quote):
 
-``EvidenceMode.REAL`` refuses a session source that is not marked ``production_grade`` (the
-in-memory fake is the TEST path and is reachable only through ``dry_run_verifier_service``).
-The mark is a guard against wiring mistakes, not a security boundary (any object can carry it).
+   * ``confirm R7K2`` / ``R7K2 पक्के``, or the owner's decision form for the recorded decision
+     (``approve R7K2`` / ``R7K2 मंजूर``; PROPOSED CCR-264) -> ``CONFIRMED``; before the echo they
+     are ignored;
+   * a question or deferral naming the code -> skipped (``NEEDS_CLARIFICATION`` if nothing else
+     follows): it does not end the row;
+   * the recorded message of another evidence row of the same subject is not a reply;
+   * any other message naming the code (a dispute, a correction, another decision) ->
+     ``amw_evidence_refuse`` (``VERIFIED -> REFUSED``, reason ``owner_disputed``): the owner
+     restates and a new row is recorded.
+
+``EvidenceMode.REAL`` refuses a session source that is not marked ``production_grade``; the
+in-memory fake is reachable only through ``dry_run_verifier_service``, which also refuses any
+database but the in-memory model. Every ``verifier_result`` written through
+``build_verifier_service`` carries ``session_source_production`` (REAL) or
+``session_source_test_fixture`` (DRY_RUN) inside the MAC, and ``ConfirmedEvidenceLookup``
+reports ``CONFIRMED`` only for a production-marked row (a TEST row is ``TEST_FIXTURE``). These
+marks guard against wiring mistakes and TEST rows reaching a real run; they are not a security
+boundary against a holder of the verifier login (``docs/v4/runtime/EVIDENCE_PATH.md``).
 """
 
-from collections.abc import Callable, Iterable
+import re
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
-from amw_core.enums import EvidenceState, InstructionSourceKind
+from amw_core.enums import EvidenceRecordKind, EvidenceState, InstructionSourceKind
 from amw_core.errors import (
     ConfigInvalidError,
     IdempotencyConflictError,
@@ -37,14 +52,21 @@ from amw_core.errors import (
 from amw_core.ids import WireId
 from amw_core.interfaces.owner_evidence import DbSession, EvidenceDatabase, EvidenceRecord
 from amw_core.interfaces.tenancy_context import TenantTransaction
-from amw_core.owner_evidence_fake import MemorySessionEventSource
+from amw_core.owner_evidence_fake import FakeEvidenceDatabase, MemorySessionEventSource
 from amw_core.owner_evidence_service import EvidenceVerifierService
 from amw_core.owner_evidence_verifier import (
+    QUESTION_OR_DEFERRED,
     SessionEventSource,
     VerifierPolicy,
+    clarity_problem,
     is_confirmation,
+    tokens,
     whitelist_tokens,
 )
+
+PRODUCTION_MARK: Final = "session_source_production"
+TEST_MARK: Final = "session_source_test_fixture"
+OWNER_DISPUTED: Final = "owner_disputed"
 
 
 class EvidenceMode(StrEnum):
@@ -69,7 +91,8 @@ def build_verifier_service(
     """The verifier component for ``mode``; REAL refuses a non-production session source."""
     if mode is EvidenceMode.REAL and not is_production_source(source):
         raise ConfigInvalidError("real mode needs a production session record source (R14)")
-    return EvidenceVerifierService(database, session, source, policy)
+    marks = {PRODUCTION_MARK: True} if mode is EvidenceMode.REAL else {TEST_MARK: True}
+    return EvidenceVerifierService(database, session, source, policy, marks)
 
 
 def dry_run_verifier_service(
@@ -82,11 +105,13 @@ def dry_run_verifier_service(
     are not production-verified (owner decision 2026-11-19: TEST fixtures for the dry run only)."""
     if not isinstance(source, MemorySessionEventSource):
         raise ConfigInvalidError("the dry-run factory takes only the in-memory TEST source")
+    if not isinstance(database, FakeEvidenceDatabase):
+        raise ConfigInvalidError("the dry-run factory writes only to the in-memory TEST database")
     return build_verifier_service(EvidenceMode.DRY_RUN, database, session, source, policy)
 
 
-class OwnerMessage(Protocol):
-    """One accepted owner chat message of a session record."""
+class SessionMessage(Protocol):
+    """One message of a session record (owner or assistant)."""
 
     @property
     def session_id(self) -> str: ...
@@ -98,11 +123,21 @@ class OwnerMessage(Protocol):
     def content(self) -> str: ...
 
 
+OwnerMessage = SessionMessage
+
+
 @runtime_checkable
 class OwnerMessageIndex(Protocol):
-    """The owner chat messages of one session, in order (e.g. ``ClaudeSessionJsonlSource``)."""
+    """The owner chat messages of one session (e.g. ``ClaudeSessionJsonlSource``)."""
 
-    def owner_messages(self, session_id: str) -> Iterable[OwnerMessage]: ...
+    def owner_messages(self, session_id: str) -> Iterable[SessionMessage]: ...
+
+
+@runtime_checkable
+class SessionMessageIndex(OwnerMessageIndex, Protocol):
+    """Owner messages plus the assistant's own messages (to find the echo; never evidence)."""
+
+    def assistant_messages(self, session_id: str) -> Iterable[SessionMessage]: ...
 
 
 AnchorLookup = Callable[[TenantTransaction, EvidenceRecord], datetime | None]
@@ -113,10 +148,15 @@ OWNER_TOPIC / DATASET_INTAKE). REQUIRES REVIEW (CCR-262): ``amw_verifier`` has n
 
 class ConfirmationOutcome(StrEnum):
     CONFIRMED = "CONFIRMED"
+    AWAITING_ECHO = "AWAITING_ECHO"
+    """No echo of this row in the session yet: no reply can count."""
     NO_REPLY_YET = "NO_REPLY_YET"
+    NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
+    """Only a question or deferral named the code: the operator asks; the row stays VERIFIED."""
     DISPUTED = "DISPUTED"
-    """The first later owner message naming the code is not a confirmation: ask again."""
+    """The owner named the code with anything else: the row is now REFUSED (owner restates)."""
     REFUSED_CHECK = "REFUSED_CHECK"
+    """A confirmation-shaped reply failed the authenticity check; the row stays VERIFIED."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,9 +166,19 @@ class ConfirmationScan:
     event_uuid: str | None = None
 
 
+ECHO_QUOTE_PREFIX: Final = 40
+
+
 def _names_code(content: str, code: str) -> bool:
     folded = " ".join(whitelist_tokens(code))
     return bool(folded) and folded in whitelist_tokens(content)
+
+
+def _is_echo(text: str, row: EvidenceRecord) -> bool:
+    """An assistant message that shows this row's code and the start of its quote."""
+    code = row.evidence.review_code or ""
+    shown = row.evidence.quote.replace("\r", " ").replace("\n", " ")[:ECHO_QUOTE_PREFIX]
+    return _names_code(text, code) and bool(shown.strip()) and shown in text
 
 
 class VerifierWorker:
@@ -139,7 +189,7 @@ class VerifierWorker:
         service: EvidenceVerifierService,
         database: EvidenceDatabase,
         session: DbSession,
-        index: OwnerMessageIndex,
+        index: SessionMessageIndex,
         policy: VerifierPolicy,
     ) -> None:
         self._service = service
@@ -163,42 +213,102 @@ class VerifierWorker:
             raise MissingDependencyError("evidence not found")
         return self._service.verify_recorded(tx, evidence_id, anchors(tx, row), now, allowed_stages)
 
+    def _echo_at(self, row: EvidenceRecord, now: datetime) -> datetime | None:
+        times = [
+            m.timestamp
+            for m in self._index.assistant_messages(row.evidence.session_id)
+            if row.evidence.message_at < m.timestamp <= now and _is_echo(m.content, row)
+        ]
+        return min(times) if times else None
+
     def confirm_from_chat(
         self, tx: TenantTransaction, evidence_id: WireId, now: datetime
     ) -> ConfirmationScan:
-        """Look for the owner's reply to the echo in the record's own session."""
+        """Look for the owner's reply to the echo in the record's own session (time order;
+        messages stamped later than ``now`` are not considered yet)."""
         row = self._db.get(self._session, tx, evidence_id)
         if row is None:
             raise MissingDependencyError("evidence not found")
         if row.state is not EvidenceState.VERIFIED:
             raise InvalidTransitionError("only VERIFIED evidence can be confirmed")
         code = row.evidence.review_code or ""
-        for message in self._index.owner_messages(row.evidence.session_id):
-            if message.timestamp <= row.evidence.message_at:
+        echo_at = self._echo_at(row, now)
+        e = row.evidence
+        siblings = self._db.for_subject(self._session, tx, e.subject_kind, e.subject_id)
+        others = {r.evidence.event_uuid for r in siblings if r.id != row.id} - {e.event_uuid}
+        replies = sorted(
+            (
+                m
+                for m in self._index.owner_messages(e.session_id)
+                if e.message_at < m.timestamp <= now
+                and m.event_uuid != e.event_uuid
+                and m.event_uuid not in others  # another record's own message, not a reply
+                and _names_code(m.content, code)
+            ),
+            key=lambda m: m.timestamp,
+        )
+        question: str | None = None
+        refused: str | None = None
+        for message in replies:
+            confirms = is_confirmation(
+                message.content, code, self._policy, decision=row.evidence.parsed_decision
+            )
+            if confirms:
+                if echo_at is None or message.timestamp <= echo_at:
+                    continue  # a repeat before the owner saw the echo is not a confirmation
+                try:
+                    done = self._service.confirm(
+                        tx,
+                        evidence_id,
+                        message.session_id,
+                        message.event_uuid,
+                        message.content,
+                        now,
+                        decision_form=True,
+                    )
+                except PermissionDeniedError, IdempotencyConflictError:
+                    refused = refused or message.event_uuid  # the check refused this reply
+                    continue
+                return ConfirmationScan(ConfirmationOutcome.CONFIRMED, done, message.event_uuid)
+            if clarity_problem(message.content, self._policy) == QUESTION_OR_DEFERRED:
+                question = question or message.event_uuid
                 continue
-            if message.event_uuid == row.evidence.event_uuid or not _names_code(
-                message.content, code
-            ):
-                continue
-            if not is_confirmation(message.content, code, self._policy):
-                return ConfirmationScan(ConfirmationOutcome.DISPUTED, row, message.event_uuid)
-            try:
-                done = self._service.confirm(
-                    tx,
-                    evidence_id,
-                    message.session_id,
-                    message.event_uuid,
-                    message.content,
-                    now,
-                )
-            except PermissionDeniedError, IdempotencyConflictError:  # the check refused it
-                return ConfirmationScan(ConfirmationOutcome.REFUSED_CHECK, row, message.event_uuid)
-            return ConfirmationScan(ConfirmationOutcome.CONFIRMED, done, message.event_uuid)
+            ended = self._db.refuse(
+                self._session, tx, row.id, OWNER_DISPUTED, {OWNER_DISPUTED: False}
+            )
+            return ConfirmationScan(ConfirmationOutcome.DISPUTED, ended, message.event_uuid)
+        if refused is not None:
+            return ConfirmationScan(ConfirmationOutcome.REFUSED_CHECK, row, refused)
+        if question is not None:
+            return ConfirmationScan(ConfirmationOutcome.NEEDS_CLARIFICATION, row, question)
+        if echo_at is None:
+            return ConfirmationScan(ConfirmationOutcome.AWAITING_ECHO, row)
         return ConfirmationScan(ConfirmationOutcome.NO_REPLY_YET, row)
 
 
-OWNER_CHAT_OPERATOR = "OWNER_CHAT_OPERATOR"
-MAC_INVALID = "MAC_INVALID"
+OWNER_CHAT_OPERATOR: Final = "OWNER_CHAT_OPERATOR"
+MAC_INVALID: Final = "MAC_INVALID"
+TEST_FIXTURE: Final = "TEST_FIXTURE"
+BINDING_MISMATCH: Final = "BINDING_MISMATCH"
+PROVIDER_LIMIT: Final = "PROVIDER_LIMIT"
+FIN_R10: Final = "FIN_R10_NOT_SEBI_REGISTERED"
+DEFAULT_CURRENCY_WORDS: Final[Mapping[str, tuple[str, ...]]] = {
+    "USD": ("usd", "$", "dollar", "dollars", "डॉलर"),
+    "INR": ("inr", "₹", "rs", "rupee", "rupees", "रुपये", "रुपया"),
+}
+"""Words that name a currency in the owner's message (owner to confirm)."""
+DEFAULT_FIN_R10_WORDS: Final = ("sebi", "सेबी")
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmationBinding:
+    """What one run-preflight confirmation claims; the evidence row must say exactly that."""
+
+    evidence_id: str
+    kind: str
+    provider: str | None = None
+    amount_minor: int | None = None
+    currency: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,29 +319,120 @@ class EvidenceStatus:
     recorded_from: str
 
 
+_NUMBER = re.compile(r"[0-9][0-9,]*(?:\.[0-9]+)?")
+
+
+def _states_amount(quote: str, amount_minor: int, exponent: int) -> bool:
+    expected = Decimal(amount_minor).scaleb(-exponent)
+    for raw in _NUMBER.findall(quote):
+        try:
+            if Decimal(raw.replace(",", "")) == expected:
+                return True
+        except InvalidOperation:  # pragma: no cover - the pattern only yields numbers
+            continue
+    return False
+
+
 class ConfirmedEvidenceLookup:
-    """Evidence status for a run preflight, read inside one tenant transaction. A row whose MAC
-    does not verify reports ``MAC_INVALID`` (never ``CONFIRMED``); a row from any source but the
-    owner chat reports that source, so a preflight that requires ``CONFIRMED`` from
-    ``OWNER_CHAT_OPERATOR`` refuses both."""
+    """Evidence status for a run preflight, read inside one tenant transaction.
+
+    ``CONFIRMED`` is reported only when every one of these holds: the MAC verifies (else
+    ``MAC_INVALID``); the row was verified through a production session source (else
+    ``TEST_FIXTURE``); the row's kind is in ``allowed_kinds`` and its quote states what the
+    binding claims: provider, amount and currency of a limit, or the FIN-R10 statement (else
+    ``BINDING_MISMATCH``). One evidence row backs exactly one binding (a second binding for the
+    same row is a configuration error). ``allowed_kinds`` defaults to none (fail closed): no
+    record kind exists yet for these owner statements (CCR-260)."""
 
     def __init__(
-        self, database: EvidenceDatabase, session: DbSession, tx: TenantTransaction
+        self,
+        database: EvidenceDatabase,
+        session: DbSession,
+        tx: TenantTransaction,
+        bindings: Sequence[ConfirmationBinding],
+        *,
+        allowed_kinds: frozenset[EvidenceRecordKind] = frozenset(),
+        currency_exponents: Mapping[str, int] | None = None,
+        currency_words: Mapping[str, tuple[str, ...]] = DEFAULT_CURRENCY_WORDS,
+        fin_r10_words: tuple[str, ...] = DEFAULT_FIN_R10_WORDS,
     ) -> None:
+        ids_ = [b.evidence_id for b in bindings]
+        if len(ids_) != len(set(ids_)):
+            raise ConfigInvalidError("one evidence row may back one confirmation only")
         self._db = database
         self._session = session
         self._tx = tx
+        self._bindings = {b.evidence_id: b for b in bindings}
+        self._kinds = allowed_kinds
+        self._exponents = dict(currency_exponents or {"USD": 2, "INR": 2})
+        self._currency_words = currency_words
+        self._fin_words = fin_r10_words
+
+    @classmethod
+    def for_confirmations(
+        cls,
+        database: EvidenceDatabase,
+        session: DbSession,
+        tx: TenantTransaction,
+        confirmations: Iterable[Any],
+        *,
+        allowed_kinds: frozenset[EvidenceRecordKind] = frozenset(),
+    ) -> ConfirmedEvidenceLookup:
+        """Bindings built from the run's confirmation records themselves (``kind``,
+        ``provider``, ``amount_minor``, ``currency``, ``evidence_id``), so two confirmations
+        naming one evidence row are a ``ConfigInvalidError``; records without an evidence id
+        are left to the preflight (it refuses them)."""
+        bindings = [
+            ConfirmationBinding(
+                str(c.evidence_id),
+                str(c.kind),
+                getattr(c, "provider", None),
+                getattr(c, "amount_minor", None),
+                getattr(c, "currency", None),
+            )
+            for c in confirmations
+            if getattr(c, "evidence_id", None)
+        ]
+        return cls(database, session, tx, bindings, allowed_kinds=allowed_kinds)
+
+    def _bound(self, row: EvidenceRecord, binding: ConfirmationBinding) -> bool:
+        if row.evidence.record_kind not in self._kinds:
+            return False
+        quote = row.evidence.quote
+        words = set(tokens(quote)) | set(quote.casefold().split())
+        if binding.kind == FIN_R10:
+            return any(w.casefold() in words for w in self._fin_words)
+        if binding.kind != PROVIDER_LIMIT or not binding.provider:
+            return False
+        exponent = self._exponents.get(binding.currency or "")
+        names = self._currency_words.get(binding.currency or "", ())
+        return (
+            binding.provider.casefold() in words
+            and binding.amount_minor is not None
+            and exponent is not None
+            and _states_amount(quote, binding.amount_minor, exponent)
+            and any(n.casefold() in words or n in quote for n in names)
+        )
 
     def get(self, evidence_id: str) -> EvidenceStatus | None:
+        binding = self._bindings.get(evidence_id)
+        if binding is None:
+            return None
         try:
             row = self._db.get(self._session, self._tx, WireId(evidence_id))
         except InputInvalidError, ValueError:
             return None
         if row is None:
             return None
-        valid = self._db.mac_valid(self._session, self._tx, row.id)
         source = row.evidence.source_kind
         channel = (
             OWNER_CHAT_OPERATOR if source is InstructionSourceKind.OWNER_CHAT_MESSAGE else source
         )
-        return EvidenceStatus(row.state.value if valid else MAC_INVALID, channel)
+        if not self._db.mac_valid(self._session, self._tx, row.id):
+            return EvidenceStatus(MAC_INVALID, channel)
+        result = row.verifier_result
+        if result.get(PRODUCTION_MARK) is not True or result.get(TEST_MARK):
+            return EvidenceStatus(TEST_FIXTURE, channel)
+        if not self._bound(row, binding):
+            return EvidenceStatus(BINDING_MISMATCH, channel)
+        return EvidenceStatus(row.state.value, channel)

@@ -170,7 +170,8 @@ class PgEvidenceDatabase:
 
     def _fetch(self, conn: Any, evidence_id: WireId) -> EvidenceRecord | None:
         row = conn.execute(
-            f"SELECT {_COLUMNS} FROM owner_instruction_evidence WHERE id = %s",  # noqa: S608
+            f"SELECT {_COLUMNS} FROM owner_instruction_evidence"  # noqa: S608
+            " WHERE id = %s AND org_id = amw_current_org()",
             (OWNER_EVIDENCE.to_uuid(evidence_id),),
         ).fetchone()
         return self._record(row) if row else None
@@ -378,7 +379,8 @@ class PgEvidenceDatabase:
         conn = self._conn(session, tx, DbRole.APP, DbRole.OPERATOR, DbRole.VERIFIER)
         rows = conn.execute(
             f"SELECT {_COLUMNS} FROM owner_instruction_evidence"  # noqa: S608
-            " WHERE subject_kind = %s AND subject_id = %s ORDER BY created_at, id",
+            " WHERE subject_kind = %s AND subject_id = %s AND org_id = amw_current_org()"
+            " ORDER BY created_at, id",
             (subject_kind, _uuid(subject_id)),
         ).fetchall()
         return [self._record(r) for r in rows]
@@ -390,7 +392,7 @@ class PgEvidenceDatabase:
         conn = self._conn(session, tx, DbRole.VERIFIER)
         rows = conn.execute(
             f"SELECT {_COLUMNS} FROM owner_instruction_evidence"  # noqa: S608
-            " WHERE state = %s ORDER BY created_at, id LIMIT %s",
+            " WHERE state = %s AND org_id = amw_current_org() ORDER BY created_at, id LIMIT %s",
             (state.value, limit),
         ).fetchall()
         return [self._record(r) for r in rows]

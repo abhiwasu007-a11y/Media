@@ -38,6 +38,7 @@ from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.owner_evidence_operator import OperatorDesk, locate
 from amw_core.owner_evidence_pg import PgDbSession, PgEvidenceDatabase
 from amw_core.owner_evidence_real import (
+    PRODUCTION_MARK,
     ConfirmationOutcome,
     EvidenceMode,
     VerifierWorker,
@@ -106,7 +107,9 @@ class Real:
             "SELECT created_at FROM approvals WHERE id = %s", (self.approval,)
         ).fetchone()
         assert got is not None
-        return got[0]  # type: ignore[no-any-return]
+        value = got[0]
+        assert isinstance(value, datetime)
+        return value
 
     def at(self, seconds: int) -> datetime:
         return self.base + timedelta(seconds=seconds)
@@ -137,6 +140,8 @@ class Real:
             echo = self.desk.record(tx, self.draft(found.event_uuid, quote, found.timestamp))
         assert echo.row is not None
         assert CODE in echo.text
+        self.t.assistant(echo.text, found.timestamp + timedelta(milliseconds=500))  # posted
+        self.t.write(self.root)
         return echo.row
 
     def verify(self, row: EvidenceRecord) -> EvidenceRecord:
@@ -201,7 +206,7 @@ def test_recorded_verified_confirmed_and_applied(real: Real) -> None:
     real.t.human("R7K2 पक्के", real.at(3))
     real.t.write(real.root)
     with real.verifier_db.transaction(real.ctx) as tx:
-        scan = real.worker.confirm_from_chat(tx, row.id, datetime.now(UTC))
+        scan = real.worker.confirm_from_chat(tx, row.id, real.at(60))
     assert scan.outcome is ConfirmationOutcome.CONFIRMED
     with real.operator_db.transaction(real.ctx) as tx:
         assert real.db.mac_valid(PgDbSession(DbRole.OPERATOR), tx, row.id)
@@ -280,7 +285,7 @@ def test_superuser_tamper_is_detected(real: Real) -> None:
     real.t.write(real.root)
     with real.verifier_db.transaction(real.ctx) as tx:
         assert not real.db.mac_valid(PgDbSession(DbRole.VERIFIER), tx, row.id)
-        scan = real.worker.confirm_from_chat(tx, row.id, datetime.now(UTC))
+        scan = real.worker.confirm_from_chat(tx, row.id, real.at(60))
     assert scan.outcome is ConfirmationOutcome.REFUSED_CHECK
 
 
@@ -304,3 +309,16 @@ def test_owner_topic_gets_its_own_code_and_round_trips(real: Real) -> None:
         listed = real.db.for_subject(PgDbSession(DbRole.VERIFIER), tx, "script", draft.subject_id)
     assert verified.state is EvidenceState.VERIFIED
     assert [r.id for r in listed] == [echo.row.id]
+
+
+def test_dispute_refuses_through_the_verifier_function(real: Real) -> None:
+    real.t.human("approve R7K2", real.at(1))
+    real.t.write(real.root)
+    row = real.verify(real.record("approve R7K2"))
+    assert row.verifier_result.get(PRODUCTION_MARK) is True
+    real.t.human("R7K2 नाही", real.at(3))
+    real.t.write(real.root)
+    with real.verifier_db.transaction(real.ctx) as tx:
+        scan = real.worker.confirm_from_chat(tx, row.id, real.at(60))
+    assert scan.outcome is ConfirmationOutcome.DISPUTED
+    assert (scan.row.state, scan.row.refused_reason) == (EvidenceState.REFUSED, "owner_disputed")
