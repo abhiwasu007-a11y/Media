@@ -202,8 +202,8 @@ _SSIM_Q = Decimal("0.000001")
 def quality_metric(
     records: Iterable[SegmentRecord], total_frames: int, vmaf_status: VmafStatus
 ) -> QualityMetricOut:
-    """Frame-weighted mean of the per-segment SSIM ``All`` values (equal to the mean over all
-    frames, as the filter's ``All`` is a per-frame mean) and the lowest segment value."""
+    """Frame-weighted mean of the per-segment SSIM ``All`` values (the mean over all frames up
+    to the filter's 6-decimal rounding, as ``All`` is a per-frame mean) and the lowest segment."""
     measured = [(Decimal(r.ssim_all), r.frames) for r in records if r.ssim_all is not None]
     frames = sum(n for _, n in measured)
     if frames == 0:
