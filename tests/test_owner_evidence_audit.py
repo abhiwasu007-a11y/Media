@@ -56,6 +56,19 @@ def evidence(kind: EvidenceRecordKind, quote: str = TEXT, **change: Any) -> NewE
     return replace(base, **change)
 
 
+NO_CODE_KINDS = (EvidenceRecordKind.OWNER_TOPIC, EvidenceRecordKind.DATASET_INTAKE)
+
+
+def first_message(kind: EvidenceRecordKind) -> str:
+    """CCR-116: OWNER_TOPIC / DATASET_INTAKE precede the job and carry no code in the first
+    message (the store issues it); other kinds carry the code they were asked for."""
+    return TEXT if kind in NO_CODE_KINDS else f"For R7K2: {TEXT}."
+
+
+def new_evidence(kind: EvidenceRecordKind) -> NewEvidence:
+    return evidence(kind, review_code=None if kind in NO_CODE_KINDS else "R7K2")
+
+
 class World:
     def __init__(self, *events: SessionEvent) -> None:
         self.harness = EvidenceHarness(MemorySessionEventSource(events), POLICY)
@@ -103,11 +116,11 @@ def test_every_record_kind_has_a_family_and_the_three_verbs() -> None:
     ],
 )
 def test_verify_and_confirm_write_verbs_in_order(kind: EvidenceRecordKind, family: str) -> None:
-    w = World(
-        event(f"For R7K2: {TEXT}.", "ev-1"),
-        event("R7K2 confirmed", "ev-2", SAID + timedelta(seconds=1)),
-    )
-    row = w.flow.record(w.tx, evidence(kind), NOW)
+    w = World(event(first_message(kind), "ev-1"))
+    row = w.flow.record(w.tx, new_evidence(kind), NOW)
+    code = row.evidence.review_code
+    assert code is not None
+    w.harness.source.add(event(f"{code} confirmed", "ev-2", SAID + timedelta(seconds=1)))
     assert w.actions() == []  # a pending insert is not yet a record
     assert w.flow.verify(w.tx, row.id, REQUESTED, NOW).state is EvidenceState.VERIFIED
     done = w.flow.confirm(w.tx, row.id, "ses-1", "ev-2", "confirmed", NOW)
@@ -123,8 +136,8 @@ def test_verify_and_confirm_write_verbs_in_order(kind: EvidenceRecordKind, famil
 
 
 def test_refused_verification_is_audited_without_the_quote() -> None:
-    w = World(event("what about R7K2 " + TEXT + "?", "ev-1"))
-    row = w.flow.record(w.tx, evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
+    w = World(event("what about " + TEXT + "?", "ev-1"))
+    row = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
     out = w.flow.verify(w.tx, row.id, None, NOW)
     assert out.state is EvidenceState.REFUSED
     assert w.actions() == ["owner_topic.record_refused"]
@@ -138,7 +151,7 @@ def test_operator_refused_attempt_is_audited() -> None:
     w = World()
     row = w.flow.record(
         w.tx,
-        evidence(EvidenceRecordKind.DATASET_INTAKE),
+        new_evidence(EvidenceRecordKind.DATASET_INTAKE),
         NOW,
         state=EvidenceState.REFUSED,
         refused_reason="source_owner_chat",
@@ -147,27 +160,55 @@ def test_operator_refused_attempt_is_audited() -> None:
     assert w.actions() == ["asset_intake.record_refused"]
 
 
-def test_unfetchable_event_and_failed_confirmation_write_nothing() -> None:
-    w = World(event(f"For R7K2: {TEXT}.", "ev-1"))
-    row = w.flow.record(w.tx, evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
-    broken = World()
-    pending = broken.flow.record(broken.tx, evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
+def test_unfetchable_event_writes_nothing() -> None:
+    w = World()
+    pending = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
     with pytest.raises(MissingDependencyError):
-        broken.flow.verify(broken.tx, pending.id, None, NOW)
-    assert broken.actions() == []
+        w.flow.verify(w.tx, pending.id, None, NOW)
+    assert w.actions() == []
+
+
+def test_failed_confirmation_is_audited_as_a_refused_attempt_and_the_row_stays_verified() -> None:
+    w = World(event(TEXT, "ev-1"))
+    row = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
     w.flow.verify(w.tx, row.id, None, NOW)
-    with pytest.raises(MissingDependencyError):
+    with pytest.raises(MissingDependencyError):  # the confirmation event is not fetchable
         w.flow.confirm(w.tx, row.id, "ses-1", "ev-missing", "confirmed", NOW)
     assert w.actions() == ["owner_topic.recorded_from_owner_chat"]
     with pytest.raises(PermissionDeniedError):
         # the same event as the evidence is not a distinct confirmation
         w.flow.confirm(w.tx, row.id, "ses-1", "ev-1", "confirmed", NOW)
-    assert w.actions() == ["owner_topic.recorded_from_owner_chat"]
+    assert w.actions() == ["owner_topic.recorded_from_owner_chat", "owner_topic.record_refused"]
+    entry = list(w.log.export(w.tx))[-1].entry
+    assert entry.details["attempt"] == "confirmation"
+    assert entry.details["state"] == "VERIFIED"
+    assert entry.details["failed_checks"]
+    assert TEXT not in str(entry.details)
+    assert w.harness.db.get(w.harness.operator, w.tx, row.id).state is EvidenceState.VERIFIED  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(
+    "free_text",
+    [TEXT, "owner said: " + TEXT, "sk-live-abcdef0123456789", "Q9Z3 and more", "a" * 300],
+)
+def test_operator_free_text_reason_never_reaches_the_audit(free_text: str) -> None:
+    w = World()
+    row = w.flow.record(
+        w.tx,
+        new_evidence(EvidenceRecordKind.DATASET_INTAKE),
+        NOW,
+        state=EvidenceState.REFUSED,
+        refused_reason=free_text,
+    )
+    assert row.refused_reason == "operator_refused"
+    entry = next(iter(w.log.export(w.tx))).entry
+    assert entry.details["refused_reason"] == "operator_refused"
+    assert free_text not in str(entry.details)
 
 
 def test_audit_is_tenant_scoped() -> None:
-    w = World(event(f"For R7K2: {TEXT}.", "ev-1"))
-    row = w.flow.record(w.tx, evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
+    w = World(event(TEXT, "ev-1"))
+    row = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
     w.flow.verify(w.tx, row.id, None, NOW)
     assert w.actions() != []
     assert w.actions(ids.ORG.new()) == []
