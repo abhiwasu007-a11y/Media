@@ -18,6 +18,7 @@ members = [
     "amw-evals",
     "amw-media-factory",
     "amw-orchestrator",
+    "amw-runtime",
 ]
 
 [[package]]
@@ -202,6 +203,7 @@ dependencies = [
     { name = "amw-core" },
     { name = "amw-evals" },
     { name = "amw-orchestrator" },
+    { name = "amw-runtime" },
 ]
 
 [package.dev-dependencies]
@@ -230,6 +232,7 @@ requires-dist = [
     { name = "amw-core", editable = "packages/amw_core" },
     { name = "amw-evals", editable = "packages/amw_evals" },
     { name = "amw-orchestrator", editable = "packages/amw_orchestrator" },
+    { name = "amw-runtime", editable = "packages/amw_runtime" },
 ]
 
 [package.metadata.requires-dev]
@@ -253,6 +256,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+
+[[package]]
+name = "amw-runtime"
+version = "0.0.0"
+source = { editable = "packages/amw_runtime" }
+dependencies = [
+    { name = "agent-06-fact-checker" },
+    { name = "amw-core" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-06-fact-checker", editable = "packages/agents/agent_06_fact_checker" },
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "pydantic", specifier = ">=2" },
+]
 
 [[package]]
 name = "annotated-types"

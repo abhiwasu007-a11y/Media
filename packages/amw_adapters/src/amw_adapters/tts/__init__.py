@@ -2,7 +2,11 @@
 
 from amw_adapters.tts.fake import FakeTtsAdapter
 from amw_adapters.tts.protocol import (
+    ControlSupport,
     TtsAdapter,
+    TtsCapabilities,
+    TtsEmotion,
+    TtsPace,
     TtsRequest,
     TtsResult,
     VoiceInfo,
@@ -11,8 +15,12 @@ from amw_adapters.tts.protocol import (
 )
 
 __all__ = [
+    "ControlSupport",
     "FakeTtsAdapter",
     "TtsAdapter",
+    "TtsCapabilities",
+    "TtsEmotion",
+    "TtsPace",
     "TtsRequest",
     "TtsResult",
     "VoiceInfo",
