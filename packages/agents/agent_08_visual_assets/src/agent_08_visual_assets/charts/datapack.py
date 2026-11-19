@@ -9,14 +9,15 @@ and charts are drawn from that registered blob, hash-verified (``DataPackChartBu
 ``FileDataPackReader`` guards the location (MAJOR-1 of the PR #75 review):
 
 * the root comes from ``charts.data_pack_root`` (unset = ``PERMANENT.CONFIG_INVALID``, fail closed);
-* the root must contain no symbolic link (its real path equals its absolute path), must end in the
-  allow-listed folders ``course/data_pack`` (the layout stated in 00_REPO_AND_SERVER_AUDIT) and must
-  not pass through a Trade research area (a path component ``IS``, ``VAL``, ``OOS`` or one holding
-  ``holdout``, any case); the factory never reads those folders;
+* the root must contain no symbolic link (its real path equals its absolute path), must end in
+  exactly ``research/course/data_pack`` (the layout stated in 00_REPO_AND_SERVER_AUDIT), no folder
+  above that suffix may be a Trade research area or another research tree (``IS``, ``VAL``, ``OOS``,
+  ``books``, ``review``, ``reports``, ``visual_audit``, ``research``, ``course``) and no component
+  may hold ``holdout`` (any case); the factory never reads those folders;
 * only the configured bare file names are opened (``charts.data_pack_files``: key
-  ``<INSTRUMENT>@<1D|1W>``), never a listing; a file must be a regular file directly in the root,
-  not a symbolic link (opened with ``O_NOFOLLOW``), and not larger than ``max_bars`` rows of at most
-  ``MAX_ROW_BYTES`` bytes;
+  ``<INSTRUMENT>@<1D|1W>``), never a listing, relative to a descriptor of the validated root; the
+  opened descriptor is pinned to the validated entry (regular file, one hard link, same device and
+  inode, ``O_NOFOLLOW``), and at most ``max_bars`` rows of ``MAX_ROW_BYTES`` bytes are read;
 * files are opened read-only and never written.
 
 ``manifest_sha256`` is the SHA-256 of the canonical JSON ``{file name: file SHA-256}`` over every
@@ -41,8 +42,12 @@ DATA_PACK_TIMEFRAMES = ("1D", "1W")
 of the pack are not used by the chart path, CCR-259)."""
 ROOT_KEY = "charts.data_pack_root"
 FILES_KEY = "charts.data_pack_files"
-ALLOWED_ROOT_SUFFIX = ("course", "data_pack")
-_RESEARCH_PARTS = frozenset({"is", "val", "oos"})
+ALLOWED_ROOT_SUFFIX = ("research", "course", "data_pack")
+"""The only accepted location shape: ``.../research/course/data_pack`` (00 audit)."""
+_DENIED_PARTS = frozenset(
+    {"is", "val", "oos", "books", "review", "reports", "visual_audit", "research", "course"}
+)
+"""Folder names refused ABOVE the allowed suffix: Trade research areas and other research trees."""
 MAX_ROW_BYTES = 256
 """Upper bound of one CSV row (``timestamp,open,high,low,close[,volume,oi]``) used for the file
 size cap ``max_bars * MAX_ROW_BYTES``; a format bound, not a policy value."""
@@ -112,6 +117,15 @@ def _check_timeframe(timeframe: str) -> None:
         raise InputInvalidError("timeframe is not supported for data_pack charts")
 
 
+def _check_entry(info: os.stat_result, cap: int) -> None:
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise ConfigInvalidError("a configured data_pack file is not a regular file")
+    if info.st_nlink != 1:
+        raise ConfigInvalidError("a configured data_pack file has more than one hard link")
+    if info.st_size > cap:
+        raise ConfigInvalidError("a configured data_pack file exceeds the size cap")
+
+
 def check_root(root: Path) -> Path:
     """The guarded real path of the pack root, or ``CONFIG_INVALID``."""
     absolute = Path(os.path.abspath(root))
@@ -124,10 +138,12 @@ def check_root(root: Path) -> Path:
     if real != absolute:
         raise ConfigInvalidError(f"{ROOT_KEY} passes through a symbolic link")
     parts = [p.lower() for p in real.parts]
-    if any(p in _RESEARCH_PARTS or "holdout" in p for p in parts):
+    if any("holdout" in p for p in parts):
         raise ConfigInvalidError(f"{ROOT_KEY} lies in a Trade research area")
     if tuple(real.parts[-len(ALLOWED_ROOT_SUFFIX) :]) != ALLOWED_ROOT_SUFFIX:
         raise ConfigInvalidError(f"{ROOT_KEY} is not the course data_pack folder")
+    if any(p in _DENIED_PARTS for p in parts[: -len(ALLOWED_ROOT_SUFFIX)]):
+        raise ConfigInvalidError(f"{ROOT_KEY} lies in a Trade research area")
     return real
 
 
@@ -136,27 +152,62 @@ class FileDataPackReader:
 
     def __init__(self, settings: DataPackSettings) -> None:
         self._root = check_root(settings.root)
+        st = os.stat(self._root, follow_symlinks=False)
+        self._root_id = (st.st_dev, st.st_ino)
         self._s = settings
         self._hashes: dict[str, str] | None = None
 
+    def _open_root(self) -> int:
+        """A directory descriptor of the validated root (no symlink, same device and inode)."""
+        try:
+            dfd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except OSError:
+            raise ConfigInvalidError(f"{ROOT_KEY} cannot be opened") from None
+        st = os.fstat(dfd)
+        if (st.st_dev, st.st_ino) != self._root_id:
+            os.close(dfd)
+            raise ConfigInvalidError(f"{ROOT_KEY} changed after it was validated")
+        return dfd
+
     def _read(self, name: str) -> bytes:
-        path = self._root / name
+        """Read one configured file, pinned to the entry that was validated: lstat and open relative
+        to the root descriptor (no path re-resolution), ``O_NOFOLLOW`` and ``O_NONBLOCK`` (a FIFO
+        never blocks), then ``fstat`` of the OPENED descriptor must show a regular file with one
+        link, the same device and inode as the lstat, and a size within the cap; at most cap + 1
+        bytes are read; anything longer, or a length other than the fstat size, is refused."""
+        cap = self._s.max_bars * MAX_ROW_BYTES
+        dfd = self._open_root()
         try:
-            info = os.lstat(path)
-        except OSError:
-            raise ConfigInvalidError("a configured data_pack file cannot be read") from None
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-            raise ConfigInvalidError("a configured data_pack file is not a regular file")
-        if path.resolve(strict=True).parent != self._root:
-            raise ConfigInvalidError("a configured data_pack file lies outside the root")
-        if info.st_size > self._s.max_bars * MAX_ROW_BYTES:
-            raise ConfigInvalidError("a configured data_pack file exceeds the size cap")
-        try:
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-        except OSError:
-            raise ConfigInvalidError("a configured data_pack file cannot be read") from None
+            try:
+                info = os.lstat(name, dir_fd=dfd)
+            except OSError:
+                raise ConfigInvalidError("a configured data_pack file cannot be read") from None
+            _check_entry(info, cap)
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+            except OSError:
+                raise ConfigInvalidError("a configured data_pack file cannot be read") from None
+        finally:
+            os.close(dfd)
         with os.fdopen(fd, "rb") as fh:  # read-only; the pack is never written
-            return fh.read(self._s.max_bars * MAX_ROW_BYTES + 1)
+            opened = os.fstat(fh.fileno())
+            _check_entry(opened, cap)
+            if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                raise ConfigInvalidError("a configured data_pack file was replaced while opened")
+            chunks: list[bytes] = []
+            size = 0
+            while size <= cap:
+                chunk = fh.read(cap + 1 - size)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+        data = b"".join(chunks)
+        if len(data) > cap:
+            raise ConfigInvalidError("a configured data_pack file exceeds the size cap")
+        if len(data) != opened.st_size:
+            raise ConfigInvalidError("a configured data_pack file changed while it was read")
+        return data
 
     def _file_hashes(self) -> dict[str, str]:
         if self._hashes is None:

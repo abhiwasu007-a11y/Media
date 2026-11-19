@@ -110,7 +110,7 @@ def ema(values: Sequence[float], period: int) -> list[float | None]:
 def rsi(values: Sequence[float], period: int) -> list[float | None]:
     """Relative Strength Index with Wilder's smoothing (the textbook definition: J. Welles Wilder
     Jr.,
-    *New Concepts in Technical Trading Systems*, 1978; RESEARCH_LOG RV-10).
+    *New Concepts in Technical Trading Systems*, 1978; RESEARCH_LOG RV-11).
 
     For closes ``c``: change ``d_i = c_i - c_(i-1)``; gain ``max(d_i, 0)``, loss ``max(-d_i, 0)``.
     The first average gain/loss is the simple mean of the first ``period`` gains/losses and gives

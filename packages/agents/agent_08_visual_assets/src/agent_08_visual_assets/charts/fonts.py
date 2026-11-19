@@ -2,12 +2,11 @@
 
 The manifest format is agent_11's ``data/fonts/manifest.json`` (schema 1: ``fonts[]`` with ``key``,
 ``file``, ``sha256``, ``licence``). Agent 08 does not import agent_11: the caller passes the
-manifest
-path (operator tooling, tests and the local demo). The preference order is Mukta (brand primary,
-being committed by the fonts lane, RV-09) and then Noto Sans Devanagari (RV-08); the first key
-present wins. The file's SHA-256 must equal the manifest value, otherwise ``CONFIG_INVALID``. In the
-stage the brand font comes from tenant storage as a ``FONT`` asset (ledgered); this resolver gives
-the same file for runs outside the stage.
+manifest path (operator tooling, tests and the local demo). The preference order is Mukta (brand
+primary, PR #74, RV-09) and then Noto Sans Devanagari (fallback, RV-08); the first key present
+wins. The file's SHA-256 must equal the manifest value, otherwise ``CONFIG_INVALID``. In the stage
+the brand font comes from tenant storage as a ``FONT`` asset (ledgered); this resolver gives the
+same file for runs outside the stage. DejaVu is never used for data_pack charts (no Devanagari).
 """
 
 import hashlib

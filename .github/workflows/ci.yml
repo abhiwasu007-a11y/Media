@@ -130,5 +130,6 @@ jobs:
           for seed in 0 1 2; do
             PYTHONHASHSEED=$seed uv run --frozen pytest -q -p no:cacheprovider --no-cov \
               tests/agents/agent_11_thumbnail_design/test_composer.py \
+              tests/agents/agent_11_thumbnail_design/test_brand_fonts.py \
               "tests/agents/agent_11_thumbnail_design/test_stage.py::test_same_inputs_give_byte_identical_files"
           done

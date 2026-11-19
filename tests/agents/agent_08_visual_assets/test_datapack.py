@@ -13,6 +13,7 @@ import io
 import json
 import os
 import random
+import stat
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -311,7 +312,7 @@ def test_dataset_must_be_the_registered_data_pack_bytes(ds_over: dict, exc: type
 
 
 def _pack_dir(tmp_path: Path) -> Path:
-    root = tmp_path / "course" / "data_pack"
+    root = tmp_path / "pack" / "research" / "course" / "data_pack"
     root.mkdir(parents=True)
     (root / "syn.csv").write_bytes(pack_csv(50))
     return root
@@ -351,20 +352,26 @@ def test_root_must_be_the_course_data_pack_folder(tmp_path: Path) -> None:
     FileDataPackReader(_settings(root))
     other = tmp_path / "elsewhere"
     other.mkdir()
-    for bad in (tmp_path / "absent", other, tmp_path / "course"):
+    loose = tmp_path / "loose" / "course" / "data_pack"  # suffix without research/
+    loose.mkdir(parents=True)
+    for bad in (tmp_path / "absent", other, root.parent, loose):
         with pytest.raises(ConfigInvalidError):
             FileDataPackReader(_settings(bad))
-    for area in ("HOLDOUT", "IS", "val", "oos", "holdout_2024"):
-        sealed = tmp_path / area / "course" / "data_pack"
+    for area in ("HOLDOUT", "IS", "val", "oos", "holdout_2024", "books", "review", "reports"):
+        sealed = tmp_path / area / "research" / "course" / "data_pack"
         sealed.mkdir(parents=True)
         with pytest.raises(ConfigInvalidError, match="research area"):
             FileDataPackReader(_settings(sealed))
+    nested = tmp_path / "x" / "research" / "books" / "research" / "course" / "data_pack"
+    nested.mkdir(parents=True)
+    with pytest.raises(ConfigInvalidError, match="research area"):
+        FileDataPackReader(_settings(nested))
 
 
 @pytest.mark.security
 def test_symlinked_root_or_file_and_oversize_file_are_refused(tmp_path: Path) -> None:
     root = _pack_dir(tmp_path)
-    link_parent = tmp_path / "alias" / "course"
+    link_parent = tmp_path / "alias" / "research" / "course"
     link_parent.mkdir(parents=True)
     os.symlink(root, link_parent / "data_pack")
     with pytest.raises(ConfigInvalidError, match="symbolic link"):
@@ -376,6 +383,71 @@ def test_symlinked_root_or_file_and_oversize_file_are_refused(tmp_path: Path) ->
         FileDataPackReader(_settings(root, {"SYN@1D": "linked.csv"})).read("SYN", "1D")
     with pytest.raises(ConfigInvalidError, match="size cap"):
         FileDataPackReader(_settings(root, max_bars=2)).read("SYN", "1D")
+
+
+@pytest.mark.security
+def test_hardlink_to_a_file_outside_the_pack_is_refused(tmp_path: Path) -> None:
+    root = _pack_dir(tmp_path)
+    secret = tmp_path / "sealed.csv"  # stands for a research-area file on the same filesystem
+    secret.write_bytes(pack_csv(10, seed=99))
+    os.link(secret, root / "alias.csv")
+    with pytest.raises(ConfigInvalidError, match="hard link"):
+        FileDataPackReader(_settings(root, {"SYN@1D": "alias.csv"})).read("SYN", "1D")
+
+
+@pytest.mark.security
+def test_fifo_is_refused_without_blocking(tmp_path: Path) -> None:
+    root = _pack_dir(tmp_path)
+    os.mkfifo(root / "pipe.csv")
+    with pytest.raises(ConfigInvalidError, match="not a regular file"):
+        FileDataPackReader(_settings(root, {"SYN@1D": "pipe.csv"})).read("SYN", "1D")
+
+
+@pytest.mark.security
+def test_file_swapped_after_the_check_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import agent_08_visual_assets.charts.datapack as dp
+
+    root = _pack_dir(tmp_path)
+    reader = FileDataPackReader(_settings(root))
+    other = tmp_path / "pack" / "other.csv"  # a different regular file, one link after the swap
+    other.write_bytes(pack_csv(50, seed=5))
+    real_open = os.open
+    swapped: list[bool] = []
+
+    def swap_then_open(path, flags, *args, **kw):
+        if path == "syn.csv" and not swapped:
+            os.replace(other, root / "syn.csv")  # rename over the validated entry
+            swapped.append(True)
+        return real_open(path, flags, *args, **kw)
+
+    monkeypatch.setattr(dp.os, "open", swap_then_open)
+    with pytest.raises(ConfigInvalidError, match="replaced while opened"):
+        reader.read("SYN", "1D")
+    assert swapped
+
+
+@pytest.mark.security
+def test_file_growing_while_read_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import agent_08_visual_assets.charts.datapack as dp
+
+    root = _pack_dir(tmp_path)
+    reader = FileDataPackReader(_settings(root))
+    real_fstat = os.fstat
+
+    def fstat_then_grow(fd):
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            with (root / "syn.csv").open("ab") as fh:
+                fh.write(b"2030-01-01,1,2,0.5,1.5,0\n")
+        return st
+
+    monkeypatch.setattr(dp.os, "fstat", fstat_then_grow)
+    with pytest.raises(ConfigInvalidError, match=r"changed while it was read|size cap"):
+        reader.read("SYN", "1D")
 
 
 @pytest.mark.unit
