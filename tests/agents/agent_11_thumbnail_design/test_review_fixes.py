@@ -18,7 +18,13 @@ from amw_core.errors import (
     MissingDependencyError,
     QualityRepeatedFailureError,
 )
-from tests.agents.agent_11_thumbnail_design.env import Env, make_env
+from tests.agents.agent_11_thumbnail_design.env import (
+    Env,
+    err_of,
+    make_env,
+    run_att,
+    violation_keys,
+)
 from tests.agents.agent_11_thumbnail_design.fakes import FakeClock
 
 NEUTRAL = (
@@ -45,10 +51,9 @@ def test_b1_finance_with_absent_or_empty_marker_list_is_config_invalid(
     markers: tuple[str, ...],
 ) -> None:
     env = _with(make_env(finance=True, promise=NEUTRAL), lexicons=_lex_for(markers))
-    with pytest.raises(ConfigInvalidError) as e:
-        env.stage.run(env.ti, "att_1")
-    assert e.value.details["check_id"] == "a11.pre.config"
-    assert "compliance.finance_sebi_in.markers" in e.value.details["violations"]
+    e = err_of(run_att(env, env.ti, "att_1"), ConfigInvalidError)
+    assert e.details.model_dump()["check_id"] == "a11.pre.config"
+    assert "compliance.finance_sebi_in.markers" in violation_keys(e)
     assert env.llm.calls == 0
 
 
@@ -59,12 +64,11 @@ def _lex_for(markers: tuple[str, ...]) -> Lexicons:
 
 def test_b1_empty_marker_list_is_fine_off_finance_but_injection_lists_always_required() -> None:
     ok = _with(make_env(), lexicons=_lex_for(()))
-    assert ok.stage.run(ok.ti, "a").status.value == "SUCCEEDED"
+    assert run_att(ok, ok.ti, "a").status.value == "SUCCEEDED"
     env = make_env()
     bad = _with(env, lexicons=_lex(env, injection_markers=(), instruction_phrases=()))
-    with pytest.raises(ConfigInvalidError) as e:
-        bad.stage.run(bad.ti, "a")
-    assert {"injection_markers", "instruction_phrases"} <= set(e.value.details["violations"])
+    e = err_of(run_att(bad, bad.ti, "a"), ConfigInvalidError)
+    assert {"injection_markers", "instruction_phrases"} <= set(violation_keys(e))
     assert bad.llm.calls == 0
 
 
@@ -72,13 +76,11 @@ def test_m7_missing_finance_pack_and_altered_prompt_fail_closed() -> None:
     env = make_env(finance=True, promise=NEUTRAL)
     packs = RulePacks({"rp.youtube_general": "x"}, None)
     gone = _with(env, packs=packs)
-    with pytest.raises(ConfigInvalidError) as e:
-        gone.stage.run(gone.ti, "a")
-    assert "rule_pack:rp.finance_sebi_in" in e.value.details["violations"]
+    e = err_of(run_att(gone, gone.ti, "a"), ConfigInvalidError)
+    assert "rule_pack:rp.finance_sebi_in" in violation_keys(e)
     tampered = _with(env, prompt=dataclasses.replace(env.stage.d.prompt, text="changed"))
-    with pytest.raises(ConfigInvalidError) as e2:
-        tampered.stage.run(tampered.ti, "a")
-    assert "prompt_sha256_mismatch" in e2.value.details["violations"]
+    e2 = err_of(run_att(tampered, tampered.ti, "a"), ConfigInvalidError)
+    assert "prompt_sha256_mismatch" in violation_keys(e2)
     assert env.llm.calls == 0
 
 
@@ -96,9 +98,8 @@ def test_m6_missing_raqm_is_permanent_and_precedes_the_paid_call() -> None:
             return getattr(self._i, name)
 
     env = _with(env, composer=NoRaqm(env.stage.d.composer))
-    with pytest.raises(MissingDependencyError) as e:
-        env.stage.run(env.ti, "a")
-    assert e.value.code == "PERMANENT.MISSING_DEPENDENCY"
+    e = err_of(run_att(env, env.ti, "a"), MissingDependencyError)
+    assert e.code == "PERMANENT.MISSING_DEPENDENCY"
     assert env.llm.calls == 0
 
 
@@ -110,9 +111,8 @@ def test_font_hash_mismatch_is_refused_before_the_paid_call(
         "agent_11_thumbnail_design.stage.verify_font",
         lambda *_: (_ for _ in ()).throw(FontIntegrityError("x")),
     )
-    with pytest.raises(MissingDependencyError) as e:
-        env.stage.run(env.ti, "a")
-    assert e.value.details["missing"] == ["font_hash_match"]
+    e = err_of(run_att(env, env.ti, "a"), MissingDependencyError)
+    assert e.details.model_dump()["missing"] == ["font_hash_match"]
     assert env.llm.calls == 0
 
 
@@ -123,7 +123,7 @@ def test_m1_promise_statement_that_is_a_call_is_blocked_on_finance() -> None:
         working_title_local="A look at the stock",
     )
     env = make_env(finance=True, promise=(p, NEUTRAL[1]))
-    out = env.stage.run(env.ti, "a")
+    out = run_att(env, env.ti, "a")
     assert out.payload is not None
     assert out.payload.data is not None
     assert out.payload.data["verdict"] == "BLOCKED"
@@ -144,9 +144,8 @@ def test_m3_licence_failure_leaves_no_asset_ledger_row_or_png() -> None:
     reg = env.repo.registered[("FONT", "ast_font")]
     env.repo.registered[("FONT", "ast_font")] = dataclasses.replace(reg, licence_state="REVOKED")
     before = set(env.storage.blobs)
-    with pytest.raises(QualityRepeatedFailureError) as e:
-        env.stage.run(env.ti, "a")
-    assert "a11.q.licence_rows" in e.value.details["check_ids"]
+    e = err_of(run_att(env, env.ti, "a"), QualityRepeatedFailureError)
+    assert "a11.q.licence_rows" in e.details.model_dump()["check_ids"]
     assert env.repo.image_inserts == []
     assert env.repo.ledger_inserts == []
     assert not [u for u in set(env.storage.blobs) - before if "/thumbnails/" in u]
@@ -171,14 +170,13 @@ def test_m4_replay_after_a_kill_inside_the_llm_call_reconciles(
 
     with monkeypatch.context() as m:
         m.setattr(env.llm, "complete", dies)
-        with pytest.raises(_Killed):
-            env.stage.run(env.ti, "att_1")
+        with pytest.raises(_Killed):  # a process kill is not a returned failure
+            run_att(env, env.ti, "att_1")
         # still locked: another attempt may hold it -> retryable, not INPUT_INVALID
-        with pytest.raises(LockConflictError):
-            env.stage.run(env.ti, "att_2")
+        err_of(run_att(env, env.ti, "att_2"), LockConflictError)
     late = _LateClock()
     env2 = _with(env, clock=late)
-    out = env2.stage.run(env2.ti, "att_3")
+    out = run_att(env2, env2.ti, "att_3")
     assert out.payload is not None
     assert out.payload.data is not None
     assert out.payload.data["variant_count_produced"] == 3
@@ -193,8 +191,7 @@ def test_m5_cross_tenant_asset_ref_is_rejected_with_a_security_event() -> None:
         env.ti.context_refs[0].model_copy(update={"uri": f"amw-blob://{other}/assets/x.png"}),
     ]
     ti = env.ti.model_copy(update={"context_refs": tuple(refs)})
-    with pytest.raises(CrossTenantRefError):
-        env.stage.run(ti, "a")
+    err_of(run_att(env, ti, "a"), CrossTenantRefError)
     assert [e.action for e in env.audit.entries] == ["security.cross_tenant_ref"]
     assert env.llm.calls == 0
 
@@ -202,5 +199,4 @@ def test_m5_cross_tenant_asset_ref_is_rejected_with_a_security_event() -> None:
 def test_m5_unresolvable_own_asset_ref_is_missing_dependency() -> None:
     env = make_env(owner_assets=1)
     env.repo.assets.clear()
-    with pytest.raises(MissingDependencyError):
-        env.stage.run(env.ti, "a")
+    err_of(run_att(env, env.ti, "a"), MissingDependencyError)

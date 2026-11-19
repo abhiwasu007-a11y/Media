@@ -92,7 +92,9 @@ def test_canary_hash_is_recorded(font_key: str) -> None:
 def test_canary_fixture_is_the_documented_spec() -> None:
     assert canary_spec("a11_test_box").font_sha256 == FONT_SHA
     assert PillowComposer().render(canary_spec("a11_test_box")).png == (
-        PillowComposer().render(spec()).png
+        # the canary has its own fixed subject picture (the three outlined rectangles it was
+        # recorded with), so the recorded hashes do not follow the glyph data (PASS6-L)
+        PillowComposer().render(spec(glyph=canary_spec("a11_test_box").glyph)).png
     )
 
 
