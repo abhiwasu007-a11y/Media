@@ -5,6 +5,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+HOOK_SECTION_ID = "hook"
+"""Reserved ``section_id`` of the hook scenes and segments of an Agent 05 document (CCR-202)."""
+TEMPLATE_ID_RE = r"^[a-z][a-z0-9_]{1,63}$"
+"""GLOSSARY section 1 *Template ID* (CCR-204)."""
 SHA256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ShotId = Annotated[str, StringConstraints(pattern=r"^sh[0-9]{2,4}$")]
 SlotId = Annotated[str, StringConstraints(pattern=r"^sl[0-9]{2,4}$")]
@@ -220,6 +224,7 @@ class Limits(Model):
 class RevisionFeedback(Model):
     check_id: str
     severity: Literal["BLOCKING", "WARNING"]
+    source_stage_id: str | None = None
     shot_ids: tuple[str, ...] = ()
     measured: float | None = None
     threshold: float | None = None
@@ -426,7 +431,8 @@ class Overlay(Model):
     kind: OverlayKind
     start_ms: int = Field(ge=0)
     end_ms: int = Field(ge=1)
-    template_ref: str | None
+    template_ref: Annotated[str, StringConstraints(min_length=1)]
+    """A template ID (GLOSSARY, CCR-204): never null, never a URI or asset ID."""
     text_refs: tuple[TextRef, ...] = ()
     vertical_variant: bool = False
 
@@ -574,3 +580,228 @@ class Slot(Model):
     @property
     def duration_ms(self) -> int:
         return self.end_ms - self.start_ms
+
+
+# ---------------------------------------------------------------- Task Input payload (7.2)
+
+
+class HashedRef(Model):
+    uri: str
+    sha256: SHA256
+
+
+class ScriptRef(HashedRef):
+    script_id: str
+    version: int = Field(ge=1)
+
+
+class VerificationRef(HashedRef):
+    verified_script_sha256: SHA256
+    stage_verdict: Literal["ALLOWED", "NEEDS_HUMAN_REVIEW"]
+    approval_id: str | None = None
+
+
+class ShotPlanInput(Model):
+    """``payload.data`` of ``agent_09.shot_plan.input`` 1.0.0 (closed, 7.2)."""
+
+    production_type_key: Literal["CHANNEL_LONG_FORM", "SHORTS"]
+    aspect_ratio: AspectRatio
+    script_ref: ScriptRef
+    verification_ref: VerificationRef
+    narration_timeline_ref: HashedRef
+    brand_kit_ref: HashedRef
+    channel_category: Annotated[str, StringConstraints(max_length=40)]
+    active_rule_packs: Annotated[
+        tuple[Annotated[str, StringConstraints(pattern=r"^rp\.[a-z0-9_]{2,40}$")], ...],
+        Field(min_length=1),
+    ]
+    parent_plan_ref: HashedRef | None = None
+    iteration: int = Field(ge=0)
+    previous_plan_ref: HashedRef | None
+    revision_feedback: tuple[RevisionFeedback, ...] = Field(default=(), max_length=64)
+    limits: Limits = Field(default_factory=Limits)
+
+
+# ---------------------------------------------------------------- slice models of other documents
+# 03 section 2.3 rule 2 (CCR-200): a consumer maps another component's document with its own slice
+# model that ignores every field it does not read; ``forbid`` is only for own documents.
+
+
+class SliceModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+
+class _SliceVisualIntent(SliceModel):
+    tier_hint: Tier
+    description: str
+    change_beats: int = Field(ge=0)
+
+
+class _SliceScene(SliceModel):
+    """Every field Agent 09 reads is required: the producer writes all of them (agent_05 8.3
+    ``DocScene``), so a missing one is a malformed document, never a default (fail closed).
+    ``section_id``, ``visual_intent`` and ``interrupt`` are required but may be ``null``."""
+
+    scene_id: str
+    section_id: str | None
+    beat: str
+    segment_ids: tuple[str, ...]
+    on_screen_text: tuple[str, ...]
+    visual_intent: _SliceVisualIntent | None
+    interrupt: Any
+    deliberate_pause_ms: int = Field(ge=0)
+    explanatory: bool
+    chart_id: str | None
+
+
+class _SliceSegment(SliceModel):
+    segment_id: str
+    kind: SegmentKind
+    scene_id: str
+    section_id: str | None
+    chart_ref: str | None
+    parent_segment_ids: tuple[str, ...]
+    text: str
+
+
+class _SliceSection(SliceModel):
+    section_id: str
+    section_kind: str
+    heading_local: str
+    scene_ids: tuple[str, ...]
+
+
+class _SliceChartRequest(SliceModel):
+    chart_id: str = Field(pattern=r"^chart_[0-9a-z_]{1,32}$")
+    first_segment_id: str
+    must_be_historical: bool
+
+
+class _SliceDisclaimerSlot(SliceModel):
+    slot_id: str
+    segment_id: str
+    text_sha256: SHA256
+
+
+class ScriptDocSlice(SliceModel):
+    """What Agent 09 reads of the ``agent_05.script_document`` blob (agent_05 8.3, CCR-202).
+
+    ``sections[]`` holds real sections only; hook scenes carry ``section_id = "hook"`` and
+    disclaimer scenes ``null``; both stay as written (no re-attribution). A scene without a
+    ``visual_intent`` (a documented ``null`` for hook and disclaimer scenes) takes the tier B
+    default of the scene model; every other field is required, a missing one is
+    ``SCRIPT_DOCUMENT_INVALID`` (CCR-200 only lets unknown fields be ignored);
+    ``deliberate_pause_ms = 0`` means no deliberate pause (the document writes ``0``, never null).
+    """
+
+    script_id: str
+    version: int = Field(ge=1)
+    language: str
+    aspect_ratio: AspectRatio
+    sections: tuple[_SliceSection, ...]
+    scenes: tuple[_SliceScene, ...]
+    segments: tuple[_SliceSegment, ...]
+    chart_requests: tuple[_SliceChartRequest, ...]
+    disclaimer_slots: tuple[_SliceDisclaimerSlot, ...]
+
+    def to_script_doc(self) -> ScriptDoc:
+        scenes = tuple(
+            Scene(
+                scene_id=sc.scene_id,
+                section_id=sc.section_id,
+                beat=sc.beat,
+                segment_ids=sc.segment_ids,
+                on_screen_text=sc.on_screen_text,
+                tier_hint=sc.visual_intent.tier_hint if sc.visual_intent else Tier.B,
+                visual_description=sc.visual_intent.description if sc.visual_intent else "",
+                change_beats=sc.visual_intent.change_beats if sc.visual_intent else 1,
+                interrupt=sc.interrupt,
+                deliberate_pause_ms=sc.deliberate_pause_ms or None,
+                explanatory=sc.explanatory,
+                chart_id=sc.chart_id,
+            )
+            for sc in self.scenes
+        )
+        return ScriptDoc(
+            script_id=self.script_id,
+            version=self.version,
+            language=self.language,
+            aspect_ratio=self.aspect_ratio,
+            sections=tuple(
+                Section(
+                    section_id=x.section_id,
+                    section_kind=x.section_kind,
+                    heading_local=x.heading_local,
+                    scene_ids=x.scene_ids,
+                )
+                for x in self.sections
+            ),
+            scenes=scenes,
+            segments=tuple(
+                Segment(
+                    segment_id=g.segment_id,
+                    kind=g.kind,
+                    scene_id=g.scene_id,
+                    section_id=g.section_id,
+                    chart_ref=g.chart_ref,
+                    parent_segment_ids=g.parent_segment_ids,
+                    text=g.text,
+                )
+                for g in self.segments
+            ),
+            chart_requests=tuple(
+                ChartRequest(
+                    chart_id=c.chart_id,
+                    first_segment_id=c.first_segment_id,
+                    must_be_historical=c.must_be_historical,
+                )
+                for c in self.chart_requests
+            ),
+            disclaimer_slots=tuple(
+                DisclaimerSlot(
+                    slot_id=d.slot_id, segment_id=d.segment_id, text_sha256=d.text_sha256
+                )
+                for d in self.disclaimer_slots
+            ),
+        )
+
+
+class _SliceTimelineSegment(SliceModel):
+    segment_id: str
+    start_ms: int | None = None
+    end_ms: int | None = None
+
+
+class TimelineSlice(SliceModel):
+    """What Agent 09 reads of the narration timeline blob (agent_07 8: source, segment times)."""
+
+    source: Literal["PROVIDER_CLIPS", "OWNER_MARKS", "UNALIGNED"]
+    segments: tuple[_SliceTimelineSegment, ...]
+
+    def to_timeline(self) -> NarrationTimeline:
+        return NarrationTimeline(
+            source=self.source,
+            segments=tuple(
+                TimelineSegment(segment_id=g.segment_id, start_ms=g.start_ms, end_ms=g.end_ms)
+                for g in self.segments
+            ),
+        )
+
+
+class BrandKitSlice(SliceModel):
+    """The brand kit fields Agent 09 reads (04 5.12): template IDs, never URIs (CCR-204)."""
+
+    intro_ref: str | None = None
+    intro_duration_ms: int | None = None
+    outro_ref: str | None = None
+    lower_third_template_ref: str | None = None
+    banned_words: tuple[str, ...] = ()
+
+    def to_brand_kit(self) -> BrandKit:
+        return BrandKit(
+            intro_ref=self.intro_ref,
+            intro_duration_ms=self.intro_duration_ms,
+            outro_ref=self.outro_ref,
+            lower_third_template_ref=self.lower_third_template_ref,
+            banned_words=self.banned_words,
+        )

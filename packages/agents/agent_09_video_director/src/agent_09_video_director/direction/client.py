@@ -39,6 +39,9 @@ class CallMeter:
     tokens_out: int = 0
     tokens_cached_in: int = 0
     cost_entry_ids: list[str] = field(default_factory=list)
+    in_flight: int = 0
+    """Calls sent to the provider whose cost is not yet recorded (a failure in between leaves the
+    cost unknown: the call may have been charged)."""
     call_log: list[CallInfo] = field(default_factory=list)
 
     def check(self) -> None:
@@ -106,9 +109,11 @@ class DirectionClient:
             cache_system_prompt=self._cfg.llm_cache_system_prompt,
             language=self._language,
         )
+        self._meter.in_flight += 1
         response = self._llm.complete(request, idempotency_key=str(key))
         entry_id = self._recorder.record(response, str(key))
         self._meter.after(response, entry_id, f"direction.{batch_id}")
+        self._meter.in_flight -= 1
         if response.stop_reason == "max_tokens":
             raise InvalidJsonError("model output truncated at max_output_tokens")
         return response.text
