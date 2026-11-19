@@ -1,5 +1,6 @@
 # ruff: noqa: PT018, PT022
-# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated"
+# mypy: disable-error-code="index,no-untyped-call,misc,union-attr"
 # (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """3A-16 acceptance (CI-sized): the whole 3A graph on fakes through the real PostgreSQL job /
 task / queue / budget / ledger / audit tables, real FFmpeg render and QC, S2's bundle.

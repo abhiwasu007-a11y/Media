@@ -1,5 +1,6 @@
 # ruff: noqa: E501
-# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated"
+# mypy: disable-error-code="index,no-untyped-call,misc,union-attr"
 # (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """PLUMBING dry run of the 3A graph: fresh PostgreSQL database, real job / task / queue / budget /
 ledger / audit tables, the graph runner, the dry-run world, and S2's delivery bundle.

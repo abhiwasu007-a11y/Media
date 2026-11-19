@@ -1,4 +1,5 @@
-# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated"
+# mypy: disable-error-code="index,no-untyped-call,misc,union-attr"
 # (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """Shared fakes of the PLUMBING dry-run world (no network, no paid call, no database inside
 agents: the graph runner owns the database records).

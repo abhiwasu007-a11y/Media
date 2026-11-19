@@ -1,5 +1,6 @@
 # ruff: noqa: E501
-# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated"
+# mypy: disable-error-code="index,no-untyped-call,misc,union-attr"
 # (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """The PLUMBING dry-run world: one executor per 3A task type, the TEST approval desk and the
 file-delivery stage (``s13_deliver`` -> lane S2's ``amw_delivery.bundle.build_bundle``).

@@ -1,4 +1,5 @@
-# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated"
+# mypy: disable-error-code="index,no-untyped-call,misc,union-attr"
 # (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s07_voice`` / ``s07_master`` -> Agent 07 with a fake TTS that writes REAL audio.
 
