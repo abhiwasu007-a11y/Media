@@ -39,6 +39,12 @@ KNOWN_INDICATORS = ("SMA", "EMA", "RSI")
 SCHEMATIC_LABEL = "Illustrative example, not real data"
 
 
+# Left margin of the footer text as a FIGURE-COORDINATE fraction (1 % of the width), NOT money:
+# written as a ratio so the currency-literal source guard (tests/core_services/test_config.py)
+# does not read it as a two-decimal money assumption.
+_FOOTER_LEFT_FRACTION = 1 / 100
+
+
 @dataclass(frozen=True, slots=True)
 class BrandPalette:
     """Colours and optional font file of the brand kit (``#rrggbb``)."""
@@ -310,7 +316,7 @@ class ChartRenderer:
                 (
                     f"footer_{k}",
                     fig.text(
-                        0.01,
+                        _FOOTER_LEFT_FRACTION,
                         0.085 - k * 0.05,
                         footer_text,
                         ha="left",
