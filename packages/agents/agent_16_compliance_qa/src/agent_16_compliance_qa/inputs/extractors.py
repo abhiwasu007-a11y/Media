@@ -163,6 +163,11 @@ class _VerifiedClaim(_Slice):
 
 
 class _VerificationDoc(_Slice):
+    """``agent_06.claim_verification.output``: ``script_id`` and ``script_sha256`` are required
+    fields of that output (agent_06 section 8.2, CCR-049) and bind it to the subject."""
+
+    script_id: str
+    script_sha256: str
     claims: tuple[_VerifiedClaim, ...]
 
 
@@ -306,7 +311,17 @@ class _GateDisclosure(_Slice):
     decision: DisclosureDecision
 
 
+class _GateSubjectDoc(_Slice):
+    render_id: str
+    render_sha256: str
+    script_id: str
+    script_sha256: str
+
+
 class _GateDoc(_Slice):
+    """``agent_16.compliance_gate.output`` (8.2): ``subject`` binds it to one render and script."""
+
+    subject: _GateSubjectDoc
     verdict: ComplianceVerdict
     rules: tuple[_GateRule, ...] = ()
     disclosure: _GateDisclosure
@@ -324,8 +339,10 @@ class _TemplateDoc(_Slice):
 
 class _QcDoc(_Slice):
     """``agent_10.technical_qc.output``: only its presence and shape are required here (the
-    rows of the render's ``qc_results`` are the source of the judged checks)."""
+    rows of the render's ``qc_results`` are the source of the judged checks) and the render it
+    names (agent_10 section 8.2: ``render_id``, ``render_sha256`` are required fields)."""
 
+    render_id: str
     render_sha256: str
 
 
@@ -346,6 +363,48 @@ def parse_doc[M: BaseModel](model: type[M], blobs: Mapping[str, bytes], key: str
                 ]
             },
         ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectBinding:
+    """The subject hashes a request names; every document that carries them must agree."""
+
+    render_id: str
+    render_sha256: str
+    script_id: str
+    script_sha256: str
+
+
+def bind_subject(
+    subject: SubjectBinding,
+    blobs: Mapping[str, bytes],
+    *,
+    verification: _VerificationDoc,
+    qc: _QcDoc,
+    gate: _GateDoc | None = None,
+) -> None:
+    """Fail closed (``INPUT_INVALID``) when a document is not about the subject: the script blob
+    hashes to ``script_sha256`` (agent_06 section 8.2: the hash of the script blob), the
+    verification output names the same script, the render QC output the same render and the
+    gate output (score only) the same four subject fields. Org binding is the blob URI owner
+    (checked at ``parse``)."""
+    script = blobs.get("script_ref")
+    if script is None or hashlib.sha256(script).hexdigest() != subject.script_sha256:
+        raise InputInvalidError("script blob does not hash to subject.script_sha256")
+    if (
+        verification.script_sha256 != subject.script_sha256
+        or verification.script_id != subject.script_id
+    ):
+        raise InputInvalidError("verification output is not about the subject's script")
+    if qc.render_sha256 != subject.render_sha256 or qc.render_id != subject.render_id:
+        raise InputInvalidError("render QC output is not about the subject's render")
+    if gate is not None and (
+        gate.subject.render_id != subject.render_id
+        or gate.subject.render_sha256 != subject.render_sha256
+        or gate.subject.script_id != subject.script_id
+        or gate.subject.script_sha256 != subject.script_sha256
+    ):
+        raise InputInvalidError("gate output is not about the subject's render and script")
 
 
 # --- database rows (the FactRowReader port) -------------------------------------------------
@@ -538,7 +597,14 @@ class DocumentGateFactExtractor:
         evidence = parse_doc(_EvidenceDoc, blobs, "frames_ref")
         if "metadata_ref" in blobs:
             raise InputInvalidError("a metadata bundle is read from 3C (Agent 12) only")
-        parse_doc(_QcDoc, blobs, "render_qc_ref")
+        qc_doc = parse_doc(_QcDoc, blobs, "render_qc_ref")
+        sub = request.subject
+        bind_subject(
+            SubjectBinding(sub.render_id, sub.render_sha256, sub.script_id, sub.script_sha256),
+            blobs,
+            verification=verification,
+            qc=qc_doc,
+        )
 
         channel = rows.channel(tx, scope.job_id)
         job = rows.job(tx, scope.job_id)
@@ -809,7 +875,9 @@ class DocumentGateFactExtractor:
                 price_ref=f"claim.{ids.get(c.local_id, c.local_id)}", has_date=False, age_days=None
             )
             for c in claims.claims
-            if c.claim_type in _PRICE_CLAIM_TYPES and c.chart_data_ref is None
+            # a price whose chart is not in the manifest has no date either (needs a human)
+            if c.claim_type in _PRICE_CLAIM_TYPES
+            and (c.chart_data_ref is None or c.chart_data_ref not in chart_info)
         )
         return tuple(items), prices, ids
 
@@ -982,7 +1050,7 @@ class DocumentScoreFactExtractor:
 
     def extract(
         self,
-        render_id: str,
+        subject: SubjectBinding,
         blobs: Mapping[str, bytes],
         tx: TenantTransaction,
         scope: ReadScope,
@@ -992,11 +1060,28 @@ class DocumentScoreFactExtractor:
         verification = parse_doc(_VerificationDoc, blobs, "verification_ref")
         thumbs = parse_doc(_ThumbDoc, blobs, "thumbnails_ref")
         gate = parse_doc(_GateDoc, blobs, "gate_output_ref")
-        parse_doc(_ClaimsDoc, blobs, "claims_ref")
-        qc = self._rows.qc_rows(tx, render_id)
+        claims_doc = parse_doc(_ClaimsDoc, blobs, "claims_ref")
+        bind_subject(
+            subject,
+            blobs,
+            verification=verification,
+            qc=parse_doc(_QcDoc, blobs, "render_qc_ref"),
+            gate=gate,
+        )
+        listed = {c.local_id for c in verification.claims}
+        if any(c.local_id not in listed for c in claims_doc.claims):
+            raise InputInvalidError("a claim has no claim_id in the verification output")
+        qc = self._rows.qc_rows(tx, subject.render_id)
         if qc is None:
             raise MissingDependencyError("render not found in this tenant")
-        crow = self._rows.claims(tx, [c.claim_id for c in verification.claims])
+        wanted = [c.claim_id for c in verification.claims]
+        crow = self._rows.claims(tx, wanted)
+        if {c.claim_id for c in crow} != set(wanted):
+            # a listed claim without its row would score as if it were verified (15.1b: no claim
+            # at all is ``[]``, a claim the verification names but the database lacks is not)
+            raise MissingDependencyError(
+                "claims named by the verification output differ from the claims rows"
+            )
         claims = tuple(
             ClaimFact(
                 claim_id=c.claim_id,

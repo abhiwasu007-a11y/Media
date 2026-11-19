@@ -15,6 +15,7 @@ from agent_16_compliance_qa.inputs.extractors import (
     DocumentGateFactExtractor,
     DocumentScoreFactExtractor,
     DocumentUniquenessExtractor,
+    SubjectBinding,
     is_sensitive,
 )
 from agent_16_compliance_qa.scoring.aggregate import QcRow
@@ -59,7 +60,7 @@ def tx() -> MemoryTransaction:
 
 
 def gate(rows: Rows | None = None, d: dict[str, Any] | None = None, **req: Any) -> Any:
-    r = request(**req)
+    r = request(d, **req)
     ex = DocumentGateFactExtractor(rows or full_rows(), config(), scope(r))
     return ex.extract(r, blobs_of(d or docs()), EVAL_DATE, tx())
 
@@ -515,8 +516,13 @@ class Verifier:
 
 def score(rows: Rows, d: dict[str, Any] | None = None, state: str = "APPROVED") -> Any:
     ex = DocumentScoreFactExtractor(rows, Verifier(state))  # type: ignore[arg-type]
-    r = request()
-    return ex.extract(r.subject.render_id, blobs_of(d or docs()), tx(), scope(r), True)
+    r = request(d)
+    return ex.extract(binding(r), blobs_of(d or docs()), tx(), scope(r), True)
+
+
+def binding(r: Any) -> SubjectBinding:
+    s = r.subject
+    return SubjectBinding(s.render_id, s.render_sha256, s.script_id, s.script_sha256)
 
 
 def test_every_score_fact_equals_its_source() -> None:
@@ -559,14 +565,20 @@ def test_every_score_fact_equals_its_source() -> None:
 
 
 def test_absent_score_sources_give_the_stated_result() -> None:
-    f = score(full_rows(qc=(), claim_rows=(), thumb_qc=()))
+    # "no claim" is valid only when the verification output itself lists none (15.1b); the old
+    # form of this test passed ``claim_rows=()`` against two verified claims, which pinned the
+    # fail-open behaviour (a missing row silently scored as full points)
+    none = docs()
+    none["verification_ref"]["claims"] = []
+    none["claims_ref"]["claims"] = []
+    f = score(full_rows(qc=(), claim_rows=(), thumb_qc=()), none)
     assert f.qc == () and f.claims == ()
     assert f.thumbnails.spec_ok is None and f.thumbnails.legible is None
     d = docs()
     d["gate_output_ref"]["rules"] = []
     d["script_ref"]["promise"] = {"working_title_local": "T"}
     del d["script_ref"]["hook_options"]
-    f = score(full_rows(qc=()), d)
+    f = score(full_rows(qc=(), claim_rows=CLAIM_ROWS), d)
     assert f.gate.licence_pass is None and f.gate.disclaimer_pass is None
     assert f.script.promise_fields_present is False and f.script.hook_options is None
 
@@ -579,7 +591,7 @@ def test_no_render_is_missing_dependency_and_an_unapproved_claim_is_not_approved
 
 
 def test_a_failing_thumbnail_check_is_reported() -> None:
-    rows = full_rows(qc=())
+    rows = full_rows(qc=(), claim_rows=CLAIM_ROWS)
     rows.thumb_qc = (
         QcRow(check_id="a11.q.legibility", verdict=CheckVerdict.FAIL),
         QcRow(check_id="a11.q.text_fit", verdict=CheckVerdict.PASS),
@@ -634,3 +646,131 @@ def test_a_shot_that_may_show_a_synthetic_person_fails_persona_on_a_sensitive_ch
     assert R.persona(
         True, i.presenter_kind, True, list(i.render_person_assets), []
     ).compliance_verdict is (ComplianceVerdict.BLOCKED)
+
+
+# --- subject binding and fail-closed claim rows (review of PASS6-K) -------------------------
+def _stamped(d: dict[str, Any]) -> dict[str, bytes]:
+    return blobs_of(d)
+
+
+def _score_with(blobs: dict[str, bytes], rows: Rows | None = None) -> Any:
+    use = rows or full_rows(qc=(PASS_QC,), claim_rows=CLAIM_ROWS)
+    ex = DocumentScoreFactExtractor(use, Verifier("APPROVED"))  # type: ignore[arg-type]
+    r = request()
+    return ex.extract(binding(r), blobs, tx(), scope(r), True)
+
+
+def _gate_with(blobs: dict[str, bytes]) -> Any:
+    r = request()
+    return DocumentGateFactExtractor(full_rows(), config(), scope(r)).extract(
+        r, blobs, EVAL_DATE, tx()
+    )
+
+
+def test_a_listed_claim_without_a_row_is_missing_dependency() -> None:
+    with pytest.raises(MissingDependencyError):
+        score(full_rows(qc=(), claim_rows=CLAIM_ROWS[:1]))
+    # a row the verification output does not list is equally a mismatch
+    d = docs()
+    del d["verification_ref"]["claims"][1]
+    del d["claims_ref"]["claims"][1]
+    with pytest.raises(MissingDependencyError):
+        score(full_rows(qc=(), claim_rows=CLAIM_ROWS), d)
+
+
+def test_no_claim_at_all_is_valid_only_when_the_verification_lists_none() -> None:
+    d = docs()
+    d["verification_ref"]["claims"] = []
+    d["claims_ref"]["claims"] = []
+    assert score(full_rows(qc=(), claim_rows=()), d).claims == ()
+    d["claims_ref"]["claims"] = docs()["claims_ref"]["claims"]
+    with pytest.raises(InputInvalidError):  # a claim the verification output never saw
+        score(full_rows(qc=(), claim_rows=()), d)
+
+
+@pytest.mark.parametrize("doc", ["render_qc_ref", "gate_output_ref"])
+@pytest.mark.parametrize("field", ["render_sha256", "render_id"])
+def test_render_documents_of_another_render_are_refused(doc: str, field: str) -> None:
+    d = docs()
+    other = "9" * 64 if field == "render_sha256" else str(ids.new_id(ids.Prefix.RENDER))
+    if doc == "gate_output_ref":
+        d[doc]["subject"][field] = other
+    else:
+        d[doc][field] = other
+    b = _stamped(d)
+    with pytest.raises(InputInvalidError):
+        _score_with(b)
+    if doc == "render_qc_ref":  # the gate reads the QC output too (not the gate output)
+        with pytest.raises(InputInvalidError):
+            _gate_with(b)
+
+
+@pytest.mark.parametrize("field", ["script_sha256", "script_id"])
+def test_a_gate_output_of_another_script_is_refused(field: str) -> None:
+    d = docs()
+    d["gate_output_ref"]["subject"][field] = (
+        "9" * 64 if field == "script_sha256" else str(ids.new_id(ids.Prefix.SCRIPT))
+    )
+    b = _stamped(d)
+    if field == "script_sha256":  # blobs_of stamps the hash: break it after serialising
+        import json
+
+        g = json.loads(b["gate_output_ref"])
+        g["subject"]["script_sha256"] = "9" * 64
+        b["gate_output_ref"] = json.dumps(g).encode()
+    with pytest.raises(InputInvalidError):
+        _score_with(b)
+
+
+def test_a_gate_output_without_a_subject_is_schema_invalid() -> None:
+    d = docs()
+    del d["gate_output_ref"]["subject"]
+    with pytest.raises(SchemaInvalidError):
+        _score_with(blobs_of(d))
+
+
+def test_the_script_blob_must_hash_to_the_subject_script_sha256() -> None:
+    b = blobs_of(docs())
+    d = docs()
+    d["script_ref"]["description_draft"] = "changed after the verification saw it"
+    b["script_ref"] = blobs_of(d)["script_ref"]  # a different script, same subject
+    with pytest.raises(InputInvalidError):
+        _score_with(b)
+    with pytest.raises(InputInvalidError):
+        _gate_with(b)
+
+
+def test_a_verification_output_of_another_script_is_refused() -> None:
+    import json
+
+    for field, value in (("script_sha256", "9" * 64), ("script_id", "scr_other")):
+        b = blobs_of(docs())
+        v = json.loads(b["verification_ref"])
+        v[field] = value
+        b["verification_ref"] = json.dumps(v).encode()
+        with pytest.raises(InputInvalidError):
+            _score_with(b)
+        with pytest.raises(InputInvalidError):
+            _gate_with(b)
+
+
+def test_a_price_claim_whose_chart_is_not_in_the_manifest_needs_a_human() -> None:
+    d = docs()
+    d["claims_ref"]["claims"].append(
+        {
+            "local_id": "c3",
+            "segment_id": "s3",
+            "claim_type": "PRICE_LEVEL",
+            "chart_data_ref": "chart_missing",
+        }
+    )
+    d["verification_ref"]["claims"].append({"claim_id": "clm_3", "local_id": "c3"})
+    i = gate(d=d).inputs
+    assert [p.has_date for p in i.text_prices] == [False]
+    res = R.price_lag([], list(i.text_prices), 30)
+    assert res.compliance_verdict is ComplianceVerdict.NEEDS_HUMAN_REVIEW
+    # with no chart shot at all the rule is not SKIPPED either
+    d["asset_manifest_ref"]["shots"][0]["chart"] = None
+    i = gate(d=d).inputs
+    res = R.price_lag(list(i.charts), list(i.text_prices), 30)
+    assert res.compliance_verdict is ComplianceVerdict.NEEDS_HUMAN_REVIEW

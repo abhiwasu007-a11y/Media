@@ -344,7 +344,15 @@ class ComplianceGateStage:
         expected_rows = sum(1 for r in payload["rules"] if r["compliance_verdict"] is not None)
         checks = [
             *results,
-            integrity("tenant", True, "every reference in the envelope org"),
+            integrity(
+                "tenant",
+                all(
+                    storage_uri_owner(ref.uri) == ti.org_id
+                    for _, ref in req.inputs
+                    if ref is not None
+                ),
+                "every reference in the envelope org",
+            ),
             integrity(
                 "rows",
                 len(written.verdict_ids) == expected_rows,

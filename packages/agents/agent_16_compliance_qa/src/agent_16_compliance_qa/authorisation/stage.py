@@ -822,7 +822,7 @@ class PublicationAuthorisationWorker:
             blob = put_artifact_once(self._storage, ctx.tenant, uri, payload)
         results = [
             *auth_results(d),
-            integrity("tenant", True, "every row read in the envelope org"),
+            integrity("tenant", res.rows.all_refs_same_org, "every row read in the envelope org"),
             integrity("evidence", True, "authorisation report written"),
         ]
         return build_task_output(

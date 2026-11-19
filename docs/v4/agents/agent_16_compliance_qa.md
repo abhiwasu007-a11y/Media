@@ -1197,7 +1197,7 @@ Same rule as §15.1a: a named source per fact, never a constant; `null` makes th
 | Fact | Source | Absent or not defined |
 |---|---|---|
 | `qc[]` | `qc_results` rows of the render (04 §5.17) | no render ⇒ `MISSING_DEPENDENCY` |
-| `claims[]` (`claim_type`, `status`, `has_citation_or_chart`, `sensitive_claim_approved`) | `claims` (04 §5.11) with their `citations` rows or `chart_data_ref`; an `APPROVED` `SENSITIVE_CLAIM` approval bound to the claim | no claim ⇒ `[]` |
+| `claims[]` (`claim_type`, `status`, `has_citation_or_chart`, `sensitive_claim_approved`) | `claims` (04 §5.11) with their `citations` rows or `chart_data_ref`; an `APPROVED` `SENSITIVE_CLAIM` approval bound to the claim | no claim in the verification output ⇒ `[]`; a claim the verification output names without its `claims` row ⇒ `MISSING_DEPENDENCY` (fail closed) |
 | `script.hook_options`, `script.promise_fields_present`, `script.section_count` | Agent 05 output (`hook_options`) and script document (`promise`, `sections[]`) | — |
 | `script.sections_with_takeaway`, `script.sections_with_example`, `script.viewer_problem_addressed` | **no field of the Agent 05 document states them yet** | `null` (not evaluated); **REQUIRES REVIEW (Phase 1): a script-document field or a judged criterion for 18 §9.2 AUDIENCE_VALUE** |
 | `thumbnails.variants`, `thumbnails.spec_ok`, `thumbnails.legible` | Agent 11 set manifest (variant count) and its `a11.q.*` results (`a11.q.legibility`, `a11.q.text_fit`, spec checks) | no thumbnail stage ⇒ `0` / `null` |

@@ -45,9 +45,12 @@ from tests.agents.agent_16_compliance_qa.extractor_support import (
     CLAIM_ROWS,
     PASS_QC,
     R_SHA,
+    RENDER_ID,
+    SCRIPT_ID,
     blobs_of,
     docs,
     full_rows,
+    script_sha,
 )
 from tests.agents.agent_16_compliance_qa.support import (
     Breaker,
@@ -260,10 +263,10 @@ def score_world(
     refs = {n: seeds.add(org, n, blobs_of(d)[n]) for n in SCORE_REFS}
     payload = {
         "subject": {
-            "render_id": ids.new_id(ids.Prefix.RENDER),
+            "render_id": RENDER_ID,
             "render_sha256": R_SHA,
-            "script_id": ids.new_id(ids.Prefix.SCRIPT),
-            "script_sha256": "b" * 64,
+            "script_id": SCRIPT_ID,
+            "script_sha256": script_sha(d),
         },
         "iteration": 0,
         "rubric_version": "rubric.v1",
@@ -330,12 +333,31 @@ def test_a_source_that_is_absent_scores_zero_never_full_points() -> None:
     w = score_world()
     rows = w.stage.d.rows
     assert isinstance(rows, type(full_rows()))
-    rows.claim_rows = ()
     rows.thumb_qc = ()
     data = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     thumbs = next(r for r in data["dimensions"] if r["dimension"] == "THUMBNAIL_METADATA")
     unknown = [c for c in thumbs["criteria"] if c["kind"] == "DETERMINISTIC" and c["earned"] == 0]
     assert unknown, "an unevaluated deterministic criterion earns 0"
+
+
+def test_a_claim_without_its_database_row_fails_the_score_closed() -> None:
+    # the old form of the test above blanked the claim rows and expected a score; a claim the
+    # verification names but the database lacks must not earn the citation points
+    w = score_world()
+    rows = w.stage.d.rows
+    assert isinstance(rows, type(full_rows()))
+    rows.claim_rows = ()
+    out = w.stage.run(w.ti, ctx_of(w.ti))
+    assert out.status is OutputStatus.FAILED and out.error is not None
+    assert out.error.code == "PERMANENT.MISSING_DEPENDENCY"
+    assert not w.store.scores
+
+
+def test_the_tenant_integrity_check_is_derived_from_the_references() -> None:
+    w = score_world()
+    out = w.stage.run(w.ti, ctx_of(w.ti))
+    tenant = next(r for r in out.validation_results if r.check_id == "a16.out.tenant")
+    assert tenant.verdict.value == "PASS"
 
 
 @pytest.mark.parametrize(
@@ -454,6 +476,8 @@ def test_authorisation_worker_returns_a_valid_output_and_failures() -> None:
     validate_against_blueprint(data, "### 8.5 `agent_16.publication_authorisation.output`")
     assert out.quality_score == data["human_wins_total"] and out.output_refs[0].uri in storage.blobs
     assert all(r.gate for r in out.validation_results if not r.check_id.startswith("a16.out"))
+    tenant = next(r for r in out.validation_results if r.check_id == "a16.out.tenant")
+    assert tenant.verdict.value == "PASS"  # derived from the rows read, not a constant
     assert_returned(worker.run(ti, mismatched(ti, job_id=str(ids.JOB.new()))), TenantMismatchError)
     bad = ti.model_copy(
         update={"payload": ti.payload.model_copy(update={"payload_schema": "x.input"})}
@@ -469,3 +493,25 @@ def test_authorisation_worker_returns_a_valid_output_and_failures() -> None:
     out = worker.run(blocked_ti, ctx_of(blocked_ti))  # an unknown approval is refused, returned
     assert out.status is OutputStatus.FAILED and out.error is not None
     assert out.error.code == "PERMANENT.INPUT_INVALID" and out.downstream_agent is None
+
+
+def test_authorisation_tenant_check_fails_when_a_row_is_of_another_org() -> None:
+    # exercised with the in-memory fakes of test_auth_stage only (no database in this lane)
+    from dataclasses import replace
+
+    from tests.agents.agent_16_compliance_qa.test_auth_stage import AUDIT, Writer, nhr_world
+
+    h, repo, req, sc_id, _ = nhr_world(listed=False)
+    repo.approvals[sc_id] = replace(repo.approvals[sc_id], org_id=ids.ORG.new())
+    stage = PublicationAuthorisationStage(config(), repo, h.a16, Writer(), AUDIT)
+    storage = Storage()
+    worker = PublicationAuthorisationWorker(stage, Tenancy(), storage, FixedClock(NOW))
+    ti = task_input(
+        str(h.org),
+        "agent_16",
+        "agent_16.publication_authorisation.input",
+        json.loads(req.model_dump_json()),
+    )
+    out = worker.run(ti, ctx_of(ti))
+    tenant = next(r for r in out.validation_results if r.check_id == "a16.out.tenant")
+    assert tenant.verdict.value == "FAIL"

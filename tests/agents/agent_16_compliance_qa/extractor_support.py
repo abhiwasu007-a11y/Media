@@ -29,6 +29,8 @@ from amw_core.enums import (
 from amw_core.interfaces.tenancy_context import TenantTransaction
 
 R_SHA = "a" * 64
+RENDER_ID = ids.new_id(ids.Prefix.RENDER)
+SCRIPT_ID = ids.new_id(ids.Prefix.SCRIPT)
 EVAL_DATE = date(2026, 1, 31)
 RELEASE = "apr_release_1"
 RELEASE_SHA = "c" * 64
@@ -112,10 +114,12 @@ def docs() -> dict[str, Any]:
             ]
         },
         "verification_ref": {
+            "script_id": SCRIPT_ID,
+            "script_sha256": "",  # stamped by ``blobs_of`` from the script blob
             "claims": [
                 {"claim_id": "clm_1", "local_id": "c1"},
                 {"claim_id": "clm_2", "local_id": "c2"},
-            ]
+            ],
         },
         "asset_manifest_ref": {
             "shots": [
@@ -161,7 +165,7 @@ def docs() -> dict[str, Any]:
             },
             "shots": [{"intent_kind": "CHART"}, {"intent_kind": "FOOTAGE"}],
         },
-        "render_qc_ref": {"render_sha256": R_SHA},
+        "render_qc_ref": {"render_id": RENDER_ID, "render_sha256": R_SHA},
         "voice_ref": {
             "voice": {"voice_kind": "PROVIDER_STOCK", "presenter_kind": "NEUTRAL_NARRATION"}
         },
@@ -210,6 +214,12 @@ def docs() -> dict[str, Any]:
             ],
         },
         "gate_output_ref": {
+            "subject": {
+                "render_id": RENDER_ID,
+                "render_sha256": R_SHA,
+                "script_id": SCRIPT_ID,
+                "script_sha256": "",  # stamped by ``blobs_of``
+            },
             "verdict": "ALLOWED",
             "rules": [
                 {"rule_id": "YTG-R6", "check_verdict": "PASS"},
@@ -220,8 +230,23 @@ def docs() -> dict[str, Any]:
     }
 
 
+def script_sha(d: Mapping[str, Any] | None = None) -> str:
+    """The subject's ``script_sha256``: the hash of the script blob (agent_06 8.2)."""
+    return sha(j((d or docs())["script_ref"]))
+
+
 def blobs_of(d: Mapping[str, Any]) -> dict[str, bytes]:
-    return {k: j(v) for k, v in d.items()}
+    """Serialise the documents; the script hash carried by the verification and gate outputs is
+    stamped from the script document, so a test that changes the script keeps them consistent."""
+    out = dict(d)
+    stamp = script_sha(d) if "script_ref" in d else ""
+    if "verification_ref" in out:
+        out["verification_ref"] = out["verification_ref"] | {"script_sha256": stamp}
+    if "gate_output_ref" in out:
+        g = out["gate_output_ref"]
+        if "subject" in g:
+            out["gate_output_ref"] = g | {"subject": g["subject"] | {"script_sha256": stamp}}
+    return {k: j(v) for k, v in out.items()}
 
 
 def asset_row(aid: str, **over: Any) -> AssetFactRow:
@@ -321,15 +346,15 @@ def full_rows(**over: Any) -> Rows:
     return rows
 
 
-def request(**over: Any) -> ComplianceGateInput:
+def request(d: Mapping[str, Any] | None = None, **over: Any) -> ComplianceGateInput:
     org = str(ids.ORG.new())
     ref = {"uri": f"amw-blob://{org}/jobs/x", "sha256": "0" * 64}
     data: dict[str, Any] = {
         "subject": {
-            "render_id": ids.new_id(ids.Prefix.RENDER),
+            "render_id": RENDER_ID,
             "render_sha256": R_SHA,
-            "script_id": ids.new_id(ids.Prefix.SCRIPT),
-            "script_sha256": "b" * 64,
+            "script_id": SCRIPT_ID,
+            "script_sha256": script_sha(d),
         },
         "iteration": 0,
         "channel_category": "finance",

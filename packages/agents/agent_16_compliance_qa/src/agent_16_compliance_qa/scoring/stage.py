@@ -25,6 +25,7 @@ from agent_16_compliance_qa.inputs.extractors import (
     DocumentScoreFactExtractor,
     FactRowReader,
     ReadScope,
+    SubjectBinding,
     is_sensitive,
 )
 from agent_16_compliance_qa.judge.client import (
@@ -275,7 +276,12 @@ class QualityScoreStage:
             if job.language != req.language:
                 raise InputInvalidError("language differs from the job row")
             facts = d.extractor.extract(
-                req.subject.render_id,
+                SubjectBinding(
+                    req.subject.render_id,
+                    req.subject.render_sha256,
+                    req.subject.script_id,
+                    req.subject.script_sha256,
+                ),
                 blobs,
                 tx,
                 ReadScope(ti.job_id, req.subject.render_id),
@@ -386,7 +392,15 @@ class QualityScoreStage:
         )
         checks = [
             *result.results,
-            integrity("tenant", True, "every reference in the envelope org"),
+            integrity(
+                "tenant",
+                all(
+                    storage_uri_owner(ref.uri) == ti.org_id
+                    for _, ref in req.inputs
+                    if ref is not None
+                ),
+                "every reference in the envelope org",
+            ),
             integrity("rows", len(ids) == len(result.dimensions), f"{len(ids)} score rows written"),
             integrity("evidence", True, "score report written"),
         ]
