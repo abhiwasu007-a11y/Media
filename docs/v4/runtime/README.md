@@ -31,3 +31,7 @@ See the REQUIRES REVIEW list in the pull request: NSE-03 (2027 holidays), Muhura
 
 ## Report label
 Agent 16 prints `DRAFT, not lawyer-approved` (checks/rules.py); the owner-specified status string here is `DRAFT – not lawyer-approved` (en dash). CCR-212 (contract pass 6) single-sources the label in `Disclaimer.status`.
+
+## Evidence contract and trust (PR #70 recheck)
+- The runtime codes to a Protocol with the attribute names of the shared evidence contract owned by PR #77 (CCR-260/261): `evidence_id`, `evidence_state`, `recorded_from`, `org_id`, `kind`, `subject_kind`, `subject_id`, `source_kind` (REAL or TEST_FIXTURE), `mac_valid`. A row that lacks any of them is a typed refusal, never an error. It will switch to the `amw_core` type when #77 publishes it.
+- In a real run the config rules are compared with the packaged data (caps ceilings, providers, environment, calendar, lag, render window, disclaimer) and a caller-supplied calendar is refused; the config is re-validated at preflight time in every mode. An override file path must be absolute and fully resolved.
