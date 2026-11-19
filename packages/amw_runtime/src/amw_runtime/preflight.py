@@ -7,7 +7,7 @@ report says so). Real-run mode needs verified, evidence-backed owner confirmatio
 import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from amw_runtime.calendar import MarketCalendar, now_utc
 from amw_runtime.config import RunMode, RuntimeConfig
@@ -35,11 +35,40 @@ def _truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() not in {"", "0", "false", "no"}
 
 
+def _evidence_problem(
+    rec: ConfirmationRecord,
+    evidence: EvidenceLookup | None,
+    org_id: str | None,
+    used_ids: set[str],
+) -> str | None:
+    """A record counts only if its evidence row is CONFIRMED, from the owner chat, bound to this
+    org and this exact subject, and not already used for another record (real-run rules)."""
+    if not rec.verified:
+        return "confirmation not verified"
+    if not (rec.evidence_id or rec.review_code):
+        return "no evidence id or review code"
+    if evidence is None or rec.evidence_id is None:
+        return "owner-evidence lookup needed to verify the record"
+    if org_id is None or rec.org_id != org_id:
+        return "record is not bound to this run's org"
+    if rec.evidence_id in used_ids:
+        return "the same evidence row cannot confirm two items"
+    row = evidence.get(rec.evidence_id)
+    if row is None or row.evidence_state != CONFIRMED or row.recorded_from != OWNER_CHANNEL:
+        return "evidence row is not CONFIRMED from the owner chat channel"
+    if row.org_id != org_id or row.subject != rec.subject():
+        return "evidence row is not bound to this org and subject"
+    used_ids.add(rec.evidence_id)
+    return None
+
+
 def _limit_problem(
     config: RuntimeConfig,
     provider: str,
     records: Sequence[ConfirmationRecord],
     evidence: EvidenceLookup | None,
+    org_id: str | None,
+    used_ids: set[str],
 ) -> tuple[str | None, bool]:
     """(problem or None, used_test_fixture) for one provider's spending-limit confirmation."""
     mine = [
@@ -49,25 +78,23 @@ def _limit_problem(
         return "no owner confirmation of the provider spending limit", False
     reasons: list[str] = []
     for rec in mine:
-        if rec.currency not in config.currency_minor_exponent or (rec.amount_minor or 0) <= 0:
-            reasons.append("limit amount/currency invalid")
-        elif not rec.verified:
-            reasons.append("confirmation not verified")
+        exp = config.currency_minor_exponent.get(rec.currency or "")
+        if rec.currency != config.currency or exp is None or (rec.amount_minor or 0) <= 0:
+            reasons.append("limit currency must be the budget currency and the amount positive")
+        elif (rec.amount_minor or 0) * 10 ** (6 - exp) > config.owner_total_cap_micros:
+            reasons.append("provider limit is above the pilot cap")
         elif rec.test_fixture:
             if config.mode is RunMode.REAL_RUN:
                 reasons.append("TEST confirmation fixture refused in real-run mode")
+            elif not rec.verified:
+                reasons.append("confirmation not verified")
             else:
                 return None, True
-        elif not (rec.evidence_id or rec.review_code):
-            reasons.append("no evidence id or review code")
-        elif evidence is None or rec.evidence_id is None:
-            reasons.append("owner-evidence lookup needed to verify the record")
         else:
-            row = evidence.get(rec.evidence_id)
-            if row is None or row.evidence_state != CONFIRMED or row.recorded_from != OWNER_CHANNEL:
-                reasons.append("evidence row is not CONFIRMED from the owner chat channel")
-            else:
+            problem = _evidence_problem(rec, evidence, org_id, used_ids)
+            if problem is None:
                 return None, False
+            reasons.append(problem)
     return "; ".join(dict.fromkeys(reasons)), False
 
 
@@ -79,15 +106,18 @@ def run_preflight(
     evidence: EvidenceLookup | None = None,
     calendar: MarketCalendar | None = None,
     render_start: datetime | None = None,
+    org_id: str | None = None,
 ) -> PreflightReport:
     """Raise ``PreflightRefused`` listing every unmet item, else return the report.
-    ``env`` is read for NAMES/markers only (default: the process environment)."""
+    ``env`` is read for NAMES/markers only (default: the process environment). ``org_id`` is the
+    run's org; real-run evidence must be bound to it."""
     environ = os.environ if env is None else env
     unmet: list[UnmetItem] = []
     passed: list[str] = []
     notes: list[str] = []
     open_items: list[str] = []
     test_used = False
+    used_ids: set[str] = set()
 
     def check(code: str, ok: bool, message: str) -> None:
         if ok:
@@ -97,7 +127,7 @@ def run_preflight(
 
     # provider spending limits confirmed by the owner (R14 intact: evidence must be CONFIRMED)
     for prov in (p for p in config.providers if p.required):
-        problem, used = _limit_problem(config, prov.name, confirmations, evidence)
+        problem, used = _limit_problem(config, prov.name, confirmations, evidence, org_id, used_ids)
         test_used = test_used or used
         check(f"PROVIDER_LIMIT:{prov.name}", problem is None, problem or "")
     if test_used:
@@ -123,10 +153,14 @@ def run_preflight(
     # calendar config present and valid for the render date
     cal = calendar
     start = render_start or now_utc()
+    start_ok = start.tzinfo is not None and start.utcoffset() is not None
+    if not start_ok:
+        cal_msg = "render start must be a timezone-aware datetime"
     try:
         cal = cal or MarketCalendar(config.data_dir / "calendar")
-        cal_ok = cal.covers(start.astimezone(cal.tz).year)
-        cal_msg = "market calendar missing, invalid or not VERIFIED for the render year"
+        cal_ok = start_ok and cal.covers(start.astimezone(cal.tz).year)
+        if start_ok:
+            cal_msg = "market calendar missing, invalid or not VERIFIED for the render year"
     except Exception:  # any failure here means: calendar not usable
         cal, cal_ok = None, False
         cal_msg = "market calendar config missing or invalid"
@@ -151,10 +185,27 @@ def run_preflight(
             notes.append(f"disclaimer {disc.version} status: {disc.status}")
 
     # FIN-R10: valid only if the owner is not SEBI-registered; an owner item, never assumed
-    if not any(
-        c.kind is ConfirmationKind.FIN_R10_NOT_SEBI_REGISTERED and c.verified and not c.test_fixture
-        for c in confirmations
-    ):
+    # Real run: REFUSED unless an evidence-backed CONFIRMED owner-chat row binds to this org.
+    # Dry run: stays an OPEN item. A self-asserted record never clears it.
+    r10_problems: list[str] = []
+    r10_ok = False
+    for rec in (c for c in confirmations if c.kind is ConfirmationKind.FIN_R10_NOT_SEBI_REGISTERED):
+        if rec.test_fixture:
+            r10_problems.append("TEST fixture never confirms FIN-R10")
+            continue
+        problem = _evidence_problem(rec, evidence, org_id, used_ids)
+        if problem is None:
+            r10_ok = True
+            break
+        r10_problems.append(problem)
+    if config.mode is RunMode.REAL_RUN:
+        check(
+            "FIN_R10",
+            r10_ok,
+            "FIN-R10 owner confirmation (not SEBI-registered) missing or not evidence-backed"
+            + (": " + "; ".join(dict.fromkeys(r10_problems)) if r10_problems else ""),
+        )
+    elif not r10_ok:
         open_items.append("FIN-R10: owner confirmation that the owner is not SEBI-registered")
 
     # development environment only
@@ -167,12 +218,18 @@ def run_preflight(
         f"{config.environment_variable} is not {config.required_environment})",
     )
 
-    # no market-hours conflict for the render start
-    if cal is not None and cal_ok:
-        decision = cal.check_render(start)
+    # no market-hours conflict anywhere in the planned render window [start, start + max]
+    minutes = config.render_max_duration_minutes
+    check(
+        "RENDER_DURATION",
+        minutes is not None,
+        "render.max_duration_minutes is not set (REQUIRES REVIEW); the render window is unknown",
+    )
+    if cal is not None and cal_ok and minutes is not None:
+        decision = cal.check_render_window(start, start + timedelta(minutes=minutes))
         check("MARKET_HOURS", decision.allowed, decision.reason)
     else:
-        check("MARKET_HOURS", False, "cannot check market hours without a valid calendar")
+        check("MARKET_HOURS", False, "cannot check market hours without a calendar and a window")
 
     if unmet:
         raise PreflightRefused(tuple(unmet))

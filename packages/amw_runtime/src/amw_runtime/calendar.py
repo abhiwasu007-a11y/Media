@@ -108,16 +108,37 @@ class MarketCalendar:
             self.regular_open <= local.time() < self.regular_close
         )
 
+    def _day_blocked(self, day: date) -> bool:
+        """A special session (e.g. Muhurat) has no recorded timing: the WHOLE day is blocked."""
+        return day in self._year(day.year).special_sessions
+
     def check_render(self, dt: datetime) -> RenderDecision:
-        """Decision with a reason. Fails closed (``allowed=False``) when the calendar cannot
+        """Decision for one instant. Fails closed (``allowed=False``) when the calendar cannot
         answer; a naive datetime is a programming error and raises."""
-        local = self._local(dt)
-        try:
-            trading = self.is_trading_day(local.date())
-        except CalendarUnavailableError as exc:
-            return RenderDecision(False, f"calendar unavailable: {exc}")
-        if trading and self.guard_start <= local.time() < self.guard_end:
-            return RenderDecision(False, "inside the market-hours guard window on a trading day")
+        return self.check_render_window(dt, dt)
+
+    def check_render_window(self, start: datetime, end: datetime) -> RenderDecision:
+        """The whole window [start, end] must stay clear of the guard window on every trading
+        day and of every special-session day (fail closed for any year the calendar lacks)."""
+        first, last = self._local(start), self._local(end)
+        if last < first:
+            return RenderDecision(False, "render window ends before it starts")
+        day = first.date()
+        while day <= last.date():
+            try:
+                if self._day_blocked(day):
+                    return RenderDecision(False, "special market session day (timings unknown)")
+                trading = self.is_trading_day(day)
+            except CalendarUnavailableError as exc:
+                return RenderDecision(False, f"calendar unavailable: {exc}")
+            if trading:
+                g_start = datetime.combine(day, self.guard_start, tzinfo=self.tz)
+                g_end = datetime.combine(day, self.guard_end, tzinfo=self.tz)
+                if first < g_end and last >= g_start:
+                    return RenderDecision(
+                        False, "inside the market-hours guard window on a trading day"
+                    )
+            day += timedelta(days=1)
         return RenderDecision(True, "outside the market-hours guard window")
 
     def render_allowed(self, dt: datetime) -> bool:

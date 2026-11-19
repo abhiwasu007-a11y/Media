@@ -23,7 +23,7 @@ from amw_runtime.errors import (
     DisclaimerError,
     PreflightRefused,
 )
-from amw_runtime.preflight import run_preflight
+from amw_runtime.preflight import PreflightReport, run_preflight
 
 pytestmark = pytest.mark.unit
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -33,8 +33,12 @@ DEV = {"AMW_ENVIRONMENT": "development"}
 EVENING = datetime(2026, 11, 19, 20, 0, tzinfo=IST)  # Thursday, after the guard window
 
 
-def cfg(mode: str = "DRY_RUN", **extra: str) -> RuntimeConfig:
-    return load_runtime_config({"AMW_RUNTIME_MODE": mode, **extra})
+def cfg(mode: str = "DRY_RUN", minutes: int | None = 60, **extra: str) -> RuntimeConfig:
+    base = load_runtime_config({"AMW_RUNTIME_MODE": mode, **extra})
+    return base.model_copy(update={"render_max_duration_minutes": minutes})
+
+
+ORG = "org-1"
 
 
 def limit(provider: str, **kw: object) -> ConfirmationRecord:
@@ -43,6 +47,7 @@ def limit(provider: str, **kw: object) -> ConfirmationRecord:
         "provider": provider,
         "amount_minor": 1000,
         "currency": "USD",
+        "org_id": ORG,
         "recorded_from": "OWNER_CHAT_OPERATOR",
         "evidence_id": f"ev-{provider}",
         "verified": True,
@@ -50,21 +55,59 @@ def limit(provider: str, **kw: object) -> ConfirmationRecord:
     return ConfirmationRecord(**{**base, **kw})
 
 
+def r10(**kw: object) -> ConfirmationRecord:
+    base: dict[str, object] = {
+        "kind": ConfirmationKind.FIN_R10_NOT_SEBI_REGISTERED,
+        "org_id": ORG,
+        "recorded_from": "OWNER_CHAT_OPERATOR",
+        "evidence_id": "ev-r10",
+        "verified": True,
+    }
+    return ConfirmationRecord(**{**base, **kw})
+
+
 class Row:
-    def __init__(self, state: str = "CONFIRMED", src: str = "OWNER_CHAT_OPERATOR") -> None:
+    def __init__(
+        self,
+        subject: str | None,
+        org_id: str | None = ORG,
+        state: str = "CONFIRMED",
+        src: str = "OWNER_CHAT_OPERATOR",
+    ) -> None:
         self.evidence_state, self.recorded_from = state, src
+        self.org_id, self.subject = org_id, subject
 
 
 class Lookup:
-    def __init__(self, row: Row | None) -> None:
-        self.row = row
+    """Fake evidence store: each evidence id maps to a row (default: a row bound to the record)."""
+
+    def __init__(self, records: list[ConfirmationRecord], **row_kw: object) -> None:
+        self.rows = {
+            r.evidence_id: Row(r.subject(), **row_kw)  # type: ignore[arg-type]
+            for r in records
+            if r.evidence_id
+        }
 
     def get(self, evidence_id: str) -> Row | None:
-        return self.row
+        return self.rows.get(evidence_id)
 
 
 def real_limits() -> list[ConfirmationRecord]:
     return [limit("anthropic"), limit("elevenlabs")]
+
+
+def real(recs: list[ConfirmationRecord], **kw: object) -> PreflightReport:
+    args: dict[str, object] = {
+        "env": {**DEV, **SECRETS},
+        "evidence": Lookup(recs),
+        "render_start": EVENING,
+        "org_id": ORG,
+    }
+    return run_preflight(cfg("REAL_RUN"), recs, **{**args, **kw})  # type: ignore[arg-type]
+
+
+def codes(exc: pytest.ExceptionInfo[PreflightRefused]) -> set[str]:
+    return {i.code for i in exc.value.items}
 
 
 # ---------------------------------------------------------------- config
@@ -79,6 +122,7 @@ def test_config_caps_in_micros_and_owner_values() -> None:
     )
     assert c.owner_decisions.music_in_first_sample is False
     assert c.owner_decisions.upload is False
+    assert load_runtime_config({"AMW_RUNTIME_MODE": "DRY_RUN"}).render_max_duration_minutes is None
 
 
 @pytest.mark.parametrize("env", [{}, {"AMW_RUNTIME_MODE": "real"}, {"AMW_RUNTIME_MODE": ""}])
@@ -96,12 +140,55 @@ def test_env_can_only_lower_caps() -> None:
         cfg(AMW_RUNTIME_TOTAL_CAP_MINOR="5001")
 
 
-def _variant(tmp_path: Path, edit: object) -> dict[str, str]:
-    data = json.loads(DEFAULT_CONFIG_FILE.read_text(encoding="utf-8"))
-    edit(data)  # type: ignore[operator]
-    path = tmp_path / "rc.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
-    return {"AMW_RUNTIME_MODE": "DRY_RUN", "AMW_RUNTIME_CONFIG_PATH": str(path)}
+def _write(tmp_path: Path, body: dict[str, object], name: str = "o.json") -> Path:
+    path = tmp_path / name
+    path.write_text(json.dumps(body), encoding="utf-8")
+    return path
+
+
+def test_override_can_only_lower_the_packaged_ceiling(tmp_path: Path) -> None:
+    env = {"AMW_RUNTIME_MODE": "DRY_RUN"}
+    low = _write(tmp_path, {"schema": 1, "budget": {"per_video_cap_minor": 200}})
+    c = load_runtime_config(env, override_path=low)
+    assert c.per_video_cap_micros == 2_000_000
+    assert c.owner_per_video_cap_micros == 5_000_000  # ceiling stays the packaged value
+    assert c.override_applied
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"budget": {"per_video_cap_minor": 10**9}},  # USD 10M per video
+        {"budget": {"total_pilot_cap_minor": 5001}},
+        {"budget": {"per_video_cap_minor": 0}},
+        {"budget": {"per_video_cap_minor": True}},
+        {"budget": {"currency": "USD"}},
+        {"budget": {"per_video_cap_minor": 100}, "providers": []},  # another provider list
+        {"budget": {"per_video_cap_minor": 100}, "calendar": {"segment": "X"}},
+        {"budget": {"per_video_cap_minor": 100}, "environment": {"required_value": "x"}},
+        {"calendar": {"segment": "CM"}},
+        {},
+    ],
+)
+def test_override_attacks_refused(tmp_path: Path, body: dict[str, object]) -> None:
+    path = _write(tmp_path, body)
+    with pytest.raises(ConfigInvalidError):
+        load_runtime_config({"AMW_RUNTIME_MODE": "DRY_RUN"}, override_path=path)
+
+
+def test_override_symlink_missing_and_env_variable(tmp_path: Path) -> None:
+    env = {"AMW_RUNTIME_MODE": "DRY_RUN"}
+    real_file = _write(tmp_path, {"budget": {"per_video_cap_minor": 100}})
+    link = tmp_path / "link.json"
+    link.symlink_to(real_file)
+    for bad in (link, tmp_path / "none.json", tmp_path):
+        with pytest.raises(ConfigInvalidError):
+            load_runtime_config(env, override_path=bad)
+    # the old ambient variable is ignored: it neither raises a cap nor swaps any rule
+    huge = _write(tmp_path, {"budget": {"per_video_cap_minor": 10**9}}, "huge.json")
+    c = load_runtime_config({**env, "AMW_RUNTIME_CONFIG_PATH": str(huge)})
+    assert c.per_video_cap_micros == 5_000_000
+    assert c.data_dir == DATA_DIR
 
 
 @pytest.mark.parametrize(
@@ -114,18 +201,25 @@ def _variant(tmp_path: Path, edit: object) -> dict[str, str]:
         lambda d: d.pop("price_data_lag"),
         lambda d: d["budget"].update(currency="EUR"),
         lambda d: d.pop("providers"),
+        lambda d: d.pop("render"),
+        lambda d: d["render"].update(max_duration_minutes=0),
     ],
 )
-def test_config_data_invalid_fails_closed(tmp_path: Path, edit: object) -> None:
+def test_packaged_data_invalid_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edit: object
+) -> None:
+    data = json.loads(DEFAULT_CONFIG_FILE.read_text(encoding="utf-8"))
+    edit(data)  # type: ignore[operator]
+    bad = _write(tmp_path, data, "rc.json")
+    monkeypatch.setattr("amw_runtime.config.DEFAULT_CONFIG_FILE", bad)
     with pytest.raises(ConfigInvalidError):
-        load_runtime_config(_variant(tmp_path, edit))
+        load_runtime_config({"AMW_RUNTIME_MODE": "DRY_RUN"})
 
 
-def test_config_unreadable_file(tmp_path: Path) -> None:
+def test_packaged_file_unreadable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("amw_runtime.config.DEFAULT_CONFIG_FILE", tmp_path / "none.json")
     with pytest.raises(ConfigInvalidError):
-        load_runtime_config(
-            {"AMW_RUNTIME_MODE": "DRY_RUN", "AMW_RUNTIME_CONFIG_PATH": str(tmp_path / "none.json")}
-        )
+        load_runtime_config({"AMW_RUNTIME_MODE": "DRY_RUN"})
 
 
 # ---------------------------------------------------------------- preflight
@@ -140,37 +234,79 @@ def test_dry_run_passes_with_test_fixture_and_says_so() -> None:
     assert any("not SEBI-registered" in i for i in rep.open_owner_items)
 
 
-def test_real_run_passes_with_verified_evidence() -> None:
-    rep = run_preflight(
-        cfg("REAL_RUN"),
-        real_limits(),
-        env={**DEV, **SECRETS},
-        evidence=Lookup(Row()),
-        render_start=EVENING,
-    )
+def test_real_run_passes_with_bound_evidence_for_everything() -> None:
+    recs = [*real_limits(), r10()]
+    rep = real(recs)
     assert rep.secrets_checked
     assert not rep.test_confirmation_used
-
-
-def test_fin_r10_confirmation_clears_open_item() -> None:
-    rec = ConfirmationRecord(
-        kind=ConfirmationKind.FIN_R10_NOT_SEBI_REGISTERED,
-        recorded_from="OWNER_CHAT_OPERATOR",
-        evidence_id="e1",
-        verified=True,
-    )
-    rep = run_preflight(
-        cfg("REAL_RUN"),
-        [*real_limits(), rec],
-        env={**DEV, **SECRETS},
-        evidence=Lookup(Row()),
-        render_start=EVENING,
-    )
+    assert "FIN_R10" in rep.checks_passed
     assert rep.open_owner_items == ()
 
 
-def codes(exc: pytest.ExceptionInfo[PreflightRefused]) -> set[str]:
-    return {i.code for i in exc.value.items}
+def test_dry_run_clears_fin_r10_only_with_evidence() -> None:
+    fixtures = [limit(p, test_fixture=True) for p in ("anthropic", "elevenlabs")]
+    with_ev = run_preflight(
+        cfg(),
+        [*fixtures, r10()],
+        env=DEV,
+        evidence=Lookup([r10()]),
+        render_start=EVENING,
+        org_id=ORG,
+    )
+    assert with_ev.open_owner_items == ()
+    self_asserted = run_preflight(
+        cfg(), [*fixtures, r10(evidence_id=None)], env=DEV, render_start=EVENING, org_id=ORG
+    )
+    assert self_asserted.open_owner_items  # a self-asserted record never clears it
+
+
+# --- B1: FIN-R10 is a refusal in real-run mode (strict regression tests)
+@pytest.mark.parametrize(
+    "case",
+    ["absent", "self_asserted", "no_lookup", "unverified_row", "other_channel", "fixture", "wrong"],
+)
+def test_real_run_refuses_without_evidence_backed_fin_r10(case: str) -> None:
+    limits = real_limits()
+    recs = {
+        "absent": limits,
+        "self_asserted": [*limits, r10(evidence_id=None, review_code=None)],
+        "no_lookup": [*limits, r10()],
+        "unverified_row": [*limits, r10()],
+        "other_channel": [*limits, r10()],
+        "fixture": [*limits, r10(test_fixture=True)],
+        "wrong": [*limits, r10(verified=False)],
+    }[case]
+    row_kw: dict[str, object] = {}
+    if case == "unverified_row":
+        row_kw = {"state": "VERIFIED"}
+    if case == "other_channel":
+        row_kw = {"src": "WEB_DASHBOARD"}
+    evidence = None if case == "no_lookup" else Lookup(recs, **row_kw)
+    if case in {"unverified_row", "other_channel"}:
+        # only the FIN-R10 row is weak; the provider rows are fine
+        good = Lookup(limits)
+        good.rows.update(Lookup([r10()], **row_kw).rows)
+        evidence = good
+    with pytest.raises(PreflightRefused) as exc:
+        real(recs, evidence=evidence)
+    assert "FIN_R10" in codes(exc)
+
+
+def test_fin_r10_evidence_must_be_bound_to_org_and_subject() -> None:
+    recs = [*real_limits(), r10()]
+    for bad in (
+        Row("FIN_R10_NOT_SEBI_REGISTERED|-|-|-|org-9", "org-1"),
+        Row(None),
+        Row("x", "org-9"),
+    ):
+        ev = Lookup(recs)
+        ev.rows["ev-r10"] = bad
+        with pytest.raises(PreflightRefused) as exc:
+            real(recs, evidence=ev)
+        assert codes(exc) == {"FIN_R10"}
+    with pytest.raises(PreflightRefused) as exc:
+        real(recs, org_id="org-2")  # records bound to another org
+    assert "FIN_R10" in codes(exc)
 
 
 def test_real_run_refuses_listing_every_unmet_item() -> None:
@@ -185,6 +321,7 @@ def test_real_run_refuses_listing_every_unmet_item() -> None:
         "PROVIDER_LIMIT:anthropic",
         "PROVIDER_LIMIT:elevenlabs",
         "SECRETS",
+        "FIN_R10",
         "ENVIRONMENT",
         "MARKET_HOURS",
     }
@@ -198,37 +335,60 @@ def test_real_run_refuses_listing_every_unmet_item() -> None:
         {"evidence_id": None, "review_code": None},
         {"amount_minor": 0},
         {"currency": "EUR"},
+        {"currency": "INR"},  # another currency than the budget currency
+        {"amount_minor": 5_000_001},  # USD 50,000.01: above the pilot cap
+        {"amount_minor": 100_000_000},  # USD 1M
+        {"org_id": "org-9"},
     ],
 )
 def test_real_run_refuses_weak_limit_confirmations(kw: dict[str, object]) -> None:
-    recs = [limit("anthropic", **kw), limit("elevenlabs")]
+    recs = [limit("anthropic", **kw), limit("elevenlabs"), r10()]
     with pytest.raises(PreflightRefused) as exc:
-        run_preflight(
-            cfg("REAL_RUN"),
-            recs,
-            env={**DEV, **SECRETS},
-            evidence=Lookup(Row()),
-            render_start=EVENING,
-        )
+        real(recs)
     assert codes(exc) == {"PROVIDER_LIMIT:anthropic"}
 
 
-@pytest.mark.parametrize("row", [None, Row("VERIFIED"), Row("CONFIRMED", "WEB_DASHBOARD")])
-def test_real_run_needs_confirmed_owner_channel_evidence(row: Row | None) -> None:
+def test_limit_at_the_cap_is_accepted() -> None:
+    recs = [limit("anthropic", amount_minor=5000), limit("elevenlabs"), r10()]
+    assert real(recs)
+
+
+def test_one_evidence_id_cannot_clear_two_items() -> None:
+    recs = [limit("anthropic"), limit("elevenlabs", evidence_id="ev-anthropic"), r10()]
+    ev = Lookup([limit("anthropic"), r10()])
     with pytest.raises(PreflightRefused) as exc:
-        run_preflight(
-            cfg("REAL_RUN"),
-            real_limits(),
-            env={**DEV, **SECRETS},
-            evidence=Lookup(row),
-            render_start=EVENING,
-        )
+        real(recs, evidence=ev)
+    assert codes(exc) == {"PROVIDER_LIMIT:elevenlabs"}
+
+
+def test_evidence_for_another_provider_or_amount_is_refused() -> None:
+    recs = [*real_limits(), r10()]
+    ev = Lookup(recs)
+    ev.rows["ev-anthropic"] = Row(limit("anthropic", amount_minor=1).subject())  # other amount
+    ev.rows["ev-elevenlabs"] = Row(limit("anthropic").subject())  # other provider's subject
+    with pytest.raises(PreflightRefused) as exc:
+        real(recs, evidence=ev)
+    assert codes(exc) == {"PROVIDER_LIMIT:anthropic", "PROVIDER_LIMIT:elevenlabs"}
+
+
+@pytest.mark.parametrize("row", [None, Row("x", state="VERIFIED"), Row("x", src="WEB_DASHBOARD")])
+def test_real_run_needs_confirmed_owner_channel_evidence(row: Row | None) -> None:
+    recs = [*real_limits(), r10()]
+    ev = Lookup(recs)
+    for key in list(ev.rows):
+        if key != "ev-r10":
+            ev.rows[key] = row  # type: ignore[assignment]
+    with pytest.raises(PreflightRefused) as exc:
+        real(recs, evidence=ev)
     assert len(exc.value.items) == 2
 
 
-def test_real_run_without_lookup_is_refused() -> None:
+def test_real_run_without_lookup_or_org_is_refused() -> None:
+    recs = [*real_limits(), r10()]
     with pytest.raises(PreflightRefused):
-        run_preflight(cfg("REAL_RUN"), real_limits(), env={**DEV, **SECRETS}, render_start=EVENING)
+        real(recs, evidence=None)
+    with pytest.raises(PreflightRefused):
+        real(recs, org_id=None)
 
 
 def test_dry_run_still_refuses_unverified_fixture_and_missing_env() -> None:
@@ -271,15 +431,46 @@ def test_2027_calendar_is_invalid_by_design_so_preflight_refuses() -> None:
     assert {"CALENDAR", "MARKET_HOURS"} <= codes(exc)
 
 
+def test_naive_render_start_is_a_typed_refusal_item() -> None:
+    recs = [limit(p, test_fixture=True) for p in ("anthropic", "elevenlabs")]
+    with pytest.raises(PreflightRefused) as exc:
+        run_preflight(cfg(), recs, env=DEV, render_start=datetime(2026, 11, 19, 20, 0))
+    assert {"CALENDAR", "MARKET_HOURS"} <= codes(exc)
+
+
+# --- M4: the whole render window, not only its start
+def test_render_window_must_clear_the_guard() -> None:
+    recs = [limit(p, test_fixture=True) for p in ("anthropic", "elevenlabs")]
+    early = datetime(2026, 11, 19, 8, 59, 59, tzinfo=IST)  # starts one second before the guard
+    with pytest.raises(PreflightRefused) as exc:
+        run_preflight(cfg(), recs, env=DEV, render_start=early)
+    assert codes(exc) == {"MARKET_HOURS"}
+    ok = run_preflight(cfg(minutes=30), recs, env=DEV, render_start=at(2026, 11, 19, 8, 29))
+    assert "MARKET_HOURS" in ok.checks_passed
+    with pytest.raises(PreflightRefused):  # 30 minutes from 08:31 reaches 09:01
+        run_preflight(cfg(minutes=30), recs, env=DEV, render_start=at(2026, 11, 19, 8, 31))
+    # a night render that crosses midnight into the next trading morning is refused as well
+    with pytest.raises(PreflightRefused):
+        run_preflight(cfg(minutes=800), recs, env=DEV, render_start=at(2026, 11, 19, 20, 0))
+
+
+def test_missing_render_duration_is_refused() -> None:
+    recs = [limit(p, test_fixture=True) for p in ("anthropic", "elevenlabs")]
+    with pytest.raises(PreflightRefused) as exc:
+        run_preflight(cfg(minutes=None), recs, env=DEV, render_start=EVENING)
+    assert {"RENDER_DURATION", "MARKET_HOURS"} <= codes(exc)
+
+
 def test_no_value_leak_in_logs_or_errors(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
     env = {**DEV, **SECRETS, "AMW_RUNTIME_MODE": "REAL_RUN"}
-    c = load_runtime_config(env)
+    c = load_runtime_config(env).model_copy(update={"render_max_duration_minutes": 60})
     with pytest.raises(PreflightRefused) as refused:
         run_preflight(c, [], env=env, render_start=EVENING)
     assert CANARY not in str(refused.value)
     assert CANARY not in repr(refused.value.items)
-    rep = run_preflight(c, real_limits(), env=env, evidence=Lookup(Row()), render_start=EVENING)
+    recs = [*real_limits(), r10()]
+    rep = run_preflight(c, recs, env=env, evidence=Lookup(recs), render_start=EVENING, org_id=ORG)
     assert CANARY not in repr(rep)
     assert CANARY not in repr(c)
     assert CANARY not in caplog.text
@@ -313,7 +504,9 @@ def test_holiday_weekend_special_session() -> None:
     assert cal.render_allowed(at(2026, 12, 25, 11, 0))  # Christmas, listed holiday
     assert cal.render_allowed(at(2026, 11, 21, 11, 0))  # Saturday
     assert cal.render_allowed(at(2026, 11, 22, 11, 0))  # Sunday
-    assert not cal.render_allowed(at(2026, 11, 8, 11, 0))  # Muhurat Sunday: guard whole window
+    for hh, mm in ((0, 5), (11, 0), (18, 30), (23, 59)):  # Muhurat Sunday: the WHOLE day
+        assert not cal.render_allowed(at(2026, 11, 8, hh, mm))
+    assert cal.render_allowed(at(2026, 11, 9, 0, 5))
     assert cal.render_allowed(at(2026, 11, 24, 11, 0))  # Guru Nanak holiday
 
 
@@ -381,6 +574,13 @@ def test_bars_lag_boundary() -> None:
     for last in (today - timedelta(days=29), today, today + timedelta(days=1), None):
         with pytest.raises(BarsTooRecentError):
             assert_bars_older_than_lag(last, today)
+
+
+def test_datetime_bar_date_is_a_typed_error() -> None:
+    with pytest.raises(BarsTooRecentError):
+        assert_bars_older_than_lag(datetime(2026, 1, 1, tzinfo=UTC), date(2026, 11, 19))
+    with pytest.raises(BarsTooRecentError):
+        assert_bars_older_than_lag(date(2026, 1, 1), datetime(2026, 11, 19, tzinfo=UTC))
 
 
 def test_policy_source_and_lag() -> None:

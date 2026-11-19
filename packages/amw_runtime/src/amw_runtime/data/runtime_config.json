@@ -70,5 +70,9 @@
   },
   "calendar": {
     "segment": "CM"
+  },
+  "render": {
+    "max_duration_minutes": null,
+    "status": "REQUIRES REVIEW (owner / measurement): no sourced value; set from the measured skeleton render time. A preflight with no value is refused."
   }
 }

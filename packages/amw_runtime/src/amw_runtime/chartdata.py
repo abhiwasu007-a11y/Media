@@ -6,7 +6,7 @@ The lag rule is the SEBI 30-day price-data lag (IN-02, FIN-R9). The arithmetic i
 """
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from agent_06_fact_checker.models import DataAge
 from agent_06_fact_checker.price_age import classify
@@ -26,8 +26,12 @@ def _packaged_lag_days() -> int:
 def assert_bars_older_than_lag(
     last_bar_date: date | None, as_of: date, *, lag_days: int | None = None
 ) -> None:
-    """Raise ``BarsTooRecentError`` unless ``as_of - last_bar_date >= lag_days`` (config data,
-    30 days from IN-02, unless a caller passes the loaded config value)."""
+    """``as_of`` is the IST publish/extraction calendar date. Raise ``BarsTooRecentError`` unless
+    ``as_of - last_bar_date >= lag_days`` (config data, 30 days from IN-02, unless the caller
+    passes the loaded config value)."""
+    for value in (last_bar_date, as_of):
+        if value is not None and (isinstance(value, datetime) or not isinstance(value, date)):
+            raise BarsTooRecentError("bar and as-of dates must be plain dates (IST calendar days)")
     lag = _packaged_lag_days() if lag_days is None else lag_days
     if last_bar_date is not None and last_bar_date > as_of:
         raise BarsTooRecentError("last bar date is after the publish/extraction date")
