@@ -81,7 +81,11 @@ class RenderSpec:
                     self.image_sha256,
                 ],
                 "font": self.font_sha256,
-                **({"font_fallback": self.fallback_font_sha256} if self.fallback_font_sha256 else {}),
+                **(
+                    {"font_fallback": self.fallback_font_sha256}
+                    if self.fallback_font_sha256
+                    else {}
+                ),
                 "fit": [self.min_font_px, self.max_font_px, self.font_step_px, self.font_cap_px],
             }
         )
@@ -331,7 +335,8 @@ class PillowComposer:
         fb_sha = hashlib.sha256(fb_bytes).hexdigest() if fb_bytes is not None else ""
 
         def fb_at(px: int) -> ImageFont.FreeTypeFont:
-            assert fb_bytes is not None
+            if fb_bytes is None:
+                raise ComposeFailedError("no fallback font is set")
             return self._font(spec.org_id, fb_sha, fb_bytes, px)
 
         def pieces(text: str) -> list[tuple[str, bool]]:

@@ -35,7 +35,10 @@ NOTDEF_PROBE = "\U000f0000"  # unassigned private-use plane code point: every fo
 
 def _read(name: str) -> bytes:
     return (
-        resources.files("agent_11_thumbnail_design").joinpath("data/fonts").joinpath(name).read_bytes()
+        resources.files("agent_11_thumbnail_design")
+        .joinpath("data/fonts")
+        .joinpath(name)
+        .read_bytes()
     )
 
 
@@ -63,8 +66,10 @@ def test_mukta_is_pinned_ofl_with_its_licence_beside_the_font(key: str) -> None:
     data = _read(str(entry["file"]))
     assert hashlib.sha256(data).hexdigest() == entry["sha256"]
     assert len(data) == entry["bytes"]
-    assert entry["licence"] == "OFL-1.1" and entry["unmodified"] is True
-    assert entry["purpose"] == "brand_primary" and entry["research_id"] == "RV-09"
+    assert entry["licence"] == "OFL-1.1"
+    assert entry["unmodified"] is True
+    assert entry["purpose"] == "brand_primary"
+    assert entry["research_id"] == "RV-09"
     licence = _read(str(entry["licence_file"])).decode("utf-8")
     assert "SIL OPEN FONT LICENSE Version 1.1" in licence
     assert str(entry["copyright"]) in licence.splitlines()[0]
@@ -75,7 +80,8 @@ def test_mukta_is_pinned_ofl_with_its_licence_beside_the_font(key: str) -> None:
 
 def test_noto_is_the_pinned_fallback() -> None:
     entry = _manifest_raw()[FALLBACK_FONT_KEY]
-    assert entry["purpose"] == "brand_fallback" and entry["licence"] == "OFL-1.1"
+    assert entry["purpose"] == "brand_fallback"
+    assert entry["licence"] == "OFL-1.1"
     assert hashlib.sha256(pinned_font_bytes(FALLBACK_FONT_KEY)).hexdigest() == entry["sha256"]
 
 
@@ -121,7 +127,8 @@ def test_rendered_marathi_thumbnail_title_is_real_text_and_tofu_is_refused() -> 
     data = pinned_font_bytes("mukta_bold")
     sha = hashlib.sha256(data).hexdigest()
     ok = PillowComposer().render(spec(font_bytes=data, font_sha256=sha, lines=(MARATHI_TITLE,)))
-    assert not ok.missing_glyphs and ok.runs
+    assert not ok.missing_glyphs
+    assert ok.runs
     img = Image.open(io.BytesIO(ok.png)).convert("RGB")
     x0, y0, x1, y1 = ok.text_box_px
     text_px = img.crop((x0, y0, x1, y1))
@@ -130,17 +137,16 @@ def test_rendered_marathi_thumbnail_title_is_real_text_and_tofu_is_refused() -> 
     assert ink > 2000  # real glyph ink in the title box
     # a code point no font covers is refused (never drawn as a .notdef box)
     with pytest.raises(GlyphMissingError):
-        PillowComposer().render(
-            spec(font_bytes=data, font_sha256=sha, lines=(NOTDEF_PROBE * 4,))
-        )
+        PillowComposer().render(spec(font_bytes=data, font_sha256=sha, lines=(NOTDEF_PROBE * 4,)))
 
 
 def test_the_boxes_of_the_dry_run_are_the_code_drawn_neutral_glyph_not_font_tofu() -> None:
-    """Break 14 finding: the three outlined rectangles right of the title in ``thumb_v1.png`` are the
+    """Break 14: the three outlined rectangles right of the title in ``thumb_v1.png`` are the
     glyph-set picture ``g1_level_steps`` (three ``rect`` ops, outline only), drawn by code. The
     subject area is therefore identical whatever the font is; the Marathi title was never tofu."""
     g1 = next(g for g in glyph_catalogue() if g.key == "g1_level_steps")
-    assert [op["op"] for op in g1.ops] == ["rect"] * 3 and all(op["fill"] is None for op in g1.ops)
+    assert [op["op"] for op in g1.ops] == ["rect"] * 3
+    assert all(op["fill"] is None for op in g1.ops)
     tpl_box = spec().template.subject_box
     w, h = 1920, 1080
     x, y, bw, bh = tpl_box
@@ -194,7 +200,9 @@ def test_fallback_that_is_not_needed_changes_no_pixel() -> None:
     withfb = replace(
         base, fallback_font_bytes=fb, fallback_font_sha256=hashlib.sha256(fb).hexdigest()
     )
-    assert PillowComposer().render(base).pixel_sha256 == PillowComposer().render(withfb).pixel_sha256
+    assert (
+        PillowComposer().render(base).pixel_sha256 == PillowComposer().render(withfb).pixel_sha256
+    )
 
 
 def test_tampered_fallback_is_refused() -> None:
@@ -228,11 +236,10 @@ def _marathi() -> tuple[Promise, Brief]:
 
 
 def test_stage_with_mukta_records_primary_and_fallback_in_the_provenance() -> None:
-    env = make_env(
-        language="mr-IN", promise=_marathi(), font=pinned_font_bytes("mukta_bold")
-    )
+    env = make_env(language="mr-IN", promise=_marathi(), font=pinned_font_bytes("mukta_bold"))
     out = env.stage.run(env.ti, "att_1")
-    assert out.payload is not None and out.payload.data is not None
+    assert out.payload is not None
+    assert out.payload.data is not None
     assert out.payload.data["verdict"] == "ALLOWED"
     prov = out.payload.data["provenance"]
     assert prov["font_source"] == "repo_manifest:mukta_bold"
@@ -242,6 +249,8 @@ def test_stage_with_mukta_records_primary_and_fallback_in_the_provenance() -> No
 def test_a_tenant_font_gets_no_fallback() -> None:
     env = make_env()  # the generated test font stands for a tenant font
     out = env.stage.run(env.ti, "att_1")
+    assert out.payload is not None
+    assert out.payload.data is not None
     prov = out.payload.data["provenance"]
     assert prov["font_source"].startswith("repo_manifest:")  # the test font is in the manifest
     assert prov["font_fallback_source"] is None  # but it is not a brand_primary font

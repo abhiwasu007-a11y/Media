@@ -20,7 +20,8 @@ def test_mukta_covers_marathi_and_latin_and_noto_adds_the_missing_glyph() -> Non
     mukta = cmap_font_reader((FONTS / "Mukta-Bold.ttf").read_bytes())
     noto = cmap_font_reader((FONTS / "NotoSansDevanagari-VF.ttf").read_bytes())
     FontCoverage.check(mukta, [TITLE])
-    assert 0x0978 not in mukta and 0x0978 in noto  # DEVANAGARI LETTER MARWARI DDA
+    assert 0x0978 not in mukta
+    assert 0x0978 in noto  # DEVANAGARI LETTER MARWARI DDA
     with pytest.raises(InputInvalidError):
         FontCoverage.check(mukta, ["ॸ"])
     FontCoverage.check(mukta | noto, ["ॸ"])  # per-glyph fallback: the union of the manifest fonts

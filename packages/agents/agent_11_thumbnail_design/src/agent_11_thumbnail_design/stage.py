@@ -1032,8 +1032,8 @@ class _Run:
 
     def _pick_fallback(self, font_bytes: bytes) -> None:
         """Per-glyph fallback (owner decision WS-06): only when the primary is a repo-manifest
-        brand font (purpose ``brand_primary``), and only the pinned fallback font. A tenant's own font gets no fallback, so its
-        coverage and licence stay exactly what the tenant registered."""
+        brand font (purpose ``brand_primary``), and only the pinned fallback font. A tenant's own
+        font gets no fallback: its coverage and licence stay as the tenant registered them."""
         self.fallback_font_bytes = None
         self.fallback_font_source = None
         pinned = font_manifest().get(hashlib.sha256(font_bytes).hexdigest())
