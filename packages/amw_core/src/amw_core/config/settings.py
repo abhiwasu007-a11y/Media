@@ -6,9 +6,18 @@ import tomllib
 from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    StrictInt,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from amw_core.enums import LlmModelTier, RetryPolicy
@@ -16,6 +25,18 @@ from amw_core.errors import ConfigInvalidError
 
 ENV_PREFIX = "AMW_"
 ENV_NESTED_DELIMITER = "__"
+
+
+MAX_MINOR_EXPONENT: Final = 6
+"""Largest ISO 4217 minor-unit exponent the money arithmetic can represent: money is integer
+micros (10^-6 of the major unit, GLOSSARY section 3), so an exponent above 6 has no exact micros
+conversion. Every consumer of ``finance.currency_minor_exponent`` refuses a value outside
+``0..MAX_MINOR_EXPONENT`` (``limit_micros``, ``cost.report.to_minor``)."""
+
+CurrencyCode = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
+"""ISO 4217 alphabetic code: three upper-case ASCII letters (as the CHECK of migration 0050)."""
+MinorExponent = Annotated[StrictInt, Field(ge=0, le=MAX_MINOR_EXPONENT)]
+"""A real integer (not a bool, string or float) between 0 and ``MAX_MINOR_EXPONENT``."""
 
 
 class _Model(BaseModel):
@@ -132,9 +153,11 @@ class FinanceSettings(_Model):
 
     variance_alert_ratio: Decimal | None = Field(default=None, gt=0)
     devanagari_token_factor: Decimal | None = Field(default=None, gt=0)
-    currency_minor_exponent: dict[str, int] = Field(default_factory=dict)
-    """ISO 4217 minor-unit exponent per budget currency (e.g. INR 2); a budget whose currency has
-    no entry cannot be converted to micros and is refused (fail closed)."""
+    currency_minor_exponent: dict[CurrencyCode, MinorExponent] = Field(default_factory=dict)
+    """ISO 4217 minor-unit exponent per budget currency. **No code default** (empty map): a budget
+    whose currency has no entry cannot be converted to micros and is refused
+    ``PERMANENT.CONFIG_INVALID`` (fail closed, CCR-133). The values (INR 2, USD 2: RV-07) are
+    deployment config data; REQUIRES REVIEW (owner decision, Q-O12): which currencies are used."""
     fx_pairs: list[str] = Field(default_factory=list)
     """Currency pairs ``"<row currency>/<budget currency>"`` for which a ledger row's recorded
     ``fx_rate`` may be applied (e.g. ``"USD/INR"``). Empty: no conversion (fail closed)."""
