@@ -633,44 +633,48 @@ class SliceModel(BaseModel):
 
 class _SliceVisualIntent(SliceModel):
     tier_hint: Tier
-    description: str = ""
-    change_beats: int = Field(default=1, ge=0)
+    description: str
+    change_beats: int = Field(ge=0)
 
 
 class _SliceScene(SliceModel):
+    """Every field Agent 09 reads is required: the producer writes all of them (agent_05 8.3
+    ``DocScene``), so a missing one is a malformed document, never a default (fail closed).
+    ``section_id``, ``visual_intent`` and ``interrupt`` are required but may be ``null``."""
+
     scene_id: str
-    section_id: str | None = None
-    beat: str = "EXPLAIN"
+    section_id: str | None
+    beat: str
     segment_ids: tuple[str, ...]
-    on_screen_text: tuple[str, ...] = ()
-    visual_intent: _SliceVisualIntent | None = None
-    interrupt: Any = None
-    deliberate_pause_ms: int = Field(default=0, ge=0)
-    explanatory: bool = True
-    chart_id: str | None = None
+    on_screen_text: tuple[str, ...]
+    visual_intent: _SliceVisualIntent | None
+    interrupt: Any
+    deliberate_pause_ms: int = Field(ge=0)
+    explanatory: bool
+    chart_id: str | None
 
 
 class _SliceSegment(SliceModel):
     segment_id: str
     kind: SegmentKind
     scene_id: str
-    section_id: str | None = None
-    chart_ref: str | None = None
-    parent_segment_ids: tuple[str, ...] = ()
-    text: str = ""
+    section_id: str | None
+    chart_ref: str | None
+    parent_segment_ids: tuple[str, ...]
+    text: str
 
 
 class _SliceSection(SliceModel):
     section_id: str
-    section_kind: str = "CONCEPT"
-    heading_local: str = ""
-    scene_ids: tuple[str, ...] = ()
+    section_kind: str
+    heading_local: str
+    scene_ids: tuple[str, ...]
 
 
 class _SliceChartRequest(SliceModel):
     chart_id: str = Field(pattern=r"^chart_[0-9a-z_]{1,32}$")
     first_segment_id: str
-    must_be_historical: bool = True
+    must_be_historical: bool
 
 
 class _SliceDisclaimerSlot(SliceModel):
@@ -684,19 +688,21 @@ class ScriptDocSlice(SliceModel):
 
     ``sections[]`` holds real sections only; hook scenes carry ``section_id = "hook"`` and
     disclaimer scenes ``null``; both stay as written (no re-attribution). A scene without a
-    ``visual_intent`` (hook, disclaimer) takes the model defaults; ``deliberate_pause_ms = 0``
-    means no deliberate pause (the document writes ``0``, never null).
+    ``visual_intent`` (a documented ``null`` for hook and disclaimer scenes) takes the tier B
+    default of the scene model; every other field is required, a missing one is
+    ``SCRIPT_DOCUMENT_INVALID`` (CCR-200 only lets unknown fields be ignored);
+    ``deliberate_pause_ms = 0`` means no deliberate pause (the document writes ``0``, never null).
     """
 
     script_id: str
     version: int = Field(ge=1)
     language: str
     aspect_ratio: AspectRatio
-    sections: tuple[_SliceSection, ...] = ()
+    sections: tuple[_SliceSection, ...]
     scenes: tuple[_SliceScene, ...]
     segments: tuple[_SliceSegment, ...]
-    chart_requests: tuple[_SliceChartRequest, ...] = ()
-    disclaimer_slots: tuple[_SliceDisclaimerSlot, ...] = ()
+    chart_requests: tuple[_SliceChartRequest, ...]
+    disclaimer_slots: tuple[_SliceDisclaimerSlot, ...]
 
     def to_script_doc(self) -> ScriptDoc:
         scenes = tuple(

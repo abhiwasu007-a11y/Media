@@ -23,7 +23,6 @@ from agent_09_video_director.persistence import (
     persist_plan,
     save_checkpoint,
 )
-from agent_09_video_director.step import Verification
 from agent_09_video_director.views import build_views
 from amw_adapters.common import FailurePlan
 from amw_core.contracts.validation import validate_task_output
@@ -52,6 +51,7 @@ from tests.agents.agent_09_video_director.support import (
     make_step,
     sample_script,
     timeline_for,
+    verification,
 )
 from tests.agents.agent_09_video_director.test_step import MemBlob
 
@@ -243,7 +243,7 @@ def test_script_gate_receives_claim_and_status(kw: dict[str, Any], code: str) ->
     script, durs = sample_script()
     step, llm, _ = make_step()
     with pytest.raises(InputInvalidError) as ei:
-        step.run(make_request(script, durs, verification=Verification(SHA_A, "ALLOWED", **kw)))
+        step.run(make_request(script, durs, verification=verification(SHA_A, "ALLOWED", **kw)))
     assert code in codes(ei.value.details) and llm.requests == []
 
 

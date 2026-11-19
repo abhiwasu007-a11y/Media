@@ -73,9 +73,9 @@ log = logging.getLogger("agent_09")
 class Verification:
     verified_script_sha256: str
     stage_verdict: str
-    approval_approved: bool = False
-    claim_blocked: bool = False
-    script_status: str = "ACTIVE"
+    approval_approved: bool
+    claim_blocked: bool
+    script_status: str
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -233,7 +233,10 @@ class ShotPlanStep:
         *,
         resume: ResumeState | None = None,
         checkpoint: Callable[[ResumeState], None] | None = None,
+        meter: CallMeter | None = None,
     ) -> StepResult:
+        """``meter`` lets the caller keep the call meter when the step fails: the paid calls made
+        before the failure are on it (cost is reported even on an error output)."""
         cfg = self._cfg
         tm, hook = self._preconditions(req)
         slots = build_skeleton(req.script, tm, hook, cfg, req.limits)
@@ -250,7 +253,7 @@ class ShotPlanStep:
             or worst_calls * req.worst_case_call_micros > req.max_cost_micros
         ):
             raise BudgetExhaustedError("reservation does not cover the worst case of the plan")
-        meter = CallMeter(req.max_calls, req.max_cost_micros, req.worst_case_call_micros)
+        meter = meter or CallMeter(req.max_calls, req.max_cost_micros, req.worst_case_call_micros)
         client = DirectionClient(
             llm=self._llm,
             cfg=cfg,

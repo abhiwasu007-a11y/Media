@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from agent_09_video_director.contracts import AspectRatio, Scene, ScriptDoc, Segment, SegmentKind
-from agent_09_video_director.step import Verification
 from amw_core.errors import AmwError
 from amw_evals.adapter import FakeAdapter, LlmResponse
 from amw_evals.runner import run_eval
@@ -21,6 +20,7 @@ from tests.agents.agent_09_video_director.support import (
     make_request,
     make_step,
     sample_script,
+    verification,
 )
 from tests.agents.agent_09_video_director.test_shot_direction_eval import CASES, recorded
 
@@ -87,7 +87,7 @@ def test_te27_hash_mismatch_through_the_step() -> None:
     inp = TE["TE-27"]["input"]
     script, durs = sample_script()
     err, _ = run_gate(script=script, durs=durs, script_sha256=inp["script_sha256"], script_ref_sha256=inp["script_sha256"],
-                      verification=Verification(inp["verified_script_sha256"], inp["stage_verdict"]))  # fmt: skip
+                      verification=verification(inp["verified_script_sha256"], inp["stage_verdict"]))  # fmt: skip
     assert codes(err.details) == TE["TE-27"]["expected"]["violations"]
 
 

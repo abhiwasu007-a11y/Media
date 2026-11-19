@@ -342,6 +342,7 @@ def te_gate_hash(case: dict[str, Any]) -> None:
         script_gate(
             script_sha256=inp["script_sha256"], ref_sha256=inp["script_sha256"],
             verified_script_sha256=inp["verified_script_sha256"], stage_verdict=inp["stage_verdict"],
+            approval_approved=False, claim_blocked=False, script_status="APPROVED",
         )  # fmt: skip
     assert ei.value.code == exp["error"] and codes(ei.value.details) == exp["violations"]
 

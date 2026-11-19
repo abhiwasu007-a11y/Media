@@ -11,7 +11,6 @@ from agent_09_video_director.assemble import plan_hash
 from agent_09_video_director.contracts import AspectRatio, RevisionFeedback, Scene
 from agent_09_video_director.output import ShotPlanDocument, build_document
 from agent_09_video_director.persistence import load_model, persist_plan
-from agent_09_video_director.step import Verification as Verif
 from agent_09_video_director.views import Views, build_views, view_matches_shots
 from amw_core.enums import CheckVerdict
 from amw_core.errors import (
@@ -38,6 +37,7 @@ from tests.agents.agent_09_video_director.support import (
     respond,
     sample_script,
     timeline_for,
+    verification,
 )
 
 pytestmark = pytest.mark.integration
@@ -125,8 +125,8 @@ def test_determinism_and_dlq_replay() -> None:
 
 GATES: list[tuple[str, dict[str, Any], type[AmwError], str]] = [
     ("hash", {"script_sha256": "d" * 64}, InputInvalidError, "SCRIPT_HASH_MISMATCH"),
-    ("verdict", {"verification": Verif(SHA_A, "BLOCKED")}, InputInvalidError, "VERDICT_NOT_ALLOWED"),
-    ("review", {"verification": Verif(SHA_A, "NEEDS_HUMAN_REVIEW")}, InputInvalidError, "VERDICT_NOT_APPROVED"),
+    ("verdict", {"verification": verification(SHA_A, "BLOCKED")}, InputInvalidError, "VERDICT_NOT_ALLOWED"),
+    ("review", {"verification": verification(SHA_A, "NEEDS_HUMAN_REVIEW")}, InputInvalidError, "VERDICT_NOT_APPROVED"),
     ("aspect", {"production_type_key": "SHORTS"}, InputInvalidError, "ASPECT_PRODUCTION_TYPE"),
     ("unaligned", {"timeline": timeline_for({"s1": 1}).model_copy(update={"source": "UNALIGNED"})},
      InputInvalidError, "TIMELINE_UNALIGNED"),
@@ -149,7 +149,7 @@ def test_gates_fail_before_any_model_call(
 def test_approved_human_review_is_allowed() -> None:
     script, durs = sample_script()
     req = make_request(
-        script, durs, verification=Verif(SHA_A, "NEEDS_HUMAN_REVIEW", approval_approved=True)
+        script, durs, verification=verification(SHA_A, "NEEDS_HUMAN_REVIEW", approval_approved=True)
     )
     assert make_step()[0].run(req).plan.shots
 

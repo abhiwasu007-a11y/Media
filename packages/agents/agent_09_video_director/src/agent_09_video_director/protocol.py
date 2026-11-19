@@ -26,6 +26,7 @@ from agent_09_video_director.contracts import (
     SliceModel,
     TimelineSlice,
 )
+from agent_09_video_director.direction.client import CallMeter
 from agent_09_video_director.output import (
     AGENT_ID,
     ShotPlanDocument,
@@ -39,6 +40,7 @@ from agent_09_video_director.persistence import persist_plan
 from agent_09_video_director.problems import input_invalid
 from agent_09_video_director.step import ShotPlanRequest, ShotPlanStep, Verification
 from amw_core.contracts.error import violation
+from amw_core.contracts.payloads import PAYLOAD_SCHEMAS, PayloadSchemaRegistry
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.errors import (
@@ -55,6 +57,8 @@ from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
 
 INPUT_SCHEMA = "agent_09.shot_plan.input"
+SCRIPT_DOCUMENT_SCHEMA = "agent_05.script_document"
+SCRIPT_DOCUMENT_SCHEMA_VERSION = "1.0.0"
 
 _TEMPLATE_ID = re.compile(TEMPLATE_ID_RE)
 _S = TypeVar("_S", bound=SliceModel)
@@ -62,11 +66,14 @@ _S = TypeVar("_S", bound=SliceModel)
 
 @dataclass(frozen=True, slots=True)
 class GateFacts:
-    """Database facts of the script gate (F-03) that no hashed ref carries."""
+    """Database facts of the script gate (F-03) that no hashed ref carries.
+
+    Fail closed: a bare ``GateFacts()`` (a port that knows nothing) blocks the plan: the claim is
+    treated as blocked and the status is ``UNKNOWN`` (refused by ``script_gate``)."""
 
     approval_approved: bool = False
-    claim_blocked: bool = False
-    script_status: str = "ACTIVE"
+    claim_blocked: bool = True
+    script_status: str = "UNKNOWN"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,21 +113,25 @@ class ShotPlanTask:
         clock: Clock,
         *,
         worst_case_call_micros: int,
+        schemas: PayloadSchemaRegistry = PAYLOAD_SCHEMAS,
     ) -> None:
         self._step, self._storage, self._ports, self._clock = step, storage, ports, clock
+        self._schemas = schemas
         self._worst_case_call_micros = worst_case_call_micros
 
     # ------------------------------------------------------------------ entry point
     def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
         started = self._clock.monotonic_ms()
+        meters: list[CallMeter] = []  # filled once the step may make paid calls
         try:
-            return self._run(task_input, ctx, started)
+            return self._run(task_input, ctx, started, meters)
         except (PermanentError, AgentError, BudgetExhaustedError) as exc:
             return error_output(
                 exc,
                 task_input=task_input,
                 now=self._clock.now(),
                 duration_ms=max(0, self._clock.monotonic_ms() - started),
+                meter=meters[0] if meters else None,
             )
 
     # ------------------------------------------------------------------ reading
@@ -138,6 +149,24 @@ class ShotPlanTask:
             return model.model_validate(self._json(ctx, ref))
         except ValidationError:
             raise input_invalid(code) from None
+
+    def _script_slice(self, ctx: ExecContext, ref: HashedRef) -> ScriptDocSlice:
+        """03 section 2.3 rule 2 (CCR-200): validate the producer's document against the producer's
+        registered schema where one is shipped, then map it with the own slice model. When Agent 05
+        has not registered ``agent_05.script_document`` the slice model's required fields are the
+        only check (recorded as open in the README)."""
+        doc = self._json(ctx, ref)
+        if not isinstance(doc, dict):
+            raise input_invalid("SCRIPT_DOCUMENT_INVALID")
+        if SCRIPT_DOCUMENT_SCHEMA in self._schemas.names():
+            try:
+                self._schemas.validate(SCRIPT_DOCUMENT_SCHEMA, SCRIPT_DOCUMENT_SCHEMA_VERSION, doc)
+            except SchemaInvalidError, SchemaVersionUnsupportedError:
+                raise input_invalid("SCRIPT_SCHEMA_INVALID") from None
+        try:
+            return ScriptDocSlice.model_validate(doc)
+        except ValidationError:
+            raise input_invalid("SCRIPT_DOCUMENT_INVALID") from None
 
     def _payload(self, task_input: TaskInput, ctx: ExecContext) -> ShotPlanInput:
         if task_input.agent_id != AGENT_ID:
@@ -203,7 +232,9 @@ class ShotPlanTask:
         return {k: tuple(v) for k, v in out.items()}
 
     # ------------------------------------------------------------------ the run
-    def _run(self, task_input: TaskInput, ctx: ExecContext, started_ms: int) -> TaskOutput:
+    def _run(
+        self, task_input: TaskInput, ctx: ExecContext, started_ms: int, meters: list[CallMeter]
+    ) -> TaskOutput:
         check_ctx(task_input, ctx)
         inp = self._payload(task_input, ctx)
         refs = [
@@ -213,7 +244,7 @@ class ShotPlanTask:
             inp.brand_kit_ref,
             *(r for r in (inp.parent_plan_ref, inp.previous_plan_ref) if r is not None),
         ]
-        script_slice = self._slice(ctx, inp.script_ref, ScriptDocSlice, "SCRIPT_DOCUMENT_INVALID")
+        script_slice = self._script_slice(ctx, inp.script_ref)
         if (script_slice.script_id, script_slice.version) != (
             inp.script_ref.script_id,
             inp.script_ref.version,
@@ -267,7 +298,9 @@ class ShotPlanTask:
             max_cost_micros=budget.max_cost_micros,
             worst_case_call_micros=self._worst_case_call_micros,
         )
-        result = self._step.run(req)
+        meter = CallMeter(req.max_calls, req.max_cost_micros, req.worst_case_call_micros)
+        meters.append(meter)  # kept for the error output: paid calls before a failure
+        result = self._step.run(req, meter=meter)
         doc = build_document(result.plan, script)
         ref = persist_plan(
             self._storage,

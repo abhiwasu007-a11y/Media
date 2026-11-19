@@ -199,6 +199,17 @@ class Recorder:
         return str(new_id(Prefix.COST_ENTRY))
 
 
+def verification(sha: str, verdict: str, **facts: Any) -> Verification:
+    """A verification whose database facts are explicit: not blocked, status APPROVED, unless
+    the test overrides them (the step has no defaults for them: fail closed)."""
+    base: dict[str, Any] = {
+        "approval_approved": False,
+        "claim_blocked": False,
+        "script_status": "APPROVED",
+    }
+    return Verification(sha, verdict, **{**base, **facts})
+
+
 def make_request(script: ScriptDoc, durations: dict[str, int], **over: Any) -> ShotPlanRequest:
     tl = timeline_for(durations)
     aspect = script.aspect_ratio
@@ -207,7 +218,7 @@ def make_request(script: ScriptDoc, durations: dict[str, int], **over: Any) -> S
         "uris": (f"amw-blob://{ORG_ID}/jobs/script.json",),
         "production_type_key": "SHORTS" if aspect is AspectRatio.PORTRAIT else "CHANNEL_LONG_FORM",
         "aspect_ratio": aspect, "script": script, "script_sha256": SHA_A, "script_ref_sha256": SHA_A,
-        "verification": Verification(SHA_A, "ALLOWED"), "timeline": tl, "timeline_sha256": "b" * 64,
+        "verification": verification(SHA_A, "ALLOWED"), "timeline": tl, "timeline_sha256": "b" * 64,
         "brand": BrandKit(intro_ref="sting_a", intro_duration_ms=1200,
                           lower_third_template_ref="lt"),
         "channel_category": "finance", "limits": Limits(ai_still_allowed=True),

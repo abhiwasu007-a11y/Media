@@ -24,6 +24,7 @@ from agent_09_video_director.contracts import (
     Stats,
     TierBudget,
 )
+from agent_09_video_director.direction.client import CallMeter
 from agent_09_video_director.persistence import OutputRefData
 from agent_09_video_director.step import StepResult
 from agent_09_video_director.views import Views, build_views
@@ -232,10 +233,17 @@ def error_output(
     task_input: TaskInput,
     now: datetime,
     duration_ms: int,
+    meter: CallMeter | None = None,
 ) -> TaskOutput:
     """Map a typed exception to ``REJECTED`` (the input was never accepted), ``SUSPENDED``
     (budget) or ``FAILED`` (blueprint 18; 03 section 5: failures are returned as Task Output).
-    Retryable infrastructure errors are not mapped here: the worker owns retry."""
+    Retryable infrastructure errors are not mapped here: the worker owns retry.
+
+    Cost of a failed run (the USD 5 per-video cap): ``meter`` holds the paid calls made before the
+    failure; their totals and ``cost_entry_ids`` are reported. A call sent whose cost was not
+    recorded (``meter.in_flight``) makes the cost unknown: the estimate is then the recorded cost
+    plus the worst case of each unrecorded call (an upper bound, never 0) and ``next_action.reason``
+    says so. ``meter=None`` means no paid call was made (failure before the step)."""
     suspended = isinstance(exc, BudgetExhaustedError)
     rejected = isinstance(exc, _REJECTED)
     status = (
@@ -252,19 +260,26 @@ def error_output(
         occurred_at=now,
         correlation_id=task_input.correlation_id,
     )
+    m = meter
+    unknown = 0 if m is None else m.in_flight
+    note = (
+        f"; cost unknown: {unknown} call(s) without a recorded cost, estimate is an upper bound"
+        if unknown
+        else ""
+    )
     if suspended:
         action = NextAction(
             type=NextActionType.WAIT,
             wait_reason=WaitReason.AWAITING_BUDGET,
             escalation_level=None,
-            reason="budget guard refused the call",
+            reason=("budget guard refused the call" + note)[:1000],
         )
     else:
         action = NextAction(
             type=NextActionType.RETRY if exc.retryable else NextActionType.STOP,
             wait_reason=None,
             escalation_level=None,
-            reason=exc.code,
+            reason=(exc.code + note)[:1000],
         )
     return TaskOutput(
         status=status,
@@ -277,14 +292,16 @@ def error_output(
         resource_usage=ResourceUsage(
             cpu_ms=0,
             peak_rss_bytes=0,
-            tokens_in=0,
-            tokens_out=0,
-            tokens_cached_in=0,
-            llm_calls=0,
-            provider_calls=0,
-            cost_estimate_micros=0,
+            tokens_in=m.tokens_in if m else 0,
+            tokens_out=m.tokens_out if m else 0,
+            tokens_cached_in=m.tokens_cached_in if m else 0,
+            llm_calls=(m.calls + m.in_flight) if m else 0,
+            provider_calls=(m.calls + m.in_flight) if m else 0,
+            cost_estimate_micros=(m.spent_micros + m.in_flight * m.worst_case_call_micros)
+            if m
+            else 0,
             currency=task_input.resource_budget.currency,
-            cost_entry_ids=(),
+            cost_entry_ids=tuple(m.cost_entry_ids) if m else (),
         ),
         error=error,
         next_action=action,

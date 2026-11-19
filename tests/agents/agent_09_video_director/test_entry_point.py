@@ -62,7 +62,7 @@ class Ports:
         return self.brand
 
     def gate_facts(self, tenant: TenantContext, **_: Any) -> GateFacts:
-        return GateFacts()
+        return GateFacts(approval_approved=False, claim_blocked=False, script_status="APPROVED")
 
     def rule_pack(self, tenant: TenantContext, key: str) -> RulePackText:
         return RulePackText(text=f"{key} RULES", version="1")
@@ -102,17 +102,22 @@ def timeline_doc(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def build(
-    w: World, *, iteration: int = 0, previous: HashedRef | None = None, **over: Any
+    w: World,
+    *,
+    iteration: int = 0,
+    previous: HashedRef | None = None,
+    script_override: Any = None,
+    **over: Any,
 ) -> tuple[TaskInput, ExecContext]:
-    doc = agent05_document()
+    doc = agent05_document() if script_override is None else script_override
     body = json.dumps(doc).encode()
     script = w.put("script.json", body)
     sha = script.sha256
-    tl = w.put("timeline.json", json.dumps(timeline_doc(doc)).encode())
+    tl = w.put("timeline.json", json.dumps(timeline_doc(agent05_document())).encode())
     data: dict[str, Any] = {
         "production_type_key": "CHANNEL_LONG_FORM",
         "aspect_ratio": "16:9",
-        "script_ref": {"script_id": doc["script_id"], "version": doc["version"], **script.model_dump()},
+        "script_ref": {"script_id": agent05_document()["script_id"], "version": agent05_document()["version"], **script.model_dump()},
         "verification_ref": {
             "uri": f"amw-blob://{w.org}/jobs/{w.job}/tasks/verify.json", "sha256": "c" * 64,
             "verified_script_sha256": sha, "stage_verdict": "ALLOWED", "approval_id": None,
