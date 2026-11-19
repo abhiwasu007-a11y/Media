@@ -1,6 +1,5 @@
 """FallbackPlanner (F-12; blueprint 6.6). Same logic as prompt rules 4-5, by arithmetic."""
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -16,7 +15,6 @@ from agent_11_thumbnail_design.text_options import finance_text_hit
 from agent_11_thumbnail_design.textutil import fold, folded_words
 
 _SOURCE_RANK = {"BRIEF_TEXT": 0, "TITLE_SPAN": 1, "KEY_TERM": 2}
-_TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 
 RATIONALES: dict[HypothesisKind, str] = {
     "CONTROL": "The brief's own phrase and the best fitting picture repeat the promise.",
@@ -34,7 +32,7 @@ class PlannerPolicy:
 
 
 def _tokens(text: str) -> set[str]:
-    return set(_TOKEN.findall(fold(text)))
+    return set(folded_words(text))
 
 
 def _texts_ok(texts: Sequence[TextOption], step: StepIn) -> bool:
