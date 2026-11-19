@@ -9,6 +9,7 @@ the audit row itself because ``state_transitions.audit_seq`` is NOT NULL (04 sec
 audit sequence must exist before the history row.
 """
 
+import re
 import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -88,6 +89,7 @@ from amw_core.state_machine import (
 from amw_core.tenancy import connection_of, org_uuid_of, translate_db_error
 
 Row = dict[str, Any]
+_STAGE_ID = re.compile(r"^[a-z0-9_]{2,32}$")  # migration 0058 tasks_stage_id_format
 _T01_JOB_STATES = (JobState.VALIDATING, JobState.RUNNING, JobState.CHECKPOINTED)
 
 
@@ -154,6 +156,7 @@ def _task(row: Row) -> TaskRecord:
         task_type=row["task_type"],
         agent_id=ExecutorId(row["agent_id"]),
         iteration=row["iteration"],
+        stage_id=row["stage_id"],
         is_required=row["is_required"],
         state=TaskState(row["state"]),
         wait_reason=WaitReason(row["wait_reason"]) if row["wait_reason"] else None,
@@ -441,6 +444,28 @@ class PgJobStore:
 
     # --- tasks ------------------------------------------------------------------------------------
     @staticmethod
+    def _check_stages(tasks: Sequence[NewTask]) -> None:
+        """``stage_id`` format (0058 CHECK); one task per ``(stage_id, iteration)`` per batch."""
+        seen: set[tuple[str, int]] = set()
+        for task in tasks:
+            stage = task.stage_id
+            if stage is None:
+                continue
+            if not isinstance(stage, str) or not _STAGE_ID.fullmatch(stage):
+                raise InputInvalidError(
+                    "stage_id is malformed", details={"stage_id": str(stage)[:64]}
+                )
+            if task.iteration < 0:
+                raise InputInvalidError("iteration must be >= 0")
+            key = (stage, task.iteration)
+            if key in seen:
+                raise InputInvalidError(
+                    "two tasks of one stage and iteration in the batch",
+                    details={"stage_id": stage, "iteration": task.iteration},
+                )
+            seen.add(key)
+
+    @staticmethod
     def _check_dag(tasks: Sequence[NewTask]) -> None:
         n = len(tasks)
         for i, task in enumerate(tasks):
@@ -466,6 +491,7 @@ class PgJobStore:
     ) -> Sequence[TaskRecord]:
         rule = self._creation_rule(TransitionId.T01, TaskState.PENDING, tx.context.actor)
         self._check_dag(tasks)
+        self._check_stages(tasks)
         org = org_uuid_of(tx)
         job_uuid = JOB.to_uuid(job_id)
         with self._cur(tx) as cur:
@@ -484,6 +510,19 @@ class PgJobStore:
                     "limits.max_tasks_per_job reached",
                     details={"task_count": job["task_count"], "adding": len(tasks)},
                 )
+            for task in tasks:
+                if task.stage_id is None:
+                    continue
+                cur.execute(
+                    "SELECT 1 FROM tasks WHERE org_id = %s AND job_id = %s AND stage_id = %s"
+                    " AND iteration = %s AND state <> 'CANCELLED'",
+                    (org, job_uuid, task.stage_id, task.iteration),
+                )
+                if cur.fetchone() is not None:
+                    raise InputInvalidError(
+                        "a live task of this stage and iteration exists",
+                        details={"stage_id": task.stage_id, "iteration": task.iteration},
+                    )
             ids = [new_uuid7() for _ in tasks]
             created: list[TaskRecord] = []
             for task_uuid, task in zip(ids, tasks, strict=True):
@@ -491,8 +530,8 @@ class PgJobStore:
                     "INSERT INTO tasks (id, org_id, job_id, task_type, agent_id, iteration,"
                     " is_required, priority, resource_class, required_capabilities,"
                     " idempotency_key, payload_schema, payload_schema_version, resource_budget,"
-                    " max_attempts, deadline)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                    " max_attempts, deadline, stage_id)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                     " RETURNING *",
                     (
                         task_uuid,
@@ -511,6 +550,7 @@ class PgJobStore:
                         Jsonb(task.resource_budget.to_doc()),
                         task.max_attempts,
                         task.deadline,
+                        task.stage_id,
                     ),
                 )
                 row = cur.fetchone()
@@ -538,6 +578,48 @@ class PgJobStore:
                 (len(tasks), org, job_uuid),
             )
         return created
+
+    def repoint_dependency(
+        self,
+        tx: TenantTransaction,
+        task_id: TaskId,
+        old_upstream_id: TaskId,
+        new_upstream_id: TaskId,
+    ) -> None:
+        task_u, old_u, new_u = (
+            TASK.to_uuid(t) for t in (task_id, old_upstream_id, new_upstream_id)
+        )
+        if old_u == new_u:
+            raise InputInvalidError("old and new upstream task are the same")
+        if task_u == new_u:
+            raise InputInvalidError("a task cannot depend on itself")
+        org = org_uuid_of(tx)
+        with self._cur(tx) as cur:
+            cur.execute(
+                "SELECT id, job_id FROM tasks WHERE org_id = %s AND id = ANY(%s) ORDER BY id"
+                " FOR UPDATE",
+                (org, [task_u, old_u, new_u]),
+            )
+            jobs = {r["id"]: r["job_id"] for r in cur.fetchall()}
+            if {task_u, old_u, new_u} - jobs.keys():
+                raise MissingDependencyError("task not found in this tenant")
+            if not jobs[task_u] == jobs[old_u] == jobs[new_u]:
+                raise InputInvalidError("re-pointing is only allowed within one job")
+            cur.execute(
+                "SELECT depends_on_task_id FROM task_dependencies WHERE org_id = %s"
+                " AND task_id = %s AND depends_on_task_id = ANY(%s)",
+                (org, task_u, [old_u, new_u]),
+            )
+            edges = {r["depends_on_task_id"] for r in cur.fetchall()}
+            if old_u not in edges:
+                raise MissingDependencyError("no dependency on the old upstream task")
+            if new_u in edges:
+                raise InputInvalidError("the dependency on the new upstream task already exists")
+            cur.execute(
+                "UPDATE task_dependencies SET depends_on_task_id = %s"
+                " WHERE org_id = %s AND task_id = %s AND depends_on_task_id = %s",
+                (new_u, org, task_u, old_u),
+            )
 
     def get_task(self, tx: TenantTransaction, task_id: TaskId) -> TaskRecord | None:
         with self._cur(tx) as cur:

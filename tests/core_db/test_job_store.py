@@ -133,11 +133,18 @@ def new_job(tenant: Tenant, source: str = "topic-1") -> NewJob:
     )
 
 
-def new_task(job: JobId, tenant: Tenant, n: int, deps: tuple[int, ...] = ()) -> NewTask:
+def new_task(
+    job: JobId,
+    tenant: Tenant,
+    n: int,
+    deps: tuple[int, ...] = (),
+    stage_id: str | None = None,
+    iteration: int = 0,
+) -> NewTask:
     return NewTask(
         task_type="agent_05.script_draft",
         agent_id=ExecutorId("agent_05"),
-        iteration=0,
+        iteration=iteration,
         is_required=True,
         priority=Priority.NORMAL,
         resource_class=ResourceClass.AI_IO,
@@ -151,6 +158,7 @@ def new_task(job: JobId, tenant: Tenant, n: int, deps: tuple[int, ...] = ()) -> 
         max_attempts=3,
         deadline=None,
         depends_on=deps,
+        stage_id=stage_id,
     )
 
 
@@ -608,3 +616,199 @@ def test_request_cancel_keeps_first_reason(
         store.request_cancel(t, a.id, "first")
         again = store.request_cancel(t, a.id, "second")
     assert again.cancel_reason == "first"
+
+
+@pytest.fixture
+def wide_store(audit: RecordingAuditLog) -> PgJobStore:
+    return PgJobStore(audit, max_tasks_per_job=50)
+
+
+# --- PASS6-A2: stage_id on insert and repoint_dependency (CCR-211, CCR-214) ----------------
+def _stage_task(
+    job: JobId, tenant: Tenant, n: int, stage: str | None, iteration: int = 0
+) -> NewTask:
+    # a distinct idempotency key per (n, iteration): the helper keys on n only
+    base = new_task(job, tenant, n, stage_id=stage, iteration=iteration)
+    return replace(
+        base,
+        idempotency_key=make_idempotency_key(
+            tenant.org_id, "task.agent_05.script_draft", [job, f"s{n}", "x", iteration]
+        ),
+    )
+
+
+def test_create_tasks_stores_and_returns_stage_id(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, wide_store: PgJobStore
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        job_id = _validating_job(wide_store, t, tenant_a)
+        made = wide_store.create_tasks(
+            t,
+            job_id,
+            [
+                _stage_task(job_id, tenant_a, 1, "s06_verify"),
+                _stage_task(job_id, tenant_a, 2, None),
+            ],
+        )
+        assert [m.stage_id for m in made] == ["s06_verify", None]
+        again = wide_store.get_task(t, made[0].id)
+        assert again is not None
+        assert again.stage_id == "s06_verify"
+        assert [r.stage_id for r in wide_store.list_tasks(t, job_id)] == ["s06_verify", None]
+
+
+@pytest.mark.parametrize("bad", ["", "a", "x" * 33, "S06", "s06-v", "s06 v", "é1"])
+def test_create_tasks_refuses_malformed_stage_id(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, wide_store: PgJobStore, bad: str
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        job_id = _validating_job(wide_store, t, tenant_a)
+        with pytest.raises(InputInvalidError):
+            wide_store.create_tasks(t, job_id, [_stage_task(job_id, tenant_a, 1, bad)])
+        assert wide_store.list_tasks(t, job_id) == []
+
+
+def test_create_tasks_refuses_duplicate_live_stage_iteration(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, wide_store: PgJobStore
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        job_id = _validating_job(wide_store, t, tenant_a)
+        with pytest.raises(InputInvalidError):  # twice in one batch
+            wide_store.create_tasks(
+                t,
+                job_id,
+                [
+                    _stage_task(job_id, tenant_a, 1, "dup_st"),
+                    _stage_task(job_id, tenant_a, 2, "dup_st"),
+                ],
+            )
+        first = wide_store.create_tasks(t, job_id, [_stage_task(job_id, tenant_a, 1, "dup_st")])[0]
+        with pytest.raises(InputInvalidError):  # against a live task of an earlier call
+            wide_store.create_tasks(t, job_id, [_stage_task(job_id, tenant_a, 3, "dup_st")])
+        # another iteration, another stage and NULL stages are fine
+        wide_store.create_tasks(
+            t,
+            job_id,
+            [
+                _stage_task(job_id, tenant_a, 4, "dup_st", 1),
+                _stage_task(job_id, tenant_a, 5, "other_st"),
+                _stage_task(job_id, tenant_a, 6, None),
+                _stage_task(job_id, tenant_a, 7, None),
+            ],
+        )
+        # cancelled first task: the same (stage, iteration) is free again (CCR-211)
+        _move(
+            wide_store,
+            t,
+            first,
+            TransitionId.T19,
+            TaskState.CANCELLED,
+            reason="superseded revision",
+        )
+        wide_store.create_tasks(t, job_id, [_stage_task(job_id, tenant_a, 8, "dup_st")])
+
+
+def _edge_graph(
+    wide_store: PgJobStore, t: TenantTransaction, tenant: Tenant
+) -> tuple[JobId, list[TaskRecord]]:
+    job_id = _validating_job(wide_store, t, tenant)
+    made = wide_store.create_tasks(
+        t,
+        job_id,
+        [
+            _stage_task(job_id, tenant, 1, "up_old"),
+            _stage_task(job_id, tenant, 2, "up_new"),
+            replace(_stage_task(job_id, tenant, 3, "down_st"), depends_on=(0,)),
+        ],
+    )
+    return job_id, list(made)
+
+
+def test_repoint_dependency_moves_the_edge(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, wide_store: PgJobStore
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        _, (old, new, down) = _edge_graph(wide_store, t, tenant_a)
+        assert wide_store.dependencies(t, down.id) == [old.id]
+        wide_store.repoint_dependency(t, down.id, old.id, new.id)
+        assert wide_store.dependencies(t, down.id) == [new.id]
+        assert wide_store.dependants(t, old.id) == []
+        assert wide_store.dependants(t, new.id) == [down.id]
+
+
+def test_repoint_dependency_guards(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, wide_store: PgJobStore
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        job_id, (old, new, down) = _edge_graph(wide_store, t, tenant_a)
+        with pytest.raises(InputInvalidError):  # old == new
+            wide_store.repoint_dependency(t, down.id, old.id, old.id)
+        with pytest.raises(InputInvalidError):  # self edge
+            wide_store.repoint_dependency(t, down.id, old.id, down.id)
+        with pytest.raises(MissingDependencyError):  # no such edge (new -> old)
+            wide_store.repoint_dependency(t, new.id, old.id, down.id)
+        with pytest.raises(MissingDependencyError):  # unknown task
+            wide_store.repoint_dependency(t, down.id, old.id, TASK.new())
+        with pytest.raises(MissingDependencyError):
+            wide_store.repoint_dependency(t, TASK.new(), old.id, new.id)
+        wide_store.repoint_dependency(t, down.id, old.id, new.id)
+        with pytest.raises(MissingDependencyError):  # old edge is gone now
+            wide_store.repoint_dependency(t, down.id, old.id, new.id)
+        assert wide_store.dependencies(t, down.id) == [new.id]
+        # a task that depends on both: moving one edge onto the other is refused (no duplicate)
+        both = wide_store.create_tasks(
+            t,
+            job_id,
+            [
+                _stage_task(job_id, tenant_a, 9, "both_a"),
+                replace(_stage_task(job_id, tenant_a, 10, "both_b"), depends_on=(0,)),
+            ],
+        )
+        wide_store.repoint_dependency(t, down.id, new.id, both[0].id)
+        wide_store.repoint_dependency(t, both[1].id, both[0].id, old.id)
+        wide_store.repoint_dependency(t, both[1].id, old.id, both[0].id)
+        assert wide_store.dependencies(t, both[1].id) == [both[0].id]
+
+
+def test_repoint_dependency_refuses_another_job_of_the_same_tenant(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, wide_store: PgJobStore
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as t:
+        _, (old, _new, down) = _edge_graph(wide_store, t, tenant_a)
+        job2 = _validating_job(wide_store, t, tenant_a)
+        foreign = wide_store.create_tasks(t, job2, [_stage_task(job2, tenant_a, 1, "up_new")])[0]
+        with pytest.raises(InputInvalidError):
+            wide_store.repoint_dependency(t, down.id, old.id, foreign.id)
+        assert wide_store.dependencies(t, down.id) == [old.id]
+
+
+def test_repoint_dependency_refuses_another_tenant(
+    tenancy: PgTenancy,
+    admin: Conn,
+    tenant_a: Tenant,
+    tenant_b: Tenant,
+    wide_store: PgJobStore,
+) -> None:
+    ensure_production_type(admin)
+    with tx(tenancy, tenant_a) as ta:
+        _, (old_a, new_a, down_a) = _edge_graph(wide_store, ta, tenant_a)
+    with tx(tenancy, tenant_b) as tb:
+        _, (old_b, _new_b, down_b) = _edge_graph(wide_store, tb, tenant_b)
+        # B cannot touch A's edge, nor name A's task as an upstream
+        with pytest.raises(MissingDependencyError):
+            wide_store.repoint_dependency(tb, down_a.id, old_a.id, new_a.id)
+        with pytest.raises(MissingDependencyError):
+            wide_store.repoint_dependency(tb, down_b.id, old_b.id, new_a.id)
+    with tx(tenancy, tenant_a) as ta:
+        # A cannot point at B's task
+        with pytest.raises(MissingDependencyError):
+            wide_store.repoint_dependency(ta, down_a.id, old_a.id, old_b.id)
+        assert wide_store.dependencies(ta, down_a.id) == [old_a.id]
+    with tx(tenancy, tenant_b) as tb:
+        assert wide_store.dependencies(tb, down_b.id) == [old_b.id]

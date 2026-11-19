@@ -6,7 +6,7 @@ from agent_04_research_knowledge.library.models import TenantScope
 from agent_04_research_knowledge.models.ingest import IngestInput, IngestOutput
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
-from amw_core.ids import AttemptId
+from amw_core.exec_context import ExecContext
 
 
 @runtime_checkable
@@ -14,9 +14,7 @@ class ResearchStage(Protocol):
     def run(
         self,
         task_input: TaskInput,
-        attempt_id: AttemptId,
-        attempt_no: int = 1,
-        envelope_org_id: str | None = None,
+        ctx: ExecContext,
     ) -> TaskOutput:
         """Run ``agent_04.research_pack``; every failure is returned as a ``TaskOutput``."""
         ...

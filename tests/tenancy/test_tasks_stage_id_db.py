@@ -2,7 +2,7 @@
 partial unique key ``(org_id, job_id, stage_id, iteration) WHERE stage_id IS NOT NULL AND state <>
 'CANCELLED'``, NULL stage allowed repeatedly, RLS / tenant-FK isolation of dependency re-pointing
 at SQL level, and zero rows without a tenant context. The ``job_store`` methods of ticket
-PASS6-A2 are not part of this file."""
+PASS6-A2 are tested in tests/core_db/test_job_store.py."""
 
 import uuid
 from collections.abc import Iterator

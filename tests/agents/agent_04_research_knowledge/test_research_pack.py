@@ -21,7 +21,7 @@ from amw_core.errors import (
     RateLimitedError,
     Upstream5xxError,
 )
-from amw_core.ids import ATTEMPT, OrgId
+from amw_core.ids import OrgId
 from tests.agents.agent_04_research_knowledge.conftest import (
     BODY_1,
     BODY_2,
@@ -29,6 +29,7 @@ from tests.agents.agent_04_research_knowledge.conftest import (
     approval,
     build_world,
     default_responder,
+    exec_ctx,
     plan_json,
     user_payload,
 )
@@ -39,7 +40,8 @@ PKG = Path(__file__).resolve().parents[3] / "packages/agents/agent_04_research_k
 
 
 def run(w: World, data: dict[str, Any] | None = None, **over: Any) -> TaskOutput:
-    return w.step().run(w.task_input(data, **over), ATTEMPT.new())
+    ti = w.task_input(data, **over)
+    return w.step().run(ti, exec_ctx(ti))
 
 
 def codes(out: TaskOutput) -> str | None:
@@ -242,7 +244,7 @@ def test_input_rejections_make_no_llm_call() -> None:
     assert codes(run(w2)) == "PERMANENT.TENANT_INACTIVE"
     w3 = build_world()
     wrong_agent = w3.task_input(agent_id="agent_05")
-    assert codes(w3.step().run(wrong_agent, ATTEMPT.new())) == "PERMANENT.UNSUPPORTED_TASK"
+    assert codes(w3.step().run(wrong_agent, exec_ctx(wrong_agent))) == "PERMANENT.UNSUPPORTED_TASK"
     w4 = build_world()
     ti = w4.task_input(
         payload={
@@ -251,11 +253,10 @@ def test_input_rejections_make_no_llm_call() -> None:
             "data": w4.data(),
         }
     )
-    assert codes(w4.step().run(ti, ATTEMPT.new())) == "PERMANENT.SCHEMA_VERSION_UNSUPPORTED"
+    assert codes(w4.step().run(ti, exec_ctx(ti))) == "PERMANENT.SCHEMA_VERSION_UNSUPPORTED"
     w5 = build_world()
-    out = w5.step().run(
-        w5.task_input(), ATTEMPT.new(), envelope_org_id="org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e90"
-    )
+    ti5 = w5.task_input()
+    out = w5.step().run(ti5, exec_ctx(ti5, org_id="org_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e90"))
     assert codes(out) == "PERMANENT.TENANT_MISMATCH" and out.status is OutputStatus.REJECTED
 
 
@@ -476,17 +477,15 @@ def test_copy_failures_drop_notes_and_loop_cap() -> None:
     out = run(w)
     assert out.status is OutputStatus.FAILED and codes(out) == "PERMANENT.INSUFFICIENT_INPUT"
     capped = build_world()
-    out2 = capped.step().run(
-        capped.task_input(
-            resource_budget={
-                "max_cost_micros": 5,
-                "currency": "USD",
-                "max_wall_ms": 1000,
-                "max_llm_calls": 2,
-            }
-        ),
-        ATTEMPT.new(),
+    capped_ti = capped.task_input(
+        resource_budget={
+            "max_cost_micros": 5,
+            "currency": "USD",
+            "max_wall_ms": 1000,
+            "max_llm_calls": 2,
+        }
     )
+    out2 = capped.step().run(capped_ti, exec_ctx(capped_ti))
     assert (
         out2.status is OutputStatus.FAILED
         and codes(out2) == "AGENT.LOOP_CAP_EXCEEDED"

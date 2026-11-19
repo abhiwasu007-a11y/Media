@@ -35,6 +35,7 @@ from amw_core.enums import (
     RulePackScope,
     SourceOwnership,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     ATTEMPT,
     CHANNEL,
@@ -44,8 +45,10 @@ from amw_core.ids import (
     PROJECT,
     TASK,
     Prefix,
+    actor_ref,
     new_id,
 )
+from amw_core.interfaces import TenantContext
 from amw_core.testing.memory import MemoryCheckpointStore, MemoryIdempotencyStore
 from tests.agents.agent_04_research_knowledge.fakes import (
     FakeAuditLog,
@@ -209,6 +212,23 @@ def default_responder(request: LlmRequest) -> str:
             )
     return json.dumps(
         {"assessments": assess, "notes": notes, "excluded_statements": [], "refusal": None}
+    )
+
+
+def exec_ctx(task: TaskInput, *, org_id: str | None = None) -> ExecContext:
+    """The ``ExecContext`` the orchestrator would build for ``task`` (a fresh attempt ID);
+    ``org_id`` overrides the envelope org (tenant mismatch tests)."""
+    return ExecContext(
+        tenant=TenantContext(
+            org_id=ORG.validate(org_id or task.org_id),
+            actor=actor_ref("agent_04"),
+            correlation_id=CORRELATION.validate(task.correlation_id),
+        ),
+        job_id=JOB.validate(task.job_id),
+        task_id=TASK.validate(task.task_id),
+        attempt_id=ATTEMPT.new(),
+        channel_id=CHANNEL.validate(task.channel_id) if task.channel_id else None,
+        attempt_no=task.retry_count + 1,
     )
 
 
@@ -454,7 +474,6 @@ def make_run(world: World, log_name: str = "amw.agent_04") -> Any:
     from agent_04_research_knowledge.library.models import TenantScope
     from agent_04_research_knowledge.observability import EventLogger, LogContext
     from agent_04_research_knowledge.runtime import CallCounter, RunInfo
-    from amw_core.interfaces import TenantContext
 
     class ListAudit:
         def __init__(self) -> None:
