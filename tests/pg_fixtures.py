@@ -228,3 +228,24 @@ def insert_task(
         ),
     )
     return task
+
+
+TEST_PROBE_LEASE_BOUND_MS = 600_000
+"""Test fixture value only (the longest probe lease the suites request), never a deployment
+value: the real bounds are REQUIRES REVIEW (Phase 1) (07 section 4.2; migration 0055)."""
+
+
+def allow_probe_lease(
+    dsn: str, provider: str, operation_class: str, max_ms: int = TEST_PROBE_LEASE_BOUND_MS
+) -> None:
+    """Set the server-side probe lease bound of one breaker key (``platform_controls`` key
+    ``breaker_probe_timeout_max_ms``, migration 0055) as the superuser, standing in for the
+    ``PLATFORM_OWNER`` write path (04 section 5.1)."""
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute(
+            "INSERT INTO platform_controls (id, key, value, updated_by)"
+            " VALUES (%s, 'breaker_probe_timeout_max_ms', jsonb_build_object(%s::text, %s::bigint),"
+            " 'sys_test')"
+            " ON CONFLICT (key) DO UPDATE SET value = platform_controls.value || EXCLUDED.value",
+            (new_uuid7(), f"{provider}.{operation_class}", max_ms),
+        )

@@ -12,7 +12,7 @@
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -34,7 +34,7 @@ from amw_core.ids import (
     IdempotencyKey,
     is_actor_ref,
 )
-from amw_core.interfaces.system_functions import BreakerKey, BreakerState
+from amw_core.interfaces.system_functions import BreakerAdmission, BreakerKey, BreakerState
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.observability import get_logger
 from amw_core.retries.breaker import BreakerRow, counts_as_failure
@@ -45,20 +45,8 @@ Connection = psycopg.Connection[tuple[Any, ...]]
 _log = get_logger("retries.breaker")
 
 
-@dataclass(frozen=True, slots=True)
-class ProbeAdmission:
-    """Outcome of ``amw_breaker_admit``: ``admitted`` is the decision, ``state`` the breaker state
-    after it (``HALF_OPEN`` admissions are probes and must be followed by ``breaker_record``)."""
-
-    admitted: bool
-    state: BreakerState
-    epoch: int = 0
-    """Probe generation: pass it to ``breaker_record`` as ``probe_epoch``."""
-
-    @property
-    def probe(self) -> bool:
-        """True when the call was admitted as a HALF_OPEN probe: pass it to ``breaker_record``."""
-        return self.admitted and self.state.state is CircuitState.HALF_OPEN
+ProbeAdmission = BreakerAdmission
+"""Outcome of ``amw_breaker_admit`` (the ``SystemFunctions`` record, CCR-108)."""
 
 
 class PgBreakerFunctions:

@@ -35,7 +35,7 @@ from amw_core.retries.pg import PgBreakerFunctions
 from amw_core.tenancy import PgTenancy, dsn_connection_factory
 from tests.core_services.support import T0, FixedClock, budget, settings
 from tests.core_services_db.conftest import Work, make_task, make_user, make_work
-from tests.pg_fixtures import Tenant
+from tests.pg_fixtures import Tenant, allow_probe_lease
 
 pytestmark = pytest.mark.integration
 M = 1_000_000
@@ -233,6 +233,7 @@ def test_half_open_admits_exactly_max_probes_of_twenty_workers(
     """M3: the probe count is kept under the row lock, so concurrent workers cannot over-admit."""
     fns = _fns(pg_dsn, half_open_max_probes=max_probes)
     key = BreakerKey(f"llm_probe_{max_probes}", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     _open_breaker(fns, key)
     outcomes, errors = run_threads(lambda _: fns.admit(ADAPTER, key))
     assert errors == []
@@ -250,6 +251,7 @@ def test_closed_breaker_admits_everyone_and_open_admits_nobody(
 ) -> None:
     fns = _fns(pg_dsn, open_ms=5_000, open_ms_max=10_000)
     key = BreakerKey("llm_probe_closed", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     outcomes, errors = run_threads(lambda _: fns.admit(ADAPTER, key))
     assert errors == []
     assert all(o.admitted and o.state.state is CircuitState.CLOSED for o in outcomes)
@@ -322,6 +324,7 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
         settings().model_copy(update={"breaker_default": cfg}),
     )
     key = BreakerKey(f"llm_parity_{seed}", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     rng = random.Random(seed)  # noqa: S311 - deterministic test data
     pure = new_row(key, datetime.now(UTC))
     codes = ["TEMPORARY.NETWORK", "TEMPORARY.UPSTREAM_5XX", "PERMANENT.INPUT_INVALID"]
@@ -376,6 +379,7 @@ def test_a_probe_that_never_reports_is_reclaimed_after_its_lease(
     """Re-review N1: crash (or an E2 refusal) after admission must not wedge HALF_OPEN."""
     fns = _fns(pg_dsn, half_open_probe_timeout_ms=300)
     key = BreakerKey("llm_probe_crash", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     _open_breaker(fns, key)
     first = fns.admit(ADAPTER, key)  # this worker crashes now: it never records
     assert first.admitted
@@ -397,6 +401,7 @@ def test_a_late_result_of_a_non_probe_call_frees_no_probe_slot(
     """Re-review m-a: a call admitted while CLOSED that ends during HALF_OPEN is not a probe."""
     fns = _fns(pg_dsn, open_ms=5_000, open_ms_max=10_000)
     key = BreakerKey("llm_probe_late", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     old_call = fns.admit(ADAPTER, key)  # admitted while CLOSED, still running
     assert old_call.admitted
     assert not old_call.probe
@@ -423,6 +428,7 @@ def test_a_very_late_probe_result_after_its_lease_was_reclaimed_frees_nothing(
     probe 1's own (very late) result must not free probe 2's slot."""
     fns = _fns(pg_dsn, half_open_probe_timeout_ms=200)
     key = BreakerKey("llm_probe_epoch", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     _open_breaker(fns, key)
     first = fns.admit(ADAPTER, key)
     assert first.probe

@@ -52,6 +52,7 @@ from amw_core.interfaces.queue import (
 )
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobStorage, BlobUri, ReadableStream
 from amw_core.interfaces.system_functions import (
+    BreakerAdmission,
     BreakerKey,
     BreakerState,
     DueResume,
@@ -73,6 +74,7 @@ __all__ = [
     "BlobInfo",
     "BlobStorage",
     "BlobUri",
+    "BreakerAdmission",
     "BreakerKey",
     "BreakerState",
     "Budget",

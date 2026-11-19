@@ -14,9 +14,10 @@ from typing import Any
 import psycopg
 
 from amw_core.enums import CircuitState, TaskState, WaitReason
-from amw_core.errors import CATALOGUE, InputInvalidError
+from amw_core.errors import CATALOGUE, ConfigInvalidError, InputInvalidError
 from amw_core.ids import ORG, QUEUE_ITEM, TASK, ActorRef, is_actor_ref
 from amw_core.interfaces.system_functions import (
+    BreakerAdmission,
     BreakerKey,
     BreakerState,
     DueResume,
@@ -40,6 +41,11 @@ class BreakerConfig:
     open_ms: int
     open_ms_max: int
     half_open_successes_to_close: int
+    half_open_max_probes: int | None = None
+    """Required by ``breaker_admit``; ``None`` (not configured) refuses with ``CONFIG_INVALID``."""
+    half_open_probe_timeout_ms: int | None = None
+    """CCR-108: no default, value REQUIRES REVIEW (07 section 4.2); ``None`` refuses admission
+    with ``CONFIG_INVALID``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,8 +124,39 @@ class PgSystemFunctions:
         )
         return [StuckTask(ORG.from_uuid(o), TASK.from_uuid(t), TaskState(s)) for o, t, s in rows]
 
+    def breaker_admit(self, caller: ActorRef, key: BreakerKey) -> BreakerAdmission:
+        cfg = self._breaker_config(key)
+        if cfg.half_open_max_probes is None or cfg.half_open_probe_timeout_ms is None:
+            raise ConfigInvalidError(
+                "breaker half_open_max_probes / half_open_probe_timeout_ms not configured"
+                " (the timeout is REQUIRES REVIEW, no default)",
+                details={"provider": key.provider, "operation_class": key.operation_class},
+            )
+        rows = self._call(
+            caller,
+            "amw_breaker_admit",
+            "SELECT admitted, state, open_until, epoch FROM amw_breaker_admit(%s, %s, %s, %s, %s)",
+            (
+                key.provider,
+                key.operation_class,
+                key.credential_scope,
+                cfg.half_open_max_probes,
+                cfg.half_open_probe_timeout_ms,
+            ),
+        )
+        admitted, state, open_until, epoch = rows[0]
+        return BreakerAdmission(
+            bool(admitted), BreakerState(key, CircuitState(state), open_until), int(epoch)
+        )
+
     def breaker_record(
-        self, caller: ActorRef, key: BreakerKey, succeeded: bool, error_code: str | None
+        self,
+        caller: ActorRef,
+        key: BreakerKey,
+        succeeded: bool,
+        error_code: str | None,
+        probe: bool | None = None,
+        probe_epoch: int | None = None,
     ) -> BreakerState:
         if succeeded and error_code is not None:
             raise InputInvalidError("a success carries no error code")
@@ -131,7 +168,7 @@ class PgSystemFunctions:
             caller,
             "amw_breaker_record",
             "SELECT state, open_until FROM amw_breaker_record(%s, %s, %s, %s, %s, %s, %s, %s, %s,"
-            " %s, %s, %s, %s)",
+            " %s, %s, %s, %s, %s, %s)",
             (
                 key.provider,
                 key.operation_class,
@@ -146,6 +183,8 @@ class PgSystemFunctions:
                 cfg.open_ms,
                 cfg.open_ms_max,
                 cfg.half_open_successes_to_close,
+                probe,
+                probe_epoch,
             ),
         )
         state, open_until = rows[0]

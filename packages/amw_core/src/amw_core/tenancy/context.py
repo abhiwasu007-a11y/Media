@@ -21,6 +21,7 @@ from psycopg import errors as pg_errors
 from amw_core.enums import OrgStatus
 from amw_core.errors import (
     AmwError,
+    ConfigInvalidError,
     DbTransientError,
     DbUnavailableError,
     InputInvalidError,
@@ -40,6 +41,9 @@ ConnectionFactory = Callable[[], AbstractContextManager[Connection]]
 SQLSTATE_INVALID_TRANSITION = "AMW01"
 SQLSTATE_GUARD_REJECTED = "AMW02"
 SQLSTATE_MISSING_DEPENDENCY = "AMW03"
+SQLSTATE_CONFIG_INVALID = "AMW04"
+"""Raised by a database function whose server-side configuration is missing or exceeded (0055:
+the probe lease bound of ``amw_breaker_admit``)."""
 
 
 class PgTenantTransaction:
@@ -87,6 +91,8 @@ def translate_db_error(exc: psycopg.Error) -> AmwError:
         return InvalidTransitionError(str(exc).split("\n", 1)[0])
     if state == SQLSTATE_MISSING_DEPENDENCY:
         return MissingDependencyError(str(exc).split("\n", 1)[0])
+    if state == SQLSTATE_CONFIG_INVALID:
+        return ConfigInvalidError(str(exc).split("\n", 1)[0])
     if state in (SQLSTATE_GUARD_REJECTED, "42501"):
         return PermissionDeniedError(str(exc).split("\n", 1)[0])
     if isinstance(exc, (pg_errors.SerializationFailure, pg_errors.DeadlockDetected)):
