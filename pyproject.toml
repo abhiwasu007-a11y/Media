@@ -49,7 +49,7 @@ agent-16-compliance-qa = { workspace = true }
 line-length = 100
 extend-exclude = ["docs"]
 target-version = "py314"
-src = ['packages/amw_core/src', 'packages/amw_adapters/src', 'packages/amw_orchestrator/src', 'packages/amw_evals/src', 'packages/amw_runtime/src', 'packages/agents/agent_04_research_knowledge/src', 'packages/agents/agent_05_scriptwriter/src', 'packages/agents/agent_06_fact_checker/src', 'packages/agents/agent_07_voice_production/src', 'packages/agents/agent_08_visual_assets/src', 'packages/agents/agent_09_video_director/src', 'packages/agents/agent_10_video_editor/src', 'packages/agents/agent_11_thumbnail_design/src', 'packages/agents/agent_16_compliance_qa/src']
+src = ['packages/amw_core/src', 'packages/amw_adapters/src', 'packages/amw_orchestrator/src', 'packages/amw_evals/src', 'packages/amw_runtime/src', 'packages/amw_delivery/src', 'packages/agents/agent_04_research_knowledge/src', 'packages/agents/agent_05_scriptwriter/src', 'packages/agents/agent_06_fact_checker/src', 'packages/agents/agent_07_voice_production/src', 'packages/agents/agent_08_visual_assets/src', 'packages/agents/agent_09_video_director/src', 'packages/agents/agent_10_video_editor/src', 'packages/agents/agent_11_thumbnail_design/src', 'packages/agents/agent_16_compliance_qa/src']
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "C4", "SIM", "RUF", "PT", "N", "ANN", "ASYNC", "TID"]
