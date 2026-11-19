@@ -97,10 +97,15 @@ def test_every_write_is_a_03_section_8_path_and_lands_where_the_rule_says(tmp_pa
     attempt = f"{prefix}tasks/{ctx.task_id}/attempts/{ctx.attempt_id}/artifacts/"
     assert f"{attempt}narration.wav" in written
     assert f"{attempt}timeline.json" in written
-    clips = [u for u in written if u.startswith(f"{prefix}cache/agent_07/")]
+    cache = [u for u in written if u.startswith(f"{prefix}cache/agent_07/")]
+    clips = [u for u in cache if u.endswith(".wav")]
+    sidecars = [u for u in cache if u.endswith(".audio.json")]  # CCR-269: recorded audio hash
     assert clips
-    assert all(u.rsplit("/", 1)[1].startswith("s") and u.endswith(".wav") for u in clips)
-    assert len(clips) + 2 == len(written)  # nothing else, in particular no s07_* path
+    assert all(u.rsplit("/", 1)[1].startswith("s") for u in clips)
+    assert sorted(u[: -len(".audio.json")] for u in sidecars) == sorted(
+        u[: -len(".wav")] for u in clips
+    )
+    assert len(cache) + 2 == len(written)  # nothing else, in particular no s07_* path
     assert not [u for u in written if "/s07_" in u]
 
 
