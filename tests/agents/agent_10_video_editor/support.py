@@ -434,7 +434,7 @@ def run_chain(world: World) -> dict[str, Any]:
     from agent_10_video_editor.render import RenderStage
     from agent_10_video_editor.subtitle_stage import SubtitleStage
 
-    render_out = RenderStage(world.deps()).run(
+    render_out = RenderStage(world.deps()).execute(
         world.render_input(), world.attempt, envelope_org=world.org
     )
     assert render_out.payload is not None
@@ -462,7 +462,7 @@ def run_chain(world: World) -> dict[str, Any]:
             "agent_05.script_document",
         ],
     )
-    subs_out = SubtitleStage(world.deps()).run(subs_in, world.attempt)
+    subs_out = SubtitleStage(world.deps()).execute(subs_in, world.attempt)
     assert subs_out.payload is not None
     assert subs_out.payload.data is not None
     s_uri, s_sha = world.put(

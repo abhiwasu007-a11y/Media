@@ -110,10 +110,13 @@ class EvidenceWriter:
         )
         return Ebur128Parser.parse_series(result.stderr)
 
+    def _uri(self, base: tuple[str, str, str], name: str) -> str:
+        return self._scope.artifact_uri(*base, name)
+
     def write(
         self,
         *,
-        base: str,
+        base: tuple[str, str, str],
         render_id: str,
         render_sha256: str,
         timeline: Timeline,
@@ -124,13 +127,12 @@ class EvidenceWriter:
         results: Sequence[CheckResult],
         work: Path,
     ) -> EvidenceRefs:
-        """``base`` = ``<job>/tasks/<task>/attempts/<att>/artifacts`` (03 section 8)."""
+        """``base`` = ``(job_id, task_id, attempt_id)``: every file is a write-once artifact of this
+        attempt (03 section 8 rule 5)."""
         entries: list[EvidenceFrame] = []
         frame_refs: list[BlobRef] = []
         for number, (index, name) in enumerate(frames, start=1):
-            info = self._scope.put_file(
-                self._scope.uri("jobs", f"{base}/frames/f{number:03d}.png"), work / name
-            )
+            info = self._scope.put_file(self._uri(base, f"frames/f{number:03d}.png"), work / name)
             ref = BlobRef(uri=info.uri, sha256=info.sha256)
             frame_refs.append(ref)
             entries.append(
@@ -143,11 +145,9 @@ class EvidenceWriter:
                     sha256=info.sha256,
                 )
             )
-        sheet = self._scope.put_file(
-            self._scope.uri("jobs", f"{base}/contact_sheet.png"), work / sheet_name
-        )
+        sheet = self._scope.put_file(self._uri(base, "contact_sheet.png"), work / sheet_name)
         series_blob = self._scope.put_bytes(
-            self._scope.uri("jobs", f"{base}/loudness_series.json"),
+            self._uri(base, "loudness_series.json"),
             canonical_json(
                 {
                     "unit": "centi_LUFS",
@@ -157,7 +157,7 @@ class EvidenceWriter:
             ),
         )
         report = self._scope.put_bytes(
-            self._scope.uri("jobs", f"{base}/qc_report.json"),
+            self._uri(base, "qc_report.json"),
             json.dumps(
                 [
                     {
@@ -197,7 +197,7 @@ class EvidenceWriter:
             ),
         )
         manifest_blob = self._scope.put_bytes(
-            self._scope.uri("jobs", f"{base}/evidence_manifest.json"),
+            self._uri(base, "evidence_manifest.json"),
             canonical_json(manifest.model_dump(mode="json")),
         )
         return EvidenceRefs(

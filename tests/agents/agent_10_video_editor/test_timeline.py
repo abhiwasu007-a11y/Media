@@ -36,7 +36,7 @@ SHA = "e" * 64
 
 
 def _doc(
-    *, end_screen: bool = False, overlay_ref: str | None = "amw-blob://org_x/t.png", reveal: int = 2
+    *, end_screen: bool = False, overlay_ref: str | None = "lower_third", reveal: int = 2
 ) -> tuple[ShotPlan, AssetManifest, dict[str, AssetRecord]]:
     plan: dict[str, Any] = {
         "timing_basis": "MEASURED", "language": "mr", "aspect_ratio": "16:9",
@@ -54,7 +54,7 @@ def _doc(
                 "kind": "END_SCREEN",
                 "start_ms": 10_000,
                 "end_ms": 12_000,
-                "template_ref": "amw-blob://org_x/e.png",
+                "template_ref": "end_screen",
             }
         )
     stills = [{"k": k, "asset_id": f"st{k}", "asset_uri": f"amw-blob://org_x/st{k}.png", "sha256": str(k) * 64, "start_ms": [4000, 7000][k], "end_ms": [7000, 10_000][k], "licence_id": "L", "ledger_entry_ids": ["l"]} for k in range(reveal)]  # fmt: skip
@@ -64,10 +64,22 @@ def _doc(
         {"shot_id": "sh01", "aspect_ratio": "9:16", "status": "SOURCED", "asset_id": "z", "asset_uri": "amw-blob://org_x/z.mp4", "fingerprints": {"sha256": "9" * 64}},
     ]  # fmt: skip
     overlays = [{"overlay_id": "ov01", "kind": "LOWER_THIRD", "template_asset_id": "t1"}]
-    assets = {"t1": AssetRecord(asset_id="t1", uri="amw-blob://org_x/t.png", sha256="5" * 64)}
+    assets = {
+        "t1": AssetRecord(
+            asset_id="t1",
+            uri="amw-blob://org_x/t.png",
+            sha256="5" * 64,
+            attributes={"template_id": "lower_third"},
+        )
+    }
     if end_screen:
         overlays.append({"overlay_id": "ov02", "kind": "END_SCREEN", "template_asset_id": "t2"})
-        assets["t2"] = AssetRecord(asset_id="t2", uri="amw-blob://org_x/e.png", sha256="6" * 64)
+        assets["t2"] = AssetRecord(
+            asset_id="t2",
+            uri="amw-blob://org_x/e.png",
+            sha256="6" * 64,
+            attributes={"template_id": "end_screen"},
+        )
     return (
         ShotPlan.model_validate(plan),
         AssetManifest.model_validate({"shots": shots, "overlays": overlays}),
@@ -112,8 +124,11 @@ def test_end_screen_tail_is_a_pseudo_shot_of_the_template() -> None:
 @pytest.mark.unit
 def test_template_mismatch_and_reveal_rules_and_missing_overlay_entry() -> None:
     with pytest.raises(InputInvalidError) as info:
-        _compile(overlay_ref="amw-blob://org_x/other.png")
+        _compile(overlay_ref="other_template")
     assert violations_of(info.value) == ["TEMPLATE_MISMATCH:ov01"]
+    with pytest.raises(InputInvalidError) as as_uri:  # a URI is never a template ID (CCR-204)
+        _compile(overlay_ref="amw-blob://org_x/t.png")
+    assert violations_of(as_uri.value) == ["TEMPLATE_MISMATCH:ov01"]
     with pytest.raises(InputInvalidError) as count:
         _compile(reveal=1)
     assert violations_of(count.value) == ["REVEAL_COUNT:sh02"]
