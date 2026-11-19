@@ -151,7 +151,7 @@ from amw_core.interfaces import (
     TenantContext,
 )
 from amw_core.interfaces.idempotency_store import BeginAction
-from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri, task_io_uri
+from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri
 
 TASK_TYPE = "agent_04.research_pack"
 STAGE_ID = "s04_research"
@@ -980,8 +980,12 @@ class ResearchPackStep:
         return output
 
     def _store_output(self, run: RunInfo, output: TaskOutput) -> BlobUri:
+        # CCR-285 (PROPOSED): ``attempts/<att>/output.json`` belongs to the orchestrator (the task
+        # row's ``output_ref``); the agent's own replay copy lives under ``checkpoints/<task>/``.
         uri = BlobUri(
-            task_io_uri(run.context.org_id, run.job_id, run.task_id, run.attempt_id, "output.json")
+            checkpoint_uri(
+                run.context.org_id, run.job_id, run.task_id, f"stored_output-{run.attempt_id}.json"
+            )
         )
         if not self._d.storage.head(run.context, uri).exists:
             self._d.storage.put(run.context, uri, BytesIO(output.model_dump_json().encode()))
