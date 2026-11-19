@@ -1,9 +1,8 @@
 """A TEST registry of the agents' own payload models (PASS6-B1 acceptance).
 
-The global allow-list ``PAYLOAD_PLUGIN_PACKAGES`` is empty until the payload-registration lane
-merges, and this lane does not edit it: the tests register the same models through this fixture
-into a private ``PayloadSchemaRegistry`` instead. Outputs of Agent 16 stages have no registered
-model yet and use a permissive stand-in (the real output is still produced by the real worker)."""
+The global allow-list (PR #98) registers 31 names; ``agent_registry`` takes those from the
+global loader and uses this module's TEST models only for the names the allow-list does not
+register (agent_16 gate/score/authorisation outputs, svc_s02.*, svc_s07.request_approval.*)."""
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,7 +31,7 @@ from agent_16_compliance_qa.assembler import ComplianceGateInput
 from agent_16_compliance_qa.authorisation.stage import AuthorisationInput
 from agent_16_compliance_qa.scoring.stage import QualityScoreInput
 from agent_16_compliance_qa.stages import UniquenessInput
-from amw_core.contracts.payloads import PayloadSchemaRegistry
+from amw_core.contracts.payloads import PayloadSchemaRegistry, load_payload_schema_plugins
 from amw_delivery.models import BundleInputs, BundleManifest
 
 
@@ -88,13 +87,28 @@ OPEN_OUTPUTS = (
 
 
 def agent_registry(*, real_outputs: bool = True) -> PayloadSchemaRegistry:
-    """Inputs always through the agent's own model; outputs through the real model or, for a
-    run whose workers are stand-ins, through the permissive one."""
+    """The GLOBAL allow-listed payload models (``load_payload_schema_plugins``, PR #98) wherever
+    the name is registered there, and the TEST models of this module ONLY for the names that are
+    not registered globally (agent_16 gate/score/authorisation outputs, ``svc_s02.*``,
+    ``svc_s07.request_approval.*``). With ``real_outputs=False`` (stand-in workers) the outputs
+    of every stage use the permissive model instead, because the stand-ins return only the fields
+    the downstream builders read."""
+    glob = PayloadSchemaRegistry()
+    load_payload_schema_plugins(glob)
     reg = PayloadSchemaRegistry()
-    for name, (version, model) in INPUTS.items():
-        reg.register(name, version, model)
-    for name, (version, model) in OUTPUTS.items():
-        reg.register(name, version, model if real_outputs else Open)
+    for name in sorted(glob.names()):
+        if name.endswith(".output") and not real_outputs:
+            reg.register(name, V, Open)
+            continue
+        known = INPUTS.get(name) or OUTPUTS.get(name)
+        version = known[0] if known else V
+        found = glob.resolve(name, version)
+        reg.register(name, found.version, found.model)
+    registered = glob.names()
+    for name, (version, model) in {**INPUTS, **OUTPUTS}.items():
+        if name not in registered:
+            reg.register(name, version, model if real_outputs or name.endswith(".input") else Open)
     for name in OPEN_OUTPUTS:
-        reg.register(name, V, Open)
+        if name not in registered:
+            reg.register(name, V, Open)
     return reg

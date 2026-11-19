@@ -1,8 +1,9 @@
 # ruff: noqa: PT018
 """PASS6-B1: every 3A input builder, against the agent's OWN input model and ``amw.task_input``.
 
-The payload models come from ``agent_schemas`` (a test registry; the global allow-list is empty
-until the payload-registration lane merges). The upstream outputs are hand-made (builder_world)."""
+The payload models come from ``agent_schemas.agent_registry``: the global allow-list (PR #98)
+where the name is registered, a TEST model only for the unregistered names. The upstream outputs
+are hand-made (builder_world)."""
 
 import ast
 from dataclasses import replace

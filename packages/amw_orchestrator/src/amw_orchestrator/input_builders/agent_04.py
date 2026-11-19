@@ -10,10 +10,9 @@ not in the repository: the revision stays refused with a typed error (CCR-280, n
 
 from amw_core.errors import InputInvalidError
 from amw_orchestrator.executor import BuildContext, BuiltInput
+from amw_orchestrator.input_builders import common as c
 
 PAYLOAD_SCHEMA = "agent_04.research_pack.input"
-YOUTUBE_GENERAL = "rp.youtube_general"
-FINANCE_SEBI_IN = "rp.finance_sebi_in"
 
 
 class ResearchPackBuilder:
@@ -24,7 +23,6 @@ class ResearchPackBuilder:
                 details={"stage_id": ctx.stage.stage_id},
             )
         topic = ctx.job.owner_topic
-        finance = ctx.job.finance_rules_apply
         data = {
             "topic": {
                 "title": topic.title,
@@ -37,7 +35,7 @@ class ResearchPackBuilder:
                 else None,
             },
             "channel_category": ctx.job.channel_category.value,
-            "active_rule_packs": [YOUTUBE_GENERAL, *([FINANCE_SEBI_IN] if finance else [])],
+            "active_rule_packs": c.active_rule_packs(ctx.job),
             "library_scope": {"collection_keys": None},
             "owner_references": [r.to_doc() for r in topic.owner_references],
             "revision": None,

@@ -20,6 +20,7 @@ from amw_orchestrator.executor import BuildContext, DocRef, JobFacts
 
 YOUTUBE_GENERAL = "rp.youtube_general"
 FINANCE_SEBI_IN = "rp.finance_sebi_in"
+# Also sent for non-finance jobs: a GLOSSARY constant (status of the owner), not a finance rule.
 OWNER_SEBI_REGISTRATION = "UNREGISTERED"
 """GLOSSARY section 6.52: the only value of v1; every payload that carries the field is a closed
 ``const`` in its schema. It is a registration status of the owner, not a finance rule text."""
@@ -185,7 +186,11 @@ def require_iteration_output(ctx: BuildContext) -> TaskOutput:
 
 def payload_doc_ref(ctx: BuildContext, stage_id: str) -> DocRef:
     """The payload of a stage's output as a stored document (by its own ``data_ref`` when it is
-    stored by reference, else a verbatim write-once copy made by the build services)."""
+    stored by reference, else a verbatim write-once copy made by the build services).
+
+    The copy is a storage write inside a builder (a side effect), but it is replay-safe: the path
+    is fixed by the output's own task and attempt, and ``TaskIo.put_payload`` writes it once and
+    returns the existing blob when its hash already matches, so a rebuild changes nothing."""
     out = stage_output(ctx, stage_id)
     pl = out.payload
     if pl is not None and pl.data_ref is not None and pl.data_sha256 is not None:

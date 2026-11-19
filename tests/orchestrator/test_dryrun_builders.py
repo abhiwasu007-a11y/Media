@@ -3,8 +3,9 @@
 
 What runs for real: the GraphRunner and its driver on the PostgreSQL tables, the TaskExecutor, the
 real ``BuilderTable`` (every task type of the 3A long-form graph), every Task Input validated
-through the agents' OWN input models (a TEST registry, ``agent_schemas``: the global allow-list
-stays empty and this lane does not edit it), the hash-verified document reads of the builders
+through the agents' OWN input models (the GLOBAL registry of PR #98 where the name is registered;
+the TEST registry ``agent_schemas`` only for the unregistered names: agent_16 gate/score/
+authorisation outputs, svc_s02.*, svc_s07.request_approval.*), the hash-verified document reads of the builders
 through the real ``TaskIo``/``LocalDiskStorage``, the S7 ``ApprovalWorker`` and the REAL
 ``agent_13.file_delivery`` entry point (``DeliveryStage``), which builds the zip and the manifest
 from what the builders passed it.
