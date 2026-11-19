@@ -31,7 +31,7 @@ from amw_orchestrator.executor import (
     RulePackDoc,
 )
 from amw_orchestrator.registry import job_graph
-from tests.orchestrator.world import LONG, ok_output
+from tests.orchestrator.world import LONG, approval_output, ok_output
 
 H = "a" * 64
 
@@ -322,7 +322,7 @@ class World:
                              "scorer_kind": "DETERMINISTIC", "criteria": []}]},
         )  # fmt: skip
         self.add("a_final", "svc_s07.request_approval.output",
-                 {"state": "APPROVED", "approval_id": new_id(Prefix.APPROVAL)})  # fmt: skip
+                 approval_output(rnd.sha256))  # fmt: skip
         self.add(
             "s16_auth", "agent_16.publication_authorisation.output",
             {"verdict": "ALLOWED", "authorised_action": "DELIVERY", "authorisation_verdict_id": "vrd_x",

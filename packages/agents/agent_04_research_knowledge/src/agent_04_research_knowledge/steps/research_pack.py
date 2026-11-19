@@ -592,11 +592,13 @@ class ResearchPackStep:
             video_kind=data.topic.video_kind,
             collections=tuple(
                 PlanCollection(
-                    collection_key=c.collection_key, kind=KnowledgeSourceKind.BOOK, languages=()
+                    collection_key=c.collection_key,
+                    kind=KnowledgeSourceKind.BOOK,
+                    languages=c.languages,
                 )
                 for c in views
             ),
-            library_languages=(),
+            library_languages=tuple(sorted({lang for c in views for lang in c.languages})),
             glossary_terms=(),
             revision_gaps=tuple(
                 PlanGap(gap_id=g.gap_id, gap_text=g.gap_text, reason=g.reason) for g in gaps

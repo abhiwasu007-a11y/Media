@@ -244,15 +244,6 @@ class StandIns:
         )
 
 
-class ApprovingDesk(TestDesk):
-    """A TEST decision that carries the approval ID (the S7 desk of the real system returns it)."""
-
-    def decision(self, task_input: TaskInput, ctx: ExecContext) -> Mapping[str, object] | None:
-        if str(ctx.task_id) not in self.decisions:
-            return None
-        return {"state": "APPROVED", "approval_id": new_id(Prefix.APPROVAL)}
-
-
 class Registry:
     def __init__(self, stand: StandIns, approval: ApprovalWorker, delivery: DeliveryStage) -> None:
         self.stand, self.approval, self.delivery = stand, approval, delivery
@@ -297,7 +288,7 @@ def test_non_finance_job_runs_to_delivered_through_the_real_builders(
 
     rig = build_rig(
         pg_dsn, tmp_path / "blobs", registry_factory=factory,
-        schemas=agent_registry(real_outputs=False), build_services=RuntimeFacts(), desk=ApprovingDesk(),
+        schemas=agent_registry(real_outputs=False), build_services=RuntimeFacts(), desk=TestDesk(),
     )  # fmt: skip
     base = rig.intake("non-finance")
     org = base.org_id

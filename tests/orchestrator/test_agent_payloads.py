@@ -97,8 +97,9 @@ def test_the_real_quality_score_and_uniqueness_outputs_are_accepted() -> None:
         assert done.status is OutputStatus.SUCCEEDED and done.error is None, schema
 
 
-def test_the_approval_output_is_still_refused_fail_closed() -> None:
-    """``svc_s07.request_approval.output`` has no schema in any Wave A document (CCR-283)."""
+def test_an_incomplete_approval_output_is_refused_fail_closed() -> None:
+    """``svc_s07.request_approval.output`` is registered (CCR-283 PROVISIONAL): the old minimal
+    ``{state}`` payload no longer matches its model and is refused."""
     out = _real_agent_04_output()
     assert out.payload is not None
     approval = out.payload.model_copy(
@@ -113,7 +114,7 @@ def test_the_approval_output_is_still_refused_fail_closed() -> None:
 
 
 @pytest.mark.parametrize(
-    "schema", ["agent_12.metadata.input", "svc_s07.request_approval.input", "agent_99.x.input"]
+    "schema", ["agent_12.metadata.input", "agent_99.x.input", "svc_s07.request_approval.x"]
 )
 def test_an_unregistered_input_never_reaches_the_worker(schema: str) -> None:
     worker = _Worker()
