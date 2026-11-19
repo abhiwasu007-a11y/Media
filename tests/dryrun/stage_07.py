@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s07_voice`` / ``s07_master`` -> Agent 07 with a fake TTS that writes REAL audio.
 
 The fake voice is the agents' own ``ToneTts`` (a 440 Hz tone whose length follows the text,
@@ -102,7 +104,12 @@ class VoiceExecutor:
         sref = ref_ending(upstream(call, script_stage), ".json")
         vref = ref_ending(upstream(call, "s06_verify"), "claim_verification_output.json")
         if self._dictionary is None:
-            doc = {"dictionary_key": "plumbing-dict", "language": "mr-IN", "version": 1, "entries": []}
+            doc = {
+                "dictionary_key": "plumbing-dict",
+                "language": "mr-IN",
+                "version": 1,
+                "entries": [],
+            }
             self._dictionary = self.w.blobs.put_bytes(
                 "assets", "dictionaries/plumbing-mr.json", json.dumps(doc).encode()
             )

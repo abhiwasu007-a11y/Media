@@ -31,7 +31,7 @@ class StandInConfig:
 class StandInDisclaimer:
     text: str
     version: str
-    status: str = "DRAFT – not lawyer-approved"
+    status: str = "DRAFT – not lawyer-approved"  # noqa: RUF001 (owner-set label)
 
 
 class TestCalendarFixture:
@@ -68,8 +68,10 @@ def load_runtime_config(env: Mapping[str, str]) -> Any:
             per_video_cap_micros_usd=int(env["AMW_PER_VIDEO_CAP_MICROS_USD"]),
             pilot_cap_micros_usd=int(env["AMW_PILOT_CAP_MICROS_USD"]),
         )
-    except (KeyError, ValueError):
-        raise ConfigInvalidError("budget caps are not configured: no spend without a limit") from None
+    except KeyError, ValueError:
+        raise ConfigInvalidError(
+            "budget caps are not configured: no spend without a limit"
+        ) from None
 
 
 def market_calendar() -> Calendar:

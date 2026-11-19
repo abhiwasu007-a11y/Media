@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s11_thumbs`` -> ``agent_11.thumbnail_variants`` (real Pillow + Raqm composition).
 
 Agent 11 reads the script promise, brand kit and shot plan through its own repository port
@@ -38,7 +40,9 @@ class ThumbsExecutor:
         doc = self.w.blobs.read_json(sref.uri, sref.sha256)
         verify = upstream_data(call, "s06_verify")
         if self._font is None:
-            self._font = self.w.blobs.put_bytes("assets", "fonts/brand_freesans.ttf", BRAND_FONT.read_bytes())
+            self._font = self.w.blobs.put_bytes(
+                "assets", "fonts/brand_freesans.ttf", BRAND_FONT.read_bytes()
+            )
         font_uri, font_sha = self._font
         promise = doc["promise"]
         brief = doc["thumbnail_brief"]
@@ -63,7 +67,12 @@ class ThumbsExecutor:
         repo = f11.FakeRepo(script, "finance", BrandKitView({}, (font,), ()), font)
         for t in load_templates():
             repo.registered[("TEMPLATE", t.template_key)] = RegisteredAsset(
-                f"ast_{t.template_key}", "TEMPLATE", t.template_key, "ACTIVE", True, "CODE_GENERATED"
+                f"ast_{t.template_key}",
+                "TEMPLATE",
+                t.template_key,
+                "ACTIVE",
+                True,
+                "CODE_GENERATED",
             )
         repo.registered[("TEMPLATE", "glyphset")] = RegisteredAsset(
             "ast_glyphset", "TEMPLATE", "glyphset", "ACTIVE", True, "CODE_GENERATED"
@@ -101,7 +110,9 @@ class ThumbsExecutor:
         )
         plan_ref = upstream_data(call, "s09_plan")["plan_ref"]
         vref = ref_ending(upstream(call, "s06_verify"), "claim_verification_output.json")
-        kit_uri, kit_sha = self.w.blobs.put_json("assets", "brand_kit/plumbing.json", {"kit": "PLUMBING"})
+        kit_uri, kit_sha = self.w.blobs.put_json(
+            "assets", "brand_kit/plumbing.json", {"kit": "PLUMBING"}
+        )
         payload: dict[str, Any] = {
             "production_type_key": "CHANNEL_LONG_FORM",
             "language": call.job.language,

@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """The deterministic SCRIPTED fake LLM of the dry run (PLUMBING TEST - NOT QUALITY).
 
 One instance per agent, with a responder that turns the agent's own rendered request into a
@@ -18,10 +20,18 @@ FAKE_MICROS_PER_CALL = 1_000
 """Synthetic fake price per call (USD 0.001): test configuration, never a real price."""
 
 
+class _Price:
+    micros = FAKE_MICROS_PER_CALL
+
+
+PRICE = _Price()
+"""Mutable fake price (the budget-breach scenario raises it; restored after the run)."""
+
+
 class ScriptedLlm:
-    def __init__(self, responder: Responder, micros_per_call: int = FAKE_MICROS_PER_CALL) -> None:
+    def __init__(self, responder: Responder, micros_per_call: int | None = None) -> None:
         self._responder = responder
-        self._micros = micros_per_call
+        self._micros = micros_per_call if micros_per_call is not None else PRICE.micros
         self.requests: list[LlmRequest] = []
 
     @property

@@ -1,3 +1,6 @@
+# ruff: noqa: E501, RUF059
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s02u_unique`` / ``s16_comp`` / ``s16_score`` / ``a_final`` / ``s16_auth`` -> Agent 16 (+S7).
 
 Integration findings handled here (see the dry-run report):
@@ -140,9 +143,12 @@ class _UniqExtractor:
         self.script, self.shots = script, tuple(shots)
 
     def extract(self, blobs: Mapping[str, bytes]) -> UniquenessFacts:
-        segs = tuple(Segment(section_role=s["kind"], text=s["text"]) for s in self.script["segments"])
-        return UniquenessFacts(script=segs, template=(), shots=self.shots, template_shots=(),
-                               complete=True)
+        segs = tuple(
+            Segment(section_role=s["kind"], text=s["text"]) for s in self.script["segments"]
+        )
+        return UniquenessFacts(
+            script=segs, template=(), shots=self.shots, template_shots=(), complete=True
+        )
 
 
 class _NoPriors:
@@ -156,9 +162,14 @@ class _GateExtractor:
     def __init__(self, facts: GateInputs) -> None:
         self.facts = facts
 
-    def extract(self, request: Any, blobs: Mapping[str, bytes], evaluation_date: date) -> ExtractedGate:
-        return ExtractedGate(inputs=self.facts.model_copy(update={"evaluation_date": evaluation_date}),
-                             method_release_approvals={}, quotation_approvals={})
+    def extract(
+        self, request: Any, blobs: Mapping[str, bytes], evaluation_date: date
+    ) -> ExtractedGate:
+        return ExtractedGate(
+            inputs=self.facts.model_copy(update={"evaluation_date": evaluation_date}),
+            method_release_approvals={},
+            quotation_approvals={},
+        )
 
 
 class ComplianceExecutor:
@@ -219,14 +230,17 @@ class ComplianceExecutor:
         doc, sref = _script(self.w, call)
         plan_view = upstream_data(call, "s09_plan")["views"]["agent_08_shots"]
         refs = self._refs(call)
-        tpl_uri, tpl_sha = self.w.blobs.put_json("assets", "templates/script_template_none.json",
-                                                 {"template": None, "note": PLUMBING})
+        tpl_uri, tpl_sha = self.w.blobs.put_json(
+            "assets", "templates/script_template_none.json", {"template": None, "note": PLUMBING}
+        )
         payload = {
             "subject": {"script_id": doc["script_id"], "script_sha256": sref.sha256},
             "iteration": call.iteration,
             "channel_id": call.job.channel_id,
             "production_type_key": call.job.production_type_key.value,
-            "routing": {"script_stage_id": "s05_shorts" if "s05_shorts" in call.upstream else "s05_script"},
+            "routing": {
+                "script_stage_id": "s05_shorts" if "s05_shorts" in call.upstream else "s05_script"
+            },
             "inputs": {
                 "script_ref": refs["script_ref"],
                 "shot_plan_ref": refs["shot_plan_ref"],
@@ -236,8 +250,13 @@ class ComplianceExecutor:
             "prior_window": {"max_prior_jobs": 5},
         }
         deps = UniquenessStageDeps(
-            config=config(), tenancy=Tenancy(), storage=self.w.blobs.storage, audit=ListAudit(),
-            clock=self.w.clock, store=self.store, source=_NoPriors(),
+            config=config(),
+            tenancy=Tenancy(),
+            storage=self.w.blobs.storage,
+            audit=ListAudit(),
+            clock=self.w.clock,
+            store=self.store,
+            source=_NoPriors(),
             extractor=_UniqExtractor(doc, [s["intent_kind"] for s in plan_view]),
         )
         ti = task_input(call, "svc_s02", "svc_s02.uniqueness_check.input", payload)
@@ -255,8 +274,11 @@ class ComplianceExecutor:
                 surface="SCRIPT_SEGMENT",
                 text=s["text"],
                 claims=tuple(
-                    ItemClaim(claim_type=c["claim_type"], time_reference_kind=c["time_reference_kind"],
-                              rule_flags=())
+                    ItemClaim(
+                        claim_type=c["claim_type"],
+                        time_reference_kind=c["time_reference_kind"],
+                        rule_flags=(),
+                    )
                     for c in by_seg.get(s["segment_id"], [])
                 ),
             )
@@ -265,52 +287,70 @@ class ComplianceExecutor:
         manifest_ref = ref_ending(upstream(call, "s08_assets"), "sourcing.json")
         manifest = self.w.blobs.read_json(manifest_ref.uri, manifest_ref.sha256)
         licensed = [
-            R.LicensedAsset(asset_ref=s["asset_id"], source_kind=s["source_type"], has_ledger_row=bool(s["ledger_entry_ids"]),
-                            licence_state="ACTIVE", covers_monetized_youtube=True,
-                            third_party_permission="NOT_APPLICABLE")
-            for s in manifest["shots"] if s.get("asset_id")
+            R.LicensedAsset(
+                asset_ref=s["asset_id"],
+                source_kind=s["source_type"],
+                has_ledger_row=bool(s["ledger_entry_ids"]),
+                licence_state="ACTIVE",
+                covers_monetized_youtube=True,
+                third_party_permission="NOT_APPLICABLE",
+            )
+            for s in manifest["shots"]
+            if s.get("asset_id")
         ]
         disclosure = [
-            R.DisclosureAsset(asset_ref=s["asset_id"], tier=s["tier"],
-                              is_realistic_synthetic=s["disclosure"]["is_realistic_synthetic"],
-                              realistic_person=s["disclosure"]["depicts_real_person"])
-            for s in manifest["shots"] if s.get("asset_id")
+            R.DisclosureAsset(
+                asset_ref=s["asset_id"],
+                tier=s["tier"],
+                is_realistic_synthetic=s["disclosure"]["is_realistic_synthetic"],
+                realistic_person=s["disclosure"]["depicts_real_person"],
+            )
+            for s in manifest["shots"]
+            if s.get("asset_id")
         ]
         uniq = upstream_data(call, "s02u_unique")["verdict"]
-        return GateInputs.model_validate({
-            "channel_category": "finance",
-            "language": call.job.language,
-            "sensitive_channel": True,
-            "routing": Routing(script_stage_id="s05_script", assets_stage_id="s08_assets",
-                               thumbnails_stage_id="s11_thumbs" if "s11_thumbs" in call.upstream else None),
-            "items": items,
-            "charts": [],
-            "text_prices": [],
-            "disclaimer_spoken": any(s["kind"] == "DISCLAIMER" for s in doc["segments"]),
-            "disclaimer_onscreen": True,  # Agent 09 plans DISCLAIMER_CARD overlays (checked in QC)
-            "disclaimer_template_version": doc["disclaimer_slots"][0]["template_version"] if doc.get("disclaimer_slots") else None,
-            "metadata_present": False,
-            "description_hash_matches": None,
-            "method_segments": [],
-            "method_label_overlay": False,
-            "production_type_key": call.job.production_type_key.value,
-            "live_format": "STANDARD",
-            "metadata_terms": None,
-            "presenter_kind": PresenterKind.NEUTRAL_NARRATION,
-            "voice_known": True,
-            "render_person_assets": [],
-            "thumbnail_person_assets": [],
-            "licensed_assets": licensed,
-            "audience_kind": "GENERAL",
-            "disclosure_assets": disclosure,
-            "realism_shots": [],
-            "voice_kind": "NEUTRAL_TTS",
-            "frame_ids": self._frame_ids(call),
-            "frames_payload": {"checks_requested": ["qc.watermark.visual",
-                                                    "qc.visual.no_synthetic_presenter"]},
-            "uniqueness_verdict": ComplianceVerdict(uniq),
-            "evaluation_date": datetime.now(UTC).date(),
-        })
+        return GateInputs.model_validate(
+            {
+                "channel_category": "finance",
+                "language": call.job.language,
+                "sensitive_channel": True,
+                "routing": Routing(
+                    script_stage_id="s05_script",
+                    assets_stage_id="s08_assets",
+                    thumbnails_stage_id="s11_thumbs" if "s11_thumbs" in call.upstream else None,
+                ),
+                "items": items,
+                "charts": [],
+                "text_prices": [],
+                "disclaimer_spoken": any(s["kind"] == "DISCLAIMER" for s in doc["segments"]),
+                "disclaimer_onscreen": True,  # Agent 09 plans DISCLAIMER_CARD overlays (checked in QC)
+                "disclaimer_template_version": doc["disclaimer_slots"][0]["template_version"]
+                if doc.get("disclaimer_slots")
+                else None,
+                "metadata_present": False,
+                "description_hash_matches": None,
+                "method_segments": [],
+                "method_label_overlay": False,
+                "production_type_key": call.job.production_type_key.value,
+                "live_format": "STANDARD",
+                "metadata_terms": None,
+                "presenter_kind": PresenterKind.NEUTRAL_NARRATION,
+                "voice_known": True,
+                "render_person_assets": [],
+                "thumbnail_person_assets": [],
+                "licensed_assets": licensed,
+                "audience_kind": "GENERAL",
+                "disclosure_assets": disclosure,
+                "realism_shots": [],
+                "voice_kind": "NEUTRAL_TTS",
+                "frame_ids": self._frame_ids(call),
+                "frames_payload": {
+                    "checks_requested": ["qc.watermark.visual", "qc.visual.no_synthetic_presenter"]
+                },
+                "uniqueness_verdict": ComplianceVerdict(uniq),
+                "evaluation_date": datetime.now(UTC).date(),
+            }
+        )
 
     def _frame_ids(self, call: StageCall) -> tuple[str, ...]:
         """Sample frame IDs of Agent 10's QC evidence pack (the frames the frames judge sees)."""
@@ -331,8 +371,11 @@ class ComplianceExecutor:
         audit = ListAudit()
         prompts = {
             k: (PROMPTS / f"{n}.v1.md").read_text(encoding="utf-8")
-            for k, n in (("policy", "compliance_gate"), ("paraphrase", "compliance_gate_paraphrase"),
-                         ("frames", "compliance_gate_frames"))
+            for k, n in (
+                ("policy", "compliance_gate"),
+                ("paraphrase", "compliance_gate_paraphrase"),
+                ("frames", "compliance_gate_frames"),
+            )
         }
 
         class _Packs:
@@ -342,21 +385,36 @@ class ComplianceExecutor:
                 return self.loaded
 
         deps = GateStageDeps(
-            config=cfg, tenancy=Tenancy(), storage=self.w.blobs.storage, audit=audit, budget=Budget(),
-            costs=MirrorLedger(), breaker=Breaker(), clock=self.w.clock,
+            config=cfg,
+            tenancy=Tenancy(),
+            storage=self.w.blobs.storage,
+            audit=audit,
+            budget=Budget(),
+            costs=MirrorLedger(),
+            breaker=Breaker(),
+            clock=self.w.clock,
             llm=MeteredLlm(ScriptedLlm(_policy), self.w.meter, 2_000),
             assembler=GateInputAssembler(
-                self.w.blobs.storage, approvals,
+                self.w.blobs.storage,
+                approvals,
                 ApprovalStepVerifier(approvals, h.a16, cfg.accepted_channels),
                 _GateExtractor(self._gate_facts(call)),
             ),
-            evidence=h.a16, packs=_Packs(), writer=VerdictWriter(self.store, self.w.blobs.storage, audit),
-            prompts=prompts, pack_texts={}, prompt_ids=("agent_16/compliance_gate.v1",),
+            evidence=h.a16,
+            packs=_Packs(),
+            writer=VerdictWriter(self.store, self.w.blobs.storage, audit),
+            prompts=prompts,
+            pack_texts={},
+            prompt_ids=("agent_16/compliance_gate.v1",),
         )
         refs = self._refs(call)
         payload = {
-            "subject": {"render_id": render_id, "render_sha256": render_sha,
-                        "script_id": doc["script_id"], "script_sha256": sref.sha256},
+            "subject": {
+                "render_id": render_id,
+                "render_sha256": render_sha,
+                "script_id": doc["script_id"],
+                "script_sha256": sref.sha256,
+            },
             "iteration": call.iteration,
             "channel_category": "finance",
             "production_type_key": call.job.production_type_key.value,
@@ -364,8 +422,11 @@ class ComplianceExecutor:
             "evaluate_as_destination": "YOUTUBE",
             "owner_sebi_registration": "UNREGISTERED",
             "language": call.job.language,
-            "routing": {"script_stage_id": "s05_script", "assets_stage_id": "s08_assets",
-                        "thumbnails_stage_id": "s11_thumbs" if "s11_thumbs" in call.upstream else None},
+            "routing": {
+                "script_stage_id": "s05_script",
+                "assets_stage_id": "s08_assets",
+                "thumbnails_stage_id": "s11_thumbs" if "s11_thumbs" in call.upstream else None,
+            },
             "inputs": refs | {"metadata_ref": None},
         }
         ti = task_input(call, "agent_16", "agent_16.compliance_gate.input", payload)
@@ -377,26 +438,46 @@ class ComplianceExecutor:
         verify = upstream_data(call, "s06_verify")
         gate = upstream_data(call, "s16_comp")
         thumbs = upstream(call, "s11_thumbs") if "s11_thumbs" in call.upstream else None
-        n_thumbs = sum(1 for r in thumbs.output_refs if r.media_type == "image/png") if thumbs else 0
+        n_thumbs = (
+            sum(1 for r in thumbs.output_refs if r.media_type == "image/png") if thumbs else 0
+        )
         det = DeterministicInputs(
-            qc=tuple(QcRow(check_id=r.check_id, verdict=r.verdict) for r in qc_out.validation_results),
+            qc=tuple(
+                QcRow(check_id=r.check_id, verdict=r.verdict) for r in qc_out.validation_results
+            ),
             claims=tuple(
-                ClaimFact(claim_id=c["claim_id"], claim_type="DEFINITION",
-                          status=ClaimStatus(c["status"]), has_citation_or_chart=bool(c.get("evidence")))
+                ClaimFact(
+                    claim_id=c["claim_id"],
+                    claim_type="DEFINITION",
+                    status=ClaimStatus(c["status"]),
+                    has_citation_or_chart=bool(c.get("evidence")),
+                )
                 for c in verify["claims"]
             ),
             script=ScriptFacts(
                 hook_options=len(doc.get("hook_options", [])),
                 promise_fields_present=bool(doc.get("promise")),
-                sections_with_takeaway=None, sections_with_example=None,
-                section_count=len(doc.get("sections", [])), viewer_problem_addressed=None,
+                sections_with_takeaway=None,
+                sections_with_example=None,
+                section_count=len(doc.get("sections", [])),
+                viewer_problem_addressed=None,
             ),
-            thumbnails=ThumbnailFacts(variants=n_thumbs, required_variants=3, spec_ok=n_thumbs > 0,
-                                      legible=None, title_length_ok=None),
-            gate=GateFacts(overall=ComplianceVerdict(gate["verdict"]), licence_pass=True,
-                           disclosure_decision=gate.get("disclosure", {}).get("decision", "NOT_REQUIRED")
-                           if isinstance(gate.get("disclosure"), dict) else "NOT_REQUIRED",
-                           disclaimer_pass=True, finance=True),
+            thumbnails=ThumbnailFacts(
+                variants=n_thumbs,
+                required_variants=3,
+                spec_ok=n_thumbs > 0,
+                legible=None,
+                title_length_ok=None,
+            ),
+            gate=GateFacts(
+                overall=ComplianceVerdict(gate["verdict"]),
+                licence_pass=True,
+                disclosure_decision=gate.get("disclosure", {}).get("decision", "NOT_REQUIRED")
+                if isinstance(gate.get("disclosure"), dict)
+                else "NOT_REQUIRED",
+                disclaimer_pass=True,
+                finance=True,
+            ),
         )
         meter = MeteredLlm(ScriptedLlm(lambda r: "{}"), self.w.meter, 2_000)
 
@@ -405,28 +486,60 @@ class ComplianceExecutor:
             from amw_adapters.llm import LlmMessage, LlmRequest
 
             meter.complete(
-                LlmRequest(model="fake-judge", system="PLUMBING",
-                           messages=(LlmMessage(role="user", content=json.dumps(payload)),),
-                           max_output_tokens=10),
-                idempotency_key=ids.make_idempotency_key(call.job.org_id, "llm.call",
-                                                         [call.task_id, "judge", str(payload["group_id"])]),
+                LlmRequest(
+                    model="fake-judge",
+                    system="PLUMBING",
+                    messages=(LlmMessage(role="user", content=json.dumps(payload)),),
+                    max_output_tokens=10,
+                ),
+                idempotency_key=ids.make_idempotency_key(
+                    call.job.org_id, "llm.call", [call.task_id, "judge", str(payload["group_id"])]
+                ),
             )
             return _quality_judge(payload)
 
-        routing = {"script_stage_id": "s05_script", "plan_stage_id": "s09_plan", "voice_stage_id": "s07_voice",
-                   "render_stage_id": "s10_render", "thumbnails_stage_id": "s11_thumbs"}
-        groups = {g: GroupRequest(payload={"group_id": g}, known_refs=frozenset({"s01"})) for g in ("G1", "G2", "G3")}
+        routing = {
+            "script_stage_id": "s05_script",
+            "plan_stage_id": "s09_plan",
+            "voice_stage_id": "s07_voice",
+            "render_stage_id": "s10_render",
+            "thumbnails_stage_id": "s11_thumbs",
+        }
+        groups = {
+            g: GroupRequest(payload={"group_id": g}, known_refs=frozenset({"s01"}))
+            for g in ("G1", "G2", "G3")
+        }
         res = QualityScorer(config(), judge).score(det, groups, routing)
         data = score_payload(res, [], {"prompt": "agent_16/quality_score.v1", "note": PLUMBING})
-        uri, sha = self.w.blobs.put_json("jobs", f"{call.job.job_id}/tasks/{call.task_id}/quality_score.json", data)
+        uri, sha = self.w.blobs.put_json(
+            "jobs", f"{call.job.job_id}/tasks/{call.task_id}/quality_score.json", data
+        )
         out = build_task_output(
-            payload_schema="agent_16.quality_score.output", data=data, results=list(res.results),
-            blob=None, usage=Usage(), now=datetime.now(UTC), currency="USD",
-            quality_score=float(res.machine_total), verdict=ComplianceVerdict.ALLOWED, downstream=None,
+            payload_schema="agent_16.quality_score.output",
+            data=data,
+            results=list(res.results),
+            blob=None,
+            usage=Usage(),
+            now=datetime.now(UTC),
+            currency="USD",
+            quality_score=float(res.machine_total),
+            verdict=ComplianceVerdict.ALLOWED,
+            downstream=None,
         )
         body = self.w.blobs.read(uri, sha)
-        return out.model_copy(update={"output_refs": (OutputRef(uri=uri, kind=OutputRefKind.REPORT, sha256=sha,
-                                                                 size_bytes=len(body), media_type="application/json"),)})
+        return out.model_copy(
+            update={
+                "output_refs": (
+                    OutputRef(
+                        uri=uri,
+                        kind=OutputRefKind.REPORT,
+                        sha256=sha,
+                        size_bytes=len(body),
+                        media_type="application/json",
+                    ),
+                )
+            }
+        )
 
     # -- R14 TEST operator path ---------------------------------------------------------------------
     def _harness(self, call: StageCall, render_id: str) -> R14:
@@ -443,10 +556,17 @@ class ComplianceExecutor:
         msg = CODE + " " + " ".join(f"{d.value.lower()} {p}" for d, p in PLACEHOLDER_SCORES)
         score = h.record(msg, EvidenceRecordKind.HUMAN_SCORE, claimed_scores=PLACEHOLDER_SCORES)
         self.approval = {
-            "approval_id": str(h.approval), "review_code": CODE, "render_id": render_id,
-            "render_sha256": render_sha, "step_evidence": str(step.id), "contribution_evidence": str(contrib.id),
-            "score_evidence": str(score.id), "states": [step.state.value, contrib.state.value, score.state.value],
-            "channel": CH.value, "recorded_by": OP, "label": f"{PLUMBING}: TEST operator path, TEST session events",
+            "approval_id": str(h.approval),
+            "review_code": CODE,
+            "render_id": render_id,
+            "render_sha256": render_sha,
+            "step_evidence": str(step.id),
+            "contribution_evidence": str(contrib.id),
+            "score_evidence": str(score.id),
+            "states": [step.state.value, contrib.state.value, score.state.value],
+            "channel": CH.value,
+            "recorded_by": OP,
+            "label": f"{PLUMBING}: TEST operator path, TEST session events",
         }
         return self.approval
 
@@ -461,40 +581,126 @@ class ComplianceExecutor:
         score = upstream_data(call, "s16_score")
         org = h.org
         repo = _AuthRepo()
-        repo.approvals[h.approval] = ApprovalRow(h.approval, org, ApprovalKind.FINAL_VIDEO, ApprovalState.APPROVED,
-                                                 "render", h.render, render_sha, CODE, REQUESTED)
-        repo.steps_[h.approval] = [StepRow(h.approval, org, 1, ApprovalStepState.APPROVED, h.owner, True, True,
-                                           OP, CH, app["step_evidence"], f"step:{h.approval}:1")]
-        repo.contribs = [ContributionRow(h.approval, org, EditorialContributionType.EXAMPLE, CONTRIBUTION, h.owner,
-                                         OP, CH, app["contribution_evidence"], f"c:{app['contribution_evidence']}")]
-        repo.scores = [HumanScoreRow(org, d, float(p), render_sha, h.owner, OP, CH, app["score_evidence"],
-                                     f"s:{app['score_evidence']}") for d, p in PLACEHOLDER_SCORES]
-        pack_rows = tuple((p.rule_pack_id, p.version) for p in packs().rows) if hasattr(packs(), "rows") else ((ids.new_id(ids.Prefix.RULE_PACK), 1),)
-        repo.gate_ = GateSummary(org, ComplianceVerdict(gate["verdict"]), render_sha, sref.sha256, t_sha, pack_rows, (),
-                                 0, DisclosureDecision.NOT_REQUIRED, ids.new_id(ids.Prefix.COMPLIANCE_VERDICT), (),
-                                 None)
-        repo.score_ = ScoreSummary(org, render_sha, {QualityDimension(d["dimension"]): float(d["points"])
-                                                     for d in score["dimensions"]})
-        repo.render_ = RenderRow(render_id, org, RenderStatus.QC_PASSED, render_sha, sref.sha256, t_sha, 0, True, 0)
+        repo.approvals[h.approval] = ApprovalRow(
+            h.approval,
+            org,
+            ApprovalKind.FINAL_VIDEO,
+            ApprovalState.APPROVED,
+            "render",
+            h.render,
+            render_sha,
+            CODE,
+            REQUESTED,
+        )
+        repo.steps_[h.approval] = [
+            StepRow(
+                h.approval,
+                org,
+                1,
+                ApprovalStepState.APPROVED,
+                h.owner,
+                True,
+                True,
+                OP,
+                CH,
+                app["step_evidence"],
+                f"step:{h.approval}:1",
+            )
+        ]
+        repo.contribs = [
+            ContributionRow(
+                h.approval,
+                org,
+                EditorialContributionType.EXAMPLE,
+                CONTRIBUTION,
+                h.owner,
+                OP,
+                CH,
+                app["contribution_evidence"],
+                f"c:{app['contribution_evidence']}",
+            )
+        ]
+        repo.scores = [
+            HumanScoreRow(
+                org,
+                d,
+                float(p),
+                render_sha,
+                h.owner,
+                OP,
+                CH,
+                app["score_evidence"],
+                f"s:{app['score_evidence']}",
+            )
+            for d, p in PLACEHOLDER_SCORES
+        ]
+        pack_rows = (
+            tuple((p.rule_pack_id, p.version) for p in packs().rows)
+            if hasattr(packs(), "rows")
+            else ((ids.new_id(ids.Prefix.RULE_PACK), 1),)
+        )
+        repo.gate_ = GateSummary(
+            org,
+            ComplianceVerdict(gate["verdict"]),
+            render_sha,
+            sref.sha256,
+            t_sha,
+            pack_rows,
+            (),
+            0,
+            DisclosureDecision.NOT_REQUIRED,
+            ids.new_id(ids.Prefix.COMPLIANCE_VERDICT),
+            (),
+            None,
+        )
+        repo.score_ = ScoreSummary(
+            org,
+            render_sha,
+            {QualityDimension(d["dimension"]): float(d["points"]) for d in score["dimensions"]},
+        )
+        repo.render_ = RenderRow(
+            render_id, org, RenderStatus.QC_PASSED, render_sha, sref.sha256, t_sha, 0, True, 0
+        )
         req = AuthorisationInput(
-            subject={"render_id": render_id, "render_sha256": render_sha, "script_id": doc["script_id"],
-                     "script_sha256": sref.sha256, "thumbnail_set_sha256": t_sha},
-            iteration=call.iteration, approval_id=h.approval, gate_task_id=_task_of(call, "s16_comp"),
-            score_task_id=_task_of(call, "s16_score"), requested_action="DELIVERY",
+            subject={
+                "render_id": render_id,
+                "render_sha256": render_sha,
+                "script_id": doc["script_id"],
+                "script_sha256": sref.sha256,
+                "thumbnail_set_sha256": t_sha,
+            },
+            iteration=call.iteration,
+            approval_id=h.approval,
+            gate_task_id=_task_of(call, "s16_comp"),
+            score_task_id=_task_of(call, "s16_score"),
+            requested_action="DELIVERY",
             intended_publish_date_utc=None,
             pack_versions=[{"rule_pack_id": p, "version": v} for p, v in pack_rows],
         )
         stage = PublicationAuthorisationStage(config(), repo, h.a16, _Writer(), ListAudit())
         res = stage.run(h.tx("agent_16"), req, datetime.now(UTC), call.idempotency_key)
         d = res.decision
-        payload = auth_payload(d, req.subject.model_dump(mode="json"), datetime.now(UTC).date(),
-                               res.earliest_compliant_publish_date, res.authorisation_verdict_id,
-                               res.disclosure_verdict_id, res.evidence_ids,
-                               f"amw-blob://{org}/evidence/{call.job.job_id}/auth.json")
+        payload = auth_payload(
+            d,
+            req.subject.model_dump(mode="json"),
+            datetime.now(UTC).date(),
+            res.earliest_compliant_publish_date,
+            res.authorisation_verdict_id,
+            res.disclosure_verdict_id,
+            res.evidence_ids,
+            f"amw-blob://{org}/evidence/{call.job.job_id}/auth.json",
+        )
         return build_task_output(
-            payload_schema="agent_16.publication_authorisation.output", data=payload, results=auth_results(d),
-            blob=None, usage=Usage(), now=datetime.now(UTC), currency="USD", quality_score=d.human_wins_total,
-            verdict=d.verdict, downstream="agent_13",
+            payload_schema="agent_16.publication_authorisation.output",
+            data=payload,
+            results=auth_results(d),
+            blob=None,
+            usage=Usage(),
+            now=datetime.now(UTC),
+            currency="USD",
+            quality_score=d.human_wins_total,
+            verdict=d.verdict,
+            downstream="agent_13",
         )
 
 

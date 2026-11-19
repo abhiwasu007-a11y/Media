@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s06_claims`` / ``s06_verify`` / ``s06_chart`` -> Agent 06 (extraction and verification)."""
 
 import json
@@ -133,11 +135,20 @@ class FactExecutor:
 
     def _refs(self, ref: Any) -> list[dict[str, Any]]:
         return [
-            {"uri": ref.uri, "purpose": "PRIOR_OUTPUT", "sha256": ref.sha256, "schema": SCRIPT_SCHEMA}
+            {
+                "uri": ref.uri,
+                "purpose": "PRIOR_OUTPUT",
+                "sha256": ref.sha256,
+                "schema": SCRIPT_SCHEMA,
+            }
         ]
 
     def _citations(self, call: StageCall) -> list[dict[str, Any]]:
-        pack = upstream_data(call, "s04_research") if "s04_research" in call.upstream else upstream_data(call, "parent.s04_research")
+        pack = (
+            upstream_data(call, "s04_research")
+            if "s04_research" in call.upstream
+            else upstream_data(call, "parent.s04_research")
+        )
         return [
             {
                 "citation_ref": c["citation_ref"],
@@ -200,8 +211,7 @@ class FactExecutor:
                 for c in doc.get("chart_requests", [])
             ],
             "available_citations": [
-                {k: v for k, v in c.items() if k != "content_sha256"}
-                for c in self._citations(call)
+                {k: v for k, v in c.items() if k != "content_sha256"} for c in self._citations(call)
             ],
             "our_method_release_approved": False,
         }
@@ -259,13 +269,30 @@ class FactExecutor:
         }
         knowledge = s6.MemoryKnowledge(
             [
-                SourceText(ref_id, CitationKind.KNOWLEDGE_CHUNK, text, sha256_hex(text), "B_PUBLISHED", False)
+                SourceText(
+                    ref_id,
+                    CitationKind.KNOWLEDGE_CHUNK,
+                    text,
+                    sha256_hex(text),
+                    "B_PUBLISHED",
+                    False,
+                )
                 for ref_id, text in self.chunk_text.items()
             ]
         )
         self.claims.register_extraction(
-            [{"claim_id": claim_ids[c["local_id"]], "extraction_verdict": c["extraction_verdict"]} for c in claims]
+            [
+                {
+                    "claim_id": claim_ids[c["local_id"]],
+                    "extraction_verdict": c["extraction_verdict"],
+                }
+                for c in claims
+            ]
         )
-        step = ClaimVerificationStep(**self._common(ScriptedLlm(verification_responder)), knowledge=knowledge)
-        ti = task_input(call, "agent_06", "agent_06.claim_verification.input", payload, self._refs(ref))
+        step = ClaimVerificationStep(
+            **self._common(ScriptedLlm(verification_responder)), knowledge=knowledge
+        )
+        ti = task_input(
+            call, "agent_06", "agent_06.claim_verification.input", payload, self._refs(ref)
+        )
         return step.run(ti, RunContext(call.attempt_id, call.stage.stage_id, call.iteration))  # type: ignore[arg-type]

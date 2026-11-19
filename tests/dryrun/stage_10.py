@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s10_render`` / ``s10_subs`` / ``s10_qc`` -> Agent 10 with the REAL local FFmpeg.
 
 The market-hours guard of Agent 10 stays ON: the admission probe reads the real wall clock in
@@ -58,14 +60,26 @@ class WallClockAdmission:
 
 
 def config(scale: str, profile: str = "qc.long_form") -> AgentTenConfig:
-    render: dict[str, Any] = {"segment_target_ms": 8000, "gop_frames": 60, "x264_preset": "faster", "threads": 2}
+    render: dict[str, Any] = {
+        "segment_target_ms": 8000,
+        "gop_frames": 60,
+        "x264_preset": "faster",
+        "threads": 2,
+    }
     qc: dict[str, Any] = {"profile": profile}
     # Code-made still graphics encode far below the 18 section 6 floor (8 Mbps) with x264 ABR
     # (dry-run finding): the floors are lowered for the PLUMBING run only and reported.
     qc.update({"video_bitrate_floor_bps": 10_000, "video_bitrate_min_bps": 20_000})
     if scale == "tiny":
-        render.update({"width_px": 640, "height_px": 360, "video_bitrate_bps": 1_000_000,
-                       "video_maxrate_bps": 1_500_000, "x264_preset": "faster"})
+        render.update(
+            {
+                "width_px": 640,
+                "height_px": 360,
+                "video_bitrate_bps": 1_000_000,
+                "video_maxrate_bps": 1_500_000,
+                "x264_preset": "faster",
+            }
+        )
         qc.update({"min_width_px": 640, "min_height_px": 360})
     if profile == "qc.shorts":
         w, h = (360, 640) if scale == "tiny" else (1080, 1920)
@@ -123,7 +137,7 @@ class EditorExecutor:
             idempotency=MemoryIdempotencyStore(),
             audit=self.audit,
             runner=ProcessFfmpegRunner(),
-            admission=WallClockAdmission(),
+            admission=self.w.extras.get("admission") or WallClockAdmission(),
             timers=ThreadTimerFactory(),
             clock=self.w.clock,
             scratch_root=self.w.scratch / "a10" / call.task_id,
@@ -196,29 +210,69 @@ class EditorExecutor:
         lic = "PLUMBING_SELF_GRANT"
         for shot in manifest["shots"]:
             if shot.get("asset_id"):
-                self.assets.add(org, AssetRecord(asset_id=shot["asset_id"], uri=shot["asset_uri"],
-                                                 sha256=shot["fingerprints"]["sha256"]))
+                self.assets.add(
+                    org,
+                    AssetRecord(
+                        asset_id=shot["asset_id"],
+                        uri=shot["asset_uri"],
+                        sha256=shot["fingerprints"]["sha256"],
+                    ),
+                )
                 assets[shot["asset_id"]] = {"status": "ACTIVE", "ai_item": False}
-                ledger.append({"asset_id": shot["asset_id"], "licence_id": lic, "render_id": None,
-                               "used_from_ms": None, "used_to_ms": None, "usage_kind": "SHOT"})
+                ledger.append(
+                    {
+                        "asset_id": shot["asset_id"],
+                        "licence_id": lic,
+                        "render_id": None,
+                        "used_from_ms": None,
+                        "used_to_ms": None,
+                        "usage_kind": "SHOT",
+                    }
+                )
             for still in shot.get("reveal_stills", []):
-                self.assets.add(org, AssetRecord(asset_id=still["asset_id"], uri=still["asset_uri"],
-                                                 sha256=still["sha256"]))
+                self.assets.add(
+                    org,
+                    AssetRecord(
+                        asset_id=still["asset_id"], uri=still["asset_uri"], sha256=still["sha256"]
+                    ),
+                )
                 assets[still["asset_id"]] = {"status": "ACTIVE", "ai_item": False}
-                ledger.append({"asset_id": still["asset_id"], "licence_id": lic, "render_id": None,
-                               "used_from_ms": None, "used_to_ms": None, "usage_kind": "IMAGE"})
+                ledger.append(
+                    {
+                        "asset_id": still["asset_id"],
+                        "licence_id": lic,
+                        "render_id": None,
+                        "used_from_ms": None,
+                        "used_to_ms": None,
+                        "usage_kind": "IMAGE",
+                    }
+                )
         for aid, (uri, sha) in self.w.extras.get("templates", {}).items():
             self.assets.add(org, AssetRecord(asset_id=aid, uri=uri, sha256=sha))
         for item in [*manifest.get("overlays", []), *manifest.get("fonts", [])]:
             aid = item.get("template_asset_id") or item.get("asset_id")
             assets[aid] = {"status": "ACTIVE", "ai_item": False}
-            ledger.append({"asset_id": aid, "licence_id": lic, "render_id": None,
-                           "used_from_ms": None, "used_to_ms": None, "usage_kind": "OVERLAY"})
+            ledger.append(
+                {
+                    "asset_id": aid,
+                    "licence_id": lic,
+                    "render_id": None,
+                    "used_from_ms": None,
+                    "used_to_ms": None,
+                    "usage_kind": "OVERLAY",
+                }
+            )
         self.licences.snapshot_value = LicenceSnapshot(
             ledger=ledger,
-            licences={lic: {"state": "ACTIVE", "covers_monetized_youtube": True,
-                            "expires_in_days": None, "third_party_permission": "PERMITTED",
-                            "org": org}},
+            licences={
+                lic: {
+                    "state": "ACTIVE",
+                    "covers_monetized_youtube": True,
+                    "expires_in_days": None,
+                    "third_party_permission": "PERMITTED",
+                    "org": org,
+                }
+            },
             assets=assets,
         )
 
@@ -239,25 +293,54 @@ class EditorExecutor:
                 "music_bed": None,
             }
             ti = task_input(call, "agent_10", "agent_10.render.input", payload, refs)
-            return RenderStage(self.deps(call)).run(ti, call.attempt_id, envelope_org=call.job.org_id)
+            return RenderStage(self.deps(call)).run(
+                ti, call.attempt_id, envelope_org=call.job.org_id
+            )
         rdata = upstream_data(call, "s10_render")
         r_uri, r_sha = self._put(call, "render_output.json", rdata)
-        refs = [*refs,
-                {"uri": r_uri, "purpose": "PRIOR_OUTPUT", "sha256": r_sha, "schema": "agent_10.render.output"},
-                {"uri": rdata["timeline_ref"]["uri"], "purpose": "PRIOR_OUTPUT",
-                 "sha256": rdata["timeline_ref"]["sha256"], "schema": "agent_10.timeline"}]
+        refs = [
+            *refs,
+            {
+                "uri": r_uri,
+                "purpose": "PRIOR_OUTPUT",
+                "sha256": r_sha,
+                "schema": "agent_10.render.output",
+            },
+            {
+                "uri": rdata["timeline_ref"]["uri"],
+                "purpose": "PRIOR_OUTPUT",
+                "sha256": rdata["timeline_ref"]["sha256"],
+                "schema": "agent_10.timeline",
+            },
+        ]
         if kind == "subtitles":
-            payload = {"render_id": rdata["render_id"], "language": call.job.language, "iteration": call.iteration,
-                       "verified_script_sha256": script_sha, "caption_style": None}
+            payload = {
+                "render_id": rdata["render_id"],
+                "language": call.job.language,
+                "iteration": call.iteration,
+                "verified_script_sha256": script_sha,
+                "caption_style": None,
+            }
             ti = task_input(call, "agent_10", "agent_10.subtitles.input", payload, refs)
             return SubtitleStage(self.deps(call)).run(ti, call.attempt_id)
         sdata = upstream_data(call, "s10_subs")
         s_uri, s_sha = self._put(call, "subs_output.json", sdata)
-        refs.append({"uri": s_uri, "purpose": "PRIOR_OUTPUT", "sha256": s_sha,
-                     "schema": "agent_10.subtitles.output"})
-        payload = {"render_id": rdata["render_id"], "render_sha256": rdata["render_ref"]["sha256"],
-                   "qc_profile": "qc.shorts" if shorts else "qc.long_form",
-                   "iteration": call.iteration, "music_bed": None, "destination": "MONETIZED_YOUTUBE"}
+        refs.append(
+            {
+                "uri": s_uri,
+                "purpose": "PRIOR_OUTPUT",
+                "sha256": s_sha,
+                "schema": "agent_10.subtitles.output",
+            }
+        )
+        payload = {
+            "render_id": rdata["render_id"],
+            "render_sha256": rdata["render_ref"]["sha256"],
+            "qc_profile": "qc.shorts" if shorts else "qc.long_form",
+            "iteration": call.iteration,
+            "music_bed": None,
+            "destination": "MONETIZED_YOUTUBE",
+        }
         ti = task_input(call, "agent_10", "agent_10.technical_qc.input", payload, refs)
         deps = self.deps(call)
         key = "shorts" if shorts else "long"

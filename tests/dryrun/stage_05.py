@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s05_script`` -> ``agent_05.script_draft`` (and ``s05_shorts`` -> shorts adaptation).
 
 The scripted LLM writes placeholder Marathi sentences (Devanagari, with ``(PLUMBING)`` and the
@@ -25,7 +27,7 @@ from amw_orchestrator.executor import StageCall
 from amw_orchestrator.metering import MeteredLlm
 from tests.agents.agent_05_scriptwriter import support as sp
 from tests.dryrun.base import World, upstream
-from tests.dryrun.kit import PLUMBING, ref_ending
+from tests.dryrun.kit import ref_ending
 from tests.dryrun.llm import ScriptedLlm
 from tests.dryrun.runtime_iface import get_disclaimer
 
@@ -109,8 +111,11 @@ def plan_json(data: dict[str, Any]) -> dict[str, Any]:
             "promise_statement": f"या भागात {KEY} म्हणजे काय ते समजेल.",
             "promise_key_terms": [KEY],
         },
-        "hooks": [hook("h1", "CONCRETE_CASE", 2, 2), hook("h2", "QUESTION", 1, 2),
-                  hook("h3", "MYTH_BUST", 2, 1)],
+        "hooks": [
+            hook("h1", "CONCRETE_CASE", 2, 2),
+            hook("h2", "QUESTION", 1, 2),
+            hook("h3", "MYTH_BUST", 2, 1),
+        ],
         "selected_hook_id": "h1",
         "sections": sections,
         "concept_plan": concept_plan,

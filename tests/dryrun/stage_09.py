@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """``s09_plan`` -> ``agent_09.shot_plan``.
 
 Agent 09 takes a typed request (no ``TaskInput`` entry point and no reader of the Agent 05
@@ -102,7 +104,9 @@ def script_view(doc: dict[str, Any], aspect: AspectRatio) -> ScriptDoc:
             section_id=s["section_id"],
             section_kind=s.get("section_kind", "CONCEPT"),
             heading_local=s.get("heading_local", ""),
-            scene_ids=tuple((lead if s["section_id"] == first else []) + list(s.get("scene_ids") or ())),
+            scene_ids=tuple(
+                (lead if s["section_id"] == first else []) + list(s.get("scene_ids") or ())
+            ),
         )
         for s in sections_in
     )
@@ -119,7 +123,9 @@ def script_view(doc: dict[str, Any], aspect: AspectRatio) -> ScriptDoc:
             for c in doc.get("chart_requests", [])
         ),
         disclaimer_slots=tuple(
-            DisclaimerSlot(slot_id=d["slot_id"], segment_id=d["segment_id"], text_sha256=d["text_sha256"])
+            DisclaimerSlot(
+                slot_id=d["slot_id"], segment_id=d["segment_id"], text_sha256=d["text_sha256"]
+            )
             for d in doc.get("disclaimer_slots", [])
         ),
     )
@@ -146,7 +152,9 @@ class PlanExecutor:
         timeline = NarrationTimeline(
             source=tl_doc["source"],
             segments=tuple(
-                TimelineSegment(segment_id=s["segment_id"], start_ms=s["start_ms"], end_ms=s["end_ms"])
+                TimelineSegment(
+                    segment_id=s["segment_id"], start_ms=s["start_ms"], end_ms=s["end_ms"]
+                )
                 for s in tl_doc["segments"]
             ),
         )
@@ -168,10 +176,17 @@ class PlanExecutor:
             script=script_view(doc, aspect),
             script_sha256=sref.sha256,
             script_ref_sha256=sref.sha256,
-            verification=Verification(verify["script_sha256"], verify["overall"]["verification_verdict"]),
+            verification=Verification(
+                verify["script_sha256"], verify["overall"]["verification_verdict"]
+            ),
             timeline=timeline,
             timeline_sha256=tl_ref.sha256,
-            brand=BrandKit(intro_ref="tpl.plumbing_title", intro_duration_ms=1500, outro_ref="tpl.plumbing_end", fallback_template_key="tpl.abstract_motion"),
+            brand=BrandKit(
+                intro_ref="tpl.plumbing_title",
+                intro_duration_ms=1500,
+                outro_ref="tpl.plumbing_end",
+                fallback_template_key="tpl.abstract_motion",
+            ),
             channel_category="finance",
             limits=Limits(ai_still_allowed=False),
             rule_packs={"rp.youtube_general": "PLUMBING YT", "rp.finance_sebi_in": "PLUMBING FIN"},
@@ -190,7 +205,9 @@ class PlanExecutor:
         )
         result = step.run(req)
         body = result.plan.model_dump_json().encode()
-        uri, sha = self.w.blobs.put_bytes("jobs", f"{call.job.job_id}/tasks/{call.task_id}/shot_plan.json", body)
+        uri, sha = self.w.blobs.put_bytes(
+            "jobs", f"{call.job.job_id}/tasks/{call.task_id}/shot_plan.json", body
+        )
         from agent_09_video_director.persistence import OutputRefData
 
         ref = OutputRefData(uri=uri, sha256=sha, size_bytes=len(body))

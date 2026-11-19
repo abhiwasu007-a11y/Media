@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,attr-defined,unused-ignore,var-annotated,index,no-untyped-call,misc,union-attr"
+# (throw-away dry-run fixtures feed fakes and dataset dicts into typed APIs)
 """Shared fakes of the PLUMBING dry-run world (no network, no paid call, no database inside
 agents: the graph runner owns the database records).
 
@@ -162,7 +164,9 @@ class ListAudit:
     def verify_chain(self, tx: TenantTransaction) -> Any:
         raise NotImplementedError
 
-    def export(self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None) -> Any:
+    def export(
+        self, tx: TenantTransaction, since_seq: int = 0, target_id: str | None = None
+    ) -> Any:
         raise NotImplementedError
 
 
@@ -235,8 +239,13 @@ def banner_png(width: int, height: int, title: str, subtitle: str = "") -> bytes
     if title:
         small = ImageFont.load_default(size=max(10, band // 3))
         draw.rectangle((0, height - band, width, height), fill=(16, 24, 32, 220))
-        draw.text((width // 2, height - band // 2), f"{title} {subtitle}".strip(),
-                  fill=(242, 242, 242, 255), font=small, anchor="mm")
+        draw.text(
+            (width // 2, height - band // 2),
+            f"{title} {subtitle}".strip(),
+            fill=(242, 242, 242, 255),
+            font=small,
+            anchor="mm",
+        )
     out = io.BytesIO()
     img.save(out, format="PNG", optimize=False)
     return out.getvalue()
