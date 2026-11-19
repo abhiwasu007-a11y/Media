@@ -44,7 +44,12 @@ from agent_09_video_director.problems import input_invalid
 from agent_09_video_director.timeline.audio import plan_audio
 from agent_09_video_director.timeline.hook import HookInfo
 from agent_09_video_director.timeline.jl import BoundaryInfo, JlShot, plan_jl
-from agent_09_video_director.timeline.overlays import build_chapters, plan_end_screen, plan_overlays
+from agent_09_video_director.timeline.overlays import (
+    build_chapters,
+    plan_end_screen,
+    plan_overlays,
+    section_start_ms,
+)
 from agent_09_video_director.timeline.tiers import TierShot, plan_tiers
 from agent_09_video_director.timeline.timemap import TimeMap
 from agent_09_video_director.timeline.transitions import BoundaryKind, plan_transition
@@ -274,13 +279,7 @@ def assemble_plan(inp: AssembleInput) -> Assembled:
         for s, v, p in zip(shots, verts, parents, strict=True)
     ]
     # 6. chapters, overlays, end screen, audio
-    first_seg_of_scene = {sc.scene_id: sc.segment_ids[0] for sc in script.scenes}
-    section_start = {
-        sec.section_id: 0 if i == 0 else tm.start(first_seg_of_scene[sec.scene_ids[0]])
-        for i, sec in enumerate(script.sections)
-        if sec.scene_ids
-    }
-    chapters = build_chapters(script.sections, section_start, script.aspect_ratio)
+    chapters = build_chapters(script.sections, section_start_ms(script, tm), script.aspect_ratio)
     overlays = plan_overlays(
         shots,
         hook_end_ms=inp.hook.end_ms,

@@ -44,6 +44,7 @@ from tests.agents.agent_09_video_director.support import (
     TASK_ID,
     Recorder,
     ResponderLlm,
+    codes,
     respond,
 )
 
@@ -224,7 +225,7 @@ def test_parser_errors() -> None:
         parse_direction_output("[1]", ["sl01"])
     with pytest.raises(OutputSchemaInvalidError) as ei:
         parse_direction_output(json.dumps({"batch_id": "b01", "directions": [], "extra": 1}), [])
-    assert ei.value.details["violations"]
+    assert codes(ei.value.details)
     refusal = {
         "reason": "OUT_OF_SCOPE",
         "message": "m",
