@@ -870,3 +870,45 @@ def test_a_newer_decision_makes_a_confirmed_one_unusable(tmp_path: Path) -> None
     assert (after.evidence_state, after.subject, after.kind, after.usable) == (
         "CONFIRMED", None, None, False,
     )  # fmt: skip
+
+
+OTHER_APPROVAL = ids.new_id(ids.Prefix.APPROVAL)
+
+
+@pytest.mark.parametrize(
+    ("later_change", "superseded_expected"),
+    [
+        ({}, True),  # same code, same approval and step
+        ({"approval_id": None, "step_no": None}, True),  # a NULL approval never exempts
+        ({"step_no": 2}, True),  # another step of the same approval never exempts
+        ({"approval_id": ids.ApprovalId(OTHER_APPROVAL)}, False),  # two different approvals
+    ],
+)
+def test_which_later_decision_supersedes(
+    tmp_path: Path, later_change: dict[str, Any], superseded_expected: bool
+) -> None:
+    """Recheck C: a later live reject sharing the code supersedes the approval unless both name
+    an approval and the approvals differ (worker and store guard)."""
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    approve = w.record(uid, "approve R7K2", minutes(5))
+    w.verify(approve)
+    later = w.t.human("reject R7K2", minutes(6))
+    w.write()
+    draft = w.draft(
+        later, "reject R7K2", minutes(6), parsed_decision=ApprovalStepState.REJECTED,
+        **later_change,
+    )  # fmt: skip
+    w.desk.record(w.tx, draft)  # live: PENDING_VERIFICATION
+    conf = w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    if superseded_expected:
+        with pytest.raises(PermissionDeniedError):  # the store guard alone also refuses
+            w.worker._service.confirm(
+                w.tx, approve.id, w.t.session_id, conf, "confirm R7K2", minutes(30)
+            )
+    expected = (
+        ConfirmationOutcome.SUPERSEDED if superseded_expected else ConfirmationOutcome.CONFIRMED
+    )
+    assert w.scan(approve).outcome is expected

@@ -450,3 +450,63 @@ def test_database_refuses_to_confirm_a_superseded_decision(real: Real) -> None:
     with real.verifier_db.transaction(real.ctx) as tx:
         scan = real.worker.confirm_from_chat(tx, approve.id, real.at(60))
     assert scan.outcome is ConfirmationOutcome.SUPERSEDED
+
+
+@pytest.mark.parametrize(
+    "later_change",
+    [{}, {"approval_id": None, "step_no": None}, {"step_no": 2}],
+    ids=["same_approval", "null_approval", "other_step"],
+)
+def test_database_supersedes_any_later_decision_on_the_code(
+    real: Real, later_change: dict[str, Any]
+) -> None:
+    """Recheck C on PostgreSQL: a live later reject with the same code supersedes the approval
+    whether it names the same approval and step, no approval (0055 lets that insert), or
+    another step; the definer function refuses the confirmation and the worker supersedes."""
+    real.t.human("approve R7K2", real.at(1))
+    real.t.write(real.root)
+    approve = real.verify(real.record("approve R7K2"))
+    later = real.t.human("reject R7K2", real.at(2))
+    real.t.write(real.root)
+    said = locate(real.src, real.t.session_id, "reject R7K2").timestamp
+    draft = real.draft(
+        later, "reject R7K2", said, parsed_decision=ApprovalStepState.REJECTED, **later_change
+    )
+    with real.operator_db.transaction(real.ctx) as tx:
+        real.db.insert_evidence(PgDbSession(DbRole.OPERATOR), tx, draft)  # stays PENDING
+    conf = real.t.human("confirm R7K2", real.at(4))
+    real.t.write(real.root)
+    with real.verifier_db.transaction(real.ctx) as tx, pytest.raises(PermissionDeniedError):
+        real.worker._service.confirm(
+            tx, approve.id, real.t.session_id, conf, "confirm R7K2", real.at(60)
+        )
+    with real.verifier_db.transaction(real.ctx) as tx:
+        scan = real.worker.confirm_from_chat(tx, approve.id, real.at(60))
+    assert scan.outcome is ConfirmationOutcome.SUPERSEDED
+
+
+def test_a_code_names_one_approval(real: Real, admin: Conn) -> None:
+    """Why only two different approvals exempt each other: on PostgreSQL a code is tied to one
+    approval (review_codes), so a decision row naming another approval cannot carry this code."""
+    other = ids.new_uuid7()
+    admin.execute(
+        "INSERT INTO approvals (id, org_id, job_id, kind, subject_kind, subject_id, subject_sha256,"
+        " state, workflow_key, current_step, managed_service, requested_by, review_code)"
+        " VALUES (%s, %s, %s, 'FINAL_VIDEO', 'render', %s, %s, 'PENDING', 'owner_one_tap', 1,"
+        " false, 'svc_s07', 'M4P9')",
+        (other, real.tenant.org_uuid, real.job, real.approval, b"\2" * 32),
+    )
+    with pytest.raises(psycopg.Error):
+        admin.execute("UPDATE approvals SET review_code = 'R7K2' WHERE id = %s", (other,))
+    uid = real.t.human("reject R7K2", real.at(2))
+    real.t.write(real.root)
+    said = locate(real.src, real.t.session_id, "reject R7K2").timestamp
+    draft = real.draft(
+        uid, "reject R7K2", said, parsed_decision=ApprovalStepState.REJECTED,
+        approval_id=ids.ApprovalId(ids.format_id(ids.Prefix.APPROVAL, other)),
+    )  # fmt: skip
+    with (
+        real.operator_db.transaction(real.ctx) as tx,
+        pytest.raises(PermissionDeniedError),  # carries another approval's code: refused (0055)
+    ):
+        real.db.insert_evidence(PgDbSession(DbRole.OPERATOR), tx, draft)

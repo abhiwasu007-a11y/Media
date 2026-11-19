@@ -274,17 +274,22 @@ def _is_echo(text: str, row: EvidenceRecord) -> bool:
     return _names_code(text, code) and bool(shown.strip()) and shown in text
 
 
+def _separate_approvals(a: object, b: object) -> bool:
+    return a is not None and b is not None and a != b
+
+
 def superseded(row: EvidenceRecord, siblings: Iterable[EvidenceRecord]) -> bool:
-    """A decision record is superseded by any other decision record on the same subject, code,
-    approval and step whose owner message is as late or later, in any state (fail closed, also
-    for a tie)."""
+    """A decision record is superseded by any other decision record on the same subject and code
+    whose owner message is as late or later, in any state (fail closed, also for a tie). The
+    only exemption: both records name an approval and the approvals differ (a code names one
+    approval, ``review_codes``; a NULL approval or another step of the same approval never
+    exempts, because a ``confirm <code>`` reply cannot tell them apart)."""
     e = row.evidence
     code = (e.review_code or "").upper()
     return any(
         r.id != row.id
         and (r.evidence.review_code or "").upper() == code
-        and r.evidence.approval_id == e.approval_id
-        and r.evidence.step_no == e.step_no
+        and not _separate_approvals(r.evidence.approval_id, e.approval_id)
         and DEFAULT_RECORD_KIND_RULES.get(r.evidence.record_kind)
         is EvidenceVerificationKind.DECISION
         and r.evidence.message_at >= row.evidence.message_at
