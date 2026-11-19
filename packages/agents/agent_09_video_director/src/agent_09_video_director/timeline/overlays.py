@@ -13,12 +13,21 @@ from agent_09_video_director.contracts import (
     IntentKind,
     Overlay,
     OverlayKind,
+    ScriptDoc,
     Section,
     Shot,
     TextRef,
     TextRefDisclaimer,
 )
 from agent_09_video_director.problems import input_invalid
+from agent_09_video_director.timeline.timemap import TimeMap
+
+CAPTION_CARD_ID = "caption_card"
+CHAPTER_CARD_ID = "chapter_card"
+DISCLAIMER_CARD_ID = "disclaimer_card"
+END_SCREEN_ID = "end_screen"
+"""Platform package template IDs (agent_09 8.2, CCR-204): registered per tenant by the shared
+template registry; Agent 08 alone resolves an ID to an asset."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +59,21 @@ def plan_end_screen(
         EndScreen(content_end_ms, end),
         (DeliberatePause(start_ms=content_end_ms, end_ms=end, reason="END_SCREEN"),),
     )
+
+
+def section_start_ms(script: ScriptDoc, tm: TimeMap) -> dict[str, int]:
+    """Start of every section's chapter (18 ``edit.chapters``, CCR-202).
+
+    The first chapter starts at 0 and covers the lead-in (every scene before the first scene of
+    ``sections[0]``: the hook and an ``AFTER_HOOK`` disclaimer); every later section starts at
+    the measured start of its first segment.
+    """
+    first_seg = {sc.scene_id: sc.segment_ids[0] for sc in script.scenes if sc.segment_ids}
+    return {
+        sec.section_id: 0 if i == 0 else tm.start(first_seg[sec.scene_ids[0]])
+        for i, sec in enumerate(script.sections)
+        if sec.scene_ids
+    }
 
 
 def build_chapters(
@@ -85,36 +109,48 @@ def plan_overlays(
     """Track V2: sting at the hook end, lower-thirds / caption cards (script text only),
     disclaimer cards, optional chapter cards, end screen last. No free text anywhere."""
     vertical = aspect is AspectRatio.PORTRAIT
-    items: list[tuple[int, int, OverlayKind, str | None, tuple[TextRef, ...]]] = []
+    items: list[tuple[int, int, OverlayKind, str, tuple[TextRef, ...]]] = []
     sting = plan_brand_sting(hook_end_ms, brand, cfg)
-    if sting is not None:
+    if sting is not None and brand.intro_ref is not None:
         items.append((sting[0], sting[1], OverlayKind.BRAND_STING, brand.intro_ref, ()))
     for shot in shots:
         disclaimers = tuple(t for t in shot.text_refs if isinstance(t, TextRefDisclaimer))
         if disclaimers:
             items.append(
-                (shot.start_ms, shot.end_ms, OverlayKind.DISCLAIMER_CARD, None, disclaimers)
+                (
+                    shot.start_ms,
+                    shot.end_ms,
+                    OverlayKind.DISCLAIMER_CARD,
+                    DISCLAIMER_CARD_ID,
+                    disclaimers,
+                )
             )
             continue
         if shot.text_refs and shot.intent_kind is not IntentKind.TEXT_CARD:
-            kind = (
-                OverlayKind.CAPTION_CARD
-                if vertical or brand.lower_third_template_ref is None
-                else OverlayKind.LOWER_THIRD
-            )
-            items.append(
-                (shot.start_ms, shot.end_ms, kind, brand.lower_third_template_ref, shot.text_refs)
-            )
+            lower_third = brand.lower_third_template_ref
+            if vertical or lower_third is None:
+                kind, template = OverlayKind.CAPTION_CARD, CAPTION_CARD_ID
+            else:
+                kind, template = OverlayKind.LOWER_THIRD, lower_third
+            items.append((shot.start_ms, shot.end_ms, kind, template, shot.text_refs))
     if cfg.chapter_cards_enabled:
         by_start = {s.start_ms: s for s in shots}
         for ch in chapters:
             first = by_start.get(ch.start_ms)
             if first is not None:
-                items.append((first.start_ms, first.end_ms, OverlayKind.CHAPTER_CARD, None, ()))
+                items.append(
+                    (first.start_ms, first.end_ms, OverlayKind.CHAPTER_CARD, CHAPTER_CARD_ID, ())
+                )
     end_screen, _ = plan_end_screen(content_end_ms, cfg)
     if end_screen is not None:
         items.append(
-            (end_screen.start_ms, end_screen.end_ms, OverlayKind.END_SCREEN, brand.outro_ref, ())
+            (
+                end_screen.start_ms,
+                end_screen.end_ms,
+                OverlayKind.END_SCREEN,
+                brand.outro_ref or END_SCREEN_ID,
+                (),
+            )
         )
     order = {k: i for i, k in enumerate(OverlayKind)}
     items.sort(key=lambda it: (it[0], order[it[2]], it[1]))

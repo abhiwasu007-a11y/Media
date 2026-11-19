@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pydantic import ValidationError
 
 from agent_09_video_director.contracts import DirectionOutput
+from amw_core.contracts.error import violation
 from amw_core.errors import InvalidJsonError, OutputSchemaInvalidError
 
 
@@ -21,18 +22,21 @@ def parse_direction_output(raw: str, expected_slot_ids: Sequence[str]) -> Direct
     try:
         out = DirectionOutput.model_validate(doc)
     except ValidationError as exc:
-        paths = ["/" + "/".join(str(p) for p in e["loc"]) + ": " + e["type"] for e in exc.errors()]
+        items = [
+            violation(e["type"], "/" + "/".join(str(p) for p in e["loc"])) for e in exc.errors()
+        ]
         raise OutputSchemaInvalidError(
-            "model output violates the schema", details={"violations": paths[:50]}
+            "model output violates the schema", details={"violations": items[:50]}
         ) from exc
     ids = [d.slot_id for d in out.directions]
     if out.refusal is not None:
         if ids:
             raise OutputSchemaInvalidError(
-                "refusal with directions", details={"violations": ["REFUSAL_WITH_DIRECTIONS"]}
+                "refusal with directions",
+                details={"violations": [violation("REFUSAL_WITH_DIRECTIONS")]},
             )
     elif ids != list(expected_slot_ids):
         raise OutputSchemaInvalidError(
-            "slot coverage or order mismatch", details={"violations": ["SLOT_COVERAGE"]}
+            "slot coverage or order mismatch", details={"violations": [violation("SLOT_COVERAGE")]}
         )
     return out
