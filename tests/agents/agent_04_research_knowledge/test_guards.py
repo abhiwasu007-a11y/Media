@@ -51,6 +51,7 @@ from amw_core.enums import (
     SourceOwnership,
     VideoKind,
 )
+from amw_core.ids import PROJECT
 from amw_core.text_normalise import Script, dominant_script
 from tests.agents.agent_04_research_knowledge.conftest import (
     PROPOSED,
@@ -403,8 +404,12 @@ def test_tenant_guard_input_rules() -> None:
     with pytest.raises(InputInvalid):
         guard_for(w).check(no_channel, data)
     no_project = w.task_input(project_id=None)
-    with pytest.raises(MissingDependency):
+    with pytest.raises(InputInvalid) as excinfo:  # PASS6-C (CCR-214): no workspace fallback
         guard_for(w).check(no_project, data)
+    assert excinfo.value.details["violations"][0].keyword == "PROJECT_MISSING"
+    unknown = w.task_input(project_id=str(PROJECT.new()))
+    with pytest.raises(MissingDependency):
+        guard_for(w).check(unknown, data)
 
 
 def test_tenant_guard_foreign_prior_pack_and_platform_ref() -> None:

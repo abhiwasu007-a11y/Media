@@ -16,6 +16,7 @@ from agent_04_research_knowledge.library.models import CollectionView, TenantSco
 from agent_04_research_knowledge.library.protocol import KnowledgeLibrary
 from agent_04_research_knowledge.models.pack_input import ResearchPackInput
 from amw_core.contracts.common import storage_uri_owner
+from amw_core.contracts.error import violation
 from amw_core.contracts.task_input import TaskInput
 from amw_core.enums import OwnerReferenceKind, VideoKind
 from amw_core.ids import Prefix, parse_id
@@ -62,6 +63,12 @@ class TenantGuard:
         # (1) the channel is required for this task
         if task.channel_id is None:
             raise InputInvalid("channel_id is required")
+        # a production job always has a project (03 section 3.1, CCR-214): no fallback to ""
+        if task.project_id is None:
+            raise InputInvalid(
+                "project_id is required",
+                details={"violations": [violation("PROJECT_MISSING", "/project_id")]},
+            )
         # (2) ID prefixes
         parse_id(task.org_id, Prefix.ORGANISATION)
         parse_id(task.job_id, Prefix.JOB)
@@ -113,9 +120,7 @@ class TenantGuard:
         # (8) tenant active
         if not self._dir.tenant_active(task.org_id):
             raise TenantInactive("tenant is not active")
-        workspace = (
-            self._dir.workspace_id(task.org_id, task.project_id) if task.project_id else None
-        )
+        workspace = self._dir.workspace_id(task.org_id, task.project_id)
         if workspace is None:
             raise MissingDependency("project workspace not found")
         return TenantCheck(scope, collections, workspace)

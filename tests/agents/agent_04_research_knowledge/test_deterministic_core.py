@@ -74,11 +74,12 @@ from amw_core.enums import (
     VideoKind,
 )
 from amw_core.errors import AuthInvalidError, RateLimitedError, Upstream5xxError
-from amw_core.ids import ATTEMPT, CHANNEL, ORG, Prefix, make_idempotency_key, new_id
+from amw_core.ids import CHANNEL, ORG, Prefix, make_idempotency_key, new_id
 from tests.agents.agent_04_research_knowledge.conftest import (
     BODY_1,
     PROPOSED,
     build_world,
+    exec_ctx,
     make_run,
     user_payload,
 )
@@ -340,7 +341,8 @@ def tn_logs(caplog: pytest.LogCaptureFixture) -> dict[str, Any]:
 
     w = build_world()
     with caplog.at_level(logging.DEBUG):
-        w.step().run(w.task_input(), ATTEMPT.new())
+        ti = w.task_input()
+        w.step().run(ti, exec_ctx(ti))
     text = " ".join(r.getMessage() for r in caplog.records)
     lines = [json.loads(r.getMessage()) for r in caplog.records if r.name == "amw.agent_04"]
     return {
@@ -554,7 +556,8 @@ def as_case(fx: dict[str, Any], case_id: str, w_tmp: Path) -> dict[str, Any]:
             },
         }
         w = build_world(lambda _r: json.dumps(refusal))
-        out = w.step().run(w.task_input(), ATTEMPT.new())
+        ti = w.task_input()
+        out = w.step().run(ti, exec_ctx(ti))
         gate = next(x for x in out.validation_results if x.gate)
         return {
             "task_status": out.status.value,
@@ -607,7 +610,8 @@ def fl(fx: dict[str, Any], case_id: str, tmp: Path) -> dict[str, Any]:
 
     def run(ww: Any = None, **k: Any) -> Any:
         target = ww or w
-        return target.step().run(target.task_input(**k), ATTEMPT.new())
+        ti = target.task_input(**k)
+        return target.step().run(ti, exec_ctx(ti))
 
     if case_id == "FL-01":
         a = task_key(w.org, w.job, fx["iteration_a"])
@@ -717,7 +721,8 @@ def fl(fx: dict[str, Any], case_id: str, tmp: Path) -> dict[str, Any]:
                 {"kind": "EXTERNAL_URL", "url": None, "knowledge_source_id": None, "note": None}
             ]
         )
-        out = w.step().run(w.task_input(bad), ATTEMPT.new())
+        ti = w.task_input(bad)
+        out = w.step().run(ti, exec_ctx(ti))
         return {"error": out.error.code if out.error else None, "llm_calls": len(w.llm.requests)}
     if case_id == "FL-12":
         try:
