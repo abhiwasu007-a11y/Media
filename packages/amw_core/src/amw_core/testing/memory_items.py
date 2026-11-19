@@ -4,7 +4,7 @@ requester's task / project / channel, idempotent by hash, expired rows never ret
 from datetime import datetime
 
 from amw_core.enums import MemoryScope
-from amw_core.errors import IdempotencyConflictError, InputInvalidError
+from amw_core.errors import IdempotencyConflictError, InputInvalidError, PermissionDeniedError
 from amw_core.ids import OrgId, Prefix, new_id
 from amw_core.interfaces.memory_items import (
     MemoryItem,
@@ -21,11 +21,15 @@ class InMemoryMemoryItems:
     def __init__(self) -> None:
         self._rows: dict[_Key, StoredMemoryItem] = {}
 
-    def put(self, tx: TenantTransaction, item: MemoryItem) -> StoredMemoryItem:
+    def put(
+        self, tx: TenantTransaction, requester: MemoryRequester, item: MemoryItem
+    ) -> StoredMemoryItem:
         problems = item.problems()
         owner = owner_id_of(item)
         if problems or owner is None:
             raise InputInvalidError("invalid memory item", details={"problems": list(problems)})
+        if not requester.may_write(item):
+            raise PermissionDeniedError("a memory item may only be written inside its own scope")
         key = (tx.context.org_id, item.scope, owner, item.key)
         old = self._rows.get(key)
         if old is None:
@@ -67,4 +71,4 @@ class InMemoryMemoryItems:
 
 def _live(row: StoredMemoryItem, now: datetime) -> bool:
     expires = row.item.expires_at
-    return expires is None or expires > now
+    return row.item.superseded_by is None and (expires is None or expires > now)

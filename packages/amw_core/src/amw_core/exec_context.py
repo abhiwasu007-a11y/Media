@@ -1,7 +1,7 @@
 """Execution context shared by the stages of one task attempt (CCR-130, ticket P4-17; 19.1).
 
 Tenant scope, typed IDs and the attempt number. ``from_task_input`` is V1 TenantScope: the
-envelope org (when the caller passes it), the Task Input org and every typed ID must agree and be
+envelope org (required), the Task Input org and every typed ID must agree and be
 well formed, else ``TENANT_MISMATCH`` before any step runs (19.1 layer 1).
 """
 
@@ -54,11 +54,11 @@ class ExecContext:
         attempt_id: str,
         agent_id: str,
         *,
-        envelope_org_id: str | None = None,
+        envelope_org_id: str,
     ) -> ExecContext:
         if task_input.agent_id != agent_id:
             raise TenantMismatchError(f"task is not addressed to {agent_id}")
-        if envelope_org_id is not None and envelope_org_id != task_input.org_id:
+        if envelope_org_id != task_input.org_id:
             raise TenantMismatchError("envelope org differs from the Task Input org")
         try:
             return cls(

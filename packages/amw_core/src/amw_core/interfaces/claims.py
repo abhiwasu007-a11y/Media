@@ -11,6 +11,7 @@ transaction and enforces ``org_id`` (27 section 7.3 rule 3).
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from amw_core.enums import (
@@ -27,6 +28,12 @@ from amw_core.ids import TaskId
 from amw_core.interfaces.tenancy_context import TenantTransaction
 
 
+def _enum(value: object, kind: type[StrEnum]) -> None:
+    """Runtime check: a plain string that merely looks like an enum value is refused."""
+    if not isinstance(value, kind):
+        raise InputInvalidError(f"{kind.__name__} value expected")
+
+
 @dataclass(frozen=True, slots=True)
 class RuleFlag:
     """One element of ``claims.rule_flags`` (``{rule_id, severity, evidence}``)."""
@@ -34,6 +41,9 @@ class RuleFlag:
     rule_id: str
     severity: RuleSeverity
     evidence: str
+
+    def __post_init__(self) -> None:
+        _enum(self.severity, RuleSeverity)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +53,8 @@ class NewClaim:
 
     local_id: str
     """The id the extractor gave the claim inside its output (not a column)."""
+    job_id: str
+    """``claims.job_id`` (NOT NULL, FK jobs)."""
     segment_id: str
     char_start: int
     char_end: int
@@ -55,6 +67,11 @@ class NewClaim:
     rule_flags: tuple[RuleFlag, ...] = ()
 
     def __post_init__(self) -> None:
+        _enum(self.claim_type, ClaimType)
+        _enum(self.time_reference_kind, TimeReferenceKind)
+        _enum(self.proposed_verdict, ComplianceVerdict)
+        for flag in self.rule_flags:
+            _enum(flag.severity, RuleSeverity)
         if self.char_start < 0 or self.char_end <= self.char_start:
             raise InputInvalidError("claim span must satisfy 0 <= char_start < char_end")
         if not self.quote or not self.normalized_claim:
@@ -69,6 +86,13 @@ class ClaimStatusUpdate:
     claim_id: str
     status: ClaimStatus
     reasons: tuple[VerificationReasonCode, ...] = ()
+    substantiation_ref: str | None = None
+    """``claims.substantiation_ref`` (set with ``SUBSTANTIATED``)."""
+
+    def __post_init__(self) -> None:
+        _enum(self.status, ClaimStatus)
+        for reason in self.reasons:
+            _enum(reason, VerificationReasonCode)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +108,7 @@ class CitationRow:
     accessed_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        _enum(self.support, CitationSupport)
         if (self.knowledge_chunk_id is None) == (self.external_url is None):
             raise InputInvalidError("exactly one of knowledge_chunk_id and external_url")
         if self.external_url is not None and self.accessed_at is None:

@@ -38,6 +38,8 @@ class MemoryItem:
     task_id: TaskId | None = None
     expires_at: datetime | None = None
     review_after: datetime | None = None
+    superseded_by: WireId | None = None
+    """A newer row replaced this one (04 5.10 ``superseded_by``); superseded rows are not live."""
     confidence: str | None = None
     """``numeric(4,3)`` as text, never a float."""
 
@@ -78,6 +80,17 @@ class MemoryRequester:
     job_id: JobId | None
     task_id: TaskId | None
 
+    def may_write(self, item: MemoryItem) -> bool:
+        """The item lies inside this requester's own scope (and its job, when both name one)."""
+        owner = owner_id_of(item)
+        if owner is None or owner != self.owner_of(item.scope):
+            return False
+        return not (
+            item.scope in {MemoryScope.TASK, MemoryScope.WORKING}
+            and self.job_id is not None
+            and item.job_id != self.job_id
+        )
+
     def owner_of(self, scope: MemoryScope) -> str | None:
         """The id that owns rows of ``scope`` for this requester (``None``: cannot see them)."""
         if scope in {MemoryScope.TASK, MemoryScope.WORKING}:
@@ -98,10 +111,16 @@ def owner_id_of(item: MemoryItem) -> str | None:
 
 @runtime_checkable
 class MemoryItems(Protocol):
-    def put(self, tx: TenantTransaction, item: MemoryItem) -> StoredMemoryItem:
-        """Insert. The same ``(scope, owner, key)`` with the same ``value_sha256`` returns the
-        stored row (idempotent replay); another hash is ``IdempotencyConflictError``; a row that
-        breaks the 04 5.10 constraints (``MemoryItem.problems``) is ``InputInvalidError``."""
+    def put(
+        self, tx: TenantTransaction, requester: MemoryRequester, item: MemoryItem
+    ) -> StoredMemoryItem:
+        """Insert on behalf of ``requester``. A row outside the requester's own scope (another
+        task's TASK / WORKING row, another project's PROJECT row, another channel's CHANNEL /
+        LONG_TERM row) is ``PermissionDeniedError``: nothing is written (no memory poisoning);
+        the org is always the transaction's. The same ``(scope, owner, key)`` with the same
+        ``value_sha256`` returns the stored row (idempotent replay); another hash is
+        ``IdempotencyConflictError``; a row that breaks the 04 5.10 constraints
+        (``MemoryItem.problems``) is ``InputInvalidError``."""
         ...
 
     def get(

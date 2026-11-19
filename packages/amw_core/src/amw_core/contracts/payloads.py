@@ -12,12 +12,12 @@ name whose registered major differs, or a requested minor newer than the registe
 carries only field locations and error types, never the offending values.
 """
 
-import importlib.metadata
+import importlib
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from importlib.metadata import EntryPoint
-from typing import Any
+from types import MappingProxyType, ModuleType
+from typing import Any, Final
 
 from pydantic import BaseModel, ValidationError
 
@@ -105,41 +105,67 @@ def register_payload_schema(name: SchemaName, version: Semver, model: type[BaseM
     PAYLOAD_SCHEMAS.register(name, version, model)
 
 
-ENTRY_POINT_GROUP = "amw.payload_schemas"
-"""Python entry-point group an agent package declares in its ``pyproject.toml`` to register its
-payload schemas: ``[project.entry-points."amw.payload_schemas"]`` ``agent_07 =
-"agent_07_voice_production.payloads:register"``, a ``register(registry)`` function that calls
-``registry.register(name, version, model)`` for each schema it owns. ``amw_core`` never imports an
-agent (layering); the orchestrator calls ``load_payload_schema_plugins`` once at start-up."""
+PAYLOAD_PLUGIN_PACKAGES: Final[Mapping[str, str]] = MappingProxyType({})
+"""The fixed allow-list of ``package -> schema namespace`` whose ``<package>.payloads.register
+(registrar)`` the loader runs, each bound to its own namespace (``agent_07_voice_production`` ->
+``agent_07``). Nothing outside this table is imported (no entry points, no configuration). It is
+empty in this PR: each agent lane adds its own line together with its ``payloads.py`` (this PR
+does not edit ``packages/agents/*``; the planned entries are listed in the PR text)."""
+
+
+class PayloadRegistrar:
+    """What a plugin receives: it may register only names inside its own namespace, once each."""
+
+    def __init__(self, registry: PayloadSchemaRegistry, namespace: str) -> None:
+        self._registry = registry
+        self._namespace = namespace
+        self._seen: set[tuple[str, int]] = set()
+
+    def register(self, name: SchemaName, version: Semver, model: type[BaseModel]) -> None:
+        if not name.startswith(f"{self._namespace}."):
+            raise ConfigInvalidError(
+                "a payload schema is outside the plugin's namespace",
+                details={"namespace": self._namespace, "schema": name},
+            )
+        key = (name, _split(version)[0])
+        if key in self._seen:
+            raise ConfigInvalidError(
+                "a payload schema is registered twice", details={"schema": name}
+            )
+        self._seen.add(key)
+        self._registry.register(name, version, model)
 
 
 def load_payload_schema_plugins(
-    registry: PayloadSchemaRegistry = PAYLOAD_SCHEMAS,
-    entry_points: Iterable[EntryPoint] | None = None,
+    registry: PayloadSchemaRegistry | None = None,
+    allow: Mapping[str, str] = PAYLOAD_PLUGIN_PACKAGES,
+    import_module: Callable[[str], ModuleType] = importlib.import_module,
 ) -> tuple[str, ...]:
-    """Run every registered plugin against ``registry``; returns the plugin names loaded. A
-    plugin that fails to load or register is a start-up error (``ConfigInvalidError``): a missing
-    schema must never silently disable payload validation."""
-    found = (
-        tuple(entry_points)
-        if entry_points is not None
-        else tuple(importlib.metadata.entry_points(group=ENTRY_POINT_GROUP))
-    )
+    """Import ``<package>.payloads`` of each allow-listed package and call its ``register``
+    with a registrar bound to the package's namespace. Returns the packages loaded. Any failure
+    (the module cannot be imported, no ``register``, a name outside the namespace, a schema
+    registered twice or a model conflict) is a start-up ``ConfigInvalidError``: a missing or
+    hijacked schema must never silently disable payload validation."""
+    target = PAYLOAD_SCHEMAS if registry is None else registry
     loaded: list[str] = []
-    for point in sorted(found, key=lambda e: e.name):
+    for package, namespace in sorted(allow.items()):
         try:
-            point.load()(registry)
+            register = import_module(f"{package}.payloads").register
+            register(PayloadRegistrar(target, namespace))
+        except ConfigInvalidError:
+            raise
         except Exception as exc:
             raise ConfigInvalidError(
-                "a payload schema plugin failed", details={"plugin": point.name}
+                "a payload schema plugin failed", details={"plugin": package}
             ) from exc
-        loaded.append(point.name)
+        loaded.append(package)
     return tuple(loaded)
 
 
 __all__ = [
-    "ENTRY_POINT_GROUP",
+    "PAYLOAD_PLUGIN_PACKAGES",
     "PAYLOAD_SCHEMAS",
+    "PayloadRegistrar",
     "PayloadSchemaRegistry",
     "RegisteredPayloadSchema",
     "load_payload_schema_plugins",
