@@ -93,9 +93,11 @@ Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deploym
   (`a11.q.language_glyphs`) passes only if one of the two fonts covers every character (a character neither covers is refused, never drawn
   as a `.notdef` box). Text Mukta fully covers renders pixel-identically with or without the fallback. The manifest provenance records
   `font_fallback_source` (CCR-245). Fonts load from memory by verified hash; no system font is ever consulted. Noto is a used `FONT` like any other: whenever it draws a glyph of a variant, the stage requires a registered `FONT` asset with key `noto_sans_devanagari_vf` (registry), writes its licence-ledger row and `LicenceFact`, and lists it in `font_asset_ids`; the fallback uses the Noto weight of the Mukta weight in use (Bold: `wght` 700). Agent 10 and agent 11 share one coverage rule (`amw_core.font_coverage`). Characters in neither font (arrows, triangles) are refused, never drawn as boxes.
-- **Owner channel:** "use only these" is enforced by `agent_11.fonts.policy = MANIFEST_ONLY` (set for the owner channel; CCR-246): a font that is
-  not a repo-manifest font is refused (`font_manifest_only`). **Tenants:** the default `TENANT_ALLOWED` keeps the tenant brand-kit mechanism of
-  FR-09 unchanged: a tenant font is a registered `FONT` asset with a licence row whose bytes hash to the recorded
+- **Owner channel:** "use only these" is enforced in code by `agent_11.fonts.policy`, whose **code default is `MANIFEST_ONLY`** (CCR-246): with
+  no key set (the owner channel, the only channel today) a font that is not a repo-manifest font is refused (`font_manifest_only`;
+  `test_the_owner_channel_default_is_manifest_only_and_refuses_a_non_manifest_font`). No channel config or brand-kit seed exists in the repo yet,
+  so the secure default in `config.py` is the place. **Tenants:** a channel that uses its own brand-kit fonts sets `TENANT_ALLOWED` in its channel
+  config, which keeps the tenant mechanism of FR-09 unchanged: a tenant font is a registered `FONT` asset with a licence row whose bytes hash to the recorded
   `sha256`; it gets no fallback (its coverage and licence stay exactly what the tenant registered).
 - **Break 14 of the dry run ("boxes" in the thumbnail):** the three outlined rectangles right of the Marathi title were the code-drawn neutral
   glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Regression tests in

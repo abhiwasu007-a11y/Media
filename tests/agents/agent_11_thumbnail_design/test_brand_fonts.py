@@ -308,7 +308,20 @@ def _with_fallback_glyph() -> tuple[Promise, Brief]:
     )
 
 
-def test_noto_is_registered_and_licensed_whenever_it_draws_a_glyph() -> None:
+def test_noto_is_registered_and_licensed_whenever_it_draws_a_glyph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_11_thumbnail_design import stage as stage_mod
+
+    seen: list[object] = []
+    original = stage_mod._Run._licence_facts
+
+    def spy(self: object, *args: object, **kwargs: object) -> object:
+        facts = original(self, *args, **kwargs)  # type: ignore[arg-type]
+        seen.extend(facts)
+        return facts
+
+    monkeypatch.setattr(stage_mod._Run, "_licence_facts", spy)
     env = make_env(
         language="mr-IN", promise=_with_fallback_glyph(), font=pinned_font_bytes("mukta_bold")
     )
@@ -318,10 +331,16 @@ def test_noto_is_registered_and_licensed_whenever_it_draws_a_glyph() -> None:
     prov = _provenance(env)
     assert prov["font_fallback_used"] is True
     assert "ast_noto" in prov["font_asset_ids"]  # type: ignore[operator]
-    assert {r.asset_id for r in env.repo.ledger if r.usage_kind == "FONT"} == {
-        "ast_font",
-        "ast_noto",
-    }
+    fonts_used = {r.asset_id for r in env.repo.ledger if r.usage_kind == "FONT"}
+    assert fonts_used == {"ast_font", "ast_noto"}
+    noto = [f for f in seen if getattr(f, "asset_id", None) == "ast_noto"]
+    assert noto, "no LicenceFact for the Noto fallback font"
+    for fact in noto:
+        assert fact.usage_kind == "FONT"  # type: ignore[attr-defined]
+        assert fact.has_ledger_row is True  # type: ignore[attr-defined]
+        assert fact.ledger_has_interval is False  # type: ignore[attr-defined]
+        assert fact.licence_state == "ACTIVE"  # type: ignore[attr-defined]
+        assert fact.covers_monetized is True  # type: ignore[attr-defined]
 
 
 def test_unregistered_noto_refuses_when_it_would_draw_a_glyph_and_is_not_needed_otherwise() -> None:
@@ -389,3 +408,24 @@ def test_arrows_and_triangles_are_in_neither_font_and_are_refused_not_drawn_as_b
 
     with pytest.raises(GlyphMissingError):
         comp.render(replace(canary_spec("mukta_bold_noto_fallback"), lines=(f"ट्रेंड {ch}",)))
+
+
+def test_the_owner_channel_default_is_manifest_only_and_refuses_a_non_manifest_font() -> None:
+    """No key set (the owner channel): the code default is MANIFEST_ONLY."""
+    from agent_11_thumbnail_design.config import Agent11Settings
+    from amw_core.errors import MissingDependencyError
+    from tests.agents.agent_11_thumbnail_design.fakes import settings
+
+    assert settings(agent_11__fonts__policy=None).fonts_policy == "MANIFEST_ONLY"
+    assert Agent11Settings.model_fields["fonts_policy"].default == "MANIFEST_ONLY"
+    env = make_env(font=_non_manifest_font(), agent_11__fonts__policy=None)
+    with pytest.raises(MissingDependencyError) as info:
+        env.stage.run(env.ti, "att_1")
+    assert "font_manifest_only" in str(info.value.details)
+    owner = make_env(
+        language="mr-IN",
+        promise=_marathi(),
+        font=pinned_font_bytes("mukta_bold"),
+        agent_11__fonts__policy=None,
+    )
+    assert _provenance(owner)["font_source"] == "repo_manifest:mukta_bold"
