@@ -501,7 +501,7 @@ Stages: as `AD_SPOT` without `agent_17.concept_variants` and the `CONCEPT` appro
 | parent_input | `SOURCE_VIDEO` (an existing video: the tenant's own publication or a client-supplied master with rights confirmation) |
 | languages | `MULTI` (target languages per order) |
 | required_inputs | source video + transcript or script (CLIENT/SYSTEM); target languages (CLIENT); pronunciation dictionary per language (SYSTEM/CLIENT); rights confirmation for the source (CLIENT) |
-| approvals | native-speaker QC per language (`svc_s03.native_speaker_qc`, mandatory human step); `FINAL_VIDEO` / `client_two_step` or `owner_one_tap` (mandatory) |
+| approvals | native-speaker QC per language (`svc_s03.native_speaker_qc`, mandatory human step; approval kind `SCRIPT` on the translated script version of that language, `subject_kind = script`, CCR-144); `FINAL_VIDEO` / `client_two_step` or `owner_one_tap` (mandatory) |
 | qc_profile | `qc.dubbing` |
 | rule_packs | the source video's packs + `rp.youtube_general` |
 | deliverables | `dub_audio_track_<lang>`, `srt_per_language`, `metadata_per_language` |

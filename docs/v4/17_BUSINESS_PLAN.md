@@ -1,6 +1,6 @@
 # 17 — BUSINESS PLAN (owner channel first, then clients)
 
-> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines are marked `(unfiled CCR)` and listed in `audit/b2_unfiled_ccr_requests_adr_business.md`; this file changes no contract.
+> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines carry their CCR number and status (filed and decided in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)); this file changes no contract.
 
 | Field | Value |
 |---|---|
@@ -56,7 +56,7 @@ weighted_score(cell) = Σ_i ( w_i × s_i ) / Σ_i ( w_i ) × 20          (0-100;
 confidence(cell)     = Σ_i ( w_i  where s_i has evidence ) / Σ_i w_i  (0-1; shown next to the score)
 ```
 
-| # | Criterion (§1B.1) | Weight key (configuration, unfiled CCR) | Evidence rule | Direction |
+| # | Criterion (§1B.1) | Weight key (configuration, CCR-166) | Evidence rule | Direction |
 |---|---|---|---|---|
 | 1 | Genuine owner/human expertise | `business.discovery.weights.expertise` | owner statement + course/library existence | higher = better |
 | 2 | Search demand | `…weights.search_demand` | official/primary demand data per language: **REQUIRES REVIEW (Phase 1): demand source** (19 §8) | higher = better |
@@ -80,10 +80,10 @@ confidence(cell)     = Σ_i ( w_i  where s_i has evidence ) / Σ_i w_i  (0-1; sh
 
 ### 2.4 Ranked shortlist method (output)
 1. Score every non-knocked-out cell; sort by `weighted_score`, then by `confidence`.
-2. A cell with `confidence` below the owner-set floor (`business.discovery.min_confidence`, unfiled CCR) is shown as **"insufficient evidence"** below the ranked list, never above a scored cell.
+2. A cell with `confidence` below the owner-set floor (`business.discovery.min_confidence`, CCR-166) is shown as **"insufficient evidence"** below the ranked list, never above a scored cell.
 3. Output table per run: rank · cell · weighted score · confidence · each criterion's score + evidence link · knock-out reasons · weight-set version.
 4. **The owner decides.** The engine never launches a channel; the decision is an approval record (S7).
-5. Storage: no table exists in `04_DATABASE_ARCHITECTURE.md`; written against `niche_scores` (unfiled CCR) and task type `agent_02.niche_score` (unfiled CCR).
+5. Storage: no table exists in `04_DATABASE_ARCHITECTURE.md`; written against `niche_scores` (CCR-166) and task type `agent_02.niche_score` (CCR-136), both Proposed, deferred to 3C.
 
 ## 3. Business feasibility report (§1B.1a) — outline
 
@@ -255,14 +255,14 @@ Display rules: every scenario number carries the badge **PROJECTION** and the da
 ### 8.4 Dashboards (3C; numbers first, green up / red down, explanations behind details)
 | Panel | Content | Data source |
 |---|---|---|
-| Per video | cost per stage, `C_video`, views, AVD, retention (`relativeRetentionPerformance`), course clicks, revenue_v, profit_v, QC score | `cost_ledger`, `quality_scores`, `analytics_snapshots`, `revenue_entries` (unfiled CCR) |
+| Per video | cost per stage, `C_video`, views, AVD, retention (`relativeRetentionPerformance`), course clicks, revenue_v, profit_v, QC score | `cost_ledger`, `quality_scores`, `analytics_snapshots`, `revenue_entries` (CCR-152) |
 | Per channel / month | revenue by stream (§6), cost, profit, MRR, ROI, cost per 1,000 views | same, aggregated |
 | YPP progress | watch_hours_12m vs 8,000; subscribers vs 1,000; months_to_YPP (PROJECTION) | YT-14 |
 | Target gap | net_revenue_month vs ₹1,00,000 (gap only) | §1 formula |
 | Budget | per-video and pilot budget use, breaches | `budgets`, `budget_reservations` (09) |
 | Stop/scale | status of each §10 rule | §10 |
 
-Actual revenue has no table in `04_DATABASE_ARCHITECTURE.md` (`invoices` are platform-to-client bills, Tier 2). Written against **`revenue_entries` (unfiled CCR)**: org, channel, publication (nullable), stream, amount_minor, currency, period, label ACTUAL, source document ref.
+Actual revenue has no table in `04_DATABASE_ARCHITECTURE.md` (`invoices` are platform-to-client bills, Tier 2). Written against **`revenue_entries` (CCR-152, Proposed, deferred to 3C)**: org, channel, publication (nullable), stream, amount_minor, currency, period, label ACTUAL, source document ref.
 
 ## 9. Unit economics (S4 / Agent 15)
 
@@ -297,7 +297,7 @@ BEV_video        = max(0, C_video + C_fixed_month / videos_month − sponsor_net
 
 ## 10. Stop / scale rules per channel
 
-MVP scope: 3C (needs published videos). Tier 0; Tier 1+ per client channel with the client's own thresholds. All thresholds are **owner-set configuration** (no value ships; unfiled CCR for the `business.*` keys).
+MVP scope: 3C (needs published videos). Tier 0; Tier 1+ per client channel with the client's own thresholds. All thresholds are **owner-set configuration** (no value ships; CCR-166 for the `business.*` keys).
 
 ### 10.1 Scale (all must hold)
 | # | Condition | Parameter |
@@ -385,15 +385,15 @@ Cadence, number of videos and video length are **owner settings** (A6), not fixe
 | 12 Launch plan | — | Day 0 gate | Days 0-90 | 0 |
 | 13 Checklist | L5-L7 design | L6 wording | all owner items; client items at Tier 1 | 0-1 |
 
-## 15. Contract change requests (unfiled; listed in `audit/b2_unfiled_ccr_requests_adr_business.md`)
+## 15. Contract change requests (filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5); all Proposed, deferred to 3C)
 
 | # | Needed | Proposed name |
 |---|---|---|
-| 1 | storage of niche scores, weights and evidence | table `niche_scores` (unfiled CCR) |
-| 2 | task type for discovery scoring | `agent_02.niche_score` (unfiled CCR) |
-| 3 | ACTUAL revenue records per stream | table `revenue_entries` + enum `revenue_stream` (unfiled CCR) |
-| 4 | owner-set business thresholds and weights | config namespace `business.*` (unfiled CCR) |
-| 5 | unit-economics / stop-scale evaluation task | `agent_15.unit_economics_report` (unfiled CCR) |
+| 1 | storage of niche scores, weights and evidence | table `niche_scores` (CCR-166) |
+| 2 | task type for discovery scoring | `agent_02.niche_score` (CCR-136) |
+| 3 | ACTUAL revenue records per stream | table `revenue_entries` + enum `revenue_stream` (CCR-152) |
+| 4 | owner-set business thresholds and weights | config namespace `business.*` (CCR-166) |
+| 5 | unit-economics / stop-scale evaluation task | `agent_15.unit_economics_report` (CCR-136) |
 
 ## Appendix A — Owner inputs needed
 
