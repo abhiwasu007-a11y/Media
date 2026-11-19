@@ -8,7 +8,7 @@ spoken text, consent person data or provider voice reference appears in any outp
 from enum import StrEnum
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import Field, StringConstraints
+from pydantic import ConfigDict, Field, StringConstraints
 
 from amw_core.contracts.common import AmwModel, Sha256Hex, StorageUri
 from amw_core.enums import PresenterKind, VoiceKind
@@ -120,7 +120,14 @@ class DenoiseOut(StrEnum):
 # --- script document (agent_05.script_document, read-only here) ----------------------------
 
 
-class ScriptSegment(AmwModel):
+class _SliceReader(AmwModel):
+    """Tolerant reader of another agent's document: fields this stage does not read are
+    ignored (the producer's contract is the full document, 05 blueprint 8.2)."""
+
+    model_config = ConfigDict(**{**AmwModel.model_config, "extra": "ignore"})
+
+
+class ScriptSegment(_SliceReader):
     segment_id: SegmentId
     text: str
     pace: Pace
@@ -128,13 +135,13 @@ class ScriptSegment(AmwModel):
     scene_id: str
 
 
-class ScriptScene(AmwModel):
+class ScriptScene(_SliceReader):
     scene_id: str
     deliberate_pause_ms: NonNeg
     pronunciation_candidates: tuple[str, ...] = ()
 
 
-class ScriptDocument(AmwModel):
+class ScriptDocument(_SliceReader):
     """The slice of ``agent_05.script_document`` Agent 07 reads (15.1). Text never leaves the
     stage: payloads, logs and outputs carry segment IDs and hashes only."""
 
