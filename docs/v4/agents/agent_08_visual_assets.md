@@ -1534,7 +1534,7 @@ agent_08_visual_assets/
 │   ├── task_input.py  task_output.py  shot_requirement.py  shot_result.py
 │   ├── query_plan.py  candidate_rank.py  chart.py  licence.py  enums.py   # mirrors of the GLOSSARY §6.52 value sets (visual_skip_reason, shot_unresolved_reason, sourcing_warning, ...)
 ├── stage.py                   # AssetSourcingStage: orchestrates S0…S8 (§16), checkpoints, validation; the task type's
-│                              #   entry point run(task_input, attempt) -> TaskOutput (03 §1 rule 5, CCR-203): it reads the
+│                              #   entry point run(task_input, ctx: ExecContext) -> TaskOutput (03 §1 rule 5, CCR-203): it reads the
 │                              #   Task Input refs itself and returns amw.task_output; StageResult stays internal
 ├── plan/
 │   ├── shot_plan_reader.py    # ShotPlanReader (anti-corruption mapper, Agent 09 output -> ShotRequirement)
@@ -1644,7 +1644,7 @@ agent_08_visual_assets/
 ### 10.1 Orchestration and guards
 | Function | Signature | Side effects | Exceptions | Validation | Tests |
 |---|---|---|---|---|---|
-| `AssetSourcingStage.run` | `run(task: TaskInput, ctx: TenantContext) -> TaskOutput` | DB writes, blob writes, adapter calls, checkpoints, cost rows, audit | any `AgentError` subclass | §7.4 first | I-01…I-12, F-*, E-01 |
+| `AssetSourcingStage.run` | `run(task: TaskInput, ctx: ExecContext) -> TaskOutput` (03 §1 rule 5, CCR-203; the tenant context is `ctx.tenant`) | DB writes, blob writes, adapter calls, checkpoints, cost rows, audit | any `AgentError` subclass | §7.4 first | I-01…I-12, F-*, E-01 |
 | `TenantGuard.check_task` | `check_task(task, ctx, uris: Sequence[str], write: bool) -> None` | security event on violation | `TenantMismatch`, `CrossTenantRef`, `InputInvalid`, `PermissionDenied` | org IDs equal; URI org equals context or `platform` (read-only); no `..`/absolute segments; ID prefixes | S-01…S-04, `TG-*` |
 | `TenantGuard.entity_not_visible` | `entity_not_visible(kind: str, wire_id: str) -> MissingDependency` | audit event with caller org only | — | message identical for foreign and missing IDs | S-03, `TG-08` |
 | `GateRouter.route` | `route(unresolved: Sequence[Unresolved], script_stage_id: str) -> GateOutcome` | none | none | no unresolved shot → gate `PASS`; any owner-material reason (`NO_DATASET`, `NO_CHART_CASE`, `METHOD_NOT_RELEASED`) → task `FAILED` `PERMANENT.MISSING_DEPENDENCY` (no gate result); otherwise gate `FAIL` with `remedy_stage_id = script_stage_id` if a `DATA_WITHIN_LAG` shot is present, else `s09_plan` (§18) | `GR-01…GR-10`, I-13 |

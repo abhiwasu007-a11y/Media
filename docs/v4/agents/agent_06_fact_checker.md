@@ -859,14 +859,14 @@ agent_06_fact_checker/
 **MVP: 3A · Tier 0. Each function lists: side effects (S), validation (V), exceptions (X, typed; mapping in §18), logging (L: ids and counts only), tests (T; ids in §21). Types are the Pydantic models of §9.**
 
 ### 10.1 Orchestration
-**`ClaimExtractionStep.run(ctx: TaskContext, task: TaskInput[ExtractionInput]) -> TaskOutput`**
+**`ClaimExtractionStep.run(task: TaskInput[ExtractionInput], ctx: ExecContext) -> TaskOutput`** (03 §1 rule 5, CCR-203)
 - S: model calls (via `ClaimExtractor`), `claims` inserts, checkpoints, ledger rows, audit rows, output blob write-once.
 - V: E0: schema, `TenantGuard.check_extraction(task)` (org equality; `script_id` in org; segments blob hash equals `scripts.content_sha256`; `channel_id` consistent), rule packs resolvable (D9).
 - X: `InputInvalid`, `TenantMismatch`, `CrossTenantRef`, `TenantInactive`, `MissingDependency`, `ConfigInvalid`, `BudgetExhausted`, `LoopCapExceeded`, `QualityRepeatedFailure`, `Refusal*` (mapped, not raised past the step).
 - L: `claims.started`, `claims.step_done` (step key, counts), `claims.completed` (counts per verdict), failures with the 07 code.
 - T: U-01…U-09, I-01, I-02, F-01…F-08.
 
-**`ClaimVerificationStep.run(ctx, task: TaskInput[VerificationInput]) -> TaskOutput`**
+**`ClaimVerificationStep.run(task: TaskInput[VerificationInput], ctx: ExecContext) -> TaskOutput`** (03 §1 rule 5, CCR-203)
 - S: model calls, `claims.status` updates, `citations` inserts, checkpoints, ledger, audit, output blob, `memory_items` pointer.
 - V: V0–V2 (§7.2).
 - X: as above plus `InputInvalid` for blocked input and `claims_sha256` mismatch.

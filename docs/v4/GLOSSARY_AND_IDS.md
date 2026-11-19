@@ -326,7 +326,7 @@ Same value set as `task_state` **without `RETRY_WAIT`** (retries are task-level 
 `A_OWNER_REAL` · `B_LICENSED_STOCK` · `C_CODE_MOTION` · `D_AI_VIDEO` · `E_AI_STILL`.
 
 ### 6.20 `capability` (worker / task)
-`llm` · `tts` · `image_gen` · `video_gen` · `stock_search` · `music_search` (CCR-007; 3B) · `render_ffmpeg` · `media_probe` · `doc_extract` (CCR-014; document text extraction for `agent_04.knowledge_ingest`) · `web_fetch` (CCR-015; allow-listed HTTPS reference fetch) · `publish_youtube` · `file_delivery` · `analytics_ingest` · `notify_email`. New capabilities are additive via CCR.
+`llm` · `tts` · `image_gen` · `video_gen` · `stock_search` · `music_search` (CCR-007; 3B) · `render_ffmpeg` · `media_probe` · `doc_extract` (CCR-014; document text extraction for `agent_04.knowledge_ingest`) · `web_fetch` (CCR-015; allow-listed HTTPS reference fetch) · `publish_youtube` · `file_delivery` · `analytics_ingest` · `notify_email`. New capabilities are additive via CCR. **Paid** capabilities (a call can cost money; 09 §3.4, CCR-205): `llm`, `tts`, `image_gen`, `video_gen`, `stock_search`, `music_search`; all others are not paid.
 
 ### 6.21 `third_party_permission`
 `PERMITTED` · `NOT_PERMITTED` · `UNKNOWN`. `UNKNOWN` blocks use for any tenant other than the licence holder's own channels (§1C.8).

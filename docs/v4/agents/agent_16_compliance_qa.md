@@ -1028,7 +1028,7 @@ agent_16_compliance_qa/
     scores.py          ScoreWriter               — quality_scores machine rows
   report/section.py    ReportSectionBuilder      — data for the `qc_report` preset (24 §4, CCR-043)
   stages.py            the stage classes wiring the above (constructor DI); each task type has one entry point
-                       run(task_input, attempt) -> TaskOutput (03 §1 rule 5, CCR-203): ComplianceGateStage,
+                       run(task_input, ctx: ExecContext) -> TaskOutput (03 §1 rule 5, CCR-203): ComplianceGateStage,
                        QualityScoreStage (wraps QualityScorer for agent_16.quality_score, CCR-209),
                        PublicationAuthorisationStage, and UniquenessCheckStage for svc_s02.uniqueness_check
 s02_uniqueness_auditor/
@@ -1060,7 +1060,7 @@ The R14 operator recording component (`OwnerChatRecorder`), the evidence-store v
 | F-14 | `ParaphraseJudge.judge` | `(pairs: list[Pair], ctx) -> list[ParaphraseFinding]` | LLM calls (private worker only) | as F-11 | text never persisted; only IDs + scores | IT-04, EV |
 | F-15 | `VerdictAlgebra.combine` | `(det: list[RuleResult], findings, upstream_flags, uniq: UniquenessResult, disc: DisclosureResult, packs) -> GateDecision` | none (pure) | — | §6.3 V1–V13; monotonic | U-28…U-35, U-84…U-86, P-01 |
 | F-16 | `VerdictWriter.write` | `(decision, subject, tx) -> list[VerdictId]` | INSERT `compliance_verdicts`, `qc_results`; UPDATE `claims.final_verdict`; evidence blob; `audit_log` | `TEMPORARY.DB_TRANSIENT`, `PERMANENT.IDEMPOTENCY_CONFLICT` | idempotency `db.output` (task, kind) | IT-05 |
-| F-17 | `UniquenessCheckStage.run` | `(ti, ctx) -> TaskOutput` | reads; `qc_results`; report blob; audit | §18 | §8.3 rule | U-36…U-40 |
+| F-17 | `UniquenessCheckStage.run` | `(ti: TaskInput, ctx: ExecContext) -> TaskOutput` | reads; `qc_results`; report blob; audit | §18 | §8.3 rule | U-36…U-40 |
 | F-18 | `DeterministicCriteria.score` | `(qc: list[QcRow], claims, script, thumbs, gate) -> list[CriterionScore]` | none | — | missing input ⇒ criterion 0 + finding, never full points | U-41…U-45 |
 | F-19 | `QualityJudge.score_group` | `(group: GroupId, inputs, ctx) -> list[CriterionScore]` | 1 LLM call per group (3 groups) | as F-11 | integer 0–max per criterion; out-of-range ⇒ `AGENT.OUTPUT_SCHEMA_INVALID` | IT-06, EV |
 | F-20 | `RubricAggregator.aggregate` | `(crit: list[CriterionScore], rubric, scaling: Scaling) -> list[DimensionRow]` | none | — | §6.6; sum of max = 100; `NONE` default, `PRO_RATA` option with SKIPPED criteria out of both sums; refuses `BLOCKING` + `NONE` | U-46…U-48, U-83 |
@@ -1184,6 +1184,29 @@ Every field of the gate input is read from the named source; a source that is ab
 | `uniqueness_verdict` | S2 `svc_s02.uniqueness_check` output | — |
 | `metadata_present`, `description_hash_matches`, `metadata_terms` | Agent 12 metadata bundle (3C) | 3A: `false`, `null`, `null` |
 | `evaluation_date` | the S4 clock at the gate (FIN-R9 lag arithmetic) | — |
+| `routing` (`script_stage_id`, `assets_stage_id`, `thumbnails_stage_id`) | the job's production-type record (24 §7.1a / §7.2a stage IDs; `thumbnails_stage_id` only when that stage is enabled for the job) | thumbnails disabled ⇒ `null` |
+| `paraphrase_pairs`, `span_hashes` | built by `GateInputAssembler` from the script segments and the knowledge chunks the Agent 04 research pack cites (`cited_chunk_ids`; chunk text read only on the private worker, NF-07) | no cited chunk ⇒ `[]` / `{}` |
+| `near_copy` | `NearCopyChecker` (YTG-R9 n-gram + LCS) over the same pairs | no pair ⇒ `[]` |
+| `frames_payload` | built by Agent 16 from Agent 10's `qc_results` rows that arrive `SKIPPED` with `JUDGED_BY_AGENT_16` (`qc.watermark.visual`, `qc.visual.no_synthetic_presenter`) and the frames of the QC evidence manifest | no such row ⇒ `null` (no frames call) |
+| `method_release_approvals` (extractor result) | the research pack's release references per segment (`method_labelled`, the named `KNOWLEDGE_RELEASE` approval and the released hash) | none named ⇒ `null` for that segment (FIN-R12 decides) |
+| `quotation_approvals` (extractor result) | `approvals` of kind `COPYRIGHT_DOUBT` whose `subject_sha256` is the span hash | none ⇒ `null` |
+
+### 15.1b Quality-score fact sources (CCR-209; `agent_16.quality_score`, `DeterministicInputs`)
+Same rule as §15.1a: a named source per fact, never a constant; `null` makes the criterion not evaluated (§6.6), it never scores points.
+
+| Fact | Source | Absent or not defined |
+|---|---|---|
+| `qc[]` | `qc_results` rows of the render (04 §5.17) | no render ⇒ `MISSING_DEPENDENCY` |
+| `claims[]` (`claim_type`, `status`, `has_citation_or_chart`, `sensitive_claim_approved`) | `claims` (04 §5.11) with their `citations` rows or `chart_data_ref`; an `APPROVED` `SENSITIVE_CLAIM` approval bound to the claim | no claim ⇒ `[]` |
+| `script.hook_options`, `script.promise_fields_present`, `script.section_count` | Agent 05 output (`hook_options`) and script document (`promise`, `sections[]`) | — |
+| `script.sections_with_takeaway`, `script.sections_with_example`, `script.viewer_problem_addressed` | **no field of the Agent 05 document states them yet** | `null` (not evaluated); **REQUIRES REVIEW (Phase 1): a script-document field or a judged criterion for 18 §9.2 AUDIENCE_VALUE** |
+| `thumbnails.variants`, `thumbnails.spec_ok`, `thumbnails.legible` | Agent 11 set manifest (variant count) and its `a11.q.*` results (`a11.q.legibility`, `a11.q.text_fit`, spec checks) | no thumbnail stage ⇒ `0` / `null` |
+| `thumbnails.required_variants` | 3 (18 §9.2 THUMBNAIL_METADATA: "3 thumbnail variants present") | — |
+| `thumbnails.title_length_ok` | the title limit of 18 §9.2 THUMBNAIL_METADATA | `null` until that limit is logged (18: REQUIRES REVIEW (Phase 1)) |
+| `gate.overall`, `gate.licence_pass`, `gate.disclaimer_pass`, `gate.disclosure_decision` | the `s16_comp` output: `verdict`, the YTG-R6 and FIN-R10 rule results, `disclosure.decision` | — |
+| `gate.finance` | as `sensitive_channel` in §15.1a | — |
+| `routing` (plan, voice, render, thumbnails stage IDs) | the production-type record | disabled stage ⇒ `null` |
+The authorisation stage (`s16_auth`) reads only rows (approvals, steps, evidence, HUMAN scores, verdicts, render hash; §6.5, §19.3); it has no extracted facts.
 
 ### 15.2 Downstream
 | To | Receives | Rule |

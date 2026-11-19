@@ -428,7 +428,7 @@ Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`. Indexes: `(org_
 | task_type | text | no | `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3]))\.[a-z0-9_]+$` |
 | stage_id | text | yes | CCR-214: the production-type record's stage (24 §2 `stage_id`, `^[a-z0-9_]{2,32}$`, CHECK); set for every task materialised from a production-type graph (every task in 3A), NULL only for a task created outside a graph. Two stages may share a task type (e.g. `s06_verify` and `s06_chart`), so the stage is not derivable from `task_type`; a resumed runner reads the job's stage map from this column |
 | agent_id | text | no | executor ID; must be the prefix of `task_type` (CHECK) |
-| iteration | int | no | default 0; revision loop number; ≤ `limits.max_revision_loops` (code) |
+| iteration | int | no | default 0; the stage's revision iteration (24 §3.3 rule 1, CCR-211: n + 1 only after iteration n completed); ≤ `limits.max_revision_loops` (code) |
 | is_required | boolean | no | default true |
 | state | enum(task_state) | no | default `PENDING` |
 | wait_reason | enum(wait_reason) | yes | CHECK `(state = 'CHECKPOINTED') = (wait_reason IS NOT NULL)` |
@@ -453,7 +453,7 @@ Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`. Indexes: `(org_
 | error_code / error_class | text / enum(failure_class) | yes | last error |
 | last_error | jsonb | yes | `amw.error` |
 | completed_at | timestamptz | yes | |
-Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`, partial `UNIQUE (org_id, job_id, stage_id, iteration) WHERE stage_id IS NOT NULL` (CCR-214). Indexes: `(org_id, job_id)`, `(next_attempt_at) WHERE state = 'RETRY_WAIT'`, `(state_changed_at) WHERE state IN ('VALIDATING','FAILED','CHECKPOINTED')` (stuck detection). Trigger: transition check (§5.6).
+Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`, partial `UNIQUE (org_id, job_id, stage_id, iteration) WHERE stage_id IS NOT NULL AND state <> 'CANCELLED'` (CCR-214; a superseded task is replaced at the same iteration, 24 §3.3 rule 1). Indexes: `(org_id, job_id)`, `(next_attempt_at) WHERE state = 'RETRY_WAIT'`, `(state_changed_at) WHERE state IN ('VALIDATING','FAILED','CHECKPOINTED')` (stuck detection). Trigger: transition check (§5.6).
 
 **task_dependencies** — TENANT · T0 · (no `id`) `org_id`, `task_id` TFK → tasks, `depends_on_task_id` TFK → tasks, `created_at`. PK `(org_id, task_id, depends_on_task_id)`; CHECK `task_id <> depends_on_task_id`. Acyclicity is guaranteed by materialising only DAGs validated from the registry (24 §3).
 

@@ -634,9 +634,9 @@ agent_10_video_editor/                (code package; imports amw_core + FfmpegRu
 ```
 ```mermaid
 classDiagram
-  class RenderStage { +run(task_input) TaskOutput }
-  class SubtitleStage { +run(task_input) TaskOutput }
-  class QcStage { +run(task_input) TaskOutput }
+  class RenderStage { +run(task_input, ctx) TaskOutput }
+  class SubtitleStage { +run(task_input, ctx) TaskOutput }
+  class QcStage { +run(task_input, ctx) TaskOutput }
   class TenantScope
   class UpstreamGate
   class HeavyWorkGuard
@@ -714,9 +714,9 @@ Rules: no module reads environment variables or the clock directly (`amw_core.co
 | F-30 | `SrtWriter.format_time` / `.write` | `(ms) -> str` / `(cues) -> bytes` | none | — | `HH:MM:SS,mmm`; UTF-8 without BOM; LF; numbered cues (DC-21…DC-23) | U-89…U-91 |
 | F-31 | `SrtParser.parse` | `(bytes) -> list[Cue]` | none | `InputInvalid` | strict parse used by the validator and the round-trip test | U-96 |
 | F-32 | `SrtValidator.validate` | `(cues, video_duration_ms) -> list[str]` | none | — | reports **all** errors in cue order: numbering, empty text, non-positive duration, overlap, last cue after video end (DC-29…DC-32) | U-92…U-95 |
-| F-33 | `SubtitleStage.run` | `(task_input) -> TaskOutput` | blob + `assets` row (`SUBTITLE`, `CODE_GENERATED`, `is_realistic_synthetic = false`, `depicts_real_person = false`, `attributes.language`; an existing row with the same `content_sha256` is reused, `UNIQUE (org_id, content_sha256)`), cost row, audit | `InputInvalid` (`TIMELINE_UNALIGNED`: a timeline with `source = UNALIGNED` is a contract violation, it cannot arrive in 3A, CCR-051), `MissingDependency` | one cue list per narration segment; text from the script by `segment_id`; timing from the aligned narration timeline | U-84…U-96, U-238 (DC-114), IT-02 |
+| F-33 | `SubtitleStage.run` | `(task_input: TaskInput, ctx: ExecContext) -> TaskOutput` (03 §1 rule 5; `RenderStage.run` the same) | blob + `assets` row (`SUBTITLE`, `CODE_GENERATED`, `is_realistic_synthetic = false`, `depicts_real_person = false`, `attributes.language`; an existing row with the same `content_sha256` is reused, `UNIQUE (org_id, content_sha256)`), cost row, audit | `InputInvalid` (`TIMELINE_UNALIGNED`: a timeline with `source = UNALIGNED` is a contract violation, it cannot arrive in 3A, CCR-051), `MissingDependency` | one cue list per narration segment; text from the script by `segment_id`; timing from the aligned narration timeline | U-84…U-96, U-238 (DC-114), IT-02 |
 | F-34 | `QcPlan.build` | `(profile, cfg, manifest_flags) -> list[CheckSpec]` | none | `ConfigInvalid` (profile unknown) | cheap checks first: ffprobe, parsers on existing files, DB checks, audio passes, then video decode passes; `SKIPPED` only for the listed cases (§20.1) | U-97 |
-| F-35 | `QcStage.run` | `(task_input) -> TaskOutput` | runs the plan, writes `qc_results`, `renders.status`, evidence blobs, cost row, audit | `RenderCrash`, `Crash` (`AGENT.CRASH`) on unavailable measurements | §4.2 flow; never `PASS` for a missing measurement | IT-03, FI-06 |
+| F-35 | `QcStage.run` | `(task_input: TaskInput, ctx: ExecContext) -> TaskOutput` (03 §1 rule 5) | runs the plan, writes `qc_results`, `renders.status`, evidence blobs, cost row, audit | `RenderCrash`, `Crash` (`AGENT.CRASH`) on unavailable measurements | §4.2 flow; never `PASS` for a missing measurement | IT-03, FI-06 |
 | F-36 | check evaluators | `evaluate_<check>(measured, cfg, context) -> CheckResult(verdict, blocking, gate, measured, threshold, unit, offending, remedy_stage_id)` | none (pure) | `MeasurementUnavailable` | one function per check of §20.1; cases DC-40…DC-85, DC-95…DC-104, DC-115…DC-118, DC-120 | U-110…U-225 |
 | F-37 | `GateAggregator.decide` | `(results, profile_check_ids) -> GateResult` | none | — | §6.5.3 (DC-83…DC-85) | U-98…U-100 |
 | F-38 | `RemedyMapper.map` | `(check_id) -> RemedyStage` | none | `ConfigInvalid` (unmapped ID) | table of §6.5.4; every `check_id` of §20.1 mapped (test enumerates) | U-101 |
@@ -776,7 +776,7 @@ Facts the design relies on, with their log status: H.264 (closed GOP), AAC-LC 48
 | `checkpoints` (5.7) | insert; read latest | resume points (§16) |
 | `idempotency_keys` (5.9) | via `amw_core` | scopes `task.<type>`, `render.master`, `render.segment` (03 §9.2, CCR-015) |
 | `scripts` (5.11) | read | script strings by `segment_id` for subtitles and overlay text; script SHA-256 |
-| `brand_kits` (5.12) | read | font asset, overlay templates, brand sting (`intro_ref`, `lower_third_template_ref`, `outro_ref`, agent_09 §15.1) |
+| `brand_kits` (5.12) | read | font asset only; overlay templates and the brand sting arrive resolved as `template_asset_id` in the Agent 08 manifest, so Agent 10 does not read `intro_ref`, `lower_third_template_ref` or `outro_ref` and never resolves a template ID (CCR-204) |
 | `assets` (5.15) | read; insert one `SUBTITLE` row per SRT | tier, source type, licence, dimensions, `expires_at`, `status`; SRT row: `kind = SUBTITLE`, `source_type = CODE_GENERATED`, `visual_source_tier` null (CHECK applies to VIDEO/IMAGE/CHART only), `is_realistic_synthetic = false`, `depicts_real_person = false` (both NOT NULL), `attributes.language` (CCR-032); a later iteration that yields byte-identical SRT bytes finds the existing row (`UNIQUE (org_id, content_sha256)`) and reuses it |
 | `licences`, `licence_ledger` (5.15) | **read only** | `qc.licence.*`, `qc.watermark.provenance`; rows are written before the render exists by Agent 08 (every shot incl. reveal stills, one `TEMPLATE` row per overlay interval, one whole-timeline `FONT` row per brand font; 3B `MUSIC_BED`) and Agent 07 (`VOICE`); **Agent 10 writes none** (CCR-031); matching uses `render_id = R OR (render_id IS NULL AND job_id = J)` (CCR-030) |
 | `renders` (5.18) | insert; update `status` and measured columns | one `COMPLETE` row per final file; `QC_PASSED` / `QC_FAILED` and `integrated_lufs`, `true_peak_dbtp` after QC; earlier renders of the same job/kind/preset → `SUPERSEDED` |

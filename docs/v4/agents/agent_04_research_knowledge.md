@@ -563,7 +563,7 @@ agent_04_research_knowledge/
 ### 9.2 Class responsibilities
 | Class | Responsibility | Pure? |
 |---|---|---|
-| `ResearchPackStep` | implements `ResearchStage.run(task_input) -> TaskOutput`; sequences S0–S7; writes checkpoints; maps exceptions to 07 codes | no (I/O) |
+| `ResearchPackStep` | implements `ResearchStage.run(task_input, ctx: ExecContext) -> TaskOutput` (03 §1 rule 5, CCR-203); sequences S0–S7; writes checkpoints; maps exceptions to 07 codes | no (I/O) |
 | `TenantGuard` | S0 tenant checks; refuses cross-tenant refs | yes |
 | `ConceptPlanner` / `PlanValidator` | render plan prompt, call adapter, parse, apply PL3–PL11 | validator yes |
 | `LibraryRetriever` | run filtered FTS; apply gate; diversity cap | no (DB) |
@@ -582,7 +582,7 @@ agent_04_research_knowledge/
 Common to every function: logging through `amw_core.observability` with `org_id`, `correlation_id`, `job_id`, `task_id`, `attempt_id`, `actor = agent_04`; no chunk text, passage text, notes or secrets in any log field (27 §7.3.6); exceptions are the typed classes of `errors.py` (mapped in §18); money in micros; UTC only. Test IDs refer to §21.
 
 ### 10.1 Orchestration
-**`ResearchPackStep.run(task_input: TaskInput) -> TaskOutput`**
+**`ResearchPackStep.run(task_input: TaskInput, ctx: ExecContext) -> TaskOutput`** (03 §1 rule 5, CCR-203)
 - Side effects: checkpoints, LLM calls (cost ledger rows), audit rows, reference snapshots, pack blob, `memory_items` row.
 - Raises (all converted to `TaskOutput` with an `amw.error`): `TenantMismatch`, `CrossTenantRef`, `InputInvalid`, `InsufficientInput`, `ConfigInvalid`, `BudgetExhausted` (→ `SUSPENDED`), plus adapter errors.
 - Validation: S0 order of §7. Idempotency: first action reads `idempotency_keys` for `task.agent_04.research_pack` (03 §9.1); a `COMPLETED` same-hash key returns the stored output (key parts `job_id`, `stage_id`, task type, `iteration`, CCR-005).

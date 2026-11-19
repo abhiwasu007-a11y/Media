@@ -587,7 +587,7 @@ Rules:
 | `aspect_ratio` | `16:9` / `9:16` (GLOSSARY §6.50) | long-form or vertical cut |
 | `promise` | `{working_title_local, promise_statement, promise_key_terms[]}` | the single promise |
 | `sections[]` | `{section_id, section_kind, heading_local, heading_en, purpose, concept_ids[], needs_interrupt, scene_ids[]}` | structure; chapters are derived from this list in order |
-| `scenes[]` | `{scene_id (secN.scM), section_id, beat, segment_ids[], on_screen_text[], visual_intent {tier_hint, description, change_beats}, interrupt, deliberate_pause_ms, explanatory, pronunciation_candidates[], chart_id, purpose_concept_id, method_label, hypothetical_example}` | what Agents 08/09 plan from |
+| `scenes[]` | `{scene_id (secN.scM; `hook.scN` for hook beats, `disc.scN` for disclaimer slots, CCR-202), section_id, beat, segment_ids[], on_screen_text[], visual_intent {tier_hint, description, change_beats}, interrupt, deliberate_pause_ms, explanatory, pronunciation_candidates[], chart_id, purpose_concept_id, method_label, hypothetical_example}` | what Agents 08/09 plan from |
 | `segments[]` | `{segment_id (s1…sN), kind, section_id, scene_id, text, pace, emotion, concept_refs[{concept_id, pack_concept_id, citation_refs[]}], chart_ref, method_label, hypothetical_example, est_start_ms, est_duration_ms, parent_segment_ids[]}` | **one segment = one narration sentence**; `kind` ∈ `HOOK_PROOF`, `HOOK_WHY`, `HOOK_COVERS`, `SHORT_HOOK`, `BODY`, `RECAP`, `COURSE_POINTER`, `FULL_VIDEO_POINTER`, `DISCLAIMER`; hook segments come first; `parent_segment_ids` only for Shorts |
 | `chart_requests[]` | as §8.2 | code allocates unique `chart_id`s across the script |
 | `chapters[]` | `{section_id, title_local, est_start_ms}` | `est_start_ms` null without a measured rate; final chapter times come from the timeline (18 `edit.chapters`) |
@@ -694,7 +694,7 @@ agent_05_scriptwriter/
 Common to every function: logging through `amw_core.observability` with `org_id`, `correlation_id`, `job_id`, `task_id`, `attempt_id`, `actor = agent_05`; **no narration text, brief text, chunk text, feedback text, topic text or secrets in any log field** (counts, IDs, hashes and check IDs only, 27 §7.3.6); exceptions are the typed classes of `errors.py` (mapped in §18); money in micros; UTC only; times in ms. Test IDs refer to §21.
 
 ### 10.1 Orchestration and pre-checks
-**`ScriptDraftStep.run(task_input: TaskInput) -> TaskOutput`** (async)
+**`ScriptDraftStep.run(task_input: TaskInput, ctx: ExecContext) -> TaskOutput`** (async; the task type's entry point, 03 §1 rule 5, CCR-203; `ShortsAdaptationStep.run` has the same signature)
 - Side effects: checkpoints, LLM calls (ledger rows), audit rows, script blob, `scripts` row, `memory_items` rows.
 - Raises (all converted to a Task Output with an `amw.error`): `TenantMismatch`, `CrossTenantRef`, `TenantInactive`, `InputInvalid`, `MissingDependency`, `ConfigInvalid`, `BudgetExhausted` (→ `SUSPENDED`), `QualityRepeatedFailure`, `LoopCapExceeded`, plus adapter errors.
 - Validation: §7.6 order. Idempotency: first action reads the task key (03 §9.1); a `COMPLETED` same-hash key returns the stored output (T04).

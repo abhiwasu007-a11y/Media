@@ -510,7 +510,7 @@ agent_11_thumbnail_design/
 ```
 ```mermaid
 classDiagram
-  class ThumbnailStage { +run(task_input, ctx) TaskOutput }
+  class ThumbnailStage { +run(task_input, ctx: ExecContext) TaskOutput }
   class InputGate
   class TextOptionBuilder
   class SubjectOptionBuilder
