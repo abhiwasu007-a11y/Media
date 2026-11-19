@@ -48,8 +48,10 @@ from amw_core.testing.memory import MemoryTransaction
 from amw_orchestrator.executor import StageCall
 from tests.agents.agent_08_visual_assets.fixtures import FakeTenancy, lic
 from tests.dryrun.base import World, upstream, upstream_data
-from tests.dryrun.kit import ref_ending, sha256_hex
+from tests.dryrun.kit import banner_png, ref_ending, sha256_hex
 
+BRAND_FONT = Path("/usr/share/fonts/truetype/freefont/FreeSans.ttf")
+"""System font with Devanagari glyphs (dry run only; the brand font is an owner decision, WS-06)."""
 PALETTE = BrandPalette("#101820", "#f2f2f2", "#2a3540", "#2ecc71", "#e74c3c", "#f1c40f", "#3498db")
 
 
@@ -87,6 +89,7 @@ class AssetsExecutor:
         self.approvals = MemoryReleaseApprovals()
         self.audit = MemoryAuditLog()
         self.font_id: str | None = None
+        self.render_size = (width, height)
         self.tpl_id: str | None = None
 
     def _setup(self, org: str) -> TenantContext:
@@ -100,7 +103,7 @@ class AssetsExecutor:
             LicenceSourceType.FONT,
         ):
             self.licences.add(lic(org, st))
-        data = (Path(matplotlib.get_data_path()) / "fonts/ttf/DejaVuSans.ttf").read_bytes()
+        data = BRAND_FONT.read_bytes()
         sha = sha256_hex(data)
         uri = self.w.blobs.storage.blob_uri(ctx, "assets", f"fonts/{sha}.ttf")
         if not self.w.blobs.storage.head(ctx, uri).exists:
@@ -113,9 +116,10 @@ class AssetsExecutor:
                 content_sha256=sha,
                 uri=str(uri),
                 size_bytes=len(data),
-                title="DejaVu Sans (matplotlib wheel)",
+                title="GNU FreeSans (system package, Devanagari coverage; licence REQUIRES REVIEW, WS-06)",
             ),
         ).asset_id
+        self.w.extras.setdefault("templates", {})[self.font_id] = (str(uri), sha)
         return ctx
 
     def execute(self, call: StageCall) -> TaskOutput:
@@ -204,18 +208,22 @@ class AssetsExecutor:
             ref = ov.get("template_ref")
             if not ref or ref in out:
                 continue
-            sha = sha256_hex(f"PLUMBING template {ref}".encode())
+            w, h = self.render_size
+            png = banner_png(w, h, ref.split(".")[-1].upper().replace("_", " "))
+            uri, sha = self.w.blobs.put_bytes("assets", f"templates/{sha256_hex(png)}.png", png)
             out[ref] = self.assets.insert(
                 tx,
                 NewAsset(
                     kind=AssetKind.TEMPLATE,
                     source_type=LicenceSourceType.CODE_GENERATED,
                     content_sha256=sha,
-                    uri=f"amw-blob://{ctx.org_id}/assets/templates/{sha}",
-                    size_bytes=1,
+                    uri=uri,
+                    size_bytes=len(png),
                     title=f"PLUMBING {ref}",
                 ),
             ).asset_id
+            self.w.extras.setdefault("templates", {})[out[ref]] = (uri, sha)
+            self.w.extras.setdefault("template_keys", {})[ref] = uri
         return out
 
     def _task_output(self, call: StageCall, ctx: TenantContext, res: Any) -> TaskOutput:

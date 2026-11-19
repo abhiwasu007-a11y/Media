@@ -50,12 +50,28 @@ def responder(request: Any) -> str:
 
 def script_view(doc: dict[str, Any], aspect: AspectRatio) -> ScriptDoc:
     """Input builder: Agent 05 script document -> Agent 09 ``ScriptDoc``."""
+    # The 05 document puts the hook (and the disclaimer before section 1) outside every section;
+    # Agent 09 starts chapter 1 at 0 ms and Agent 10 QC compares chapter starts with the first
+    # shot of each section, so the lead-in scenes are attributed to the first section here.
+    sections_in = doc.get("sections", [])
+    first = sections_in[0]["section_id"] if sections_in else None
+    lead = []
+    for sc in doc["scenes"]:
+        if sc.get("section_id") in (None, "hook"):
+            lead.append(sc["scene_id"])
+        else:
+            break
+    lead_set = set(lead)
+
+    def sec_of(scene_id: str, value: str | None) -> str | None:
+        return first if scene_id in lead_set else (None if value == "hook" else value)
+
     segments = tuple(
         Segment(
             segment_id=s["segment_id"],
             kind=SegmentKind(s["kind"]),
             scene_id=s["scene_id"],
-            section_id=s.get("section_id"),
+            section_id=sec_of(s["scene_id"], s.get("section_id")),
             chart_ref=s.get("chart_ref"),
             parent_segment_ids=tuple(s.get("parent_segment_ids") or ()),
             text=s["text"],
@@ -68,7 +84,7 @@ def script_view(doc: dict[str, Any], aspect: AspectRatio) -> ScriptDoc:
         scenes.append(
             Scene(
                 scene_id=sc["scene_id"],
-                section_id=sc.get("section_id") if sc.get("section_id") not in ("hook",) else None,
+                section_id=sec_of(sc["scene_id"], sc.get("section_id")),
                 beat=_BEATS.get(sc["beat"], sc["beat"]),
                 segment_ids=tuple(sc["segment_ids"]),
                 on_screen_text=tuple(sc.get("on_screen_text") or ()),
@@ -86,9 +102,9 @@ def script_view(doc: dict[str, Any], aspect: AspectRatio) -> ScriptDoc:
             section_id=s["section_id"],
             section_kind=s.get("section_kind", "CONCEPT"),
             heading_local=s.get("heading_local", ""),
-            scene_ids=tuple(s.get("scene_ids") or ()),
+            scene_ids=tuple((lead if s["section_id"] == first else []) + list(s.get("scene_ids") or ())),
         )
-        for s in doc.get("sections", [])
+        for s in sections_in
     )
     return ScriptDoc(
         script_id=doc["script_id"],
@@ -155,7 +171,7 @@ class PlanExecutor:
             verification=Verification(verify["script_sha256"], verify["overall"]["verification_verdict"]),
             timeline=timeline,
             timeline_sha256=tl_ref.sha256,
-            brand=BrandKit(fallback_template_key="tpl.abstract_motion"),
+            brand=BrandKit(intro_ref="tpl.plumbing_title", intro_duration_ms=1500, outro_ref="tpl.plumbing_end", fallback_template_key="tpl.abstract_motion"),
             channel_category="finance",
             limits=Limits(ai_still_allowed=False),
             rule_packs={"rp.youtube_general": "PLUMBING YT", "rp.finance_sebi_in": "PLUMBING FIN"},

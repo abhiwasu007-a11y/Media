@@ -220,3 +220,23 @@ def ref_ending(out: TaskOutput, suffix: str) -> OutputRef:
 def as_mapping(value: object) -> Mapping[str, Any]:
     assert isinstance(value, Mapping)
     return value
+
+
+def banner_png(width: int, height: int, title: str, subtitle: str = "") -> bytes:
+    """Full-frame RGBA overlay: an opaque PLUMBING band at the top, transparent elsewhere."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    band = max(24, height // 9)
+    draw.rectangle((0, 0, width, band), fill=(200, 20, 20, 235))
+    font = ImageFont.load_default(size=max(12, band // 2))
+    draw.text((width // 2, band // 2), PLUMBING, fill=(255, 255, 255, 255), font=font, anchor="mm")
+    if title:
+        small = ImageFont.load_default(size=max(10, band // 3))
+        draw.rectangle((0, height - band, width, height), fill=(16, 24, 32, 220))
+        draw.text((width // 2, height - band // 2), f"{title} {subtitle}".strip(),
+                  fill=(242, 242, 242, 255), font=small, anchor="mm")
+    out = io.BytesIO()
+    img.save(out, format="PNG", optimize=False)
+    return out.getvalue()
