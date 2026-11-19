@@ -3,6 +3,8 @@
 import re
 import unicodedata
 
+from amw_core.text_normalise import normalise_for_matching, tokenize
+
 _WS = re.compile(r"\s+")
 FIN_SYMBOLS = frozenset("₹$€£¥%")
 
@@ -13,33 +15,19 @@ def normalise(text: str) -> str:
 
 
 def fold(text: str) -> str:
-    return normalise(text).casefold()
+    """Matching form from the shared core normaliser (CCR-105): NFKC, casefold, invisible and
+    look-alike folds, Devanagari canonical forms. Never used for displayed text."""
+    return normalise_for_matching(text).text
 
 
 def words(text: str) -> list[str]:
     return normalise(text).split(" ") if normalise(text) else []
 
 
-def _is_edge_noise(ch: str) -> bool:
-    """Punctuation (P*) and symbols (S*) only. Letters, digits and combining marks (Devanagari
-    vowel signs, virama, anusvara: categories Mc/Mn) are part of the word and are never stripped."""
-    return unicodedata.category(ch)[0] in ("P", "S")
-
-
-def _strip_edges(word: str) -> str:
-    start, end = 0, len(word)
-    while start < end and _is_edge_noise(word[start]):
-        start += 1
-    while end > start and _is_edge_noise(word[end - 1]):
-        end -= 1
-    return word[start:end]
-
-
 def folded_words(text: str) -> list[str]:
-    """Case-folded words with edge punctuation removed; whole-word matching only (no stemming,
+    """Whole-word tokens of the shared core normaliser; whole-word matching only (no stemming,
     no prefix match), so an inflected form is a different word (blueprint 6.2)."""
-    out = [_strip_edges(w) for w in fold(text).split(" ")]
-    return [w for w in out if w]
+    return [t.text for t in tokenize(normalise_for_matching(text))]
 
 
 def contains_sequence(haystack: list[str], needle: list[str]) -> bool:
