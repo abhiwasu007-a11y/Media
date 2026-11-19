@@ -1,6 +1,6 @@
 # ADR-003 — Authentication and identity: in-process proven libraries for Tier 0–2; self-hosted identity service only for Tier 3
 
-> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines are marked `(unfiled CCR)` and listed in `audit/b2_unfiled_ccr_requests_adr_business.md`; this file changes no contract.
+> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines carry their CCR number and status (filed and decided in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)); this file changes no contract.
 
 | Field | Value |
 |---|---|
@@ -62,10 +62,10 @@ No web login, no public endpoint, no Google OAuth (D1). The owner is the only hu
 Simplest option that meets §1C.4 Tier 1 with **zero extra resident RAM** on the shared VPS (INF-01, §3.2a). Every service option adds a resident process of hundreds of MB to over 1 GB (UNLOGGED-AUTH-01, -03, -05) and a second user store that must be kept in sync with `memberships`.
 | Function | Library (pinned exact version at build, 27) | Contract used |
 |---|---|---|
-| Password hashing | argon2-cffi, Argon2 (UNLOGGED-AUTH-09). Parameters: **REQUIRES REVIEW (Phase 1): official Argon2 / library recommended parameters, recorded in RESEARCH_LOG; then measured on the VPS (hash time and memory per login)** | credential row (unfiled CCR, §3.4) |
+| Password hashing | argon2-cffi, Argon2 (UNLOGGED-AUTH-09). Parameters: **REQUIRES REVIEW (Phase 1): official Argon2 / library recommended parameters, recorded in RESEARCH_LOG; then measured on the VPS (hash time and memory per login)** | credential row (CCR-154, §3.4) |
 | MFA | TOTP via pyotp (UNLOGGED-AUTH-10) + single-use recovery codes stored as hashes; WebAuthn/passkeys via webauthn (UNLOGGED-AUTH-10) optional, 3C+ | `users.mfa_enrolled`, `user_sessions.mfa_verified_at` (04 §5.1) |
 | Google sign-in | Authlib OIDC client (UNLOGGED-AUTH-08), scopes for sign-in only (`openid`, `email`, `profile`); a **separate** Google client from the per-channel YouTube OAuth of 08 §6. Whether this client needs Google verification: **REQUIRES REVIEW (Phase 1)** | `user_auth_refs (provider = GOOGLE, external_subject)` |
-| Sessions | Server-side rows; cookie `HttpOnly`, `Secure`, `SameSite` (08 §5.5); CSRF per ADR-004; revocable (`revoked_at`); MFA step recorded | `user_sessions`; opaque token hash (unfiled CCR, §3.4) |
+| Sessions | Server-side rows; cookie `HttpOnly`, `Secure`, `SameSite` (08 §5.5); CSRF per ADR-004; revocable (`revoked_at`); MFA step recorded | `user_sessions`; opaque token hash (CCR-154, §3.4) |
 | Invitations | Random single-use token from a CSPRNG (standard library; **REQUIRES REVIEW (Phase 1): record the official reference**), stored as SHA-256 `token_hash`, expiry, revoked on membership removal (08 §5.4); acceptance creates `memberships` row `ACTIVE`; `PLATFORM_OWNER` never invitable (04 §5.1) | `invitations`, `memberships` |
 | Roles | `role` enum (GLOSSARY §6.44) on `memberships`; checks against 08 §5.2 in the API and at the state-machine guard | `memberships.role`, `workspace_ids` |
 | Tenant context | After login, the request sets `app.user_id` and `app.org_id = user_sessions.active_org_id` with `SET LOCAL` (04 §3.2); `active_org_id` must have an `ACTIVE` membership (04 trigger) | 04 §3.2, ADR-002 |
@@ -80,12 +80,12 @@ Lockout, rate-limit and session-lifetime values: **REQUIRES REVIEW (Phase 1): ow
 4. An external security review of the auth flows is required before Tier 1 (08 §13 pack).
 
 ### 3.4 Credential storage location (closes 04 §5.1 / 22 P2 REQUIRES REVIEW)
-In the factory PostgreSQL, in a GLOBAL (RLS self) table readable/writable only by `amw_auth`, **not** in a separate identity service. The table does not exist in 04 yet: written here as **`user_credentials` (unfiled CCR)**; `user_sessions` (04 §5.1 exists) has no opaque-token hash column, written as **`user_sessions.token_hash` (unfiled CCR)**, because the UUIDv7 row id is time-ordered (GLOSSARY §2.1) and must not serve as a bearer secret. Per-org MFA enforcement is written as **`org_controls` key `mfa_required` (unfiled CCR)**; 04 today has only the per-user `mfa_enrolled` flag.
+In the factory PostgreSQL, in a GLOBAL (RLS self) table readable/writable only by `amw_auth`, **not** in a separate identity service. The table does not exist in 04 yet: written here as **`user_credentials` (CCR-154, Proposed, deferred to 3C)**; `user_sessions` (04 §5.1 exists) has no opaque-token hash column, written as **`user_sessions.token_hash` (CCR-154)**, because the UUIDv7 row id is time-ordered (GLOSSARY §2.1) and must not serve as a bearer secret. Per-org MFA enforcement is written as **`org_controls` key `mfa_required` (CCR-154)**; 04 today has only the per-user `mfa_enrolled` flag.
 
 ### 3.5 Tier 3: SSO / SCIM decided when a paying client needs it
 - OIDC SSO per org can stay in Option A (Authlib, UNLOGGED-AUTH-08). SAML and inbound SCIM in-process rely on less mature libraries (UNLOGGED-AUTH-12).
 - **Default for Tier 3:** a self-hosted identity broker **only on the dedicated or own server of that tier** (04 §8.4), never on the shared VPS; it federates the client's IdP and forwards an OIDC login to the factory, which keeps `users` / `memberships` / `org_sso_connections` / `org_domains` as the system of record (08 §7.2). Candidate with the strongest documented SAML + SCIM support: Keycloak (UNLOGGED-AUTH-01, UNLOGGED-AUTH-02); alternatives ZITADEL (SCIM Preview, UNLOGGED-AUTH-05) and Ory Polis (UNLOGGED-AUTH-06). Final pick by a Phase 1 spike: licence (REQUIRES REVIEW), measured RAM, SCIM deprovisioning → `membership_status = SUSPENDED/REMOVED` + session and API key revocation (MT-4.7), enforced SSO with audited break-glass (MT-4.6).
-- Session policies and IP allow-list follow 08 §7.2 / §7.4 (storage unfiled CCR there).
+- Session policies and IP allow-list follow 08 §7.2 / §7.4 (session policy: CCR-154, deferred; the IP allow-list is the existing `org_controls` key `ip_allowlist`, 04 §5.1).
 
 ## 4. Consequences
 - **Positive.** No extra resident service at Tier 0–2; one identity store (04 §5.1) under the same RLS and tenancy tests; no sync between an external user store and `memberships`.
@@ -103,7 +103,7 @@ In the factory PostgreSQL, in a GLOBAL (RLS self) table readable/writable only b
 7. `amw_app` cannot read credential rows; only `amw_auth` can (08 §4.1 grant drift test).
 
 ## 6. Status
-**Draft - documentation.** Nothing here blocks 3A (no auth in 3A). Owner approval needed before 3C auth code; the unfiled CCRs listed in `audit/b2_unfiled_ccr_requests_adr_business.md` must be filed and decided first, and UNLOGGED-AUTH-01 … UNLOGGED-AUTH-12 logged.
+**Draft - documentation.** Nothing here blocks 3A (no auth in 3A). Owner approval needed before 3C auth code; CCR-154 (filed, Proposed, deferred to 3C) must be applied first, and UNLOGGED-AUTH-01 … UNLOGGED-AUTH-12 logged.
 
 ## 7. Revisit triggers
 1. Measured RAM headroom on the VPS or on a Tier 1 own server makes a service option affordable and the in-process flow code is larger than expected.

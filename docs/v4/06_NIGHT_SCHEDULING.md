@@ -299,12 +299,12 @@ Directive §1: on a dedicated platform server the window becomes per-tenant conf
 | Level | Field | Status |
 |---|---|---|
 | Per channel | `channels.production_window jsonb` (04: "T1+ per-tenant window on a dedicated server (06)") | Exists in the contract |
-| Per tenant (organisation) | **No field exists**; a tenant-wide default is needed so every channel of a tenant need not repeat the window | CCR-B (pending CCR): `organisations.production_window` |
+| Per tenant (organisation) | `org_controls.production_schedule`: the tenant-wide default, so every channel of a tenant need not repeat the window | CCR-139 (MODIFIED, Applied): no new column; the tenant-wide window is the `org_controls` key `production_schedule` (04 §5.1), not `organisations.production_window` |
 | Platform default | Config key `night.window.default` = the directive window (`Asia/Kolkata`, 00:00–07:00, drain lead 30 minutes) | New config key (owned here) |
 
 Resolution order for a task: channel window → organisation window → platform default. Jobs that are not tied to a channel (analytics ingest, internal) use the organisation window.
 
-### 12.2 Window document (shape proposed; schema pending CCR)
+### 12.2 Window document (shape proposed; JSON Schema fixed with the first per-tenant window, CCR-139)
 
 ```json
 {
@@ -318,7 +318,7 @@ Resolution order for a task: channel window → organisation window → platform
 
 - `timezone`: an IANA zone; `start`/`end` are local wall times; `end` earlier than `start` means the window crosses midnight in that zone.
 - `windows`: one or more intervals per day (a dedicated server may allow 24 hours with a maintenance gap). An operational setting only; no chart logic depends on it.
-- `always_open: true` is accepted **only** for a tenant on a dedicated server (no neighbours). It requires a deployment marker `deployment.dedicated = true` (config; Tier 1+). On the shared VPS it is refused at validation (`CONFIG_INVALID`).
+- `always_open: true` is accepted **only** for a tenant on a dedicated server (no neighbours). It requires `deployment.profile` other than `shared_vps` (config key, CCR-141; Tier 1+); there is no separate `deployment.dedicated` marker. On the shared VPS it is refused at validation (`CONFIG_INVALID`).
 - `market_hours_guard` may be `false` only when the render runs on a dedicated server **and** the owner has recorded that decision for that tenant. D1 is stated for the owner's workload on the shared VPS; its extension to client tenants is a decision to confirm (CCR-B text).
 - Validation: `end` ≠ `start`; `drain_lead_ms` < window length; at least one window unless `always_open`; unknown keys rejected. A window that fails validation is `CONFIG_INVALID` (07) and admission treats it as **closed** (fail closed).
 
@@ -357,7 +357,7 @@ An operator can set `OPERATOR_PAUSE` (S8 / operator tool) at any time: running t
 
 | Signal | Level (07 §7) | Condition |
 |---|---|---|
-| `night.window_opened` / `night.drain_started` / `night.window_closed` (event names pending CCR-A) | info | Each moment, with counts |
+| `night.window_opened` / `night.drain_started` / `night.window_closed` (event names registered here, 08 §9.2 rule; persisted record CCR-138, Proposed, deferred to 3C) | info | Each moment, with counts |
 | Forced kill at stop | L2 | Worker not exited at stop timeout |
 | Task still `RUNNING` after `window_end` + stop timeout | L2 | Missed stop |
 | Admission refusals high | L1 | Refused claims above config threshold in a window |
@@ -386,14 +386,14 @@ Metrics: tasks admitted and refused by guard and class; checkpoints per window; 
 | N12 | Night report | contains every section of §8 with counts equal to the database; per-tenant visibility holds |
 | N13 | Q7: `daytime_enabled = false` | no scheduler or worker process runs after 07:00 in the cgroup listing (INF-04 test method) |
 
-## 16. Contract gaps (this document writes against the proposed names; listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md))
+## 16. Contract gaps (this document writes against the proposed names; filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5))
 
-| ID | Needed | Proposal (pending CCR) |
+| ID | Needed | Proposal (CCR and decision) |
 |---|---|---|
-| CCR-A | A persisted record of night runs (drain flag by scope, window start/end, report blob reference, counts) and the event names for window moments | Table `night_runs` (pending CCR) with columns scope, scope_id, window_start, window_end, drain_started_at, closed_at, report_ref (blob of kind `REPORT`); events `night.window_opened`, `night.drain_started`, `night.window_closed` (pending CCR) |
-| CCR-B | Tenant-wide window default | Column `organisations.production_window jsonb` (pending CCR); schema of the window document of §12.2 added to GLOSSARY or 03 |
+| CCR-A | A persisted record of night runs (drain flag by scope, window start/end, report blob reference, counts) and the event names for window moments | CCR-138 (Proposed, deferred to 3C): table `night_runs` with columns scope, scope_id, window_start, window_end, drain_started_at, closed_at, report_ref (blob of kind `REPORT`); events `night.window_opened`, `night.drain_started`, `night.window_closed` (registered by this document, 08 §9.2) |
+| CCR-B | Tenant-wide window default | CCR-139 (MODIFIED, Applied): no column `organisations.production_window`; the default is `org_controls.production_schedule` (04 §5.1); the JSON Schema of the §12.2 window document is fixed with the first per-tenant window (Tier 1+) |
 
-Until the CCRs are decided, the 3A guards need neither: the guards read configuration and the clock only.
+The 3A guards need neither: the guards read configuration and the clock only.
 
 ## 17. Scope by phase and tier
 
