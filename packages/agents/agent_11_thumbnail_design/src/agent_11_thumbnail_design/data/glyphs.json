@@ -1,12 +1,30 @@
 {
   "glyph_set_version": "1.0.0",
-  "criterion": "A glyph is neutral only if it has no arrow, no slope, no ascending or descending sequence of shapes and no up or down marker (level, symmetric or enclosing shapes such as frames, level steps, blocks and nodes).",
-  "neutral_allow_list": ["g1_level_steps", "g3_two_frames", "g4_blocks"],
+  "criterion": "A glyph is neutral only if it has no arrow, no net slope, no ascending or descending sequence of shapes and no up or down marker (level, symmetric or enclosing shapes such as frames, blocks and nodes; an oscillating line is level only if it is mirror-symmetric about the vertical centre line, so that it ends at the level where it starts, and it sits between two level guide lines).",
+  "neutral_allow_list": ["g1_rsi_line", "g3_two_frames", "g4_blocks"],
   "glyphs": [
-    {"key": "g1_level_steps", "label": "level steps outline", "ops": [
-      {"op": "rect", "box": [0, 300, 280, 400], "fill": null, "outline": "primary"},
-      {"op": "rect", "box": [360, 300, 280, 400], "fill": null, "outline": "primary"},
-      {"op": "rect", "box": [720, 300, 280, 400], "fill": null, "outline": "primary"}]},
+    {"key": "g1_rsi_line", "label": "oscillating RSI line chart", "ops": [
+      {"op": "rect", "box": [0, 120, 14, 780], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [0, 886, 1000, 14], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [60, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [164, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [268, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [372, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [476, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [580, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [684, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [788, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [892, 244, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [60, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [164, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [268, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [372, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [476, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [580, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [684, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [788, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "rect", "box": [892, 744, 64, 12], "fill": "secondary", "outline": null},
+      {"op": "polygon", "points": [[0, 478], [125, 658], [270, 308], [390, 538], [500, 448], [610, 538], [730, 308], [875, 658], [1000, 478], [1000, 522], [875, 702], [730, 352], [610, 582], [500, 492], [390, 582], [270, 352], [125, 702], [0, 522]], "fill": "primary", "outline": null}]},
     {"key": "g2_arrow", "label": "rising arrow", "ops": [
       {"op": "polygon", "points": [[500, 0], [900, 450], [600, 450], [600, 1000], [400, 1000], [400, 450], [100, 450]], "fill": "primary", "outline": null}]},
     {"key": "g3_two_frames", "label": "two overlapping frames", "ops": [

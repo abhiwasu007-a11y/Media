@@ -35,7 +35,7 @@ from tests.agents.agent_11_thumbnail_design.env import (
 
 class _SeededThenDisk:
     """Seeded input blobs are read from the fake; everything the stage writes (and every read of
-    it) goes to the real ``LocalDiskStorage``, which refuses a path that is not a 03 section 8 path."""
+    it) goes to the real ``LocalDiskStorage``, which refuses a non-03-section-8 path."""
 
     def __init__(self, seeds: Any, disk: LocalDiskStorage) -> None:
         self._seeds, self._disk = seeds, disk
@@ -54,6 +54,9 @@ class _SeededThenDisk:
 
     def head(self, context: Any, uri: Any) -> Any:
         return self._target(uri).head(context, uri)
+
+    def list_prefix(self, context: Any, org_id: Any, area: str) -> Any:
+        return self._disk.list_prefix(context, org_id, area)
 
 
 def _on_disk(env: Env, tmp_path: Path) -> Env:
@@ -134,7 +137,10 @@ def test_a_dlq_replay_in_a_new_attempt_gives_identical_files_and_no_second_row()
     assert len(pngs) == 3
     assert {r.uri for r in first.output_refs}.isdisjoint({r.uri for r in second.output_refs})
     d1, d2 = first.payload, second.payload
-    assert d1 is not None and d2 is not None and d1.data is not None and d2.data is not None
+    assert d1 is not None
+    assert d2 is not None
+    assert d1.data is not None
+    assert d2.data is not None
     assert d1.data["set_sha256"] == d2.data["set_sha256"]
     # the second attempt's files sit under its own attempt path
     a2 = str(exec_ctx(env.ti, "att_2").attempt_id)
@@ -189,5 +195,6 @@ def test_a_bug_inside_the_stage_is_returned_as_agent_crash(
     monkeypatch.setattr(env.repo, "script_view", boom)
     out = run_att(env, env.ti, "att_1")
     assert out.status is OutputStatus.FAILED
-    assert out.error is not None and out.error.code == "AGENT.CRASH"
+    assert out.error is not None
+    assert out.error.code == "AGENT.CRASH"
     assert "secret detail" not in out.error.message

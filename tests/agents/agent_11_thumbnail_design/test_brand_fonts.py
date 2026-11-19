@@ -24,7 +24,7 @@ from agent_11_thumbnail_design.pinning import (
 )
 from agent_11_thumbnail_design.ports import RegisteredAsset
 from agent_11_thumbnail_design.templates import glyph_catalogue
-from tests.agents.agent_11_thumbnail_design.env import err_of, make_env, run_att
+from tests.agents.agent_11_thumbnail_design.env import Env, err_of, make_env, run_att
 from tests.agents.agent_11_thumbnail_design.fontgen import build_font
 from tests.agents.agent_11_thumbnail_design.test_composer import ORG, spec
 
@@ -142,13 +142,17 @@ def test_rendered_marathi_thumbnail_title_is_real_text_and_tofu_is_refused() -> 
         PillowComposer().render(spec(font_bytes=data, font_sha256=sha, lines=(NOTDEF_PROBE * 4,)))
 
 
-def test_the_boxes_of_the_dry_run_are_the_code_drawn_neutral_glyph_not_font_tofu() -> None:
-    """Break 14: the three outlined rectangles right of the title in ``thumb_v1.png`` are the
-    glyph-set picture ``g1_level_steps`` (three ``rect`` ops, outline only), drawn by code. The
-    subject area is therefore identical whatever the font is; the Marathi title was never tofu."""
-    g1 = next(g for g in glyph_catalogue() if g.key == "g1_level_steps")
-    assert [op["op"] for op in g1.ops] == ["rect"] * 3
-    assert all(op["fill"] is None for op in g1.ops)
+def test_the_subject_picture_is_a_code_drawn_chart_line_and_does_not_depend_on_the_font() -> None:
+    """Break 14 / Q-O30 (D11 item 4): the three outlined rectangles of the dry run were the glyph
+    ``g1_level_steps``, drawn by code, not font tofu. They are replaced by ``g1_rsi_line`` (axes,
+    two guide lines and one oscillating line; no outlined rectangle). The subject area is still
+    identical whatever the font is."""
+    keys = [g.key for g in glyph_catalogue()]
+    assert "g1_level_steps" not in keys
+    g1 = next(g for g in glyph_catalogue() if g.key == "g1_rsi_line")
+    assert g1.neutral
+    assert sum(op["op"] == "polygon" for op in g1.ops) == 1  # the line
+    assert all(op["outline"] is None for op in g1.ops)  # nothing reads as an outlined box
     tpl_box = spec().template.subject_box
     w, h = 1920, 1080
     x, y, bw, bh = tpl_box
@@ -259,8 +263,8 @@ def _non_manifest_font() -> bytes:
     return data
 
 
-def _provenance(env: object) -> dict[str, object]:
-    out = run_att(env, env.ti, "att_1")  # type: ignore[attr-defined]
+def _provenance(env: Env) -> dict[str, object]:
+    out = run_att(env, env.ti, "att_1")
     assert out.payload is not None
     assert out.payload.data is not None
     prov: dict[str, object] = out.payload.data["provenance"]

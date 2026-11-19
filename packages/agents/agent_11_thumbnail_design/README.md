@@ -100,7 +100,8 @@ Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deploym
   config, which keeps the tenant mechanism of FR-09 unchanged: a tenant font is a registered `FONT` asset with a licence row whose bytes hash to the recorded
   `sha256`; it gets no fallback (its coverage and licence stay exactly what the tenant registered).
 - **Break 14 of the dry run ("boxes" in the thumbnail):** the three outlined rectangles right of the Marathi title were the code-drawn neutral
-  glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Regression tests in
+  glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Owner decision D11 item 4
+  (Q-O30, ticket PASS6-L) replaced it by `g1_rsi_line` (axes, two dashed guide lines, one mirror-symmetric oscillating line). Regression tests in
   `tests/agents/agent_11_thumbnail_design/test_brand_fonts.py` prove no `.notdef` for Marathi title and subject words (cmap and pixels) and
   that the subject area does not depend on the font.
 

@@ -47,7 +47,12 @@ def test_glyph_neutrality_follows_the_allow_list_and_the_arrow_is_not_neutral() 
     assert all(v for k, v in by_key.items() if k != "g2_arrow")
     for g in glyph_catalogue():
         if g.neutral:
-            assert all(op["op"] != "polygon" for op in g.ops)
+            for op in g.ops:
+                if op["op"] == "polygon":
+                    # a neutral glyph may hold a polygon only as a level oscillation: its point
+                    # set mirrors about the vertical centre line (it ends where it starts)
+                    pts = {tuple(p) for p in op["points"]}
+                    assert pts == {(1000 - x, y) for x, y in pts}, g.key
 
 
 def test_templates_are_offered_by_language_and_finance_neutrality() -> None:
