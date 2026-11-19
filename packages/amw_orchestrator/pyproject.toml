@@ -2,7 +2,7 @@
 name = "amw-orchestrator"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core", "amw-adapters"]
+dependencies = ["amw-core", "amw-adapters", "amw-runtime"]
 
 [build-system]
 requires = ["hatchling"]
@@ -14,3 +14,4 @@ packages = ["src/amw_orchestrator"]
 [tool.uv.sources]
 amw-core = { workspace = true }
 amw-adapters = { workspace = true }
+amw-runtime = { workspace = true }

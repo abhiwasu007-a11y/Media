@@ -13,7 +13,7 @@ from amw_core.enums import ProductionTypeKey
 from amw_core.errors import ConfigInvalidError
 from amw_orchestrator.metering import Meter, MeteredLlm, MeteredTask, metered_task
 from amw_orchestrator.registry import job_graph, record, topological_order
-from amw_orchestrator.runtime_iface import TestCalendarFixture
+from amw_runtime.calendar import MarketCalendar
 
 pytestmark = pytest.mark.unit
 LONG = ProductionTypeKey.CHANNEL_LONG_FORM
@@ -86,10 +86,10 @@ def test_metering_refuses_calls_outside_a_task_and_before_the_adapter() -> None:
     assert refusing.after == 0
 
 
-def test_calendar_stand_in_refuses_the_regular_session() -> None:
+def test_runtime_calendar_refuses_the_regular_session() -> None:
     from datetime import UTC, datetime
 
-    cal = TestCalendarFixture()
+    cal = MarketCalendar()
     assert not cal.render_allowed(datetime(2026, 11, 19, 6, 0, tzinfo=UTC))  # Thu 11:30 IST
     assert cal.render_allowed(datetime(2026, 11, 19, 20, 0, tzinfo=UTC))
     assert cal.render_allowed(datetime(2026, 11, 21, 6, 0, tzinfo=UTC))  # Saturday

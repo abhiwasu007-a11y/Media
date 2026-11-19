@@ -3,29 +3,38 @@
 Every control decision is code reading the registry record (24 section 7.1a / 7.2a) and the
 task outputs; an LLM never chooses a route. Per task (03 section 11.3):
 
-T01 create (batch, ``PgJobStore``) -> T02 validate -> T03 budget reservation (E1) + enqueue
-(``PgTaskQueue``) -> claim (``amw_queue_claim``) -> T07 + attempt -> executor -> T08 complete
-(reservation consumed, queue row DONE) / T10-T12 retry / T11 failed. A paid call inside the
-executor passes E2 / ledger / E3 in the metering wrappers. A refused reservation is T05
-``AWAITING_BUDGET`` and stops the job (3A: every paid task is non-critical, hard stop).
+T01 create (batch, ``PgJobStore``; ``tasks.stage_id`` persisted, CCR-214) -> T02 validate -> T03
+budget reservation (E1) + enqueue (``PgTaskQueue``) -> claim (``amw_queue_claim``) -> T07 +
+attempt -> ``TaskExecutor`` (input builder, ``TaskWorker.run(TaskInput, ExecContext)``, payload
+validation) -> T08 complete (reservation consumed, queue row DONE, input / output documents
+stored) / T10-T12 retry / T11 failed. A paid call inside a worker passes E2 / ledger / E3 in the
+metering wrappers. A refused reservation is T05 ``AWAITING_BUDGET`` and stops the job (3A: every
+paid task is non-critical, hard stop).
+
+J02 refusals (fail closed, J04 ``FAILED``, typed error raised): a job without ``project_id``
+(``PROJECT_MISSING``), a paid stage without its configured cost budget (CCR-205), no ACTIVE
+``PER_VIDEO`` budget row for the job (D9 / D10: the per-video cap is a hard stop, never assumed).
 
 Gates (03 section 5.3 rule 4, 24 section 3.3): only a stage the record registers as a gate may
 return ``gate: true`` results; a failed gate (``gate_failures``) takes ``on_fail``. ``REVISE``
-picks the earliest allowed ``remedy_stage_id`` in topological order (else the primary target)
-and creates iteration n+1 tasks for the target and every stage that depends on it; the count per
-gate is capped by ``limits.max_revision_loops``, then the job ends ``COMPLETED /
-BLOCKED_COMPLIANCE``. ``STOP`` ends the job (``BLOCKED_COMPLIANCE`` for a compliance block).
+picks the earliest allowed ``remedy_stage_id`` in topological order (else the primary target) and
+applies the 24 section 3.3 rule 1 table (CCR-211) to the target and every stage that depends on
+it, by the state of each stage's current task; the count per gate is capped by
+``limits.max_revision_loops``, then the job ends ``COMPLETED / BLOCKED_COMPLIANCE``. ``STOP`` ends
+the job (``BLOCKED_COMPLIANCE`` for a compliance block).
 
-Approval stages (``svc_s07.request_approval``) park the task ``CHECKPOINTED /
-AWAITING_APPROVAL`` (T09) until the ``ApprovalDesk`` reports the owner's decision as R14
-evidence; then T15 resumes it. The desk never infers a decision.
+Approval stages (``svc_s07.request_approval``, an ``ApprovalWorker``) park the task
+``CHECKPOINTED / AWAITING_APPROVAL`` (T09) until the ``ApprovalDesk`` reports the owner's decision
+as R14 evidence; then T15 resumes it. The desk never infers a decision.
 
-Market hours: a ``HEAVY_CPU`` task is not claimed while the calendar refuses rendering; the
-run returns ``RENDER_WINDOW_CLOSED`` (the task stays ``QUEUED``).
+Market hours: a ``HEAVY_CPU`` task is not claimed while the calendar refuses rendering; the run
+returns ``RENDER_WINDOW_CLOSED`` (the task stays ``PENDING`` / ``QUEUED``).
 
-Known limits (stated in the PR): the stage of a task is kept in the runner's map (the ``tasks``
-table has no stage column); a crash-resume of the runner itself and leases / heartbeats over
-long renders are 3C hardening (the reaper exists in ``amw_core.retries``).
+Crash-resume: the stage of every task is ``tasks.stage_id``; ``load`` rebuilds the stage map and
+the completed outputs (read back from the stored ``output.json``) from the database, ``run``
+continues. Not covered (3C hardening, listed in the PR): leases / heartbeats over long renders and
+the reaper (a task found ``RUNNING`` after a crash stops the run with ``RUNNING_STALE``), and the
+revision feedback of a gate that failed before the crash (kept in memory only).
 """
 
 import time
@@ -34,17 +43,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
 
-from pydantic import ValidationError
-
 from amw_core.contracts import (
     ResourceBudget,
     Stage,
     TaskOutput,
     ValidationResult,
-    error_object_from_exception,
     gate_failures,
     has_gate_results,
     integrity_failures,
+    violation,
 )
 from amw_core.contracts.envelope import Envelope
 from amw_core.contracts.production_type import ReviseOnFail
@@ -61,7 +68,14 @@ from amw_core.enums import (
     TransitionId,
     WaitReason,
 )
-from amw_core.errors import AmwError, BudgetExhaustedError, MissingDependencyError
+from amw_core.errors import (
+    AmwError,
+    BudgetExhaustedError,
+    ConfigInvalidError,
+    InputInvalidError,
+    LockConflictError,
+    MissingDependencyError,
+)
 from amw_core.ids import (
     MESSAGE,
     ActorRef,
@@ -84,13 +98,21 @@ from amw_core.interfaces import (
     TenantContext,
     TenantTransaction,
 )
-from amw_core.interfaces.job_store import JobTransition
+from amw_core.interfaces.job_store import JobRecord, JobTransition
+from amw_core.interfaces.queue import ClaimedItem
 from amw_core.state_machine import check_job, check_task, derive_job
 from amw_core.state_machine.machine import TaskView
-from amw_orchestrator.executor import ExecutorRegistry, JobFacts, StageCall
+from amw_orchestrator.executor import (
+    ApprovalDesk,
+    BuildContext,
+    JobFacts,
+    PreparedTask,
+    TaskExecutor,
+)
 from amw_orchestrator.metering import MeteredTask, metered_task
+from amw_orchestrator.outputs import SpendLike, budget_stop_output, failed_output, usage_dict
 from amw_orchestrator.registry import topological_order
-from amw_orchestrator.runtime_iface import Calendar
+from amw_orchestrator.task_io import StoredDoc, TaskIo
 
 ORCH = ActorRef("agent_01")
 SCHEDULER = ActorRef("sys_scheduler")
@@ -101,22 +123,31 @@ _QUEUE = {
     ResourceClass.HEAVY_CPU: QueueName.RENDER,
     ResourceClass.PUBLISH: QueueName.PUBLISH,
 }
+_SAME_ITERATION_CANCEL = (
+    TaskState.VALIDATING,
+    TaskState.QUEUED,
+    TaskState.RETRY_WAIT,
+    TaskState.CHECKPOINTED,
+)
+"""CCR-211: cancelled (T19 ``superseded revision``) and replaced at the same iteration."""
+_HUMAN_DECISION = (TaskState.FAILED, TaskState.DEAD_LETTER)
+SUPERSEDED = "superseded revision"
 
 
-class ApprovalDesk(Protocol):
-    """S7 boundary: open the approval request and report the owner's decision.
-
-    ``decision`` returns ``None`` while no confirmed owner evidence exists (the task stays
-    ``CHECKPOINTED``), else the approval payload (``state`` APPROVED / REJECTED /
-    CHANGES_REQUESTED, the approval and evidence IDs)."""
-
-    def open(self, call: StageCall) -> Mapping[str, object]: ...
-
-    def decision(self, call: StageCall) -> Mapping[str, object] | None: ...
+class Calendar(Protocol):
+    def render_allowed(self, dt: datetime) -> bool: ...
 
 
 class BudgetPolicy(Protocol):
     def budget_for(self, stage: Stage) -> ResourceBudget: ...
+
+    def validate(self, graph: Sequence[Stage]) -> None:
+        """J02: raise ``ConfigInvalidError`` when a paid stage has no configured budget."""
+        ...
+
+
+class SpendReader(Protocol):
+    def spend_of(self, attempt_id: str) -> Sequence[SpendLike]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +167,7 @@ class StageRun:
     output: TaskOutput | None = None
     attempts: int = 0
     duration_ms: int = 0
+    wait_reason: WaitReason | None = None
 
 
 @dataclass
@@ -143,13 +175,14 @@ class RunReport:
     job_id: str
     status: str
     """DELIVERED / BLOCKED_COMPLIANCE / FAILED / AWAITING_BUDGET / RENDER_WINDOW_CLOSED /
-    AWAITING_APPROVAL / REJECTED_BY_APPROVER."""
+    AWAITING_APPROVAL / REJECTED_BY_APPROVER / AWAITING_DLQ_DECISION / RUNNING_STALE."""
     order: list[str] = field(default_factory=list)
     """Stage IDs in execution order (iteration suffix ``#n`` for n > 0)."""
     gates: list[dict[str, object]] = field(default_factory=list)
     revisions: list[dict[str, object]] = field(default_factory=list)
     stages: dict[str, StageRun] = field(default_factory=dict)
     task_stage: dict[str, str] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
     detail: str = ""
 
 
@@ -161,16 +194,20 @@ class GraphRunner:
         jobs: JobStore,
         queue: TaskQueue,
         budget: BudgetGuard,
-        executors: ExecutorRegistry,
+        executor: TaskExecutor,
         approvals: ApprovalDesk,
         budgets: BudgetPolicy,
         calendar: Calendar,
         config: RunnerConfig,
+        task_io: TaskIo,
+        spend: SpendReader | None = None,
+        require_per_video: Callable[[TenantTransaction, str, str], object] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._t, self._jobs, self._q, self._budget = tenancy, jobs, queue, budget
-        self._x, self._desk, self._budgets = executors, approvals, budgets
+        self._x, self._desk, self._budgets = executor, approvals, budgets
         self._cal, self._cfg, self._now = calendar, config, clock
+        self._io, self._spend, self._per_video = task_io, spend, require_per_video
         self._feedback: dict[str, tuple[ValidationResult, ...]] = {}
         self._feedback_src: dict[str, str] = {}
         self._max_loops = 3
@@ -238,33 +275,67 @@ class GraphRunner:
 
     # ------------------------------------------------------------------ graph
     def start(self, job: JobFacts, graph: tuple[Stage, ...]) -> RunReport:
-        """J02 -> T01 for the whole graph -> J03 (job already created by the intake, J01)."""
+        """J02 -> (validation) -> T01 for the whole graph -> J03; the job exists (J01, intake).
+
+        A failed validation ends the job with J04 and raises the typed error (the J04 row is
+        committed first): no project, an unconfigured paid stage, no PER_VIDEO budget row."""
         report = RunReport(job.job_id, "RUNNING")
+        refusal: AmwError | None = None
         with self._t.transaction(self._ctx(job)) as tx:
             rec = _need(self._jobs.get_job(tx, JobId(job.job_id)))
-            change = JobTransition(
-                job_id=rec.id,
-                transition_id=TransitionId.J02,
-                from_state=rec.state,
-                to_state=JobState.VALIDATING,
-                expected_state_version=rec.state_version,
-                actor=ORCH,
-                monetized_destination=False,
-            )
-            check_job(change)
-            rec = self._jobs.transition_job(tx, change)
-            self._create(tx, job, graph, [s.stage_id for s in graph], {}, report)
-            change = JobTransition(
-                job_id=rec.id,
-                transition_id=TransitionId.J03,
-                from_state=rec.state,
-                to_state=JobState.QUEUED,
-                expected_state_version=rec.state_version,
-                actor=ORCH,
-            )
-            check_job(change)
-            self._jobs.transition_job(tx, change)
+            rec = self._job_step(tx, rec, TransitionId.J02, JobState.VALIDATING)
+            try:
+                self._validate_job(tx, job, graph)
+            except AmwError as exc:
+                refusal = exc
+                self._job_step(
+                    tx, rec, TransitionId.J04, JobState.FAILED, reason=f"{exc.code}"[:200]
+                )
+            else:
+                self._create(tx, job, graph, [s.stage_id for s in graph], {}, report)
+                self._job_step(tx, rec, TransitionId.J03, JobState.QUEUED)
+        if refusal is not None:
+            report.status = "FAILED"
+            report.detail = f"J02 refused: {refusal.code}"
+            raise refusal
         return report
+
+    def _job_step(
+        self,
+        tx: TenantTransaction,
+        rec: JobRecord,
+        tid: TransitionId,
+        to: JobState,
+        reason: str | None = None,
+    ) -> JobRecord:
+        change = JobTransition(
+            job_id=rec.id,
+            transition_id=tid,
+            from_state=rec.state,
+            to_state=to,
+            expected_state_version=rec.state_version,
+            actor=ORCH,
+            monetized_destination=False if tid is TransitionId.J02 else None,
+            reason=reason,
+        )
+        check_job(change)
+        return self._jobs.transition_job(tx, change)
+
+    def _validate_job(self, tx: TenantTransaction, job: JobFacts, graph: tuple[Stage, ...]) -> None:
+        if not job.project_id:
+            raise InputInvalidError(
+                "a production job needs its project",
+                details={"violations": [violation("PROJECT_MISSING", "/project_id")]},
+            )
+        self._budgets.validate(graph)
+        if self._per_video is not None:
+            self._per_video(tx, job.job_id, job.currency)
+        elif any(self._budgets.budget_for(s).max_cost_micros > 0 for s in graph):
+            # a paid graph with no per-video check wired is a configuration error (fail closed)
+            raise ConfigInvalidError(
+                "the per-video budget check is not wired: no paid run without the cap",
+                details={"violations": [violation("PER_VIDEO_CHECK_UNWIRED", "/budgets")]},
+            )
 
     def _create(
         self,
@@ -274,9 +345,14 @@ class GraphRunner:
         stage_ids: Sequence[str],
         iterations: Mapping[str, int],
         report: RunReport,
-    ) -> None:
+    ) -> Mapping[str, TaskRecord]:
+        """T01 for ``stage_ids`` (a whole graph or a revision batch). Edges inside the batch are
+        written by ``create_tasks``; an edge to a stage outside the batch cannot be expressed by
+        the JobStore interface (CCR-274 provisional, see the PR): the runner's graph is the truth
+        for readiness, the database edges are informational (T02 guard)."""
         by_id = {s.stage_id: s for s in graph}
-        order = [sid for sid in topological_order(graph) if sid in set(stage_ids)]
+        wanted = set(stage_ids)
+        order = [sid for sid in topological_order(graph) if sid in wanted]
         index = {sid: i for i, sid in enumerate(order)}
         new = []
         for sid in order:
@@ -297,13 +373,78 @@ class GraphRunner:
                     max_attempts=self._cfg.max_attempts,
                     deadline=None,
                     depends_on=tuple(index[d] for d in st.depends_on if d in index),
+                    stage_id=sid,
                 )
             )
         records = self._jobs.create_tasks(tx, JobId(job.job_id), new)
+        made: dict[str, TaskRecord] = {}
         for sid, rec in zip(order, records, strict=True):
             report.stages[sid] = StageRun(sid, str(rec.id), iterations.get(sid, 0), rec.state)
             report.task_stage[str(rec.id)] = sid
+            made[sid] = rec
+        return made
 
+    # ------------------------------------------------------------------ resume
+    def load(self, job: JobFacts, graph: tuple[Stage, ...]) -> RunReport:
+        """Rebuild the stage map from ``tasks.stage_id`` (crash-resume, CCR-214 (a)): per stage the
+        live task of the highest iteration, the completed outputs read back from storage and the
+        previous iteration's output (``PRIOR_OUTPUT``)."""
+        report = RunReport(job.job_id, "RUNNING")
+        wanted = {s.stage_id for s in graph}
+        with self._t.transaction(self._ctx(job)) as tx:
+            tasks = [t for t in self._jobs.list_tasks(tx, JobId(job.job_id)) if t.stage_id]
+            by_stage: dict[str, list[TaskRecord]] = {}
+            for t in tasks:
+                if t.stage_id in wanted:
+                    by_stage.setdefault(str(t.stage_id), []).append(t)
+            for sid, rows in by_stage.items():
+                live = [t for t in rows if t.state is not TaskState.CANCELLED]
+                if not live:
+                    continue
+                cur = max(live, key=lambda t: t.iteration)
+                run = StageRun(sid, str(cur.id), cur.iteration, cur.state, None, cur.attempt_count)
+                run.wait_reason = cur.wait_reason
+                if cur.state is TaskState.COMPLETED:
+                    run.output = self._read_output(tx, job, cur)
+                if cur.iteration > 0:
+                    prev = next(
+                        (
+                            t
+                            for t in rows
+                            if t.iteration == cur.iteration - 1 and t.state is TaskState.COMPLETED
+                        ),
+                        None,
+                    )
+                    if prev is not None:
+                        report.stages[f"{sid}#prior"] = StageRun(
+                            sid,
+                            str(prev.id),
+                            prev.iteration,
+                            prev.state,
+                            self._read_output(tx, job, prev),
+                        )
+                report.stages[sid] = run
+                report.task_stage[str(cur.id)] = sid
+        missing = wanted - {k for k in report.stages if "#" not in k}
+        if missing:
+            raise MissingDependencyError(
+                "the job has no live task for stages of its graph",
+                details={
+                    "violations": [
+                        violation("STAGE_TASK_MISSING", f"/{m}") for m in sorted(missing)
+                    ]
+                },
+            )
+        return report
+
+    def _read_output(self, tx: TenantTransaction, job: JobFacts, rec: TaskRecord) -> TaskOutput:
+        return self._io.get_output(
+            TenantContext(job.org_id, ORCH, job.correlation_id),  # type: ignore[arg-type]
+            rec.output_ref or "",
+            rec.output_sha256 or "",
+        )
+
+    # ------------------------------------------------------------------ run loop
     def run(
         self,
         job: JobFacts,
@@ -317,10 +458,13 @@ class GraphRunner:
         loops: dict[str, int] = {}
         started = time.monotonic()
         while True:
+            blocked = self._blocked(report, by_id, topo)
+            if blocked is not None:
+                return blocked
             ready = [
                 sid
                 for sid in topo
-                if report.stages[sid].state is TaskState.PENDING
+                if report.stages[sid].state in _RUNNABLE
                 and all(
                     report.stages[d].state is TaskState.COMPLETED for d in by_id[sid].depends_on
                 )
@@ -357,40 +501,62 @@ class GraphRunner:
         report.status = outcome_kind.value if state is JobState.COMPLETED else state.value
         return report
 
+    def _blocked(
+        self, report: RunReport, by_id: Mapping[str, Stage], topo: Sequence[str]
+    ) -> RunReport | None:
+        """A resumed job can hold tasks the loop must not touch: stop with a stated reason."""
+        for sid in topo:
+            run = report.stages[sid]
+            if run.state is TaskState.RUNNING:
+                report.status = "RUNNING_STALE"
+                report.detail = f"{sid}: task found RUNNING (lease / reaper is 3C hardening)"
+                return report
+            if run.state in _HUMAN_DECISION:
+                report.status = (
+                    "FAILED" if run.state is TaskState.FAILED else "AWAITING_DLQ_DECISION"
+                )
+                report.detail = f"{sid}: {run.state.value}, waits for the human DLQ decision"
+                return report
+            if run.state is TaskState.CHECKPOINTED and (
+                run.wait_reason is WaitReason.AWAITING_BUDGET
+            ):
+                report.status = "AWAITING_BUDGET"
+                report.detail = f"{sid}: budget hard stop (L3 to the owner)"
+                return report
+        return None
+
     # ------------------------------------------------------------------ one task
-    def _call(
+    def _bc(
         self,
         job: JobFacts,
         stage: Stage,
         report: RunReport,
-        attempt_id: str,
         attempt_no: int,
         parent: Mapping[str, TaskOutput],
-    ) -> StageCall:
+    ) -> BuildContext:
         run = report.stages[stage.stage_id]
         upstream = {
             sid: r.output
             for sid, r in report.stages.items()
-            if r.output is not None and r.state is TaskState.COMPLETED
+            if "#" not in sid and r.output is not None and r.state is TaskState.COMPLETED
         }
         upstream.update({f"parent.{k}": v for k, v in parent.items()})
         prior = report.stages.get(f"{stage.stage_id}#prior")
-        return StageCall(
+        return BuildContext(
             job=job,
             stage=stage,
             task_id=run.task_id,
-            attempt_id=attempt_id,
-            attempt_no=attempt_no,
             iteration=run.iteration,
+            attempt_no=attempt_no,
             idempotency_key=self._task_key(job, stage, run.iteration),
             resource_budget=self._budgets.budget_for(stage),
             upstream=upstream,
-            prior_output=prior.output if prior is not None else None,
-            revision_feedback=tuple(self._feedback.get(stage.stage_id, ())),
-            revision_source_stage_id=self._feedback_src.get(stage.stage_id),
             upstream_task_ids={
                 sid: r.task_id for sid, r in report.stages.items() if "#" not in sid
             },
+            prior_output=prior.output if prior is not None else None,
+            revision_feedback=tuple(self._feedback.get(stage.stage_id, ())),
+            revision_source_stage_id=self._feedback_src.get(stage.stage_id),
         )
 
     def _run_task(
@@ -398,10 +564,28 @@ class GraphRunner:
     ) -> RunReport | None:
         run = report.stages[stage.stage_id]
         tid = TaskId(run.task_id)
+        if run.state is TaskState.CHECKPOINTED:  # parked approval (resume)
+            return self._await_approval(job, stage, report, parent)
+        if run.state is TaskState.RETRY_WAIT:  # crash between T10 and T12
+            with self._t.transaction(self._ctx(job, SCHEDULER)) as tx:
+                rec = _need(self._jobs.get_task(tx, tid))
+                rec = self._transition(tx, rec, TransitionId.T12, TaskState.QUEUED, SCHEDULER)
+                self._enqueue(tx, job, stage, rec)
+                run.state = rec.state
+        elif run.state in (TaskState.PENDING, TaskState.VALIDATING):
+            outcome = self._admit(job, stage, report, run, tid)
+            if outcome is not None:
+                return outcome
+        return self._attempts(job, stage, report, parent)
+
+    def _admit(
+        self, job: JobFacts, stage: Stage, report: RunReport, run: StageRun, tid: TaskId
+    ) -> RunReport | None:
         budget = self._budgets.budget_for(stage)
         with self._t.transaction(self._ctx(job)) as tx:
             rec = _need(self._jobs.get_task(tx, tid))
-            rec = self._transition(tx, rec, TransitionId.T02, TaskState.VALIDATING, ORCH)
+            if rec.state is TaskState.PENDING:
+                rec = self._transition(tx, rec, TransitionId.T02, TaskState.VALIDATING, ORCH)
             if budget.max_cost_micros > 0:
                 granted = self._budget.reserve(
                     tx, tid, budget.max_cost_micros, budget.currency
@@ -427,7 +611,7 @@ class GraphRunner:
                 f"{stage.stage_id}: budget reservation refused (hard stop, L3 to the owner)"
             )
             return report
-        return self._attempts(job, stage, report, parent)
+        return None
 
     def _enqueue(self, tx: TenantTransaction, job: JobFacts, stage: Stage, rec: TaskRecord) -> None:
         self._q.enqueue(
@@ -467,7 +651,12 @@ class GraphRunner:
             ),
         )
 
-    def _claim(self, stage: Stage) -> tuple[WorkerId, object]:
+    def _claim(self, stage: Stage, task_id: str) -> tuple[WorkerId, ClaimedItem]:
+        """Claim the queue row. ``amw_queue_claim`` is cross-tenant and not keyed by task, so the
+        runner only proceeds when the claimed row IS this task's. A foreign row is handed back at
+        once (its lease is cut to 1 ms; nothing of it runs) and the claim fails with
+        ``TEMPORARY.LOCK_CONFLICT`` (retryable): this driver expects to be the only consumer of
+        its queues until the worker pool of 3C exists."""
         worker = self._cfg.workers[stage.resource_class]
         claimed = self._q.claim(
             ClaimRequest(
@@ -480,8 +669,18 @@ class GraphRunner:
             )
         )
         if not claimed:
-            raise RuntimeError(f"{stage.stage_id}: queue claim returned nothing")
-        return worker, claimed[0]
+            raise MissingDependencyError(
+                "no queue row for the task",
+                details={"violations": [violation("CLAIM_EMPTY", f"/{stage.stage_id}")]},
+            )
+        item = claimed[0]
+        if str(item.task_id) != task_id:
+            self._q.heartbeat(item.queue_item_id, worker, 1)
+            raise LockConflictError(
+                "the queue returned another task's row",
+                details={"violations": [violation("CLAIM_FOREIGN_ROW", "/queue")]},
+            )
+        return worker, item
 
     def _attempts(
         self, job: JobFacts, stage: Stage, report: RunReport, parent: Mapping[str, TaskOutput]
@@ -490,18 +689,32 @@ class GraphRunner:
         tid = TaskId(run.task_id)
         worker_actor = stage.task_type.split(".", 1)[0]
         while True:
-            worker, item = self._claim(stage)
+            worker, item = self._claim(stage, run.task_id)
             with self._t.transaction(self._ctx(job)) as tx:
                 rec = _need(self._jobs.get_task(tx, tid))
                 rec = self._transition(tx, rec, TransitionId.T07, TaskState.RUNNING, worker_actor)
                 attempt = self._jobs.start_attempt(tx, tid, worker, None, False)
                 self._derive(tx, job, TransitionId.T07)
-            run.attempts += 1
+                attempt_no = attempt.attempt_no
+            run.attempts = attempt_no
             report.order.append(stage.stage_id + (f"#{run.iteration}" if run.iteration else ""))
-            call = self._call(job, stage, report, str(attempt.id), run.attempts, parent)
+            bc = self._bc(job, stage, report, attempt_no, parent)
             t0 = time.monotonic()
-            out = self._execute(call, job, stage, worker_actor)
+            input_doc, out = self._execute(bc, job, stage, worker_actor, str(attempt.id))
             run.duration_ms += int((time.monotonic() - t0) * 1000)
+            stored_out = self._io.put_output(
+                self._ctx(job, worker_actor), job.job_id, run.task_id, str(attempt.id), out
+            )
+            doc_fields: dict[str, object] = {
+                "output_ref": stored_out.uri,
+                "output_sha256": stored_out.sha256,
+            }
+            if input_doc is not None:
+                doc_fields.update(
+                    input_ref=input_doc.uri,
+                    input_sha256=input_doc.sha256,
+                    input_schema_version="1.0.0",
+                )
             with self._t.transaction(self._ctx(job, worker_actor)) as tx:
                 rec = _need(self._jobs.get_task(tx, tid))
                 verdict = self._judge(stage, out)
@@ -511,7 +724,7 @@ class GraphRunner:
                         attempt.id,
                         AttemptResult.SUSPENDED,
                         run.duration_ms,
-                        None,
+                        stored_out.uri,
                         out.resource_usage,
                         None,
                     )
@@ -522,9 +735,10 @@ class GraphRunner:
                         TaskState.CHECKPOINTED,
                         worker_actor,
                         wait_reason=out.next_action.wait_reason or WaitReason.AWAITING_APPROVAL,
+                        **doc_fields,
                     )
-                    self._q.mark_done(tx, item.queue_item_id, worker)  # type: ignore[attr-defined]
-                    run.state = rec.state
+                    self._q.mark_done(tx, item.queue_item_id, worker)
+                    run.state, run.wait_reason = rec.state, rec.wait_reason
                     self._derive(tx, job, TransitionId.T09)
                 elif verdict == "OK":
                     self._jobs.finish_attempt(
@@ -532,14 +746,19 @@ class GraphRunner:
                         attempt.id,
                         AttemptResult.SUCCEEDED,
                         run.duration_ms,
-                        None,
+                        stored_out.uri,
                         out.resource_usage,
                         None,
                     )
                     rec = self._transition(
-                        tx, rec, TransitionId.T08, TaskState.COMPLETED, worker_actor
+                        tx,
+                        rec,
+                        TransitionId.T08,
+                        TaskState.COMPLETED,
+                        worker_actor,
+                        **doc_fields,
                     )
-                    self._q.mark_done(tx, item.queue_item_id, worker)  # type: ignore[attr-defined]
+                    self._q.mark_done(tx, item.queue_item_id, worker)
                     if self._budgets.budget_for(stage).max_cost_micros > 0:
                         self._budget.consume(tx, tid)
                     run.state, run.output = rec.state, out
@@ -552,9 +771,15 @@ class GraphRunner:
                     )
                     result = AttemptResult.FAILED_RETRYABLE if retry else AttemptResult.FAILED_FINAL
                     self._jobs.finish_attempt(
-                        tx, attempt.id, result, run.duration_ms, None, out.resource_usage, out.error
+                        tx,
+                        attempt.id,
+                        result,
+                        run.duration_ms,
+                        stored_out.uri,
+                        out.resource_usage,
+                        out.error,
                     )
-                    self._q.mark_done(tx, item.queue_item_id, worker)  # type: ignore[attr-defined]
+                    self._q.mark_done(tx, item.queue_item_id, worker)
                     if retry:
                         rec = self._transition(
                             tx,
@@ -564,6 +789,7 @@ class GraphRunner:
                             worker_actor,
                             next_attempt_at=self._now(),
                             error=out.error,
+                            **doc_fields,
                         )
                     else:
                         rec = self._transition(
@@ -573,6 +799,7 @@ class GraphRunner:
                             TaskState.FAILED,
                             worker_actor,
                             error=out.error,
+                            **doc_fields,
                         )
                         if self._budgets.budget_for(stage).max_cost_micros > 0:
                             self._budget.release(tx, tid)
@@ -587,7 +814,7 @@ class GraphRunner:
                         f"{stage.stage_id}: budget breach during the task (hard stop, L3)"
                     )
                     return report
-                return self._await_approval(job, stage, report, parent, call)
+                return self._await_approval(job, stage, report, parent)
             if run.state is TaskState.FAILED:
                 report.status = "FAILED"
                 code = out.error.code if out.error is not None else "AGENT.INCOMPLETE_OUTPUT"
@@ -599,25 +826,42 @@ class GraphRunner:
                 rec = self._transition(tx, rec, TransitionId.T12, TaskState.QUEUED, SCHEDULER)
                 self._enqueue(tx, job, stage, rec)
 
-    def _execute(self, call: StageCall, job: JobFacts, stage: Stage, agent: str) -> TaskOutput:
+    def _execute(
+        self, bc: BuildContext, job: JobFacts, stage: Stage, agent: str, attempt_id: str
+    ) -> tuple[StoredDoc | None, TaskOutput]:
+        """Build, store the Task Input, run the worker. Typed errors become failed outputs that
+        carry the real spend of the attempt."""
         meta = MeteredTask(
             job.org_id,
             job.job_id,
-            call.task_id,
-            call.attempt_id,
+            bc.task_id,
+            attempt_id,
             stage.stage_id,
             agent,
             job.channel_id,
         )
+        stored: StoredDoc | None = None
         try:
             with metered_task(meta):
-                if stage.task_type == APPROVAL_TASK:
-                    return self._approval_output(call)
-                return self._x.executor_for(stage).execute(call)
+                prepared: PreparedTask = self._x.prepare(bc, attempt_id)
+                stored = self._io.put_input(
+                    self._ctx(job, agent), job.job_id, bc.task_id, attempt_id, prepared.task_input
+                )
+                return stored, self._x.run(prepared)
         except BudgetExhaustedError as exc:
-            return _budget_stop(call, str(exc))
+            return stored, budget_stop_output(str(exc), self._usage(attempt_id, job.currency))
         except AmwError as exc:
-            return _failed(exc, call, agent)
+            return stored, failed_output(
+                exc,
+                actor=agent,
+                attempt_no=bc.attempt_no,
+                correlation_id=job.correlation_id,
+                usage=self._usage(attempt_id, job.currency),
+            )
+
+    def _usage(self, attempt_id: str, currency: str) -> dict[str, object]:
+        spend = self._spend.spend_of(attempt_id) if self._spend is not None else ()
+        return usage_dict(spend, currency)
 
     def _judge(self, stage: Stage, out: TaskOutput) -> str:
         """03 section 5.3: SUCCEEDED + no integrity failure (+ gate results only from a gate)."""
@@ -630,31 +874,19 @@ class GraphRunner:
         return "OK"
 
     # ------------------------------------------------------------------ approvals (S7)
-    def _approval_output(self, call: StageCall) -> TaskOutput:
-        decided = self._desk.decision(call)
-        if decided is None:
-            opened = self._desk.open(call)
-            return _suspended(call, dict(opened))
-        return _approval_done(call, dict(decided))
-
     def _await_approval(
-        self,
-        job: JobFacts,
-        stage: Stage,
-        report: RunReport,
-        parent: Mapping[str, TaskOutput],
-        call: StageCall,
+        self, job: JobFacts, stage: Stage, report: RunReport, parent: Mapping[str, TaskOutput]
     ) -> RunReport | None:
-        if self._desk.decision(call) is None:
+        run = report.stages[stage.stage_id]
+        if not self._desk.decided(job.job_id, run.task_id):
             report.status = "AWAITING_APPROVAL"
             report.detail = f"{stage.stage_id}: waiting for the owner's decision (R14 evidence)"
             return report
-        run = report.stages[stage.stage_id]
         with self._t.transaction(self._ctx(job)) as tx:  # T15 resume
             rec = _need(self._jobs.get_task(tx, TaskId(run.task_id)))
             rec = self._transition(tx, rec, TransitionId.T15, TaskState.QUEUED, ORCH)
             self._enqueue(tx, job, stage, rec)
-            run.state = rec.state
+            run.state, run.wait_reason = rec.state, None
             self._derive(tx, job, TransitionId.T15)
         result = self._attempts(job, stage, report, parent)
         if result is None:
@@ -708,33 +940,112 @@ class GraphRunner:
             report.status = "BLOCKED_COMPLIANCE"
             report.detail = f"{stage.stage_id}: max_revision_loops reached"
             return report
-        # Rule 1 of 24 section 3.3: the target and every dependant that already ran get a new
-        # iteration; a dependant still PENDING has read nothing stale and simply waits for the
-        # new upstream task (an iteration >= 1 without a previous output would be refused by
-        # Agent 09, PREVIOUS_PLAN_REF).
-        affected = {
-            sid
-            for sid in _dependants(graph, target)
-            if sid == target or report.stages[sid].state is TaskState.COMPLETED
-        }
-        iterations = {sid: report.stages[sid].iteration + 1 for sid in affected}
+        waiting = self._revise(job, graph, stage, target, failing, report)
+        if waiting is not None:
+            entry["waits_for_dlq"] = waiting
+            report.status = "AWAITING_DLQ_DECISION"
+            report.detail = (
+                f"{stage.stage_id}: revision of {target} waits for the human decision on {waiting}"
+            )
+            return report
+        return None
+
+    def _revise(
+        self,
+        job: JobFacts,
+        graph: tuple[Stage, ...],
+        gate: Stage,
+        target: str,
+        failing: Sequence[ValidationResult],
+        report: RunReport,
+    ) -> str | None:
+        """24 section 3.3 rule 1 (CCR-211), by the state of each affected stage's current task:
+
+        ``COMPLETED``                                  new task at n + 1 (``PRIOR_OUTPUT``)
+        ``PENDING``                                    kept; its dependencies are re-pointed
+        ``VALIDATING`` / ``QUEUED`` / ``RETRY_WAIT`` / ``CHECKPOINTED``
+                                                       T19 ``superseded revision``; replaced at the
+                                                       same iteration
+        ``RUNNING``                                    cancel requested, acknowledged (T20), then as
+                                                       above
+        ``FAILED`` / ``DEAD_LETTER``                   not touched; the whole revision waits for the
+                                                       human decision (returns that stage id)
+
+        Returns the stage a human must decide on, else ``None`` once the revision is created."""
+        by_id = {s.stage_id: s for s in graph}
+        order = [sid for sid in topological_order(graph) if sid in _dependants(graph, target)]
+        with self._t.transaction(self._ctx(job)) as tx:
+            current = {
+                sid: _need(self._jobs.get_task(tx, TaskId(report.stages[sid].task_id)))
+                for sid in order
+            }
+            for sid in order:
+                if current[sid].state in _HUMAN_DECISION:
+                    return sid
+            replace: dict[str, int] = {}
+            keep: list[str] = []
+            for sid in order:
+                rec = current[sid]
+                if rec.state is TaskState.COMPLETED:
+                    replace[sid] = rec.iteration + 1
+                elif rec.state is TaskState.PENDING:
+                    keep.append(sid)
+                else:
+                    self._supersede(tx, job, by_id[sid], rec)
+                    replace[sid] = rec.iteration
+            for sid in replace:
+                old = report.stages[sid]
+                if old.output is not None and old.state is TaskState.COMPLETED:
+                    report.stages[f"{sid}#prior"] = StageRun(
+                        old.stage_id, old.task_id, old.iteration, old.state, old.output
+                    )
+            old_ids = {sid: current[sid].id for sid in order}
+            made = self._create(tx, job, graph, list(replace), replace, report)
+            for sid in keep:  # PENDING dependants: same task, edges moved to the new upstream task
+                pending = current[sid]
+                for dep in by_id[sid].depends_on:
+                    if dep in made and dep in old_ids:
+                        try:
+                            self._jobs.repoint_dependency(
+                                tx, pending.id, old_ids[dep], made[dep].id
+                            )
+                        except MissingDependencyError:
+                            report.notes.append(
+                                f"{sid}: no database edge to {dep} to re-point (CCR-274); "
+                                "the graph decides readiness"
+                            )
         report.revisions.append(
             {
-                "gate": stage.stage_id,
+                "gate": gate.stage_id,
                 "target": target,
-                "iteration": iterations[target],
-                "stages": sorted(affected),
+                "iteration": replace.get(target),
+                "stages": sorted(replace),
+                "kept": sorted(keep),
             }
         )
-        for sid in affected:
-            old = report.stages[sid]
-            if old.output is not None:
-                report.stages[f"{sid}#prior"] = old
         self._feedback = {target: tuple(failing)}
-        self._feedback_src = {target: stage.stage_id}
-        with self._t.transaction(self._ctx(job)) as tx:
-            self._create(tx, job, graph, sorted(affected), iterations, report)
+        self._feedback_src = {target: gate.stage_id}
         return None
+
+    def _supersede(
+        self, tx: TenantTransaction, job: JobFacts, stage: Stage, rec: TaskRecord
+    ) -> None:
+        """Cancel a live task whose revision replaces it at the same iteration (T19 / T20)."""
+        tid = rec.id
+        if rec.state is TaskState.RUNNING:
+            self._jobs.request_cancel(tx, tid, SUPERSEDED)
+            rec = _need(self._jobs.get_task(tx, tid))
+            self._transition(
+                tx, rec, TransitionId.T20, TaskState.CANCELLED, ORCH, reason=SUPERSEDED
+            )
+        else:
+            self._transition(
+                tx, rec, TransitionId.T19, TaskState.CANCELLED, ORCH, reason=SUPERSEDED
+            )
+        self._q.cancel_for_task(tx, tid)
+        if self._budgets.budget_for(stage).max_cost_micros > 0:
+            self._budget.release(tx, tid)
+        self._derive(tx, job, TransitionId.T19)
 
     def _limits(self, graph: tuple[Stage, ...]) -> int:
         return self._max_loops
@@ -755,6 +1066,16 @@ class GraphRunner:
                 run.state = rec.state
 
 
+_RUNNABLE = (
+    TaskState.PENDING,
+    TaskState.VALIDATING,
+    TaskState.QUEUED,
+    TaskState.RETRY_WAIT,
+    TaskState.CHECKPOINTED,
+)
+"""States from which the loop (re)enters a task: a fresh one, or one found after a crash."""
+
+
 def _need[T](value: T | None) -> T:
     """A row the runner itself created must exist (else the DB lost it: typed error)."""
     if value is None:
@@ -772,147 +1093,6 @@ def _dependants(graph: tuple[Stage, ...], target: str) -> set[str]:
                 out.add(s.stage_id)
                 changed = True
     return out
-
-
-def _now_z() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _usage(currency: str = "USD") -> dict[str, object]:
-    return {
-        "cpu_ms": 0,
-        "peak_rss_bytes": 0,
-        "tokens_in": 0,
-        "tokens_out": 0,
-        "tokens_cached_in": 0,
-        "llm_calls": 0,
-        "provider_calls": 0,
-        "cost_estimate_micros": 0,
-        "currency": currency,
-        "cost_entry_ids": [],
-    }
-
-
-def _failed(exc: AmwError, call: StageCall, agent: str) -> TaskOutput:
-    try:
-        err = error_object_from_exception(
-            exc,
-            actor=agent,
-            attempt_no=call.attempt_no,
-            occurred_at=datetime.now(UTC),
-            correlation_id=call.job.correlation_id,
-        )
-    except ValidationError:  # details of a non-contract shape: keep the code, drop details
-        exc.details = {}
-        err = error_object_from_exception(
-            exc,
-            actor=agent,
-            attempt_no=call.attempt_no,
-            occurred_at=datetime.now(UTC),
-            correlation_id=call.job.correlation_id,
-            extra_details={"checks": [str(exc)[:200]]},
-        )
-    return TaskOutput.model_validate(
-        {
-            "status": "FAILED",
-            "payload": None,
-            "output_refs": [],
-            "quality_score": None,
-            "confidence": None,
-            "validation_results": [],
-            "duration": 0,
-            "resource_usage": _usage(),
-            "error": err.to_doc(),
-            "next_action": {
-                "type": "ESCALATE",
-                "wait_reason": None,
-                "escalation_level": "L3",
-                "reason": "stage raised a typed error",
-            },
-            "downstream_agent": None,
-            "timestamp": _now_z(),
-        }
-    )
-
-
-def _suspended(call: StageCall, opened: dict[str, object]) -> TaskOutput:
-    return TaskOutput.model_validate(
-        {
-            "status": "SUSPENDED",
-            "payload": {
-                "payload_schema": "svc_s07.request_approval.output",
-                "payload_schema_version": "1.0.0",
-                "data": opened,
-            },
-            "output_refs": [],
-            "quality_score": None,
-            "confidence": None,
-            "validation_results": [],
-            "duration": 0,
-            "resource_usage": _usage(),
-            "error": None,
-            "next_action": {
-                "type": "WAIT",
-                "wait_reason": "AWAITING_APPROVAL",
-                "escalation_level": None,
-                "reason": "waiting for the owner's decision",
-            },
-            "downstream_agent": None,
-            "timestamp": _now_z(),
-        }
-    )
-
-
-def _approval_done(call: StageCall, decided: dict[str, object]) -> TaskOutput:
-    return TaskOutput.model_validate(
-        {
-            "status": "SUCCEEDED",
-            "payload": {
-                "payload_schema": "svc_s07.request_approval.output",
-                "payload_schema_version": "1.0.0",
-                "data": decided,
-            },
-            "output_refs": [],
-            "quality_score": None,
-            "confidence": None,
-            "validation_results": [],
-            "duration": 0,
-            "resource_usage": _usage(),
-            "error": None,
-            "next_action": {
-                "type": "CONTINUE",
-                "wait_reason": None,
-                "escalation_level": None,
-                "reason": "owner decision recorded with R14 evidence",
-            },
-            "downstream_agent": None,
-            "timestamp": _now_z(),
-        }
-    )
-
-
-def _budget_stop(call: StageCall, reason: str) -> TaskOutput:
-    return TaskOutput.model_validate(
-        {
-            "status": "SUSPENDED",
-            "payload": None,
-            "output_refs": [],
-            "quality_score": None,
-            "confidence": None,
-            "validation_results": [],
-            "duration": 0,
-            "resource_usage": _usage(),
-            "error": None,
-            "next_action": {
-                "type": "WAIT",
-                "wait_reason": "AWAITING_BUDGET",
-                "escalation_level": "L3",
-                "reason": f"RESOURCE.BUDGET_EXHAUSTED: {reason}"[:1000],
-            },
-            "downstream_agent": None,
-            "timestamp": _now_z(),
-        }
-    )
 
 
 def _outcome_of(tasks: Sequence[TaskRecord]) -> JobOutcome:

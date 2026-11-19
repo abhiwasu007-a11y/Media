@@ -1,21 +1,66 @@
-"""The boundary between the code-controlled graph runner and the stage workers.
+"""The boundary between the code-controlled graph runner and the stage workers (CCR-203).
 
 The runner (``amw_orchestrator.driver``) decides everything: order, gates, revisions, approvals,
-budgets. A ``StageExecutor`` only does the work of one task and returns an ``amw.task_output``;
-it never chooses the next stage (03 section 11; directive section 2: no LLM-to-LLM control).
+budgets. A worker has exactly one entry point, ``amw_core.interfaces.TaskWorker.run(task_input,
+ctx) -> TaskOutput`` (03 section 1 rule 5); this module holds no second worker contract. What it
+adds is the orchestrator's side of the hand-off:
+
+* an ``InputBuilder`` per task type turns the job facts and the upstream outputs into the payload
+  of a ``TaskInput`` (the only code that builds one);
+* ``TaskExecutor`` validates the input payload through the payload registry, builds the
+  ``TaskInput`` and the ``ExecContext`` (stage and iteration from the task row), calls
+  ``TaskWorker.run`` and validates the output payload again (03 section 5.3 rule 2a). A schema
+  failure is ``PERMANENT.SCHEMA_INVALID`` / ``SCHEMA_VERSION_UNSUPPORTED`` (03 section 6 row 6),
+  raised as a typed error; the runner turns every typed error into a failed Task Output.
+
+An LLM never makes a control decision (directive section 2).
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from enum import StrEnum
+from typing import Any, Protocol, runtime_checkable
 
-from amw_core.contracts import OwnerTopic, ResourceBudget, Stage, TaskOutput, ValidationResult
-from amw_core.enums import ProductionTypeKey
+from amw_core.contracts import (
+    ContextRef,
+    OwnerTopic,
+    ResourceBudget,
+    Stage,
+    TaskInput,
+    TaskOutput,
+    ValidationResult,
+)
+from amw_core.contracts.common import PayloadObject
+from amw_core.contracts.payloads import PAYLOAD_SCHEMAS, PayloadSchemaRegistry
+from amw_core.enums import OutputStatus, Priority, ProductionTypeKey
+from amw_core.errors import AmwError, MissingDependencyError, SchemaInvalidError
+from amw_core.exec_context import ExecContext
+from amw_core.interfaces import TaskWorker
+from amw_orchestrator.outputs import SpendLike, failed_output
+
+
+class ChannelCategory(StrEnum):
+    """CCR-273 (PROPOSED): ``finance`` / ``non-finance``. The finance-only gates (FIN-R1..R13,
+    FIN-R10, the price-data lag, the finance icon rules) apply only to ``FINANCE``."""
+
+    FINANCE = "finance"
+    NON_FINANCE = "non_finance"
+
+
+_NON_FINANCE_LABELS = frozenset({"non_finance", "non-finance"})
+
+
+def resolve_channel_category(raw: str | None) -> ChannelCategory:
+    """Fail closed (CCR-273 item 4): only an explicit non-finance label skips the finance rules;
+    ``None``, an empty value, an unknown value or ``finance`` is FINANCE."""
+    if isinstance(raw, str) and raw.strip().lower() in _NON_FINANCE_LABELS:
+        return ChannelCategory.NON_FINANCE
+    return ChannelCategory.FINANCE
 
 
 @dataclass(frozen=True, slots=True)
 class JobFacts:
-    """What a worker may know about its job (IDs are wire IDs)."""
+    """What the builders may know about the job (IDs are wire IDs)."""
 
     org_id: str
     workspace_id: str
@@ -29,40 +74,248 @@ class JobFacts:
     language: str
     owner_topic: OwnerTopic
     currency: str
+    channel_category: ChannelCategory = ChannelCategory.FINANCE
+    """Fail-closed default: a job built without an explicit category is a finance job."""
+
+    @property
+    def finance_rules_apply(self) -> bool:
+        return self.channel_category is ChannelCategory.FINANCE
 
 
 @dataclass(frozen=True, slots=True)
-class StageCall:
-    """One task attempt as the runner hands it to an executor."""
+class BuildContext:
+    """Everything an input builder reads: the job, the stage and its task row, the latest
+    ``COMPLETED`` output per stage (a child job: also ``parent.<id>``), and the revision facts."""
 
     job: JobFacts
     stage: Stage
     task_id: str
-    attempt_id: str
-    attempt_no: int
     iteration: int
+    attempt_no: int
     idempotency_key: str
     resource_budget: ResourceBudget
     upstream: Mapping[str, TaskOutput]
-    """Latest ``COMPLETED`` output per stage of this job (and, for a child job, ``parent.<id>``)."""
+    upstream_task_ids: Mapping[str, str] = field(default_factory=dict)
     prior_output: TaskOutput | None = None
     """The previous iteration's output of this stage (24 section 3.3 rule 6, ``PRIOR_OUTPUT``)."""
-    revision_feedback: tuple[ValidationResult, ...] = field(default_factory=tuple)
-    """Failing gate results that caused this iteration (24 section 3.3 rules 7 / 7b)."""
+    revision_feedback: tuple[ValidationResult, ...] = ()
     revision_source_stage_id: str | None = None
-    upstream_task_ids: Mapping[str, str] = field(default_factory=dict)
-    """Task ID of each ``upstream`` output (a worker may cite a gate or score task)."""
+
+    def upstream_output(self, stage_id: str) -> TaskOutput:
+        out = self.upstream.get(stage_id)
+        if out is None:
+            raise MissingDependencyError(
+                "upstream output missing", details={"stage_id": stage_id[:64]}
+            )
+        return out
+
+    def upstream_data(self, stage_id: str) -> dict[str, Any]:
+        out = self.upstream_output(stage_id)
+        if out.payload is None or out.payload.data is None:
+            raise MissingDependencyError(
+                "upstream payload is stored by reference", details={"stage_id": stage_id[:64]}
+            )
+        return dict(out.payload.data)
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltInput:
+    """The payload of one Task Input (03 section 3): schema name, version, inline data and the
+    context refs. The executor validates ``data`` against the registered model."""
+
+    payload_schema: str
+    payload_schema_version: str
+    data: Mapping[str, Any]
+    context_refs: tuple[ContextRef, ...] = ()
+    priority: Priority = Priority.NORMAL
 
 
 @runtime_checkable
-class StageExecutor(Protocol):
-    def execute(self, call: StageCall) -> TaskOutput:
-        """Run one attempt; domain failures are gate results, never exceptions (03 5.3)."""
-        ...
+class InputBuilder(Protocol):
+    def build(self, ctx: BuildContext) -> BuiltInput: ...
 
 
 @runtime_checkable
-class ExecutorRegistry(Protocol):
-    def executor_for(self, stage: Stage) -> StageExecutor:
-        """The worker for a stage (by ``task_type``; ``KeyError`` when none is registered)."""
-        ...
+class WorkerRegistry(Protocol):
+    """Worker and input builder per task type (``MissingDependencyError`` when none)."""
+
+    def worker_for(self, stage: Stage) -> TaskWorker: ...
+
+    def builder_for(self, stage: Stage) -> InputBuilder: ...
+
+
+class ApprovalDesk(Protocol):
+    """S7 boundary: open the approval request and report the owner's decision.
+
+    ``decision`` returns ``None`` while no confirmed owner evidence (R14) exists, else the
+    approval payload (``state`` APPROVED / REJECTED / CHANGES_REQUESTED, approval and evidence
+    IDs). ``decided`` is the cheap check the runner makes before it resumes a parked task."""
+
+    def open(self, task_input: TaskInput, ctx: ExecContext) -> Mapping[str, object]: ...
+
+    def decision(self, task_input: TaskInput, ctx: ExecContext) -> Mapping[str, object] | None: ...
+
+    def decided(self, job_id: str, task_id: str) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTask:
+    task_input: TaskInput
+    ctx: ExecContext
+    worker: TaskWorker
+
+
+BlobReader = Callable[[str, str], Mapping[str, Any]]
+"""``(data_ref, data_sha256) -> parsed JSON`` for payloads stored by reference."""
+
+
+class TaskExecutor:
+    """Build, validate, ``TaskWorker.run``, validate (one attempt: ``prepare`` then ``run``)."""
+
+    def __init__(
+        self,
+        workers: WorkerRegistry,
+        *,
+        schemas: PayloadSchemaRegistry = PAYLOAD_SCHEMAS,
+        blob_reader: BlobReader | None = None,
+    ) -> None:
+        self._workers, self._schemas, self._blob = workers, schemas, blob_reader
+
+    def _payload_data(self, payload: PayloadObject) -> Mapping[str, Any]:
+        if payload.data is not None:
+            return payload.data
+        if self._blob is None or payload.data_ref is None or payload.data_sha256 is None:
+            # fail closed: a payload nobody can read is never trusted (27 section 7.3)
+            raise SchemaInvalidError(
+                "payload stored by reference cannot be read for validation",
+                details={"schema": payload.payload_schema},
+            )
+        return self._blob(payload.data_ref, payload.data_sha256)
+
+    def validate_payload(self, payload: PayloadObject) -> None:
+        self._schemas.validate(
+            payload.payload_schema, payload.payload_schema_version, self._payload_data(payload)
+        )
+
+    def prepare(self, bc: BuildContext, attempt_id: str) -> PreparedTask:
+        stage = bc.stage
+        built = self._workers.builder_for(stage).build(bc)
+        job = bc.job
+        agent = stage.task_type.split(".", 1)[0]
+        task_input = TaskInput.model_validate(
+            {
+                "org_id": job.org_id,
+                "job_id": job.job_id,
+                "task_id": bc.task_id,
+                "project_id": job.project_id,
+                "channel_id": job.channel_id,
+                "agent_id": agent,
+                "source_agent": "agent_01",
+                "priority": built.priority.value,
+                "deadline": None,
+                "context_refs": [
+                    r.model_dump(mode="json", by_alias=True) for r in built.context_refs
+                ],
+                "resource_budget": bc.resource_budget.model_dump(mode="json"),
+                "payload": {
+                    "payload_schema": built.payload_schema,
+                    "payload_schema_version": built.payload_schema_version,
+                    "data": dict(built.data),
+                },
+                "correlation_id": job.correlation_id,
+                "idempotency_key": bc.idempotency_key,
+                "retry_count": bc.attempt_no - 1,
+                "schema_version": "1.0.0",
+            }
+        )
+        self.validate_payload(task_input.payload)
+        ctx = ExecContext.from_task_input(
+            task_input,
+            attempt_id,
+            agent,
+            envelope_org_id=job.org_id,
+            stage_id=stage.stage_id,
+            iteration=bc.iteration,
+        )
+        return PreparedTask(task_input, ctx, self._workers.worker_for(stage))
+
+    def run(self, prepared: PreparedTask, spend: Sequence[SpendLike] = ()) -> TaskOutput:
+        """``TaskWorker.run`` plus the 03 section 5.3 rule 2a payload check of the output.
+
+        Typed errors raised by the worker propagate to the runner (it reports them with the real
+        spend of the attempt). An output whose payload fails its schema is returned as a FAILED
+        output that keeps the worker's own ``resource_usage`` (the money was spent)."""
+        output = prepared.worker.run(prepared.task_input, prepared.ctx)
+        if output.status is OutputStatus.SUCCEEDED:
+            try:
+                if output.payload is None:  # TaskOutput already refuses this; explicit guard
+                    raise SchemaInvalidError("a succeeded output carries no payload")
+                self.validate_payload(output.payload)
+            except AmwError as exc:
+                return failed_output(
+                    exc,
+                    actor=prepared.task_input.agent_id,
+                    attempt_no=prepared.ctx.attempt_no,
+                    correlation_id=prepared.task_input.correlation_id,
+                    usage=output.resource_usage,
+                )
+        return output
+
+
+class ApprovalWorker:
+    """``svc_s07.request_approval`` as a ``TaskWorker`` over the ``ApprovalDesk`` boundary:
+    SUSPENDED (``AWAITING_APPROVAL``) until the desk reports R14-backed evidence, then SUCCEEDED
+    with the approval payload. It never infers a decision."""
+
+    def __init__(self, desk: ApprovalDesk, clock: Callable[[], str]) -> None:
+        self._desk, self._clock = desk, clock
+
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        decided = self._desk.decision(task_input, ctx)
+        if decided is None:
+            return _approval_output(
+                "SUSPENDED", dict(self._desk.open(task_input, ctx)), self._clock()
+            )
+        return _approval_output("SUCCEEDED", dict(decided), self._clock())
+
+
+def _approval_output(status: str, data: dict[str, object], stamp: str) -> TaskOutput:
+    waiting = status == "SUSPENDED"
+    return TaskOutput.model_validate(
+        {
+            "status": status,
+            "payload": {
+                "payload_schema": "svc_s07.request_approval.output",
+                "payload_schema_version": "1.0.0",
+                "data": data,
+            },
+            "output_refs": [],
+            "quality_score": None,
+            "confidence": None,
+            "validation_results": [],
+            "duration": 0,
+            "resource_usage": {
+                "cpu_ms": 0,
+                "peak_rss_bytes": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "tokens_cached_in": 0,
+                "llm_calls": 0,
+                "provider_calls": 0,
+                "cost_estimate_micros": 0,
+                "currency": "USD",
+                "cost_entry_ids": [],
+            },
+            "error": None,
+            "next_action": {
+                "type": "WAIT" if waiting else "CONTINUE",
+                "wait_reason": "AWAITING_APPROVAL" if waiting else None,
+                "escalation_level": None,
+                "reason": "waiting for the owner's decision"
+                if waiting
+                else "owner decision recorded with R14 evidence",
+            },
+            "downstream_agent": None,
+            "timestamp": stamp,
+        }
+    )
