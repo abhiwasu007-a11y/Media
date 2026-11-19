@@ -263,3 +263,80 @@ def test_registry_rejects_a_key_declared_twice() -> None:
         reg.declare("finance.x", "agent_09")
     reg.declare_all(["retry.temporary.base_ms", "breaker.x.y.window_ms"], "amw_core")
     assert reg.keys["agent_05.max_hooks"] == "agent_05"
+
+
+def test_currency_exponent_fixture_is_config_data_cited_to_rv07() -> None:
+    """CCR-133 / P4-07: INR 2 and USD 2 exist only as config data (RV-07, REQUIRES REVIEW)."""
+    from tests.core_services.support import CURRENCY_EXPONENT_FIXTURE
+
+    text = CURRENCY_EXPONENT_FIXTURE.read_text(encoding="utf-8")
+    assert "RV-07" in text
+    assert "REQUIRES REVIEW" in text
+    cfg = load_settings(environ={}, config_file=CURRENCY_EXPONENT_FIXTURE)
+    assert cfg.finance.currency_minor_exponent == {"INR": 2, "USD": 2}
+    assert load_settings(environ={}).finance.currency_minor_exponent == {}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"INR": True},
+        {"INR": "2"},
+        {"INR": 2.0},
+        {"INR": -1},
+        {"INR": 7},
+        {"inr": 2},
+        {"IN R": 2},
+        {"EURO": 2},
+        {"\u20ac": 2},
+        {"INR": None},
+    ],
+)
+def test_currency_exponent_config_is_strict(bad: dict[str, object]) -> None:
+    """CCR-133: integers 0..6 only (not bool / string / float), keys are 3 upper-case letters."""
+    with pytest.raises(ConfigInvalidError):
+        load_settings(
+            environ={"AMW_FINANCE__CURRENCY_MINOR_EXPONENT": json.dumps(bad)},
+        )
+
+
+def test_currency_exponent_bounds_are_accepted() -> None:
+    cfg = load_settings(
+        environ={"AMW_FINANCE__CURRENCY_MINOR_EXPONENT": '{"JPY": 0, "KWD": 3, "XXX": 6}'}
+    )
+    assert cfg.finance.currency_minor_exponent == {"JPY": 0, "KWD": 3, "XXX": 6}
+
+
+def test_no_currency_literal_or_exponent_assumption_in_source() -> None:
+    """A guard, not a proof: no source module under ``packages/*/src`` names an ISO currency code
+    next to a digit, builds ``currency_minor_exponent`` from literals, or assumes two decimals
+    (``* 100`` / ``/ 100`` / ``0.01`` on money, ``quantize`` to two places). Config data lives
+    in config files and test fixtures only (CCR-133)."""
+    import ast
+    import re
+
+    root = Path(__file__).resolve().parents[2] / "packages"
+    code = re.compile(r"^(INR|USD|EUR|GBP|JPY)$")
+    offenders: list[str] = []
+    for path in root.glob("**/src/**/*.py"):
+        tree = ast.parse(path.read_text("utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+                if any(isinstance(k, str) and code.match(k) for k in keys) and any(
+                    isinstance(v, ast.Constant) and type(v.value) is int for v in node.values
+                ):
+                    offenders.append(f"{path}:{node.lineno} dict of currency to int")
+            if isinstance(node, ast.keyword) and node.arg and code.match(node.arg):
+                offenders.append(f"{path}:{node.value.lineno} keyword {node.arg}=")
+            if isinstance(node, ast.Constant) and node.value == 0.01:
+                offenders.append(f"{path}:{node.lineno} 0.01")
+            if (
+                isinstance(node, ast.BinOp)
+                and isinstance(node.op, ast.Mult | ast.Div | ast.FloorDiv)
+                and isinstance(node.right, ast.Constant)
+                and node.right.value == 100
+                and re.search(r"minor|amount|cost|limit|money", ast.unparse(node.left), re.I)
+            ):
+                offenders.append(f"{path}:{node.lineno} money x or / 100")
+    assert offenders == []
