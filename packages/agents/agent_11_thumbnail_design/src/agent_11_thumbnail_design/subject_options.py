@@ -114,7 +114,11 @@ def build_picture_options(
     glyphs: Sequence[GlyphFacts],
     finance: bool,
     cfg: PictureBuildConfig,
+    requested_glyphs: frozenset[str] = frozenset(),
 ) -> PictureOptions:
+    """``requested_glyphs``: glyph keys a template explicitly requests. On a finance channel the
+    default is NO icon (owner decision D13 item 3, Q-O31): a glyph is offered only if it is on the
+    strict neutral allow-list AND requested. Non-finance channels are not restricted here."""
     owner: list[PictureOption] = []
     excluded: list[ExcludedPicture] = []
     for a in sorted(assets, key=lambda x: x.sha):
@@ -136,6 +140,9 @@ def build_picture_options(
     for g in sorted(glyphs, key=lambda x: x.key):
         if finance and not g.direction_neutral:
             excluded.append(ExcludedPicture("FINANCE_DIRECTION", glyph=g.key))
+            continue
+        if finance and g.key not in requested_glyphs:
+            excluded.append(ExcludedPicture("FINANCE_NO_ICON", glyph=g.key))
             continue
         code.append(
             PictureOption(

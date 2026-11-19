@@ -45,7 +45,7 @@ def _variant(vid: str, hyp: str, text: str, pic_id: str = "o01", tid: str = "t01
     pic = PictureOption(
         option_id=pic_id,
         kind="CODE_GLYPH",
-        key="g1_level_steps",
+        key="g1_rsi_line",
         label="steps",
         has_face=False,
         direction_neutral=True,
