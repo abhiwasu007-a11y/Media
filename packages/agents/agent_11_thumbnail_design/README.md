@@ -56,7 +56,7 @@ What the code does:
 - **Raster identity**: `RenderResult.pixel_sha256` (mode, size, decoded RGB). The PNG file hash (`file.sha256`) identifies the stored blob and
   is stable on one host. A fixed PNG encoder was rejected: stored (uncompressed) deflate blocks are host independent but make a 1920x1080 file
   about 6.2 MB instead of about 9 KB.
-- **Canary** (`canary.py`, tests `test_canary_hash_is_recorded`): box test font and the real Noto font, recorded per FreeType version. A listed
+- **Canary** (`canary.py`, tests `test_canary_hash_is_recorded`): box test font, the real Noto font, Mukta Regular, Mukta Bold and Mukta Bold with the Noto fallback (a code point Mukta lacks), recorded per FreeType version (Mukta, a static hinted font, is identical on FreeType 2.13.3, 2.14.1 and 2.14.3; only the fallback canary follows Noto). A listed
   FreeType must match exactly. An unlisted one is skipped with its hash in the normal `gates` job and fails in the clean-image job
   `a11-render-determinism` (`A11_REQUIRE_RECORDED_ENV=1`). No perceptual tolerance exists: nothing measured needs one.
 - **Fonts**: bytes must hash to the recorded hash (registered asset `sha256`, or a manifest entry), else `FontIntegrityError` (stage:
@@ -73,8 +73,7 @@ What the code does:
 - **Known limits**: a missing font asset or licence row is detected only when the rows are written, after the paid model call (pre-existing order);
   hinted tenant fonts are not covered by a canary; `pixel_sha256` is not stored in the manifest.
 
-Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved); (2) macOS and Windows have no recorded canary (CI run 44447278617 matched on x86_64 Ubuntu 24.04 with FriBiDi 1.0.13, x86_64 Ubuntu 26.04 with FriBiDi 1.0.16 and arm64 Ubuntu 24.04, all strict, FreeType 2.14.3 only; the 2.13.3 and 2.14.1 rows are local x86_64 measurements); (3) the owner picks the default Devanagari font (Q-O6): the pinned OFL candidate is
-verified, not chosen; (4) the verifier's `c58d42db` is unexplained until their probe output is compared.
+Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved); (2) macOS and Windows have no recorded canary (CI run 44447278617 matched on x86_64 Ubuntu 24.04 with FriBiDi 1.0.13, x86_64 Ubuntu 26.04 with FriBiDi 1.0.16 and arm64 Ubuntu 24.04, all strict, FreeType 2.14.3 only; the 2.13.3 and 2.14.1 rows are local x86_64 measurements); (3) the Devanagari font is decided (owner, 2026-11-19: Mukta primary, Noto Sans Devanagari fallback; CCR-245); the new Mukta canaries are recorded for FreeType 2.13.3, 2.14.1 and 2.14.3 from local x86_64 measurements and are proven on 2.14.3 by the strict CI job once this PR's checks run; (4) the verifier's `c58d42db` is unexplained until their probe output is compared.
 
 ## Fonts, templates, glyphs (licence rows)
 
@@ -84,10 +83,23 @@ verified, not chosen; (4) the verifier's `c58d42db` is unexplained until their p
 - Each template, the glyph set (`TEMPLATE`) and the font (`FONT`) are tenant `assets` rows registered once by the shared registry
   (CCR-031). The stage reads them (`ThumbnailRepository.registered_assets`) and writes `licence_ledger` rows without interval
   (`usage_kind` `TEMPLATE`, `FONT`, `IMAGE`); a missing registration is `PERMANENT.MISSING_DEPENDENCY`.
-- Pinned fonts (`data/fonts/`, manifest with SHA-256, licence and source): Noto Sans Devanagari variable font, Version 2.007, SIL OFL 1.1,
-  unmodified, 641,944 bytes, licence text `OFL-NotoSansDevanagari.txt` (research entry RV-08); and the generated box test font
-  `a11_test_box.ttf` (5.6 KB, no third-party outlines; `test_committed_test_font_equals_generator_and_is_pinned`). The default Devanagari
-  font stays a tenant `FONT` asset chosen by the owner (question Q-O6); its bytes must hash to the recorded `sha256` of the asset.
+- Pinned fonts (`data/fonts/`, manifest with SHA-256, licence and source). **Brand fonts (owner decision 2026-11-19, WS-06):** Mukta
+  (Ek Type, SIL OFL 1.1, Version 2.538, unmodified) is the primary: `Mukta-Regular.ttf` (body) and `Mukta-Bold.ttf` (headline), licence
+  text `OFL-Mukta.txt` (research entries RV-09, RV-10); Noto Sans Devanagari variable font (Version 2.007, SIL OFL 1.1, unmodified,
+  `OFL-NotoSansDevanagari.txt`, RV-08) is the fallback. Also the generated box test font `a11_test_box.ttf` (5.6 KB, no third-party outlines;
+  `test_committed_test_font_equals_generator_and_is_pinned`).
+- **Per-glyph fallback:** when the primary is a manifest font of purpose `brand_primary`, the stage adds the pinned Noto font; a code point
+  goes to Noto only when Mukta has no glyph for it (cmap, fontTools), mixed runs sit on Mukta's baseline, and the coverage gate
+  (`a11.q.language_glyphs`) passes only if one of the two fonts covers every character (a character neither covers is refused, never drawn
+  as a `.notdef` box). Text Mukta fully covers renders pixel-identically with or without the fallback. The manifest provenance records
+  `font_fallback_source` (CCR-245). Only manifest fonts load; no system font is ever consulted.
+- **Tenants:** "use only these" is the rule of the owner's channel (its brand kit registers Mukta and Noto). The tenant brand-kit mechanism of
+  FR-09 is unchanged for other tenants: a tenant font is a registered `FONT` asset with a licence row whose bytes hash to the recorded
+  `sha256`; it gets no fallback (its coverage and licence stay exactly what the tenant registered).
+- **Break 14 of the dry run ("boxes" in the thumbnail):** the three outlined rectangles right of the Marathi title were the code-drawn neutral
+  glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Regression tests in
+  `tests/agents/agent_11_thumbnail_design/test_brand_fonts.py` prove no `.notdef` for Marathi title and subject words (cmap and pixels) and
+  that the subject area does not depend on the font.
 
 ## Tenant isolation (blueprint 19.1)
 
@@ -115,7 +127,7 @@ injection, revision, replay, tenancy and security tests (`test_stage.py`).
    deterministic baseline only; the baseline is not the model and its pass says nothing about model quality.
 6. The finance marker lists, injection phrases and neutral words are injected (`Lexicons`); production lists are 13 / rule-pack
    content. The lists used in tests are fixtures.
-7. Real-font Devanagari evidence now uses the pinned OFL font (`test_production_font_is_pinned_ofl_and_shapes_devanagari`); the owner has not yet chosen the default font asset (Q-O6).
+7. (Superseded for the owner channel by the 2026-11-19 owner decision: Mukta primary, Noto fallback.) Real-font Devanagari evidence now uses the pinned OFL font (`test_production_font_is_pinned_ofl_and_shapes_devanagari`); the owner has not yet chosen the default font asset (Q-O6).
 8. Chart stills (3B), AI stills (3C), upload and Studio test are out of scope. `a11.q.chart_still` is emitted `SKIPPED` unless a
    chart is used.
 9. Official thumbnail spec (dimensions, formats) and the preview-size threshold are `REQUIRES REVIEW`; `a11.q.preview_legibility`

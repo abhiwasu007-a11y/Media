@@ -1,0 +1,247 @@
+"""Brand fonts (owner decision 2026-11-19, WS-06): Mukta primary, Noto Sans Devanagari fallback.
+
+Covers the pinned files and licences, the per-glyph fallback, the stage wiring (provenance, no
+fallback for tenant fonts) and the regression for the "boxes" seen in the dry run (break 14).
+"""
+
+import hashlib
+import io
+import json
+from importlib import resources
+
+import pytest
+from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
+from PIL import Image, ImageDraw, ImageFont
+
+from agent_11_thumbnail_design.canary import canary_spec
+from agent_11_thumbnail_design.composer import PillowComposer, font_pieces
+from agent_11_thumbnail_design.errors import GlyphMissingError
+from agent_11_thumbnail_design.models import Brief, Promise
+from agent_11_thumbnail_design.pinning import (
+    FALLBACK_FONT_KEY,
+    font_manifest,
+    pinned_font_bytes,
+)
+from agent_11_thumbnail_design.templates import glyph_catalogue
+from tests.agents.agent_11_thumbnail_design.env import make_env
+from tests.agents.agent_11_thumbnail_design.test_composer import ORG, spec
+
+#: Title and subject words of the dry run (the Marathi title of ``thumb_v1.png``) and a
+#: mixed Marathi / Latin line; ``ळ`` and ``ऱ`` are Marathi letters.
+MARATHI_TITLE = "डायव्हर्जन्स ?"
+MARATHI_LINES = ("ट्रेंड कसा वाचायचा", "डायव्हर्जन्स ?", "ऱ ळ ज्ञ क्ष श्र ₹ trend 2026")
+NOTDEF_PROBE = "\U000f0000"  # unassigned private-use plane code point: every font draws .notdef
+
+
+def _read(name: str) -> bytes:
+    return (
+        resources.files("agent_11_thumbnail_design").joinpath("data/fonts").joinpath(name).read_bytes()
+    )
+
+
+def _manifest_raw() -> dict[str, dict[str, object]]:
+    raw = json.loads(_read("manifest.json"))
+    return {f["key"]: f for f in raw["fonts"]}
+
+
+def _mask(font: ImageFont.FreeTypeFont, text: str) -> bytes:
+    img = Image.new("L", (400, 200), 0)
+    ImageDraw.Draw(img).text((20, 20), text, font=font, fill=255)
+    return img.tobytes()
+
+
+def _font(data: bytes, px: int = 90) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(io.BytesIO(data), px, layout_engine=ImageFont.Layout.RAQM)
+
+
+# ---------------------------------------------------------------------------- pinned files
+
+
+@pytest.mark.parametrize("key", ["mukta_regular", "mukta_bold"])
+def test_mukta_is_pinned_ofl_with_its_licence_beside_the_font(key: str) -> None:
+    entry = _manifest_raw()[key]
+    data = _read(str(entry["file"]))
+    assert hashlib.sha256(data).hexdigest() == entry["sha256"]
+    assert len(data) == entry["bytes"]
+    assert entry["licence"] == "OFL-1.1" and entry["unmodified"] is True
+    assert entry["purpose"] == "brand_primary" and entry["research_id"] == "RV-09"
+    licence = _read(str(entry["licence_file"])).decode("utf-8")
+    assert "SIL OPEN FONT LICENSE Version 1.1" in licence
+    assert str(entry["copyright"]) in licence.splitlines()[0]
+    name = TTFont(io.BytesIO(data))["name"]
+    assert name.getDebugName(0) == entry["copyright"]  # the font's own copyright line
+    assert font_manifest()[str(entry["sha256"])].key == key
+
+
+def test_noto_is_the_pinned_fallback() -> None:
+    entry = _manifest_raw()[FALLBACK_FONT_KEY]
+    assert entry["purpose"] == "brand_fallback" and entry["licence"] == "OFL-1.1"
+    assert hashlib.sha256(pinned_font_bytes(FALLBACK_FONT_KEY)).hexdigest() == entry["sha256"]
+
+
+def test_every_manifest_font_file_is_listed_and_no_unlisted_font_ships() -> None:
+    listed = {str(f["file"]) for f in _manifest_raw().values()}
+    shipped = {
+        p.name
+        for p in resources.files("agent_11_thumbnail_design").joinpath("data/fonts").iterdir()
+        if p.name.endswith((".ttf", ".otf", ".ttc", ".woff", ".woff2"))
+    }
+    assert shipped == listed
+
+
+# ---------------------------------------------------------------------------- tofu regression
+
+
+@pytest.mark.parametrize("key", ["mukta_regular", "mukta_bold", FALLBACK_FONT_KEY])
+def test_marathi_text_has_no_notdef_glyphs_cmap_and_pixels(key: str) -> None:
+    """No .notdef box for the Marathi title and subject words: cmap AND pixel evidence."""
+    data = pinned_font_bytes(key)
+    text = " ".join(MARATHI_LINES)
+    # 1. cmap: every code point maps to a real glyph (not gid 0 / .notdef)
+    tt = TTFont(io.BytesIO(data))
+    cmap = tt.getBestCmap()
+    notdef = tt.getGlyphOrder()[0]
+    chars = {c for c in text if not c.isspace()}
+    assert not [c for c in chars if ord(c) not in cmap or cmap[ord(c)] == notdef]
+    assert not PillowComposer().missing_glyphs(ORG, data, text)
+    # 2. pixels: each character's raster differs from the .notdef box of the same font, and the
+    #    whole title is not a row of boxes (Raqm shapes conjuncts, so compare per character).
+    font = _font(data)
+    box = _mask(font, NOTDEF_PROBE)
+    assert any(box)
+    for ch in sorted(chars):
+        got = _mask(font, ch)
+        assert any(got), f"U+{ord(ch):04X} draws nothing"
+        assert got != box, f"U+{ord(ch):04X} renders as the .notdef box"
+    title = _mask(font, MARATHI_TITLE)
+    assert title != _mask(font, NOTDEF_PROBE * len(MARATHI_TITLE))
+
+
+def test_rendered_marathi_thumbnail_title_is_real_text_and_tofu_is_refused() -> None:
+    data = pinned_font_bytes("mukta_bold")
+    sha = hashlib.sha256(data).hexdigest()
+    ok = PillowComposer().render(spec(font_bytes=data, font_sha256=sha, lines=(MARATHI_TITLE,)))
+    assert not ok.missing_glyphs and ok.runs
+    img = Image.open(io.BytesIO(ok.png)).convert("RGB")
+    x0, y0, x1, y1 = ok.text_box_px
+    text_px = img.crop((x0, y0, x1, y1))
+    background = text_px.getpixel((0, 0))
+    ink = sum(1 for p in text_px.get_flattened_data() if p != background)
+    assert ink > 2000  # real glyph ink in the title box
+    # a code point no font covers is refused (never drawn as a .notdef box)
+    with pytest.raises(GlyphMissingError):
+        PillowComposer().render(
+            spec(font_bytes=data, font_sha256=sha, lines=(NOTDEF_PROBE * 4,))
+        )
+
+
+def test_the_boxes_of_the_dry_run_are_the_code_drawn_neutral_glyph_not_font_tofu() -> None:
+    """Break 14 finding: the three outlined rectangles right of the title in ``thumb_v1.png`` are the
+    glyph-set picture ``g1_level_steps`` (three ``rect`` ops, outline only), drawn by code. The
+    subject area is therefore identical whatever the font is; the Marathi title was never tofu."""
+    g1 = next(g for g in glyph_catalogue() if g.key == "g1_level_steps")
+    assert [op["op"] for op in g1.ops] == ["rect"] * 3 and all(op["fill"] is None for op in g1.ops)
+    tpl_box = spec().template.subject_box
+    w, h = 1920, 1080
+    x, y, bw, bh = tpl_box
+    region = (x * w // 1000, y * h // 1000, (x + bw) * w // 1000, (y + bh) * h // 1000)
+    pics = []
+    for key in ("mukta_bold", "noto_sans_devanagari_vf"):
+        d = pinned_font_bytes(key)
+        r = PillowComposer().render(
+            spec(font_bytes=d, font_sha256=hashlib.sha256(d).hexdigest(), lines=(MARATHI_TITLE,))
+        )
+        pics.append(Image.open(io.BytesIO(r.png)).convert("RGB").crop(region).tobytes())
+    assert pics[0] == pics[1]
+
+
+# ---------------------------------------------------------------------------- per-glyph fallback
+
+
+def test_font_pieces_splits_only_where_the_primary_lacks_a_glyph() -> None:
+    primary, fallback = frozenset(map(ord, "abc ")), frozenset(map(ord, "xyz"))
+    assert font_pieces("ab c", primary, fallback) == [("ab c", False)]
+    assert font_pieces("abxyc", primary, fallback) == [("ab", False), ("xy", True), ("c", False)]
+    assert font_pieces("ax y", primary, fallback) == [("a", False), ("x y", True)]
+    assert font_pieces("ab", primary, None) == [("ab", False)]  # no fallback: one primary run
+    assert font_pieces("", primary, fallback) == []
+
+
+def test_fallback_draws_a_glyph_mukta_lacks_and_without_it_the_render_fails() -> None:
+    mukta = pinned_font_bytes("mukta_bold")
+    assert 0x0978 not in TTFont(io.BytesIO(mukta)).getBestCmap()
+    comp = PillowComposer()
+    assert comp.missing_glyphs(ORG, mukta, "ॸ") == ("ॸ",)
+    with_fb = canary_spec("mukta_bold_noto_fallback")
+    assert with_fb.fallback_font_bytes is not None
+    assert not comp.missing_glyphs(
+        ORG, mukta, "".join(with_fb.lines), None, with_fb.fallback_font_bytes
+    )
+    assert comp.render(with_fb).missing_glyphs == ()
+    from dataclasses import replace
+
+    with pytest.raises(GlyphMissingError):
+        comp.render(replace(with_fb, fallback_font_bytes=None, fallback_font_sha256=None))
+
+
+def test_fallback_that_is_not_needed_changes_no_pixel() -> None:
+    """Text fully covered by Mukta renders identically with or without the fallback font set."""
+    mukta = pinned_font_bytes("mukta_bold")
+    base = spec(font_bytes=mukta, font_sha256=hashlib.sha256(mukta).hexdigest(), lines=("ट्रेंड",))
+    from dataclasses import replace
+
+    fb = pinned_font_bytes(FALLBACK_FONT_KEY)
+    withfb = replace(
+        base, fallback_font_bytes=fb, fallback_font_sha256=hashlib.sha256(fb).hexdigest()
+    )
+    assert PillowComposer().render(base).pixel_sha256 == PillowComposer().render(withfb).pixel_sha256
+
+
+def test_tampered_fallback_is_refused() -> None:
+    from dataclasses import replace
+
+    from agent_11_thumbnail_design.errors import FontIntegrityError
+
+    s = canary_spec("mukta_bold_noto_fallback")
+    bad = bytearray(s.fallback_font_bytes or b"")
+    bad[-1] ^= 1
+    with pytest.raises(FontIntegrityError):
+        PillowComposer().render(replace(s, fallback_font_bytes=bytes(bad)))
+
+
+# ---------------------------------------------------------------------------- stage wiring
+
+
+def _marathi() -> tuple[Promise, Brief]:
+    return (
+        Promise(
+            promise_statement="डायव्हर्जन्स कसा वाचायचा ते तुम्ही शिकाल.",
+            promise_key_terms=("डायव्हर्जन्स",),
+            working_title_local="डायव्हर्जन्स कसा वाचायचा",
+        ),
+        Brief(
+            subject_idea="outline of level steps",
+            text_idea_local="डायव्हर्जन्स ?",
+            must_not_promise=("profit",),
+        ),
+    )
+
+
+def test_stage_with_mukta_records_primary_and_fallback_in_the_provenance() -> None:
+    env = make_env(
+        language="mr-IN", promise=_marathi(), font=pinned_font_bytes("mukta_bold")
+    )
+    out = env.stage.run(env.ti, "att_1")
+    assert out.payload is not None and out.payload.data is not None
+    assert out.payload.data["verdict"] == "ALLOWED"
+    prov = out.payload.data["provenance"]
+    assert prov["font_source"] == "repo_manifest:mukta_bold"
+    assert prov["font_fallback_source"] == f"repo_manifest:{FALLBACK_FONT_KEY}"
+
+
+def test_a_tenant_font_gets_no_fallback() -> None:
+    env = make_env()  # the generated test font stands for a tenant font
+    out = env.stage.run(env.ti, "att_1")
+    prov = out.payload.data["provenance"]
+    assert prov["font_source"].startswith("repo_manifest:")  # the test font is in the manifest
+    assert prov["font_fallback_source"] is None  # but it is not a brand_primary font

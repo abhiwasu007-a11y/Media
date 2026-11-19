@@ -60,7 +60,13 @@ from agent_11_thumbnail_design.payload import (
     PlannerInfo,
     ThumbnailInput,
 )
-from agent_11_thumbnail_design.pinning import render_environment, verify_font
+from agent_11_thumbnail_design.pinning import (
+    FALLBACK_FONT_KEY,
+    font_manifest,
+    pinned_font_bytes,
+    render_environment,
+    verify_font,
+)
 from agent_11_thumbnail_design.ports import (
     BrandKitView,
     FontRef,
@@ -387,6 +393,8 @@ class _Run:
         self.calls = _Calls()
         self.banned_words: tuple[str, ...] = ()
         self.font_source = "tenant_asset"
+        self.fallback_font_bytes: bytes | None = None
+        self.fallback_font_source: str | None = None
         self.scanner = InjectionScanner(
             stage.d.lexicons.injection_markers, stage.d.lexicons.instruction_phrases
         )
@@ -474,13 +482,23 @@ class _Run:
                 "the font bytes do not match the recorded hash of the font asset",
                 details={"check_id": "a11.pre.config", "missing": ["font_hash_match"]},
             ) from exc
+        self._pick_fallback(font_bytes)
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
         self.banned_words = tuple(banned_words)
         covered_text = " ".join(
             [promise.working_title_local, brief.text_idea_local, *promise.promise_key_terms]
         )
-        if self.d.composer.missing_glyphs(self.ti.org_id, font_bytes, covered_text, font.sha256):
+        if self.d.composer.missing_glyphs(
+            self.ti.org_id,
+            font_bytes,
+            covered_text,
+            font.sha256,
+            self.fallback_font_bytes,
+            hashlib.sha256(self.fallback_font_bytes).hexdigest()
+            if self.fallback_font_bytes
+            else None,
+        ):
             raise MissingDependencyError("no font with glyph coverage for the language")
 
         # Promise material scan: instruction-like content means a human must look (8.4).
@@ -1004,7 +1022,27 @@ class _Run:
             max_font_px=self.s.text_max_font_px,
             font_step_px=self.s.text_font_step_px,
             font_cap_px=cap,
+            fallback_font_bytes=self.fallback_font_bytes,
+            fallback_font_sha256=(
+                hashlib.sha256(self.fallback_font_bytes).hexdigest()
+                if self.fallback_font_bytes
+                else None
+            ),
         )
+
+    def _pick_fallback(self, font_bytes: bytes) -> None:
+        """Per-glyph fallback (owner decision WS-06): only when the primary is a repo-manifest
+        brand font (purpose ``brand_primary``), and only the pinned fallback font. A tenant's own font gets no fallback, so its
+        coverage and licence stay exactly what the tenant registered."""
+        self.fallback_font_bytes = None
+        self.fallback_font_source = None
+        pinned = font_manifest().get(hashlib.sha256(font_bytes).hexdigest())
+        if pinned is None or pinned.purpose != "brand_primary":
+            return
+        fallback = pinned_font_bytes(FALLBACK_FONT_KEY)
+        if fallback != font_bytes:
+            self.fallback_font_bytes = fallback
+            self.fallback_font_source = f"repo_manifest:{FALLBACK_FONT_KEY}"
 
     def _compose_and_persist(
         self,
@@ -1474,6 +1512,7 @@ class _Run:
             "template_set_sha256": template_set_sha256(),
             "font_asset_ids": [font.asset_id],
             "font_source": self.font_source,
+            "font_fallback_source": self.fallback_font_source,
             "render_environment": render_environment(),
             "calls": self.calls.records,
         }

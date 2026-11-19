@@ -31,6 +31,8 @@ from PIL import features
 from agent_11_thumbnail_design.errors import FontIntegrityError
 
 _PKG = "agent_11_thumbnail_design"
+#: Per-glyph fallback of the brand font (owner decision 2026-11-19, WS-06): Mukta is the primary.
+FALLBACK_FONT_KEY = "noto_sans_devanagari_vf"
 
 
 def _data(name: str) -> bytes:
