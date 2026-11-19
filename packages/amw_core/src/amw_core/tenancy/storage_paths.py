@@ -22,12 +22,13 @@ from amw_core.interfaces.tenancy_context import TenantTransaction
 
 PLATFORM = "platform"
 _URI = re.compile(r"^amw-(?P<scheme>blob|entity)://(?P<owner>[^/]+)/(?P<rest>.+)$")
-_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.=-]{0,199}$")
+"""One path-segment rule for the builders and the storage backend (they must agree)."""
 
 
 def _check_path(parts: list[str]) -> None:
     for part in parts:
-        if part in ("", ".", "..") or not _SEGMENT.fullmatch(part):
+        if part in ("", ".", "..") or not SEGMENT_RE.fullmatch(part):
             raise InputInvalidError("storage path segment not allowed", details={"segment": part})
 
 
@@ -39,6 +40,8 @@ def blob_uri(org_id: OrgId, area: str, path: str) -> str:
     return f"amw-blob://{org_id}/{area}/{path}"
 
 
+# Provisional shapes of 03 section 8 rule 5 (CCR-266): agent_01..17 only; renders/ and
+# deliveries/<pub>/ and artifacts/ need at least one file segment.
 _AGENT_ID = re.compile(r"^agent_(0[1-9]|1[0-7])$")
 _TASK_FILES = frozenset({"input.json", "output.json"})
 

@@ -1,6 +1,6 @@
 """``amw.error`` 1.0.0 (03 section 6) and the bridge from typed exceptions to the Error object."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Annotated, Any, ClassVar, Self
 
@@ -56,8 +56,11 @@ def _violation_item(item: object) -> Violation | dict[str, Any]:
 def _normalised_details(details: dict[str, Any]) -> dict[str, Any]:
     raw = details.get("violations")
     if raw is None:
-        return details
-    items = [raw] if isinstance(raw, str | Mapping | Violation) else list(raw)
+        return {k: v for k, v in details.items() if k != "violations"}
+    if isinstance(raw, str | bytes | Mapping | Violation) or not isinstance(raw, Iterable):
+        items: list[object] = [raw]
+    else:
+        items = list(raw)
     return {**details, "violations": [_violation_item(i) for i in items[:MAX_VIOLATIONS]]}
 
 

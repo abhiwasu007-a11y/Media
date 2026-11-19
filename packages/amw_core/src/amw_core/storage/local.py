@@ -14,7 +14,6 @@
 import errno
 import hashlib
 import os
-import re
 import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -32,7 +31,7 @@ from amw_core.ids import ORG, OrgId, Prefix, is_valid_id
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri, ReadableStream
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.observability import get_logger, log_context
-from amw_core.tenancy.storage_paths import check_jobs_subpath
+from amw_core.tenancy.storage_paths import SEGMENT_RE, check_jobs_subpath
 
 SCHEME = "amw-blob://"
 PLATFORM = "platform"
@@ -41,7 +40,7 @@ TENANT_AREAS: frozenset[str] = frozenset(
 )
 """03 section 8 areas (first path segment)."""
 TEMP_PREFIX = ".amw-tmp-"
-_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.=-]{0,199}$")
+_SEGMENT_RE = SEGMENT_RE
 _log = get_logger("storage")
 
 

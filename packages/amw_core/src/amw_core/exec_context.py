@@ -70,8 +70,12 @@ class ExecContext:
             raise TenantMismatchError(f"task is not addressed to {agent_id}")
         if envelope_org_id != task_input.org_id:
             raise TenantMismatchError("envelope org differs from the Task Input org")
-        if stage_id is not None and not _STAGE_ID.fullmatch(stage_id):
-            raise InputInvalidError("stage_id is malformed", details={"stage_id": stage_id[:64]})
+        if stage_id is not None and (
+            not isinstance(stage_id, str) or not _STAGE_ID.fullmatch(stage_id)
+        ):
+            raise InputInvalidError(
+                "stage_id is malformed", details={"stage_id": str(stage_id)[:64]}
+            )
         if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
             raise InputInvalidError("iteration must be an integer >= 0")
         try:

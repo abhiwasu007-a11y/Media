@@ -226,3 +226,44 @@ def test_builders_reject_unsafe_input() -> None:
         sp.checkpoint_uri(J, J, T, "x")  # type: ignore[arg-type]
     with pytest.raises(InputInvalidError):
         sp.render_uri(org, J, "")
+
+
+@pytest.mark.parametrize("bad", [5, True, False, None, 3.5, "S", b"x", {"a": 1}, [[1, 2]], [None]])
+def test_non_list_violations_never_break_error_building(bad: object) -> None:
+    doc = _error_doc({"violations": bad})
+    items = doc["details"].get("violations", [])  # type: ignore[attr-defined]
+    assert all({"path", "keyword", "message"} == set(v) for v in items)
+
+
+def test_non_string_stage_id_is_input_invalid() -> None:
+    ti = _ti()
+    for bad in (5, b"voice", ["voice"]):
+        with pytest.raises(InputInvalidError):
+            ExecContext.from_task_input(
+                ti,
+                ATTEMPT.new(),
+                "agent_07",
+                envelope_org_id=ti.org_id,
+                stage_id=bad,  # type: ignore[arg-type]
+            )
+
+
+@pytest.mark.parametrize(
+    "name", [".hidden", "_x", "-x", "a" * 201, "a b", "x/.y", "x/" + "b" * 201]
+)
+def test_builders_are_at_least_as_strict_as_the_backend(name: str) -> None:
+    with pytest.raises(InputInvalidError):
+        sp.task_artifact_uri(A.org_id, J, T, AT, name)
+    with pytest.raises(InputInvalidError):
+        sp.render_uri(A.org_id, J, name)
+
+
+def test_every_builder_output_passes_the_backend_parser() -> None:
+    from amw_core.storage import parse_uri
+
+    for uri in [
+        *_builders(),
+        sp.render_uri(A.org_id, J, "a" * 200),
+        sp.render_uri(A.org_id, J, "a.b=c"),
+    ]:
+        parse_uri(uri)
