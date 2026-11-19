@@ -26,6 +26,7 @@ from typing import Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from amw_core.config import AmwSettings
+from amw_core.config.settings import MAX_MINOR_EXPONENT
 from amw_core.cost.ledger import amount_in, effective_rows
 from amw_core.enums import ActorKind, BudgetPeriod, BudgetScopeKind, BudgetState, ReservationStatus
 from amw_core.errors import (
@@ -56,7 +57,7 @@ from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.cost_ledger import CostEntry
 from amw_core.interfaces.tenancy_context import TenantTransaction
 
-_MICROS_PER_MINOR = (1_000_000, 100_000, 10_000, 1_000, 100, 10, 1)
+_MICROS_PER_MINOR: tuple[int, ...] = tuple(10 ** (6 - e) for e in range(MAX_MINOR_EXPONENT + 1))
 """Micros per minor unit by ISO 4217 exponent 0-6."""
 PER_ITEM_PERIODS = frozenset({BudgetPeriod.PER_VIDEO, BudgetPeriod.PER_JOB})
 ROLLING_PERIODS = frozenset({BudgetPeriod.DAY, BudgetPeriod.MONTH})
@@ -142,7 +143,7 @@ def actor_kind_of(actor: str) -> ActorKind:
 def limit_micros(budget: Budget, settings: AmwSettings) -> int:
     """``limit_minor`` converted to micros (GLOSSARY section 3); unknown exponent fails closed."""
     exp = settings.finance.currency_minor_exponent.get(budget.currency)
-    if exp is None or not 0 <= exp <= 6:
+    if exp is None or isinstance(exp, bool) or not 0 <= exp <= MAX_MINOR_EXPONENT:
         raise ConfigInvalidError(
             "no minor-unit exponent configured for the budget currency",
             details={"currency": budget.currency},
