@@ -167,7 +167,7 @@ def make_env(
         ctx_refs.append({"uri": uri, "purpose": "ASSET"})
     repo = FakeRepo(
         script,
-        "finance" if finance else "education",
+        "finance" if finance else "youtube_general",
         kit_view,
         font_ref,
         assets=assets,
@@ -216,7 +216,7 @@ def make_env(
             tuple(INJECTION_MARKERS),
             ("ignore all rules",),
             frozenset({"the"}),
-            frozenset({"education"}),
+            frozenset({"youtube_general"}),
         ),
         packs=RulePacks(
             {"rp.youtube_general": "PLATFORM-PACK", "rp.finance_sebi_in": "FIN-PACK"},

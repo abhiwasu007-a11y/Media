@@ -515,7 +515,7 @@ def test_registered_asset_unused_import() -> None:
 
 def test_unknown_channel_category_runs_as_finance_with_no_glyph() -> None:
     env = make_env(finance=False)
-    env.repo.category = "Education-Unlisted"  # not an explicitly known non-finance category
+    env.repo.category = "education"  # not an explicitly known non-finance category
     out = run_att(env, env.ti, "att_1")
     d = data(out)
     assert all(v["picture"]["kind"] != "CODE_GLYPH" for v in d["variants"])

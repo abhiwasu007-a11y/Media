@@ -309,12 +309,24 @@ def test_fixture_step_is_json() -> None:
 
 
 @pytest.mark.parametrize(
-    "category", [None, "", " ", "unknown", "Education", "EDUCATION", "education ", 7, b"education"]
+    "category",
+    [
+        None,
+        "",
+        " ",
+        "unknown",
+        "YouTube_General",
+        "youtube_general ",
+        "education",
+        "philosophy",
+        7,
+        b"youtube_general",
+    ],
 )
 def test_unknown_or_malformed_channel_category_is_finance_fail_closed(category: object) -> None:
     from agent_11_thumbnail_design.stage import Lexicons
 
-    lex = Lexicons((), (), (), frozenset(), frozenset({"education"}))
+    lex = Lexicons((), (), (), frozenset(), frozenset({"youtube_general"}))
     assert lex.is_finance(category) is True
 
 
@@ -322,7 +334,19 @@ def test_only_an_explicit_known_category_is_non_finance_and_default_is_all_finan
     from agent_11_thumbnail_design.stage import Lexicons
 
     assert (
-        Lexicons((), (), (), frozenset(), frozenset({"education"})).is_finance("education") is False
+        Lexicons((), (), (), frozenset(), frozenset({"youtube_general"})).is_finance(
+            "youtube_general"
+        )
+        is False
     )
-    assert Lexicons((), (), (), frozenset()).is_finance("education") is True
+    assert Lexicons((), (), (), frozenset()).is_finance("youtube_general") is True
     assert Lexicons((), (), (), frozenset()).is_finance("finance") is True
+
+
+def test_finance_and_undocumented_categories_stay_finance_when_a_documented_one_is_known() -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    lex = Lexicons((), (), (), frozenset(), frozenset({"youtube_general"}))
+    for c in ("finance", "education", "philosophy"):
+        assert lex.is_finance(c)
+    assert not lex.is_finance("youtube_general")
