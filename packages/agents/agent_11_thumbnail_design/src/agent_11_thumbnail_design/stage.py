@@ -688,7 +688,7 @@ class _Run:
             finance=finance,
             faces_allowed=self.s.faces_allowed,
             scanner=self.scanner,
-            neutral_lexicon=self.d.lexicons.neutral_words,
+            neutral_lexicon=frozenset(fold(w) for w in self.d.lexicons.neutral_words),
             fin_lexicon=self.d.lexicons.finance_markers,
         )
 

@@ -8,7 +8,7 @@
 | Directive sections covered | §3.1 (core agent registry, binding), §3.2 (shared services S1–S13 and owners), §2 (stages are code-controlled; every service has a named owner; no new autonomous agents), §3.5.5 (one package per agent), §1C.15 (tiers) |
 | Facts cited | RESEARCH_LOG: YT-09 (YPP inauthentic content, no AI persona on finance), IN-03 (no forward-looking statements on named securities), IN-08 (copyright posture), PR-01 / PR-03 (model routing; API billed separately from subscription), INF-01 (shared VPS) |
 | Marking | **3A / 3B / 3C** = the owner's build stages (D1). **Tier 0–3** = enterprise tiers (GLOSSARY §6.47). Every row carries both |
-| Conventions | `(pending CCR)` = name not in Wave A; listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (none is in the register yet). `REQUIRES REVIEW (Phase 1): <need>` = value unknown, none invented. Public repository: no private method, book titles, course content or server details |
+| Conventions | `(CCR-NNN, status)` = name not in Wave A, filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5). `REQUIRES REVIEW (Phase 1): <need>` = value unknown, none invented. Public repository: no private method, book titles, course content or server details |
 
 ---
 
@@ -168,7 +168,7 @@ Source for the 3A list: 3A_SLICE_SPEC §2.4. Source for what is out of 3A: §9 o
 |---|---|---|
 | 1 | Blueprints 01–03, 05–17 not yet written (only Agent 04 exists). Rows marked "planned" are paths per directive §4. | Wave B-2 and the 3A blueprints, per D2 |
 | 2 | The decision split for Agents 01, 02, 03, 07, 12, 14, 15, 17 in section 3.3 is the directive-implied split. Each blueprint section 6 confirms it. | pending blueprints |
-| 3 | Scheduled system jobs of services (S4 reconciliation, S5 resource sampling, S6 permission review) have no canonical task type in 24 §3.2. How they are executed and audited is undefined in the contracts. | open: request listed in `audit/b2_unfiled_ccr_requests_shared.md` (pending CCR) |
+| 3 | Scheduled system jobs of services (S4 reconciliation, S5 resource sampling, S6 permission review) have no canonical task type in 24 §3.2. How they are executed and audited is undefined in the contracts. | CCR-135 (mechanism) and CCR-136 (task types): Proposed, deferred to 3C (trigger: the first scheduled job, S4 reconciliation in 3B) |
 | 4 | Tier for S1 and S13 is not stated in the directive. | REQUIRES REVIEW (Phase 1): set in 14_SHARED_SERVICES.md |
 | 5 | `agent_04.knowledge_ingest` and the 3A production types v2 (owner-topic input, `FILE_DELIVERY`) are applied (CCR-003, CCR-006; GLOSSARY, 24 §7.1a). | closed |
 

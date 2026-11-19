@@ -238,13 +238,13 @@ Agents never self-approve. The audit row records proposer, approver, and subject
 | Per-client learning dashboards, cross-client benchmarks | no | no | not before a paying client; cross-tenant data never mixed (rule 9) | 1–3 |
 | Public API for experiments | no | no | no | 3 (only if needed) |
 
-## 14. Contract requests raised by this document (pending CCR)
+## 14. Contract requests raised by this document (filed: CCR-136, CCR-146, CCR-147)
 
-They are listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md); none is assumed to exist.
+They are filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5), all Proposed, deferred to 3C (trigger: the Agent 14 blueprint); none is assumed to exist.
 
 1. Experiment state transition table and guard trigger for `experiment_state` (section 7).
-2. Task types for 24 §3.2: `agent_14.insight_analysis`, `agent_14.experiment_proposal`, `agent_14.experiment_readout` (pending CCR). Today only `agent_14.analytics_ingest` exists.
-3. Storage for insights and for the applied-change link: either a table `insights` (pending CCR) with `channel_id`, evidence refs, label, data range, and a column `experiments.applied_change_ref` (pending CCR) and `experiments.insight_id` (pending CCR), or an explicit decision to keep these in `memory_items` and `result` jsonb.
+2. Task types for 24 §3.2: `agent_14.insight_analysis`, `agent_14.experiment_proposal`, `agent_14.experiment_readout` (CCR-136). Today only `agent_14.analytics_ingest` exists.
+3. Storage for insights and for the applied-change link: either a table `insights` (CCR-147) with `channel_id`, evidence refs, label, data range, and a column `experiments.applied_change_ref` and `experiments.insight_id` (CCR-147), or an explicit decision to keep these in `memory_items` and `result` jsonb.
 4. Config keys `learning.min_sample_size`, `learning.min_duration_ms`, `learning.guard_metrics` (config registry entries; values REQUIRES REVIEW).
 5. Prompt/eval pack entries for the Agent 14 narration steps (27 §6, >= 20 golden cases each) when the blueprint is written.
 

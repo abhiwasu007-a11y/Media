@@ -8,7 +8,7 @@
 | Directive sections covered | §3.5.3 (golden sets, thresholds, CI gate), §3.5.4 (no paid calls in tests; opt-in live smoke test), §3.5.6 (no ticket without a test), §3.5.7 (walking skeleton acceptance, as amended by D1); §1A.6 (QC self-test), §1A.10 (golden-sample pilot); §1C.1 (tenancy suite), §1C.13 (security gates); rules 5, 7, 8, 9 |
 | Owner decisions applied | D1 (3A / 3B / 3C; paid calls only within owner-set limits; per-video and pilot budgets stop on breach; keys only via the environment secret mechanism; render never in market hours; no upload and no Google OAuth in 3A), D2 (fast track; no relaxation of any gate) |
 | Scope marking | Each section carries **[3A / 3B / 3C · Tier n]**. Tier 0 is the owner's own tenant; Tier 1–3 items are listed as design hooks only (§15) and are built only when a paying client needs them (§1C.15). |
-| "(pending CCR)" | A name this document needs that no contract defines. Listed in §16; none is invented here. |
+| "(CCR-NNN)" | A name this document needs that no contract defines, with its register number (CONTRACT_CHANGE_REQUESTS.md); none is invented here. |
 
 ---
 
@@ -473,4 +473,4 @@ Fakes never raise a feature above Implemented; only runs through the real compon
 
 ## 19. Contract change requests this document depends on
 
-None is filed here. Names this document uses that were requested elsewhere are all applied: `PILOT_TOTAL` and `PROVIDER` budget scopes (CCR-035), `qc_report` / `cost_per_stage_report` / `delivery_manifest` (CCR-043), the delivery storage area (CCR-017), `CHANNEL_LONG_FORM` v2 / `SHORTS` v2 (CCR-003) and `agent_04.knowledge_ingest` (CCR-014). The `Clock` Protocol exists as built (`amw_core.interfaces.clock`); SOURCE_LAYOUT.md does not list it (listed in `audit/b2_unfiled_ccr_requests_shared.md`).
+None is filed here. Names this document uses that were requested elsewhere are all applied: `PILOT_TOTAL` and `PROVIDER` budget scopes (CCR-035), `qc_report` / `cost_per_stage_report` / `delivery_manifest` (CCR-043), the delivery storage area (CCR-017), `CHANNEL_LONG_FORM` v2 / `SHORTS` v2 (CCR-003) and `agent_04.knowledge_ingest` (CCR-014). The `Clock` Protocol exists as built (`amw_core.interfaces.clock`); SOURCE_LAYOUT.md lists it (CCR-162).

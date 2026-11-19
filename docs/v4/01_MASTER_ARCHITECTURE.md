@@ -9,7 +9,7 @@
 | Owner decisions applied | **D1** (3A / 3B / 3C build order; no upload and no Google OAuth in 3A; spend controls; secrets; render never in market hours), **D2** (fast track) |
 | Scope / tier marking | Every section header carries **[3A / 3B / 3C · Tier n]** (tiers per GLOSSARY §6.47). |
 | Research IDs used | INF-01, INF-02, INF-03, INF-04, INF-05, INF-06, INF-07, INF-08, INF-09, INF-11, YT-01, YT-03, YT-04, PR-02, PR-03 |
-| Rule of this document | It **places** components and flows. It defines no contract, table, field, enum or task type; every such name is taken from the Wave A documents. Names that are not yet in a contract carry "(pending CCR)" and are listed in `audit/b2_unfiled_ccr_requests_shared.md` (not yet in the register). |
+| Rule of this document | It **places** components and flows. It defines no contract, table, field, enum or task type; every such name is taken from the Wave A documents. Names that are not yet in a contract carry their CCR number and status (CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)). |
 
 ---
 
@@ -230,7 +230,7 @@ Agents and services never import each other; every hand-off is a contract messag
 | 01 | CEO & Master Orchestrator | Control plane: workflow engine, admission, scheduling, resource monitor (S5), governance (S7), command center (S8), tenancy (S9), integration API (S12) | `amw_orchestrator`, `workers/scheduler`, `apps/api` | owns `svc_s07.request_approval` | **3A minimal**; hardening 3C |
 | 02 | Market Intelligence | Strategy stage before production | ai_worker | `agent_02.trend_scan` | 3C |
 | 03 | Content Strategy | Strategy stage: topic selection | ai_worker | `agent_03.topic_selection` | 3C (3A: the owner topic replaces it, `amw.owner_topic`, CCR-006) |
-| 04 | Research & Knowledge | Production stage; knowledge library | ai_worker | `agent_04.research_pack`; `agent_04.knowledge_ingest` (pending CCR, ADR-013) | **3A** |
+| 04 | Research & Knowledge | Production stage; knowledge library | ai_worker | `agent_04.research_pack`; `agent_04.knowledge_ingest` (CCR-014, ADR-013) | **3A** |
 | 05 | Scriptwriter | Production stage; owns S3 | ai_worker | `agent_05.script_draft`, `agent_05.shorts_adaptation`, `svc_s03.*` (3C) | **3A** |
 | 06 | Fact Checker | Blocking gate stage | ai_worker | `agent_06.claim_extraction`, `agent_06.claim_verification` | **3A** |
 | 07 | Voice Production | Production stage (TTS = AI_IO, mastering = HEAVY_CPU) | ai_worker + render_worker | `agent_07.voice_synthesis`, `agent_07.audio_master` | **3A** |
