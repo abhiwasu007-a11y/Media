@@ -31,7 +31,11 @@ from amw_core.contracts import (
     ValidationResult,
 )
 from amw_core.contracts.common import PayloadObject
-from amw_core.contracts.payloads import PAYLOAD_SCHEMAS, PayloadSchemaRegistry
+from amw_core.contracts.payloads import (
+    PAYLOAD_SCHEMAS,
+    PayloadSchemaRegistry,
+    load_payload_schema_plugins,
+)
 from amw_core.enums import OutputStatus, Priority, ProductionTypeKey
 from amw_core.errors import AmwError, MissingDependencyError, SchemaInvalidError
 from amw_core.exec_context import ExecContext
@@ -180,6 +184,9 @@ class TaskExecutor:
         blob_reader: BlobReader | None = None,
     ) -> None:
         self._workers, self._schemas, self._blob = workers, schemas, blob_reader
+        # start-up: the agents' payload models register through the allow-listed loader; any
+        # failure is a ConfigInvalidError, so validation is never silently disabled (27 sec 7.3)
+        self.plugins: tuple[str, ...] = load_payload_schema_plugins(schemas)
 
     def _payload_data(self, payload: PayloadObject) -> Mapping[str, Any]:
         if payload.data is not None:

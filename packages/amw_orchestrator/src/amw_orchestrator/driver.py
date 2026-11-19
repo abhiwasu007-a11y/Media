@@ -168,6 +168,8 @@ class StageRun:
     attempts: int = 0
     duration_ms: int = 0
     wait_reason: WaitReason | None = None
+    key: str = ""
+    """The task's stored idempotency key (the Task Input carries exactly this value)."""
 
 
 @dataclass
@@ -216,12 +218,16 @@ class GraphRunner:
     def _ctx(self, job: JobFacts, actor: str = ORCH) -> TenantContext:
         return TenantContext(job.org_id, ActorRef(actor), job.correlation_id)  # type: ignore[arg-type]
 
-    def _task_key(self, job: JobFacts, stage: Stage, iteration: int) -> str:
-        return make_idempotency_key(
-            job.org_id,
-            f"task.{stage.task_type}",
-            [job.job_id, stage.stage_id, stage.task_type, iteration],
-        )
+    def _task_key(self, job: JobFacts, stage: Stage, iteration: int, generation: int = 0) -> str:
+        """03 section 9 ``task.<task_type>`` key. A task that replaces a cancelled one at the same
+        iteration (CCR-211) would repeat the key and hit ``UNIQUE (org_id, idempotency_key)``;
+        ``generation`` (the number of cancelled tasks of that stage and iteration) is appended
+        only then, so every first-generation key is exactly the contract key (CCR-274
+        provisional default, see the PR)."""
+        parts: list[str | int] = [job.job_id, stage.stage_id, stage.task_type, iteration]
+        if generation:
+            parts.append(generation)
+        return make_idempotency_key(job.org_id, f"task.{stage.task_type}", parts)
 
     def _transition(
         self,
@@ -345,6 +351,7 @@ class GraphRunner:
         stage_ids: Sequence[str],
         iterations: Mapping[str, int],
         report: RunReport,
+        generations: Mapping[str, int] | None = None,
     ) -> Mapping[str, TaskRecord]:
         """T01 for ``stage_ids`` (a whole graph or a revision batch). Edges inside the batch are
         written by ``create_tasks``; an edge to a stage outside the batch cannot be expressed by
@@ -366,7 +373,9 @@ class GraphRunner:
                     priority=Priority.NORMAL,
                     resource_class=st.resource_class,
                     required_capabilities=st.capabilities,
-                    idempotency_key=self._task_key(job, st, iterations.get(sid, 0)),  # type: ignore[arg-type]
+                    idempotency_key=self._task_key(  # type: ignore[arg-type]
+                        job, st, iterations.get(sid, 0), (generations or {}).get(sid, 0)
+                    ),
                     payload_schema=f"{st.task_type}.input",
                     payload_schema_version="1.0.0",
                     resource_budget=self._budgets.budget_for(st),
@@ -379,7 +388,9 @@ class GraphRunner:
         records = self._jobs.create_tasks(tx, JobId(job.job_id), new)
         made: dict[str, TaskRecord] = {}
         for sid, rec in zip(order, records, strict=True):
-            report.stages[sid] = StageRun(sid, str(rec.id), iterations.get(sid, 0), rec.state)
+            report.stages[sid] = StageRun(
+                sid, str(rec.id), iterations.get(sid, 0), rec.state, key=str(rec.idempotency_key)
+            )
             report.task_stage[str(rec.id)] = sid
             made[sid] = rec
         return made
@@ -403,7 +414,7 @@ class GraphRunner:
                     continue
                 cur = max(live, key=lambda t: t.iteration)
                 run = StageRun(sid, str(cur.id), cur.iteration, cur.state, None, cur.attempt_count)
-                run.wait_reason = cur.wait_reason
+                run.wait_reason, run.key = cur.wait_reason, str(cur.idempotency_key)
                 if cur.state is TaskState.COMPLETED:
                     run.output = self._read_output(tx, job, cur)
                 if cur.iteration > 0:
@@ -548,7 +559,7 @@ class GraphRunner:
             task_id=run.task_id,
             iteration=run.iteration,
             attempt_no=attempt_no,
-            idempotency_key=self._task_key(job, stage, run.iteration),
+            idempotency_key=run.key,
             resource_budget=self._budgets.budget_for(stage),
             upstream=upstream,
             upstream_task_ids={
@@ -1000,7 +1011,12 @@ class GraphRunner:
                         old.stage_id, old.task_id, old.iteration, old.state, old.output
                     )
             old_ids = {sid: current[sid].id for sid in order}
-            made = self._create(tx, job, graph, list(replace), replace, report)
+            every = self._jobs.list_tasks(tx, JobId(job.job_id))
+            generations = {
+                sid: sum(1 for t in every if t.stage_id == sid and t.iteration == n)
+                for sid, n in replace.items()
+            }
+            made = self._create(tx, job, graph, list(replace), replace, report, generations)
             for sid in keep:  # PENDING dependants: same task, edges moved to the new upstream task
                 pending = current[sid]
                 for dep in by_id[sid].depends_on:
