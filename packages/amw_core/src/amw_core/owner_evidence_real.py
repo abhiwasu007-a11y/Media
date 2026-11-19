@@ -33,6 +33,7 @@ boundary against a holder of the verifier login (``docs/v4/runtime/EVIDENCE_PATH
 """
 
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -40,7 +41,13 @@ from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Final, Protocol, runtime_checkable
 
-from amw_core.enums import EvidenceRecordKind, EvidenceState, InstructionSourceKind
+from amw_core.enums import (
+    ApprovalStepState,
+    EvidenceRecordKind,
+    EvidenceState,
+    EvidenceVerificationKind,
+    InstructionSourceKind,
+)
 from amw_core.errors import (
     ConfigInvalidError,
     IdempotencyConflictError,
@@ -52,20 +59,22 @@ from amw_core.errors import (
 from amw_core.ids import WireId
 from amw_core.interfaces.owner_evidence import DbSession, EvidenceDatabase, EvidenceRecord
 from amw_core.interfaces.tenancy_context import TenantTransaction
-from amw_core.owner_evidence_fake import FakeEvidenceDatabase, MemorySessionEventSource
+from amw_core.owner_evidence_fake import (
+    PRODUCTION_MARK,
+    TEST_MARK,
+    FakeEvidenceDatabase,
+    MemorySessionEventSource,
+)
 from amw_core.owner_evidence_service import EvidenceVerifierService
 from amw_core.owner_evidence_verifier import (
     QUESTION_OR_DEFERRED,
     SessionEventSource,
     VerifierPolicy,
     clarity_problem,
-    is_confirmation,
     tokens,
     whitelist_tokens,
 )
 
-PRODUCTION_MARK: Final = "session_source_production"
-TEST_MARK: Final = "session_source_test_fixture"
 OWNER_DISPUTED: Final = "owner_disputed"
 
 
@@ -81,18 +90,43 @@ def is_production_source(source: SessionEventSource) -> bool:
     )
 
 
+@runtime_checkable
+class ProfiledDatabase(Protocol):
+    """A database that reports its ``evidence_db_profile`` (``REAL`` or ``TEST``; 0059)."""
+
+    def db_profile(self, session: DbSession, tx: TenantTransaction | None) -> str: ...
+
+
+def _profile(database: EvidenceDatabase, session: DbSession, tx: TenantTransaction | None) -> str:
+    if isinstance(database, FakeEvidenceDatabase):
+        return database.profile
+    if isinstance(database, ProfiledDatabase):
+        return database.db_profile(session, tx)
+    return "UNKNOWN"
+
+
 def build_verifier_service(
     mode: EvidenceMode,
     database: EvidenceDatabase,
     session: DbSession,
     source: SessionEventSource,
     policy: VerifierPolicy,
+    *,
+    tx: TenantTransaction | None = None,
 ) -> EvidenceVerifierService:
-    """The verifier component for ``mode``; REAL refuses a non-production session source."""
-    if mode is EvidenceMode.REAL and not is_production_source(source):
-        raise ConfigInvalidError("real mode needs a production session record source (R14)")
-    marks = {PRODUCTION_MARK: True} if mode is EvidenceMode.REAL else {TEST_MARK: True}
-    return EvidenceVerifierService(database, session, source, policy, marks)
+    """The verifier component for ``mode``. REAL refuses a non-production session source.
+    DRY_RUN refuses any session source but the in-memory TEST one and any database whose own
+    profile row (``evidence_db_profile``, 0059; REAL by default) is not ``TEST``: a dry run can
+    never write into the real database (``tx`` is needed to read a PostgreSQL profile)."""
+    if mode is EvidenceMode.REAL:
+        if not is_production_source(source):
+            raise ConfigInvalidError("real mode needs a production session record source (R14)")
+        return EvidenceVerifierService(database, session, source, policy, {PRODUCTION_MARK: True})
+    if not isinstance(source, MemorySessionEventSource):
+        raise ConfigInvalidError("the dry run takes only the in-memory TEST source")
+    if _profile(database, session, tx) != "TEST":
+        raise ConfigInvalidError("the dry run refuses a database whose profile is not TEST")
+    return EvidenceVerifierService(database, session, source, policy, {TEST_MARK: True})
 
 
 def dry_run_verifier_service(
@@ -100,14 +134,12 @@ def dry_run_verifier_service(
     session: DbSession,
     source: MemorySessionEventSource,
     policy: VerifierPolicy,
+    *,
+    tx: TenantTransaction | None = None,
 ) -> EvidenceVerifierService:
-    """The explicit TEST factory: an in-memory session source, dry run only. Rows it verifies
-    are not production-verified (owner decision 2026-11-19: TEST fixtures for the dry run only)."""
-    if not isinstance(source, MemorySessionEventSource):
-        raise ConfigInvalidError("the dry-run factory takes only the in-memory TEST source")
-    if not isinstance(database, FakeEvidenceDatabase):
-        raise ConfigInvalidError("the dry-run factory writes only to the in-memory TEST database")
-    return build_verifier_service(EvidenceMode.DRY_RUN, database, session, source, policy)
+    """The explicit TEST factory (owner decision 2026-11-19: TEST fixtures for the dry run
+    only); see ``build_verifier_service`` for what it refuses."""
+    return build_verifier_service(EvidenceMode.DRY_RUN, database, session, source, policy, tx=tx)
 
 
 class SessionMessage(Protocol):
@@ -157,6 +189,10 @@ class ConfirmationOutcome(StrEnum):
     """The owner named the code with anything else: the row is now REFUSED (owner restates)."""
     REFUSED_CHECK = "REFUSED_CHECK"
     """A confirmation-shaped reply failed the authenticity check; the row stays VERIFIED."""
+    SUPERSEDED = "SUPERSEDED"
+    """A later decision record on the same code exists: this row is now REFUSED."""
+    AMBIGUOUS = "AMBIGUOUS"
+    """Another open record carries the same code: no reply can say which one it confirms."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +203,39 @@ class ConfirmationScan:
 
 
 ECHO_QUOTE_PREFIX: Final = 40
+SUPERSEDED: Final = "superseded_by_later_decision"
+CONFIRM_FORMS: Final = (("confirm", None), (None, "पक्के"))
+"""``confirm <code>`` / ``<code> पक्के``: confirm any record (CCR-101 / CCR-264)."""
+APPROVE_FORMS: Final = (("approve", None), (None, "मंजूर"))
+"""``approve <code>`` / ``<code> मंजूर``: confirm an APPROVED record only (PROPOSED CCR-264)."""
+_SENTENCE_END: Final = frozenset(".!।")
+
+
+def _strict_words(content: str) -> list[str] | None:
+    """NFKC, case-folded words of a short reply, or ``None`` if any character other than a
+    letter, mark, digit or space occurs (one final ``.`` / ``!`` / ``।`` is allowed): so
+    ``R7K2_``, ``R7<ZWSP>K2``, quotes and other punctuation are never a confirmation."""
+    text = unicodedata.normalize("NFKC", content).casefold().strip()
+    if text and text[-1] in _SENTENCE_END:
+        text = text[:-1].rstrip()
+    if any(unicodedata.category(c)[0] not in "LMN" and c != " " for c in text):
+        return None
+    return text.split(" ") if text and "  " not in text else None
+
+
+def exact_confirmation(content: str, code: str, decision: ApprovalStepState | None) -> bool:
+    """Exactly one of the confirmation forms (``approve`` forms only for an APPROVED record)."""
+    words = _strict_words(content)
+    folded = code.casefold()
+    if words is None or len(words) != 2 or not folded:
+        return False
+    forms = CONFIRM_FORMS + (APPROVE_FORMS if decision is ApprovalStepState.APPROVED else ())
+    for before, after in forms:
+        if (before is not None and words == [before, folded]) or (
+            after is not None and words == [folded, after]
+        ):
+            return True
+    return False
 
 
 def _names_code(content: str, code: str) -> bool:
@@ -234,8 +303,21 @@ class VerifierWorker:
         code = row.evidence.review_code or ""
         echo_at = self._echo_at(row, now)
         e = row.evidence
-        siblings = self._db.for_subject(self._session, tx, e.subject_kind, e.subject_id)
-        others = {r.evidence.event_uuid for r in siblings if r.id != row.id} - {e.event_uuid}
+        siblings = [
+            r
+            for r in self._db.for_subject(self._session, tx, e.subject_kind, e.subject_id)
+            if r.id != row.id and (r.evidence.review_code or "").upper() == code.upper()
+        ]
+        others = {r.evidence.event_uuid for r in siblings} - {e.event_uuid}
+        live = [r for r in siblings if r.state is not EvidenceState.REFUSED]
+        if self._policy.record_kind_rules.get(e.record_kind) is EvidenceVerificationKind.DECISION:
+            if any(r.evidence.message_at > e.message_at for r in live):
+                # only the latest decision on a code counts (CCR-264): a later one supersedes this
+                ended = self._db.refuse(self._session, tx, row.id, SUPERSEDED, {SUPERSEDED: False})
+                return ConfirmationScan(ConfirmationOutcome.SUPERSEDED, ended)
+        elif any(r.state is EvidenceState.VERIFIED for r in live):
+            # `confirm <code>` cannot tell two open records of one code apart
+            return ConfirmationScan(ConfirmationOutcome.AMBIGUOUS, row)
         replies = sorted(
             (
                 m
@@ -250,9 +332,7 @@ class VerifierWorker:
         question: str | None = None
         refused: str | None = None
         for message in replies:
-            confirms = is_confirmation(
-                message.content, code, self._policy, decision=row.evidence.parsed_decision
-            )
+            confirms = exact_confirmation(message.content, code, row.evidence.parsed_decision)
             if confirms:
                 if echo_at is None or message.timestamp <= echo_at:
                     continue  # a repeat before the owner saw the echo is not a confirmation
@@ -309,14 +389,28 @@ class ConfirmationBinding:
     provider: str | None = None
     amount_minor: int | None = None
     currency: str | None = None
+    org_id: str | None = None
+    """The org the confirmation is for; the evidence row must belong to it."""
+
+
+def runtime_subject(
+    kind: str, provider: str | None, amount_minor: int | None, currency: str | None, org: str | None
+) -> str:
+    """The binding key of ``amw_runtime.confirmations.ConfirmationRecord.subject`` (PR #70):
+    ``kind|provider|amount_minor|currency|org_id`` with ``-`` for an absent part."""
+    amount = "-" if amount_minor is None else str(amount_minor)
+    return f"{kind}|{provider or '-'}|{amount}|{currency or '-'}|{org or '-'}"
 
 
 @dataclass(frozen=True, slots=True)
 class EvidenceStatus:
-    """What a run preflight needs of one evidence row (``amw_runtime`` ``EvidenceView``)."""
+    """What a run preflight needs of one evidence row (``amw_runtime`` ``EvidenceView``).
+    ``subject`` is set only when the row is bound to its confirmation (see the lookup)."""
 
     evidence_state: str
     recorded_from: str
+    org_id: str | None = None
+    subject: str | None = None
 
 
 _NUMBER = re.compile(r"[0-9][0-9,]*(?:\.[0-9]+)?")
@@ -389,6 +483,7 @@ class ConfirmedEvidenceLookup:
                 getattr(c, "provider", None),
                 getattr(c, "amount_minor", None),
                 getattr(c, "currency", None),
+                getattr(c, "org_id", None),
             )
             for c in confirmations
             if getattr(c, "evidence_id", None)
@@ -428,11 +523,15 @@ class ConfirmedEvidenceLookup:
         channel = (
             OWNER_CHAT_OPERATOR if source is InstructionSourceKind.OWNER_CHAT_MESSAGE else source
         )
+        org = row.org_id
         if not self._db.mac_valid(self._session, self._tx, row.id):
-            return EvidenceStatus(MAC_INVALID, channel)
+            return EvidenceStatus(MAC_INVALID, channel, org)
         result = row.verifier_result
         if result.get(PRODUCTION_MARK) is not True or result.get(TEST_MARK):
-            return EvidenceStatus(TEST_FIXTURE, channel)
-        if not self._bound(row, binding):
-            return EvidenceStatus(BINDING_MISMATCH, channel)
-        return EvidenceStatus(row.state.value, channel)
+            return EvidenceStatus(TEST_FIXTURE, channel, org)
+        if binding.org_id != org or not self._bound(row, binding):
+            return EvidenceStatus(BINDING_MISMATCH, channel, org)
+        subject = runtime_subject(
+            binding.kind, binding.provider, binding.amount_minor, binding.currency, org
+        )
+        return EvidenceStatus(row.state.value, channel, org, subject)

@@ -439,8 +439,8 @@ class ClaudeSessionJsonlSource:
         if not _EVENT_UUID.match(event_uuid):
             return None
         lines = self._lines(session_id)
-        needle = event_uuid.encode("ascii")
-        if any(isinstance(line, _Corrupt) and needle in line.raw for line in lines):
+        own = re.compile(rb'"uuid"\s*:\s*"' + re.escape(event_uuid.encode("ascii")) + rb'"')
+        if any(isinstance(line, _Corrupt) and own.search(line.raw) for line in lines):
             return self._refused(session_id, event_uuid, Verdict.CORRUPT_RECORD, None)
         matches = [r for r in lines if not isinstance(r, _Corrupt) and r.get("uuid") == event_uuid]
         if not matches:

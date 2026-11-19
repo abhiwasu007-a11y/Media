@@ -31,7 +31,12 @@ from amw_core.errors import (
 )
 from amw_core.interfaces import DbRole, EvidenceRecord, NewEvidence, TenantContext
 from amw_core.interfaces.tenancy_context import TenantTransaction
-from amw_core.owner_evidence_fake import FakeEvidenceDatabase, MemorySessionEventSource
+from amw_core.owner_evidence_fake import (
+    PRODUCTION_MARK,
+    FakeEvidenceDatabase,
+    MemorySessionEventSource,
+    merge_result,
+)
 from amw_core.owner_evidence_mac import MacKeyring
 from amw_core.owner_evidence_operator import OperatorDesk, load_echo_templates, locate
 from amw_core.owner_evidence_pg import PgEvidenceDatabase
@@ -47,6 +52,7 @@ from amw_core.owner_evidence_real import (
     VerifierWorker,
     build_verifier_service,
     dry_run_verifier_service,
+    exact_confirmation,
     is_production_source,
 )
 from amw_core.owner_evidence_verifier import SessionEvent, VerifierPolicy, is_confirmation
@@ -65,6 +71,11 @@ APPROVAL = ids.new_id(ids.Prefix.APPROVAL)
 SUBJECT = ids.new_id(ids.Prefix.RENDER)
 OWNER = ids.USER.new()
 ANY_KIND = frozenset(EvidenceRecordKind)
+
+
+def state_of(lookup: ConfirmedEvidenceLookup, evidence_id: str) -> str | None:
+    status = lookup.get(evidence_id)
+    return None if status is None else status.evidence_state
 
 
 def requested(tx: TenantTransaction, row: EvidenceRecord) -> datetime | None:
@@ -270,7 +281,7 @@ def test_dispute_refuses_the_row_so_the_owner_restates(tmp_path: Path, dispute_t
 
 @pytest.mark.parametrize(
     ("decision", "reply"),
-    [("approve R7K2", "approve R7K2"), ("R7K2 मंजूर", "R7K2 मंजूर"), ("reject R7K2", "R7K2 नामंजूर")],
+    [("approve R7K2", "approve R7K2"), ("R7K2 मंजूर", "R7K2 मंजूर"), ("reject R7K2", "confirm R7K2")],
 )
 def test_the_owners_decision_form_after_the_echo_confirms(
     tmp_path: Path, decision: str, reply: str
@@ -398,7 +409,7 @@ def test_operator_refusal_is_audited_and_echoed(tmp_path: Path) -> None:
 
 
 def test_real_mode_refuses_the_test_source_and_dry_run_needs_it(tmp_path: Path) -> None:
-    db = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}))
+    db = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}), profile="TEST")
     verifier = db.login(DbRole.VERIFIER, PASSWORDS[DbRole.VERIFIER])
     memory = MemorySessionEventSource()
     jsonl = ClaudeSessionJsonlSource(JsonlSourceConfig(tmp_path, OWNER_ACCOUNT))
@@ -408,6 +419,7 @@ def test_real_mode_refuses_the_test_source_and_dry_run_needs_it(tmp_path: Path) 
         build_verifier_service(EvidenceMode.REAL, db, verifier, memory, POLICY)
     assert dry_run_verifier_service(db, verifier, memory, POLICY) is not None
     with pytest.raises(ConfigInvalidError):
+        # the wrong source type on purpose: the runtime guard must refuse it
         dry_run_verifier_service(db, verifier, jsonl, POLICY)  # type: ignore[arg-type]
 
 
@@ -463,7 +475,7 @@ def test_preflight_lookup_reports_only_mac_valid_owner_chat_confirmations(tmp_pa
     assert status.evidence_state == "MAC_INVALID"  # pending: no MAC yet, never CONFIRMED
     w.verify(row)
     w.worker.confirm_from_chat(w.tx, row.id, minutes(30))
-    assert lookup.get(row.id) == EvidenceStatus("BINDING_MISMATCH", "OWNER_CHAT_OPERATOR")
+    assert state_of(lookup, row.id) == "BINDING_MISMATCH"
     w.db.superuser_tamper(w.tx, row.id, confirmation_quote="forged")
     tampered = lookup.get(row.id)
     assert tampered is not None
@@ -528,7 +540,7 @@ def test_provider_limit_evidence_is_bound_to_provider_amount_and_currency(
     provider, amount, currency = binding
     lookup = ConfirmedEvidenceLookup(
         w.db, app, w.tx,
-        [ConfirmationBinding(row.id, PROVIDER_LIMIT, provider, amount, currency)],
+        [ConfirmationBinding(row.id, PROVIDER_LIMIT, provider, amount, currency, row.org_id)],
         allowed_kinds=frozenset(kinds),
     )  # fmt: skip
     got = lookup.get(row.id)
@@ -537,7 +549,7 @@ def test_provider_limit_evidence_is_bound_to_provider_amount_and_currency(
 
 
 def test_dry_run_rows_are_marked_and_never_confirmed_for_a_real_run(tmp_path: Path) -> None:
-    db = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}))
+    db = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}), profile="TEST")
     tx = MemoryTransaction(TenantContext(ids.ORG.new(), ids.ActorRef("sys_operator")))
     db.register_approval_code(tx, CODE, APPROVAL)
     said, later = minutes(5), minutes(8)
@@ -571,7 +583,7 @@ def test_dry_run_rows_are_marked_and_never_confirmed_for_a_real_run(tmp_path: Pa
         [ConfirmationBinding(row.id, PROVIDER_LIMIT, "anthropic", 1000, "USD")],
         allowed_kinds=frozenset({EvidenceRecordKind.CONTRIBUTION}),
     )  # fmt: skip
-    assert lookup.get(row.id) == EvidenceStatus("TEST_FIXTURE", "OWNER_CHAT_OPERATOR")
+    assert state_of(lookup, row.id) == "TEST_FIXTURE"
 
 
 def test_dry_run_factory_refuses_a_real_database() -> None:
@@ -589,17 +601,156 @@ def test_lookup_from_confirmation_records(tmp_path: Path) -> None:
     app = w.db.login(DbRole.APP, PASSWORDS[DbRole.APP])
     rec = SimpleNamespace(
         kind=PROVIDER_LIMIT, provider="anthropic", amount_minor=1000, currency="USD",
-        evidence_id=row.id,
+        evidence_id=row.id, org_id=row.org_id,
     )  # fmt: skip
     no_evidence = SimpleNamespace(kind=FIN_R10, evidence_id=None)
     lookup = ConfirmedEvidenceLookup.for_confirmations(
         w.db, app, w.tx, [rec, no_evidence],
         allowed_kinds=frozenset({EvidenceRecordKind.CONTRIBUTION}),
     )  # fmt: skip
-    assert lookup.get(row.id) == EvidenceStatus("CONFIRMED", "OWNER_CHAT_OPERATOR")
+    assert lookup.get(row.id) == EvidenceStatus(
+        "CONFIRMED", "OWNER_CHAT_OPERATOR", row.org_id,
+        f"PROVIDER_LIMIT|anthropic|1000|USD|{row.org_id}",
+    )  # fmt: skip
     with pytest.raises(ConfigInvalidError):
         ConfirmedEvidenceLookup.for_confirmations(w.db, app, w.tx, [rec, rec])
     sebi = ConfirmedEvidenceLookup(
         w.db, app, w.tx, [ConfirmationBinding(row.id, "OTHER_KIND")], allowed_kinds=ANY_KIND
     )
-    assert sebi.get(row.id) == EvidenceStatus("BINDING_MISMATCH", "OWNER_CHAT_OPERATOR")
+    assert state_of(sebi, row.id) == "BINDING_MISMATCH"
+
+
+def test_echo_reply_forms_are_exactly_four(tmp_path: Path) -> None:
+    """CCR-264: only `approve R7K2`, `R7K2 मंजूर`, `confirm R7K2`, `R7K2 पक्के` (one final full
+    stop allowed); any other character, word or order is never a confirmation."""
+    ok = ["approve R7K2", "R7K2 मंजूर", "confirm R7K2", "R7K2 पक्के", "Confirm r7k2.", "R7K2 पक्के।"]
+    bad = [
+        "confirm R7K2_", "confirm R7\u200bK2", "confirm  R7K2", "yes R7K2", "ok R7K2",
+        "approve R7K2 please", "R7K2 approve", "मंजूर R7K2", "confirmed R7K2", '"confirm R7K2"',
+        "confirm R7K2?", "R7K2 पक्का", "",
+    ]  # fmt: skip
+    approved = ApprovalStepState.APPROVED
+    assert all(exact_confirmation(text, CODE, approved) for text in ok)
+    assert not any(exact_confirmation(text, CODE, approved) for text in bad)
+    rejected = ApprovalStepState.REJECTED
+    assert exact_confirmation("confirm R7K2", CODE, rejected)
+    assert not exact_confirmation("approve R7K2", CODE, rejected)
+    assert not exact_confirmation("confirm R7K2", "", approved)
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5))
+    sneaky = w.t.human("confirm R7K2_", minutes(8))
+    w.write()
+    w.verify(row)
+    scan = w.scan(row)
+    assert (scan.outcome, scan.event_uuid) == (ConfirmationOutcome.DISPUTED, sneaky)
+
+
+def decision_world(
+    tmp_path: Path, first: str, second: str
+) -> tuple[World, EvidenceRecord, EvidenceRecord]:
+    """Two decision records on one code: `first` at minute 5, `second` at minute 6."""
+    w = make_world(tmp_path)
+    rows = []
+    for i, text in enumerate((first, second)):
+        uid = w.t.human(text, minutes(5 + i))
+        w.write()
+        parsed = ApprovalStepState.REJECTED if "reject" in text else ApprovalStepState.APPROVED
+        rows.append(w.record(uid, text, minutes(5 + i), parsed_decision=parsed))
+    for row in rows:
+        assert w.verify(row).state is EvidenceState.VERIFIED
+    return w, rows[0], rows[1]
+
+
+def test_approve_then_reject_then_confirm_never_confirms_the_approval(tmp_path: Path) -> None:
+    w, approve, reject = decision_world(tmp_path, "approve R7K2", "reject R7K2")
+    conf = w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    first = w.scan(approve)
+    assert first.outcome is ConfirmationOutcome.SUPERSEDED
+    assert (first.row.state, first.row.refused_reason) == (
+        EvidenceState.REFUSED, "superseded_by_later_decision",
+    )  # fmt: skip
+    latest = w.scan(reject)
+    assert (latest.outcome, latest.event_uuid) == (ConfirmationOutcome.CONFIRMED, conf)
+    assert latest.row.evidence.parsed_decision is ApprovalStepState.REJECTED
+
+
+def test_reject_then_approve_confirms_the_latest_approval(tmp_path: Path) -> None:
+    w, reject, approve = decision_world(tmp_path, "reject R7K2", "approve R7K2")
+    w.t.human("R7K2 मंजूर", minutes(8))
+    w.write()
+    latest = w.scan(approve)
+    assert latest.outcome is ConfirmationOutcome.CONFIRMED
+    assert w.scan(reject).outcome is ConfirmationOutcome.SUPERSEDED
+
+
+def test_a_confirm_before_the_latest_decision_does_not_count(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human("reject R7K2", minutes(5))
+    w.write()
+    reject = w.record(uid, "reject R7K2", minutes(5), parsed_decision=ApprovalStepState.REJECTED)
+    w.t.human("confirm R7K2", minutes(5.6))  # confirms nothing yet: the approve comes later
+    later = w.t.human("approve R7K2", minutes(6))
+    w.write()
+    approve = w.record(later, "approve R7K2", minutes(6))
+    for row in (reject, approve):
+        w.verify(row)
+    assert w.scan(approve).outcome is ConfirmationOutcome.NO_REPLY_YET
+    assert w.scan(reject).outcome is ConfirmationOutcome.SUPERSEDED
+
+
+def test_two_open_content_records_on_one_code_are_ambiguous(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    rows = []
+    for i in range(2):
+        quote = f"R7K2 contribution number {i} about weekly charts"
+        uid = w.t.human(quote, minutes(5 + i))
+        w.write()
+        rows.append(
+            w.record(
+                uid,
+                quote,
+                minutes(5 + i),
+                record_kind=EvidenceRecordKind.CONTRIBUTION,
+                parsed_decision=None,
+                job_id=ids.JOB.new(),
+            )
+        )
+    for row in rows:
+        w.verify(row)
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    assert w.scan(rows[0]).outcome is ConfirmationOutcome.AMBIGUOUS
+
+
+def test_test_mark_survives_confirmation_and_cannot_enter_a_real_database(tmp_path: Path) -> None:
+    real = FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}))  # profile REAL (default)
+    verifier = real.login(DbRole.VERIFIER, PASSWORDS[DbRole.VERIFIER])
+    policy = VerifierPolicy(frozenset({"human"}), frozenset({"acct"}))
+    with pytest.raises(ConfigInvalidError):  # fabricated events + a REAL database: refused
+        dry_run_verifier_service(real, verifier, MemorySessionEventSource(), policy)
+    with pytest.raises(ConfigInvalidError):
+        build_verifier_service(
+            EvidenceMode.DRY_RUN, PgEvidenceDatabase(), verifier, MemorySessionEventSource(), policy
+        )
+    assert merge_result({TEST_MARK: True, "a": True}, {PRODUCTION_MARK: True, "a": False}) == {
+        TEST_MARK: True, "a": False,
+    }  # fmt: skip
+    assert merge_result({}, {PRODUCTION_MARK: True}) == {}
+    with pytest.raises(ValueError, match="profile"):
+        FakeEvidenceDatabase(PASSWORDS, MacKeyring({1: TEST_KEY}), profile="LIVE")
+
+
+def test_dispute_keeps_the_verification_checks(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5))
+    w.t.human("R7K2 नाही", minutes(7))
+    w.write()
+    verified = w.verify(row)
+    ended = w.scan(row).row
+    assert ended.verifier_result[PRODUCTION_MARK] is True
+    assert set(verified.verifier_result) < set(ended.verifier_result)

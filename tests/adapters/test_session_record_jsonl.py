@@ -452,3 +452,16 @@ def test_assistant_messages_are_listed_for_the_echo_only(tmp_path: Path) -> None
     src = source(tmp_path, t)
     assert [m.event_uuid for m in src.assistant_messages(t.session_id)] == [echo]
     assert [m.content for m in src.owner_messages(t.session_id)] == [GRAMMAR]
+
+
+def test_a_corrupt_line_refuses_only_its_own_event(tmp_path: Path) -> None:
+    """The next line names this record as its ``parentUuid`` but is corrupt: only that line's
+    own event is affected."""
+    t = Transcript()
+    good = t.human(GRAMMAR, minutes(5))
+    corrupt = b'{"type":"user","parentUuid":"' + good.encode() + b'","uuid":"x","c":"\xff"}'
+    path = t.write(tmp_path)
+    path.write_bytes(path.read_bytes() + corrupt + b"\n")
+    event = source(tmp_path, t).fetch(t.session_id, good)
+    assert event is not None
+    assert event.inbound_origin == HUMAN_ORIGIN

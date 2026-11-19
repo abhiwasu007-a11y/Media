@@ -31,7 +31,7 @@ import hmac
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 
 from amw_core.enums import (
     EvidenceRecordKind,
@@ -63,6 +63,17 @@ from amw_core.owner_evidence_verifier import (
     SessionEvent,
     evidence_sha256,
 )
+
+PRODUCTION_MARK: Final = "session_source_production"
+TEST_MARK: Final = "session_source_test_fixture"
+_MARKS: Final = (PRODUCTION_MARK, TEST_MARK)
+
+
+def merge_result(old: Mapping[str, bool], new: Mapping[str, bool]) -> dict[str, bool]:
+    """``amw_evidence_result_merge`` (0059): the new checks merged into the stored ones; the
+    stored source marks are kept exactly (never added, changed or removed later)."""
+    merged = {k: v for k, v in (dict(old) | dict(new)).items() if k not in _MARKS}
+    return merged | {k: old[k] for k in _MARKS if k in old}
 
 
 def needs_own_review_code(kind: EvidenceRecordKind) -> bool:
@@ -128,7 +139,13 @@ class FakeEvidenceDatabase:
         keyring: MacKeyring,
         *,
         review_code_length: int = DEFAULT_LENGTH,
+        profile: str = "REAL",
     ) -> None:
+        if profile not in ("REAL", "TEST"):
+            raise ValueError("profile is REAL or TEST")
+        self.profile = profile
+        """``evidence_db_profile.profile`` (migration 0059): REAL refuses TEST-marked results,
+        TEST refuses production-marked ones."""
         self.__passwords = dict(passwords)
         self.__keyring = keyring
         self._review_code_length = review_code_length
@@ -345,6 +362,14 @@ class FakeEvidenceDatabase:
             raise InvalidTransitionError("only pending evidence can be verified")
         if row.evidence.source_kind is not InstructionSourceKind.OWNER_CHAT_MESSAGE:
             raise PermissionDeniedError("only an owner chat message can be verified")
+        test = verifier_result.get(TEST_MARK) is True
+        prod = verifier_result.get(PRODUCTION_MARK) is True
+        if (
+            (test and prod)
+            or (test and self.profile != "TEST")
+            or (prod and self.profile != "REAL")
+        ):
+            raise PermissionDeniedError("source mark not allowed in this database profile")
         row = self._stamp(
             replace(
                 row,
@@ -384,7 +409,7 @@ class FakeEvidenceDatabase:
                 confirmation_event_uuid=confirmation_event_uuid,
                 confirmation_quote=confirmation_quote,
                 confirmation_message_at=confirmation_message_at,
-                verifier_result=dict(row.verifier_result) | dict(verifier_result),
+                verifier_result=merge_result(row.verifier_result, verifier_result),
             )
         )
         self._rows[(org, row.id)] = row
@@ -406,7 +431,7 @@ class FakeEvidenceDatabase:
             row,
             state=EvidenceState.REFUSED,
             refused_reason=reason,
-            verifier_result=dict(verifier_result),
+            verifier_result=merge_result(row.verifier_result, verifier_result),
             evidence_mac=None,
             mac_key_version=None,
         )

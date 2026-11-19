@@ -28,6 +28,7 @@ from amw_core.enums import (
     InstructionSourceKind,
 )
 from amw_core.errors import (
+    ConfigInvalidError,
     IdempotencyConflictError,
     InputInvalidError,
     MissingDependencyError,
@@ -35,16 +36,24 @@ from amw_core.errors import (
 )
 from amw_core.interfaces import DbRole, EvidenceRecord, NewEvidence, TenantContext
 from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.owner_evidence_fake import (
+    PRODUCTION_MARK,
+    TEST_MARK,
+    MemorySessionEventSource,
+)
 from amw_core.owner_evidence_operator import OperatorDesk, locate
 from amw_core.owner_evidence_pg import PgDbSession, PgEvidenceDatabase
 from amw_core.owner_evidence_real import (
-    PRODUCTION_MARK,
+    ConfirmationBinding,
     ConfirmationOutcome,
+    ConfirmedEvidenceLookup,
     EvidenceMode,
     VerifierWorker,
     build_verifier_service,
+    dry_run_verifier_service,
 )
-from amw_core.owner_evidence_verifier import VerifierPolicy
+from amw_core.owner_evidence_service import EvidenceVerifierService
+from amw_core.owner_evidence_verifier import SessionEvent, VerifierPolicy
 from amw_core.tenancy import PgTenancy
 from amw_core.tenancy.evidence_keys import install_evidence_mac_key
 from tests.fake_audit import RecordingAuditLog
@@ -322,3 +331,93 @@ def test_dispute_refuses_through_the_verifier_function(real: Real) -> None:
         scan = real.worker.confirm_from_chat(tx, row.id, real.at(60))
     assert scan.outcome is ConfirmationOutcome.DISPUTED
     assert (scan.row.state, scan.row.refused_reason) == (EvidenceState.REFUSED, "owner_disputed")
+
+
+@contextmanager
+def profile_test(admin: Conn) -> Iterator[None]:
+    """The database owner marks this scratch database TEST for one test (0059)."""
+    admin.execute("UPDATE evidence_db_profile SET profile = 'TEST'")
+    try:
+        yield
+    finally:
+        admin.execute("UPDATE evidence_db_profile SET profile = 'REAL'")
+
+
+def fabricated(real: Real) -> tuple[MemorySessionEventSource, NewEvidence]:
+    said = real.at(1)
+    events = [
+        SessionEvent(real.t.session_id, "fab-1", "user", False, "human", "approve R7K2", said,
+                     "acct", None),
+        SessionEvent(real.t.session_id, "fab-2", "user", False, "human", "confirm R7K2",
+                     real.at(3), "acct", None),
+    ]  # fmt: skip
+    return MemorySessionEventSource(events), real.draft("fab-1", "approve R7K2", said)
+
+
+def test_dry_run_refuses_the_real_database(real: Real) -> None:
+    """Fabricated events + the real (REAL-profile) database: the factory refuses, and a service
+    built by hand that writes a TEST mark is refused by the database itself."""
+    memory, draft = fabricated(real)
+    policy = VerifierPolicy(frozenset({"human"}), frozenset({"acct"}))
+    verifier = PgDbSession(DbRole.VERIFIER)
+    with real.verifier_db.transaction(real.ctx) as tx:
+        assert real.db.db_profile(verifier, tx) == "REAL"
+        with pytest.raises(ConfigInvalidError):
+            dry_run_verifier_service(real.db, verifier, memory, policy, tx=tx)
+    assert real.db.db_profile(verifier, None) == "UNKNOWN"
+    with pytest.raises(ConfigInvalidError):
+        dry_run_verifier_service(real.db, verifier, memory, policy)
+    with real.operator_db.transaction(real.ctx) as tx:
+        row = real.db.insert_evidence(PgDbSession(DbRole.OPERATOR), tx, draft)
+    forged = EvidenceVerifierService(real.db, verifier, memory, policy, {TEST_MARK: True})
+    with real.verifier_db.transaction(real.ctx) as tx, pytest.raises(PermissionDeniedError):
+        forged.verify_recorded(tx, row.id, real.anchors(tx, row), real.at(30))
+    both = EvidenceVerifierService(
+        real.db, verifier, memory, policy, {TEST_MARK: True, PRODUCTION_MARK: True}
+    )
+    with real.verifier_db.transaction(real.ctx) as tx, pytest.raises(PermissionDeniedError):
+        both.verify_recorded(tx, row.id, real.anchors(tx, row), real.at(30))
+
+
+def test_test_mark_survives_a_real_confirmation(real: Real, admin: Conn) -> None:
+    """A TEST row (TEST-profile database) confirmed by a REAL-mode service stays TEST; the
+    run-preflight lookup refuses it; a production mark cannot enter a TEST database."""
+    memory, draft = fabricated(real)
+    policy = VerifierPolicy(frozenset({"human"}), frozenset({"acct"}))
+    verifier = PgDbSession(DbRole.VERIFIER)
+    with profile_test(admin):
+        with real.operator_db.transaction(real.ctx) as tx:
+            row = real.db.insert_evidence(PgDbSession(DbRole.OPERATOR), tx, draft)
+        with real.verifier_db.transaction(real.ctx) as tx:
+            dry = dry_run_verifier_service(real.db, verifier, memory, policy, tx=tx)
+            verified = dry.verify_recorded(tx, row.id, real.anchors(tx, row), real.at(30))
+        assert verified.verifier_result[TEST_MARK] is True
+        laundering = EvidenceVerifierService(
+            real.db, verifier, memory, policy, {PRODUCTION_MARK: True}
+        )
+        with real.verifier_db.transaction(real.ctx) as tx:
+            done = laundering.confirm(
+                tx, row.id, real.t.session_id, "fab-2", "confirm R7K2", real.at(30)
+            )
+        assert done.state is EvidenceState.CONFIRMED
+        assert done.verifier_result.get(TEST_MARK) is True
+        assert PRODUCTION_MARK not in done.verifier_result
+        binding = ConfirmationBinding(row.id, "FIN_R10_NOT_SEBI_REGISTERED", org_id=row.org_id)
+        with real.verifier_db.transaction(real.ctx) as tx:
+            lookup = ConfirmedEvidenceLookup(
+                real.db, verifier, tx, [binding], allowed_kinds=frozenset(EvidenceRecordKind)
+            )
+            status = lookup.get(row.id)
+        assert status is not None
+        assert status.evidence_state == "TEST_FIXTURE"
+        _, draft2 = fabricated(real)
+        known = memory.fetch(real.t.session_id, "fab-1")
+        assert known is not None
+        memory.add(replace(known, event_uuid="fab-3"))
+        with real.operator_db.transaction(real.ctx) as tx:
+            row2 = real.db.insert_evidence(
+                PgDbSession(DbRole.OPERATOR), tx, replace(draft2, event_uuid="fab-3")
+            )
+        prod = EvidenceVerifierService(real.db, verifier, memory, policy, {PRODUCTION_MARK: True})
+        with real.verifier_db.transaction(real.ctx) as tx, pytest.raises(PermissionDeniedError):
+            prod.verify_recorded(tx, row2.id, real.anchors(tx, row2), real.at(30))

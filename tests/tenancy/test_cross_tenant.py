@@ -46,6 +46,7 @@ GLOBAL_ALLOW_LIST = frozenset(
         "workers",
         "plans",
         "evidence_mac_keys",
+        "evidence_db_profile",  # 0059, one row: the database's REAL / TEST profile (CCR-265)
         "amw_schema_migrations",
     }
 )

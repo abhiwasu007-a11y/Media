@@ -315,6 +315,8 @@ class VerifierPolicy:
     )
     neutral_tokens: frozenset[str] = DEFAULT_NEUTRAL_TOKENS
     confirm_words: frozenset[str] = DEFAULT_CONFIRM_WORDS
+    decision_confirm_words: frozenset[str] = frozenset({"approve", "मंजूर"})
+    """PROPOSED CCR-264: approval words that also confirm an APPROVED record after the echo."""
     stage_words: Mapping[str, tuple[str, ...]] = field(
         default_factory=lambda: dict(DEFAULT_STAGE_WORDS)
     )
@@ -537,9 +539,9 @@ def is_confirmation(
     confirmation.
 
     ``decision`` (PROPOSED CCR-264, used only by the verifier worker for a reply that comes after
-    the operator's echo): the owner's established decision form for the same decision also
-    confirms, under the full decision whitelist (exactly the code, exactly one decision word of
-    that class, neutral words only; ``CHANGES_REQUESTED`` never)."""
+    the operator's echo): for an ``APPROVED`` record, the owner's established approval form also
+    confirms: exactly the code and exactly one word of ``policy.decision_confirm_words``
+    (``approve`` / ``मंजूर``), nothing else."""
     if not review_code:
         return False
     rest = _without_code(content, review_code)
@@ -550,9 +552,10 @@ def is_confirmation(
     hits = [w for w in rest if w in confirm]
     if len(hits) == 1 and all(w in confirm or w in neutral for w in rest):
         return True
-    if decision not in (ApprovalStepState.APPROVED, ApprovalStepState.REJECTED):
+    if decision is not ApprovalStepState.APPROVED:
         return False
-    return read_decision_message(content, review_code, policy) == (decision, None)
+    words = {" ".join(whitelist_tokens(w)) for w in policy.decision_confirm_words}
+    return len(rest) == 1 and rest[0] in words
 
 
 def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:

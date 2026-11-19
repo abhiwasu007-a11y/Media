@@ -360,6 +360,15 @@ class PgEvidenceDatabase:
         return self._required(conn, evidence_id)
 
     # ---- reads --------------------------------------------------------------------------
+    def db_profile(self, session: DbSession, tx: TenantTransaction | None) -> str:
+        """``evidence_db_profile.profile`` (0059): ``REAL`` unless the owner of the database set
+        it to ``TEST``; ``UNKNOWN`` without a transaction."""
+        if tx is None:
+            return "UNKNOWN"
+        conn = self._conn(session, tx, DbRole.APP, DbRole.OPERATOR, DbRole.VERIFIER)
+        row = conn.execute("SELECT profile FROM evidence_db_profile WHERE id").fetchone()
+        return str(row[0]) if row else "UNKNOWN"
+
     def mac_valid(self, session: DbSession, tx: TenantTransaction, evidence_id: WireId) -> bool:
         conn = self._conn(session, tx, DbRole.APP, DbRole.OPERATOR, DbRole.VERIFIER)
         row = self._call(
