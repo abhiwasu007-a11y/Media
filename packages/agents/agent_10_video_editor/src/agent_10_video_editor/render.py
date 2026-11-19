@@ -60,6 +60,7 @@ from agent_10_video_editor.inputs import (
     NarrationTimeline,
     ScriptStrings,
     ShotPlan,
+    parse_script_document,
 )
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
 from agent_10_video_editor.observability import LogContext, emit, labels
@@ -182,9 +183,7 @@ def load_inputs(task_input: TaskInput, scope: TenantScope) -> LoadedInputs:
                 blob("agent_07.voice_synthesis.output"),
                 "agent_07.voice_synthesis.output",
             ),
-            script=parse_blob(
-                ScriptStrings, blob("agent_05.script_document"), "agent_05.script_document"
-            ),
+            script=parse_script_document(blob("agent_05.script_document")),
             script_sha256=refs["agent_05.script_document"][1],
         )
     except ValidationError as exc:
