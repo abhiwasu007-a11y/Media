@@ -212,7 +212,13 @@ class GateInputAssembler:
                 chunks = self._storage.get(tx.context, BlobUri(ref.uri), ref.sha256)
                 blobs[name] = b"".join(chunks)
         verify_frames(self._storage, tx, blobs.get("frames_ref"))
-        extracted = self._extractor.extract(req, blobs, evaluation_date, tx)
+        extractor = self._extractor
+        bind = getattr(extractor, "bind", None)
+        if callable(bind):  # the document extractor reads rows of THIS job and render (CCR-287)
+            from agent_16_compliance_qa.inputs.extractors import ReadScope
+
+            extractor = bind(ReadScope(ti.job_id, req.subject.render_id))
+        extracted = extractor.extract(req, blobs, evaluation_date, tx)
         inputs = extracted.inputs
         segments = tuple(
             seg.model_copy(

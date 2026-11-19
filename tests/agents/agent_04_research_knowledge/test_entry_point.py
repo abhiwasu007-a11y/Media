@@ -77,5 +77,8 @@ def test_every_write_is_accepted_by_the_real_backend(tmp_path: Path) -> None:
     names = [p.as_posix() for p in jobs]
     assert any("/artifacts/research_pack.json" in n and "/attempts/" in n for n in names)
     assert any("/checkpoints/" in n for n in names)
-    assert any(n.endswith("/output.json") for n in names)
+    # CCR-285 (PROPOSED): the replay copy is a checkpoint blob; ``output.json`` is the
+    # orchestrator's
+    assert any("/checkpoints/" in n and "/stored_output-" in n for n in names)
+    assert not any(n.endswith("/output.json") for n in names)
     assert isinstance(out, TaskOutput)

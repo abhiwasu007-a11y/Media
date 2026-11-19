@@ -58,8 +58,10 @@ def _subject(ctx: BuildContext) -> dict[str, str]:
 
 def _qc_refs(ctx: BuildContext) -> tuple[DocRef, DocRef]:
     ev = c.payload(ctx, "s10_qc")["evidence"]
+    # CCR-287 (PROPOSED): ``render_qc_ref`` is the ``agent_10.technical_qc.output`` payload document
+    # (it names the render: ``render_id``, ``render_sha256``), not the QC report row list
     return (
-        DocRef(ev["report_ref"]["uri"], ev["report_ref"]["sha256"]),
+        c.payload_doc_ref(ctx, "s10_qc"),
         DocRef(ev["manifest_ref"]["uri"], ev["manifest_ref"]["sha256"]),
     )
 
@@ -85,7 +87,6 @@ class ComplianceGateBuilder:
         _metadata_guard(ctx)
         qc_report, frames = _qc_refs(ctx)
         script = c.ref_in(c.payload(ctx, c.script_stage_id(job)), "script_document")
-        voice = c.payload(ctx, "s07_voice")["timeline"]
         refs = {
             "script_ref": script,
             "claims_ref": c.artifact(
@@ -99,7 +100,9 @@ class ComplianceGateBuilder:
             ),
             "shot_plan_ref": c.ref_in(c.payload(ctx, "s09_plan"), "plan_ref"),
             "render_qc_ref": qc_report,
-            "voice_ref": DocRef(voice["timeline_uri"], voice["timeline_sha256"]),
+            # CCR-287 (PROPOSED): agent_16 reads the ``voice`` block (voice kind, presenter kind) of
+            # the agent_07 output payload, which the narration timeline document does not carry
+            "voice_ref": c.payload_doc_ref(ctx, "s07_voice"),
             "thumbnails_ref": _thumbs_ref(ctx),
             "uniqueness_ref": c.artifact(
                 c.stage_output(ctx, "s02u_unique"), r"uniqueness-[0-9]+\.json"
