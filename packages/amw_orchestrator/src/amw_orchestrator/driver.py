@@ -222,7 +222,7 @@ class GraphRunner:
         """03 section 9 ``task.<task_type>`` key. A task that replaces a cancelled one at the same
         iteration (CCR-211) would repeat the key and hit ``UNIQUE (org_id, idempotency_key)``;
         ``generation`` (the number of cancelled tasks of that stage and iteration) is appended
-        only then, so every first-generation key is exactly the contract key (CCR-274
+        only then, so every first-generation key is exactly the contract key (CCR-275
         provisional default, see the PR)."""
         parts: list[str | int] = [job.job_id, stage.stage_id, stage.task_type, iteration]
         if generation:

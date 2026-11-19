@@ -233,7 +233,7 @@ class FakeWorld:
     ``ctx.stage_id``; ``fail_gate[stage]`` is a list consumed one run at a time."""
 
     llm: MeteredLlm | None = None
-    fail_gate: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    fail_gate: dict[str, list[list[dict[str, Any]]]] = field(default_factory=dict)
     calls: list[tuple[str, int, int]] = field(default_factory=list)
     seen_finance: list[bool] = field(default_factory=list)
     on_call: Callable[[str], None] | None = None
@@ -259,7 +259,7 @@ class FakeWorld:
         results: list[dict[str, Any]] = []
         queue = self.fail_gate.get(stage)
         if queue:
-            results = queue.pop(0)  # type: ignore[assignment]
+            results = queue.pop(0)
         return ok_output(
             f"{task_type}.output",
             {"stage": stage, "iteration": ctx.iteration},
@@ -457,4 +457,4 @@ class _Cal:
 
 def db_rows(dsn: str, query: str, params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
     with psycopg.connect(dsn) as conn:
-        return conn.execute(query, params).fetchall()  # type: ignore[arg-type]
+        return conn.execute(query, params).fetchall()

@@ -226,8 +226,10 @@ def test_full_graph_revise_loop_runs_to_delivery(pg_dsn: str, tmp_path: Path) ->
     report = rig.runner.run(job, graph, report)
     assert report.status == "DELIVERED", report.detail
     assert report.revisions[0]["target"] == "s10_render"
-    assert {"s10_render", "s10_subs", "s10_qc"} <= set(report.revisions[0]["stages"])  # type: ignore[arg-type]
-    assert "s02u_unique" in report.revisions[0]["kept"]  # type: ignore[operator]
+    stages, kept = report.revisions[0]["stages"], report.revisions[0]["kept"]
+    assert isinstance(stages, list) and isinstance(kept, list)
+    assert {"s10_render", "s10_subs", "s10_qc"} <= set(stages)
+    assert "s02u_unique" in kept
     assert ("s10_render", 1, 1) in rig.world.calls
     rows = db_rows(
         pg_dsn,
