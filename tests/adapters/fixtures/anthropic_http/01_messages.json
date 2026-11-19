@@ -1,0 +1,25 @@
+{
+  "note": "Redacted recording shape (PR-08): ids replaced, no key, no account data, prompt not stored.",
+  "method": "POST",
+  "path": "/v1/messages",
+  "status": 200,
+  "headers": {"request-id": "req_recorded01", "content-type": "application/json"},
+  "body": {
+    "id": "msg_recorded01",
+    "type": "message",
+    "role": "assistant",
+    "model": "claude-haiku-5-5",
+    "content": [{"type": "thinking", "thinking": "", "signature": "redacted"}, {"type": "text", "text": "recorded reply"}],
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "stop_details": null,
+    "usage": {
+      "input_tokens": 21,
+      "output_tokens": 3,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0},
+      "service_tier": "standard"
+    }
+  }
+}
