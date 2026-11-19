@@ -9,6 +9,7 @@ Skipped while ``amw_runtime`` is not in the workspace (it is on its own branch).
 imported by name so this file type-checks without it; it was run on a local merge with PR #70.
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -60,10 +61,21 @@ def record(org: str, which: str, evidence_id: str | None, **kw: object) -> Any:
     return confirmations.ConfirmationRecord(**{**base, **kw})
 
 
+@pytest.fixture(autouse=True)
+def packaged_render_minutes(tmp_path_factory: pytest.TempPathFactory, monkeypatch: Any) -> None:
+    """A real run takes its rules only from the packaged data (PR #70 N2): the shipped file has no
+    render duration (REQUIRES REVIEW), so this test loads a packaged-style file that sets one."""
+    data = json.loads(runtime_config.DEFAULT_CONFIG_FILE.read_text(encoding="utf-8"))
+    data["render"]["max_duration_minutes"] = 60
+    path = tmp_path_factory.mktemp("rc") / "rc.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(runtime_config, "DEFAULT_CONFIG_FILE", path)
+
+
 def run(records: list[Any], lookup: Any, org: str) -> Any:
     config = runtime_config.load_runtime_config({"AMW_RUNTIME_MODE": "REAL_RUN"})
     return preflight.run_preflight(
-        config.model_copy(update={"render_max_duration_minutes": 60}),
+        config,
         records,
         env={**DEV, **SECRETS},
         evidence=lookup,
