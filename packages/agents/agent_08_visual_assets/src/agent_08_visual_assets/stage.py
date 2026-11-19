@@ -206,6 +206,13 @@ class BrandKitReader(Protocol):
     def brand_kit(self, tx: TenantTransaction, uri: str, sha256: str | None) -> BrandKit | None: ...
 
 
+class JobDestinationReader(Protocol):
+    """Reads ``jobs.monetized_destination`` (CCR-028) of the task's job inside the tenant
+    transaction; ``None`` when the row or the value is not readable."""
+
+    def monetized_destination(self, tx: TenantTransaction, job_id: str) -> bool | None: ...
+
+
 class FootageSelector(Protocol):
     def select(self, shot: ShotRequirement, candidates: Sequence[AssetRecord]) -> FootageChoice: ...
 
@@ -273,11 +280,13 @@ class AssetSourcingStage:
         settings: AssetSettings,
         selector: FootageSelector | None = None,
         brand_kits: BrandKitReader | None = None,
+        job_destinations: JobDestinationReader | None = None,
     ) -> None:
         self._tenancy, self._assets, self._licences = tenancy, assets, licences
         self._ledger, self._fp, self._approvals = ledger, fingerprints, approvals
         self._blobs, self._clock, self._s, self._selector = blobs, clock, settings, selector
         self._brand_kits, self._templates = brand_kits, TemplateResolver(assets)
+        self._job_destinations = job_destinations
         self._destination = LicenceDestination.MONETIZED_YOUTUBE
         self._reset(JobScope("", "", "", ""))
 
@@ -351,6 +360,7 @@ class AssetSourcingStage:
             "script_bytes": script_bytes,
             "plan_bytes": plan_bytes,
             "brand": self._brand(task, tenant),
+            "job_destination": self._job_destination(task, tenant),
             "timeline_end_ms": total,
             "previous": previous,
         }
@@ -374,6 +384,21 @@ class AssetSourcingStage:
         if kit is None:
             raise MissingDependencyError("brand kit not found", details={"class": "brand_kit"})
         return kit
+
+    def _job_destination(self, task: TaskInput, tenant: TenantContext) -> LicenceDestination:
+        """The job's own destination; the payload value is never trusted here. Fails CLOSED: an
+        unreadable destination refuses the task instead of falling back to the payload."""
+        if self._job_destinations is None:
+            raise ConfigInvalidError("no job destination reader is configured")
+        with self._tenancy.transaction(tenant) as tx:
+            monetized = self._job_destinations.monetized_destination(tx, task.job_id)
+        if monetized is None:
+            raise MissingDependencyError(
+                "the job's monetized destination is not readable", details={"class": "job"}
+            )
+        return (
+            LicenceDestination.MONETIZED_YOUTUBE if monetized else LicenceDestination.NON_MONETIZED
+        )
 
     def _task_output(
         self, task: TaskInput, ctx: ExecContext, result: StageResult, started: int

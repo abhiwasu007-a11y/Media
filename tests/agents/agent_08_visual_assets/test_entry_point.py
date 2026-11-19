@@ -1,6 +1,5 @@
 # ruff: noqa: PT018
-# mypy: disable-error-code="arg-type,attr-defined,misc,has-type,no-untyped-def,no-any-return"
-# mypy: disable-error-code="assignment,union-attr,index,call-arg,type-arg,var-annotated"
+# mypy: disable-error-code="arg-type,index,no-untyped-def,union-attr"
 """PASS6-G: the ``TaskWorker`` entry point ``run(task_input, ctx)`` (CCR-203), the plan's
 ``total_duration_ms`` as the timeline end (CCR-205) and ``TemplateResolver`` (CCR-204).
 
@@ -78,6 +77,18 @@ class Brands:
         return self.kit
 
 
+class Jobs:
+    """``jobs.monetized_destination`` of the task's job; ``None`` is an unreadable value."""
+
+    def __init__(self, monetized: bool | None) -> None:
+        self.monetized = monetized
+        self.seen: list[str] = []
+
+    def monetized_destination(self, tx, job_id):
+        self.seen.append(job_id)
+        return self.monetized
+
+
 def real_plan() -> tuple[dict[str, Any], int]:
     script, durs = sample_script()
     step, _, _ = make_step()
@@ -131,13 +142,21 @@ def script_doc() -> dict[str, Any]:
 class Rig:
     """One tenant, Agent 09's real plan and script blobs in storage, the stage with fakes."""
 
-    def __init__(self, *, templates: tuple[str, ...] = PLATFORM_IDS, kit: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        templates: tuple[str, ...] = PLATFORM_IDS,
+        kit: bool = True,
+        monetized: bool | None = True,
+        with_jobs: bool = True,
+    ) -> None:
         self.env = Env()
         w = self.env.w
         for i, tid in enumerate(templates):
             w.add_template(tid, f"{i + 1:x}".rjust(64, "a"))
         self.plan, self.total = real_plan()
         self.brands = Brands(BrandKit(PALETTE, (self.env.font,)) if kit else None)
+        self.jobs = Jobs(monetized)
         self.stage = AssetSourcingStage(
             tenancy=FakeTenancy(),
             assets=w.assets,
@@ -149,6 +168,7 @@ class Rig:
             clock=FixedClock(),
             settings=settings(),
             brand_kits=self.brands,
+            job_destinations=self.jobs if with_jobs else None,
         )
         self.job, self.task = str(JOB.new()), str(TASK.new())
         self.attempt = str(ATTEMPT.new())
@@ -191,7 +211,7 @@ class Rig:
                 "script_id": "scr_" + "0" * 8 + "-0000-7000-8000-" + "0" * 12,
             },
             "aspect_ratios": ["16:9"],
-            "destination": "MONETIZED_YOUTUBE",
+            "destination": over.pop("destination", "MONETIZED_YOUTUBE"),
             "script_stage_id": "s05_script",
             "channel_category": "finance",
             "active_rule_packs": [],
@@ -431,3 +451,59 @@ def test_a_later_attempt_writes_its_own_manifest_and_keeps_the_assets() -> None:
     assert [o["template_asset_id"] for o in a.payload.data["overlays"]] == [
         o["template_asset_id"] for o in b.payload.data["overlays"]
     ]
+
+
+def test_the_entry_point_reads_the_job_destination_and_a_matching_payload_passes() -> None:
+    rig = Rig(monetized=True)
+    out = rig.stage.run(rig.task_input(destination="MONETIZED_YOUTUBE"), rig.ctx)
+    assert out.status is OutputStatus.SUCCEEDED and out.error is None
+    assert rig.jobs.seen == [rig.job]
+    rig = Rig(monetized=False)
+    out = rig.stage.run(rig.task_input(destination="NON_MONETIZED"), rig.ctx)
+    assert out.status is OutputStatus.SUCCEEDED and out.error is None
+
+
+def test_a_non_monetized_payload_on_a_monetized_job_does_not_relax_the_licence_gate() -> None:
+    rig = Rig(monetized=True)
+    out = rig.stage.run(rig.task_input(destination="NON_MONETIZED"), rig.ctx)
+    assert out.status is not OutputStatus.SUCCEEDED
+    assert out.error.code == "PERMANENT.INPUT_INVALID"
+    assert out.payload is None and not out.output_refs
+    assert not list(rig.env.w.ledger.for_job(rig.env.w.tx, rig.job))
+
+
+def test_a_monetized_payload_on_a_non_monetized_job_is_refused_too() -> None:
+    rig = Rig(monetized=False)
+    out = rig.stage.run(rig.task_input(destination="MONETIZED_YOUTUBE"), rig.ctx)
+    assert out.error.code == "PERMANENT.INPUT_INVALID"
+
+
+def test_an_unreadable_job_destination_fails_closed() -> None:
+    rig = Rig(monetized=None)
+    for dest in ("MONETIZED_YOUTUBE", "NON_MONETIZED"):
+        out = rig.stage.run(rig.task_input(destination=dest), rig.ctx)
+        assert out.status is not OutputStatus.SUCCEEDED
+        assert out.error.code == "PERMANENT.MISSING_DEPENDENCY"
+        assert out.payload is None
+
+
+def test_no_job_destination_reader_fails_closed() -> None:
+    rig = Rig(with_jobs=False)
+    out = rig.stage.run(rig.task_input(destination="NON_MONETIZED"), rig.ctx)
+    assert out.status is not OutputStatus.SUCCEEDED
+    assert out.error.code == "PERMANENT.CONFIG_INVALID"
+
+
+def test_a_failed_gate_is_succeeded_with_continue_and_the_reason() -> None:
+    import datetime as dt
+
+    from amw_core.enums import NextActionType
+
+    rig = Rig()
+    rig.stage._clock = FixedClock(dt.datetime(2025, 4, 20, tzinfo=dt.UTC))
+    out = rig.stage.run(rig.task_input(), rig.ctx)
+    assert out.status is OutputStatus.SUCCEEDED
+    assert out.payload.data["gate_verdict"] == "FAILED"
+    assert out.next_action.type is NextActionType.CONTINUE
+    assert out.next_action.reason.startswith("gate FAILED: ")
+    assert out.error is None
