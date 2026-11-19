@@ -41,18 +41,66 @@ def test_catalogue_rejects_a_missing_or_duplicate_default() -> None:
         load_templates(doc)
 
 
+def _is_directional(ops: Any) -> bool:
+    """The neutrality guard: a neutral glyph may hold only level rectangles. Any polygon (an arrow,
+    a trend line, an oscillating line: every line has slopes) makes a glyph directional, whatever
+    its symmetry. Deliberately no symmetry or net-slope exception."""
+    return any(op["op"] != "rect" for op in ops)
+
+
 def test_glyph_neutrality_follows_the_allow_list_and_the_arrow_is_not_neutral() -> None:
     by_key = {g.key: g.neutral for g in glyph_catalogue()}
     assert by_key["g2_arrow"] is False
-    assert all(v for k, v in by_key.items() if k != "g2_arrow")
+    # the RSI line has up and down slopes: not neutral until the owner confirms (Q-O31)
+    assert by_key["g1_rsi_line"] is False
+    assert {k for k, v in by_key.items() if v} == {"g3_two_frames", "g4_blocks"}
     for g in glyph_catalogue():
         if g.neutral:
-            for op in g.ops:
-                if op["op"] == "polygon":
-                    # a neutral glyph may hold a polygon only as a level oscillation: its point
-                    # set mirrors about the vertical centre line (it ends where it starts)
-                    pts = {tuple(p) for p in op["points"]}
-                    assert pts == {(1000 - x, y) for x, y in pts}, g.key
+            assert not _is_directional(g.ops), g.key
+        else:
+            assert _is_directional(g.ops), g.key
+
+
+def test_neutrality_guard_rejects_an_arrow_and_any_rising_polyline() -> None:
+    arrow = next(g for g in glyph_catalogue() if g.key == "g2_arrow")
+    pts = {tuple(p) for p in arrow.ops[0]["points"]}
+    assert pts == {(1000 - x, y) for x, y in pts}  # the arrow is mirror-symmetric, yet directional
+    assert _is_directional(arrow.ops)
+    rising = [
+        {
+            "op": "polygon",
+            "points": [[0, 900], [500, 500], [1000, 100], [1000, 160], [500, 560], [0, 960]],
+            "fill": "primary",
+            "outline": None,
+        }
+    ]
+    assert _is_directional(rising)
+    mirrored = [
+        {
+            "op": "polygon",
+            "points": [[0, 500], [500, 100], [1000, 500], [500, 160]],
+            "fill": "primary",
+            "outline": None,
+        }
+    ]
+    assert _is_directional(mirrored)  # symmetric shapes do not pass either
+    assert not _is_directional(
+        [{"op": "rect", "box": [0, 0, 10, 10], "fill": "primary", "outline": None}]
+    )
+
+
+def test_finance_never_gets_a_directional_glyph_and_falls_back_to_text_only() -> None:
+    from agent_11_thumbnail_design.subject_options import PictureBuildConfig, build_picture_options
+
+    facts = [g.facts() for g in glyph_catalogue() if g.key in {"g1_rsi_line", "g2_arrow"}]
+    opts = build_picture_options(
+        assets=[],
+        glyphs=facts,
+        finance=True,
+        cfg=PictureBuildConfig(min_w=1, min_h=1, faces_allowed=False, chart_still_allowed=False),
+    )
+    assert [o.kind for o in opts.options] == ["NONE"]
+    assert {e.reason for e in opts.excluded} == {"FINANCE_DIRECTION"}
 
 
 def test_templates_are_offered_by_language_and_finance_neutrality() -> None:

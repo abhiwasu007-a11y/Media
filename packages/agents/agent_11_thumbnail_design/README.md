@@ -101,7 +101,7 @@ Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deploym
   `sha256`; it gets no fallback (its coverage and licence stay exactly what the tenant registered).
 - **Break 14 of the dry run ("boxes" in the thumbnail):** the three outlined rectangles right of the Marathi title were the code-drawn neutral
   glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Owner decision D11 item 4
-  (Q-O30, ticket PASS6-L) replaced it by `g1_rsi_line` (axes, two dashed guide lines, one mirror-symmetric oscillating line). Regression tests in
+  (Q-O30, ticket PASS6-L) replaced it by `g1_rsi_line` (axes, two dashed guide lines, one oscillating line). The line has slopes, so the glyph is NOT on the finance neutral allow-list until the owner answers Q-O31; on finance channels the picture is then another neutral glyph or none (text only). Regression tests in
   `tests/agents/agent_11_thumbnail_design/test_brand_fonts.py` prove no `.notdef` for Marathi title and subject words (cmap and pixels) and
   that the subject area does not depend on the font.
 

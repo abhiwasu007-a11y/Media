@@ -118,7 +118,9 @@ def test_marathi_finance_script_with_devanagari_text() -> None:
     assert failed(out) == []
     assert d["variants"][0]["text_local"] == "ट्रेंड वाचा"
     assert all(v["picture"]["direction_neutral"] for v in d["variants"])
-    assert d["option_stats"]["picture_excluded"] == {"FINANCE_DIRECTION": 1}
+    assert d["option_stats"]["picture_excluded"] == {
+        "FINANCE_DIRECTION": 2
+    }  # g2_arrow and g1_rsi_line (Q-O31)
 
 
 def test_promise_that_is_a_call_is_blocked_without_a_model_call() -> None:

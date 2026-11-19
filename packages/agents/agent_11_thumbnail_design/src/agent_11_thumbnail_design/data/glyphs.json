@@ -1,7 +1,7 @@
 {
   "glyph_set_version": "1.0.0",
-  "criterion": "A glyph is neutral only if it has no arrow, no net slope, no ascending or descending sequence of shapes and no up or down marker (level, symmetric or enclosing shapes such as frames, blocks and nodes; an oscillating line is level only if it is mirror-symmetric about the vertical centre line, so that it ends at the level where it starts, and it sits between two level guide lines).",
-  "neutral_allow_list": ["g1_rsi_line", "g3_two_frames", "g4_blocks"],
+  "criterion": "A glyph is neutral only if it has no arrow, no slope, no ascending or descending sequence of shapes and no up or down marker (level, symmetric or enclosing shapes such as frames, blocks and nodes). A glyph that draws a line, curve or polygon is never neutral, because a line has slopes.",
+  "neutral_allow_list": ["g3_two_frames", "g4_blocks"],
   "glyphs": [
     {"key": "g1_rsi_line", "label": "oscillating RSI line chart", "ops": [
       {"op": "rect", "box": [0, 120, 14, 780], "fill": "secondary", "outline": null},

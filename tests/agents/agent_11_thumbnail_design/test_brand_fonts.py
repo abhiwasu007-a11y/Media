@@ -150,7 +150,7 @@ def test_the_subject_picture_is_a_code_drawn_chart_line_and_does_not_depend_on_t
     keys = [g.key for g in glyph_catalogue()]
     assert "g1_level_steps" not in keys
     g1 = next(g for g in glyph_catalogue() if g.key == "g1_rsi_line")
-    assert g1.neutral
+    assert not g1.neutral  # slopes: not on the finance neutral allow-list until Q-O31 is answered
     assert sum(op["op"] == "polygon" for op in g1.ops) == 1  # the line
     assert all(op["outline"] is None for op in g1.ops)  # nothing reads as an outlined box
     tpl_box = spec().template.subject_box
