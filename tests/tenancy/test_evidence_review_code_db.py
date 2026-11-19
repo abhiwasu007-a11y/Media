@@ -1,4 +1,4 @@
-"""Own review codes of evidence without an approval in PostgreSQL (CCR-116, migration 0052;
+"""Own review codes of evidence without an approval in PostgreSQL (CCR-116, migration 0055;
 04 section 5.16): required for live approval-less CONTENT / SCORE rows, CCR-090 format in upper
 case, unique per org across approval codes and evidence codes (case-insensitive), serialised
 between concurrent writers by a transaction advisory lock."""

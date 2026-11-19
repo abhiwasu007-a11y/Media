@@ -16,7 +16,7 @@ What it models:
   never both a row's event and another row's confirmation (one message = one subject = one step).
 * **Human rows.** ``human_record_apply`` (``amw_operator``) requires ``CONFIRMED`` and a valid
   MAC and writes the one human row the evidence names, once.
-* **Own review codes (CCR-116, migration 0052).** An ``OWNER_TOPIC`` / ``DATASET_INTAKE``
+* **Own review codes (CCR-116, migration 0055).** An ``OWNER_TOPIC`` / ``DATASET_INTAKE``
   evidence, and any other ``CONTENT`` / ``SCORE`` evidence without ``approval_id``, carries its
   own review code (CCR-090 format, upper case), unique per org across approval codes
   (``register_approval_code`` models ``approvals.review_code``) and evidence codes, compared
@@ -194,7 +194,7 @@ class FakeEvidenceDatabase:
     def register_approval_code(
         self, tx: TenantTransaction, code: str, approval_id: str | None = None
     ) -> None:
-        """Models an ``approvals`` row's ``review_code`` (the 0052 ``review_codes`` registry):
+        """Models an ``approvals`` row's ``review_code`` (the 0055 ``review_codes`` registry):
         refused when any approval or evidence code of the org equals it, case-insensitively.
         With ``approval_id``, evidence tied to that approval must carry exactly this code."""
         org = tx.context.org_id
@@ -205,7 +205,7 @@ class FakeEvidenceDatabase:
             self._approval_code_of[(org, approval_id)] = code.upper()
 
     def _check_approval_code(self, org: OrgId, evidence: NewEvidence, state: EvidenceState) -> None:
-        """0052: evidence tied to an approval carries that approval's code and never another
+        """0055: evidence tied to an approval carries that approval's code and never another
         row's code (an own code, or another approval's), so a code resolves to one row."""
         code = (evidence.review_code or "").upper()
         if not code:
