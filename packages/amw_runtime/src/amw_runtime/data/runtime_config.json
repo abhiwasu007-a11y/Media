@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "owner_decisions": {
+    "source": "owner instructions relayed in the lane S4 brief; evidence record ids REQUIRES REVIEW (the owner-evidence rows are not linked yet)",
+    "topics": [
+      "RSI divergence explained on historical charts"
+    ],
+    "topics_status": "provisional per D8 rule 7 until the owner confirms in writing",
+    "music_in_first_sample": false,
+    "upload": false
+  },
+  "budget": {
+    "currency": "USD",
+    "per_video_cap_minor": 500,
+    "total_pilot_cap_minor": 5000,
+    "hard_stop_on_breach": true,
+    "source": "owner-approved caps (lane S4 brief): USD 5 per video, USD 50 pilot"
+  },
+  "finance": {
+    "currency_minor_exponent": {
+      "USD": 2,
+      "INR": 2
+    },
+    "source_id": "RV-07"
+  },
+  "price_data_lag": {
+    "days": 30,
+    "unit": "CALENDAR_DAYS",
+    "source_id": "IN-02"
+  },
+  "providers": [
+    {
+      "name": "anthropic",
+      "role": "LLM",
+      "required": true,
+      "secret_name": "AMW_SECRET_ANTHROPIC_API_KEY",
+      "source_id": "PR-01"
+    },
+    {
+      "name": "elevenlabs",
+      "role": "TTS",
+      "required": true,
+      "secret_name": "AMW_SECRET_ELEVENLABS_API_KEY",
+      "source_id": "PR-04"
+    },
+    {
+      "name": "stock_footage",
+      "role": "STOCK_FOOTAGE",
+      "required": false,
+      "secret_name": null,
+      "source_id": "ADR-009 (no provider chosen; 3A_SLICE_SPEC section 3: only if the owner buys a licence)"
+    }
+  ],
+  "environment": {
+    "required_value": "development",
+    "environment_variable": "AMW_ENVIRONMENT",
+    "vps_markers": [
+      "AMW_VPS",
+      "AMW_ON_VPS",
+      "AMW_DEPLOY_TARGET_VPS"
+    ]
+  },
+  "chart_data": {
+    "source_kind": "course_data_pack",
+    "location_variable": "AMW_CHART_DATA_PACK_LOCATION"
+  },
+  "disclaimer": {
+    "template_id": "FIN-R10",
+    "version": "v1"
+  },
+  "calendar": {
+    "segment": "CM"
+  }
+}
