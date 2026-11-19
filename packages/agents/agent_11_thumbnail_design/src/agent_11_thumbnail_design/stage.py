@@ -103,7 +103,7 @@ from agent_11_thumbnail_design.text_options import (
 )
 from agent_11_thumbnail_design.textutil import contains_sequence, fold, folded_words
 from amw_adapters.llm.protocol import LlmAdapter
-from amw_core.config import RulePackSettings
+from amw_core.config import RulePackSettings, effective_non_finance_categories
 from amw_core.contracts.common import PayloadObject, storage_uri_owner
 from amw_core.contracts.error import error_object_from_exception, violation
 from amw_core.contracts.task_input import TaskInput
@@ -203,11 +203,13 @@ class Lexicons:
             injection_markers,
             instruction_phrases,
             neutral_words,
-            frozenset(rule_packs.non_finance_categories),
+            effective_non_finance_categories(rule_packs.non_finance_categories),
         )
 
     def is_finance(self, category: object) -> bool:
-        return not (isinstance(category, str) and category in self.non_finance_categories)
+        # re-checked: a directly built Lexicons cannot make finance or an ad category non-finance
+        allowed = effective_non_finance_categories(self.non_finance_categories)
+        return not (isinstance(category, str) and category in allowed)
 
 
 @dataclass(frozen=True, slots=True)

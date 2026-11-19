@@ -16,12 +16,12 @@ adds is the orchestrator's side of the hand-off:
 An LLM never makes a control decision (directive section 2).
 """
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
-from amw_core.config import DEFAULT_NON_FINANCE_CATEGORIES
+from amw_core.config import RulePackSettings, effective_non_finance_categories
 from amw_core.contracts import (
     ContextRef,
     OwnerTopic,
@@ -56,16 +56,24 @@ _NON_FINANCE_LABELS = frozenset({"non_finance", "non-finance"})
 
 
 def resolve_channel_category(
-    raw: str | None,
-    non_finance_categories: Collection[str] = DEFAULT_NON_FINANCE_CATEGORIES,
+    raw: object, rule_packs: RulePackSettings | None = None
 ) -> ChannelCategory:
     """Fail closed (CCR-273 item 4): only an explicit non-finance label, or a documented
-    non-finance channel category from the rule-pack config (``rule_packs.non_finance_categories``,
-    exact match: PASS6-N), skips the finance rules; ``None``, an empty value, an unknown value or
-    ``finance`` is FINANCE."""
-    if isinstance(raw, str) and (
-        raw.strip().lower() in _NON_FINANCE_LABELS or raw in non_finance_categories
-    ):
+    non-finance channel category of the validated rule-pack config (``rule_packs`` is a
+    ``RulePackSettings``: packaged data or its narrowing-only override; exact match, PASS6-N),
+    skips the finance rules. ``None``, an empty or non-str value, an unknown value, ``finance`` and
+    the advertising categories are FINANCE. The category set is never a caller-built collection:
+    anything that is not a ``RulePackSettings`` gives FINANCE for every value, and the set is
+    intersected with the packaged list (``effective_non_finance_categories``), so no value of the
+    set can make ``finance`` non-finance."""
+    if not isinstance(raw, str):
+        return ChannelCategory.FINANCE
+    if rule_packs is None:
+        rule_packs = RulePackSettings()
+    if not isinstance(rule_packs, RulePackSettings):
+        return ChannelCategory.FINANCE
+    allowed = effective_non_finance_categories(rule_packs.non_finance_categories)
+    if raw.strip().lower() in _NON_FINANCE_LABELS or raw in allowed:
         return ChannelCategory.NON_FINANCE
     return ChannelCategory.FINANCE
 

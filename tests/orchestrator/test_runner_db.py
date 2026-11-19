@@ -67,7 +67,7 @@ def test_non_finance_skeleton_runs_end_to_end(pg_dsn: str, tmp_path: Path) -> No
 
 def test_default_category_is_finance_and_unknown_fails_closed(pg_dsn: str, tmp_path: Path) -> None:
     rig = build_rig(pg_dsn, tmp_path)
-    assert rig.intake(None).finance_rules_apply
+    assert rig.intake("").finance_rules_apply  # empty (channels.category is NOT NULL, 04)
     assert rig.intake("philosophy", title="Seneca two").finance_rules_apply  # unknown label
 
 

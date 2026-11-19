@@ -352,6 +352,18 @@ def test_finance_and_undocumented_categories_stay_finance_when_a_documented_one_
     assert not lex.is_finance("youtube_general")
 
 
+def test_directly_built_lexicons_cannot_make_finance_or_ads_non_finance() -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    lex = Lexicons(
+        (), (), (), frozenset(),
+        frozenset({"finance", "advertising", "ad_sector", "brand_safety", "kids"}),
+    )  # fmt: skip
+    for c in ("finance", "advertising", "ad_sector", "brand_safety"):
+        assert lex.is_finance(c)
+    assert not lex.is_finance("kids")
+
+
 def test_production_lexicons_builder_takes_non_finance_categories_from_rule_pack_config() -> None:
     """PASS6-N: documented non-finance categories (04 rule_packs.category) are non-finance;
     ``finance``, undocumented values and the advertising pack categories stay finance."""

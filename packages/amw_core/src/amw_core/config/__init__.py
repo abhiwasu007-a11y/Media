@@ -12,6 +12,7 @@
 
 from amw_core.config.registry import SHARED_NAMESPACES, ConfigKeyRegistry
 from amw_core.config.settings import (
+    ALWAYS_FINANCE_CATEGORIES,
     DEFAULT_NON_FINANCE_CATEGORIES,
     DOCUMENTED_RULE_PACK_CATEGORIES,
     AmwSettings,
@@ -31,11 +32,13 @@ from amw_core.config.settings import (
     StorageSettings,
     WaitSettings,
     WindowSettings,
+    effective_non_finance_categories,
     load_settings,
     require_secrets,
 )
 
 __all__ = [
+    "ALWAYS_FINANCE_CATEGORIES",
     "DEFAULT_NON_FINANCE_CATEGORIES",
     "DOCUMENTED_RULE_PACK_CATEGORIES",
     "SHARED_NAMESPACES",
@@ -57,6 +60,7 @@ __all__ = [
     "StorageSettings",
     "WaitSettings",
     "WindowSettings",
+    "effective_non_finance_categories",
     "load_settings",
     "require_secrets",
 ]

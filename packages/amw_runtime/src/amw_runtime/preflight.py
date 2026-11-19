@@ -44,6 +44,37 @@ CONFIRMED = "CONFIRMED"
 OWNER_CHANNEL = "OWNER_CHAT_OPERATOR"
 
 
+_SCOPE_KEY = object()
+
+
+@dataclass(frozen=True, slots=True)
+class JobPreflightScope:
+    """The job facts a preflight may narrow itself by (CAT-01, D13 item 2, CCR-273 PROPOSED).
+
+    There is no public boolean on ``run_preflight``: the only way to skip the finance-only items is
+    a scope for THIS org and THIS job whose category was resolved as non-finance. It cannot be
+    constructed directly (a wrong key raises ``TypeError``); ``mint_job_scope`` is the one door and
+    belongs to the orchestrator job preflight (``amw_orchestrator.services.run_job_preflight``;
+    a test pins that no other module calls it). This is a convention guard inside one trusted
+    process, not a security boundary: code that can call ``mint_job_scope`` can also build a
+    ``JobFacts``. A confirmation, an evidence row or a config can never produce one."""
+
+    org_id: str
+    job_id: str
+    finance_rules_apply: bool
+    _key: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._key is not _SCOPE_KEY:
+            raise TypeError("a JobPreflightScope is minted by the orchestrator job preflight only")
+
+
+def mint_job_scope(*, org_id: str, job_id: str, finance_rules_apply: bool) -> JobPreflightScope:
+    """Orchestrator only (see ``JobPreflightScope``): ``finance_rules_apply`` comes from the job's
+    resolved channel category, which fails closed to finance."""
+    return JobPreflightScope(org_id, job_id, finance_rules_apply, _SCOPE_KEY)
+
+
 @dataclass(frozen=True)
 class PreflightReport:
     mode: RunMode
@@ -261,17 +292,31 @@ def run_preflight(
     org_id: str | None = None,
     job_id: str | None = None,
     authorisation_ttl: timedelta = DEFAULT_AUTHORISATION_TTL,
-    finance_rules_apply: bool = True,
+    job_scope: JobPreflightScope | None = None,
 ) -> PreflightReport:
     """Raise ``PreflightRefused`` listing every unmet item, else return the report.
-    ``finance_rules_apply`` (CAT-01, D13 item 2, CCR-273 PROPOSED) is decided by the caller from the
-    JOB's channel category (never from a confirmation, evidence row or config): the default True is
-    fail closed. When False ONLY the finance-only items are skipped (``FIN_R10`` and the price-data
-    ``LAG`` config item) and the report notes it; PROVIDER_LIMIT evidence, org binding, caps,
-    secrets, environment, config, calendar and render checks and the token minting are unchanged.
+    ``job_scope`` (CAT-01, D13 item 2, CCR-273 PROPOSED) is the orchestrator's job scope (never a
+    confirmation, evidence row or config); absent = finance, fail closed. For a non-finance scope
+    of this ``org_id`` and ``job_id`` ONLY the finance-only items are skipped (``FIN_R10`` and the
+    price-data ``LAG`` config item: exactly what CCR-273 says; whether a non-finance chart still
+    needs a lag is open, CCR-284) and the report notes it; PROVIDER_LIMIT evidence, org binding,
+    caps, secrets, environment, config, calendar and render checks and the token minting are
+    unchanged. A scope of another org or job, or one that is not a ``JobPreflightScope``, refuses.
     ``env`` is read for NAMES/markers only (default: the process environment). ``org_id`` is the
     run's org; real-run evidence must be bound to it. ``job_id`` binds the provider
     authorisations to one job (a job-scoped call guard refuses a token with another or no job)."""
+    finance_rules_apply = True
+    if job_scope is not None:
+        if (
+            not isinstance(job_scope, JobPreflightScope)
+            or job_scope._key is not _SCOPE_KEY
+            or job_scope.org_id != org_id
+            or job_scope.job_id != job_id
+        ):
+            raise PreflightRefused(
+                (UnmetItem("JOB_SCOPE", "job scope is not minted for this org and job"),)
+            )
+        finance_rules_apply = job_scope.finance_rules_apply
     environ = os.environ if env is None else env
     unmet: list[UnmetItem] = []
     passed: list[str] = []

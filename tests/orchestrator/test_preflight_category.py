@@ -4,7 +4,11 @@ config item) apply only to a finance job; an unset or unknown category is financ
 Every other item (PROVIDER_LIMIT evidence, org binding, caps, secrets, environment, config,
 calendar, render window) is unchanged and a passing non-finance REAL_RUN mints its tokens."""
 
+import ast
 import dataclasses
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -15,12 +19,18 @@ from amw_orchestrator.services import run_job_preflight
 from amw_runtime.config import RuntimeConfig, load_runtime_config
 from amw_runtime.confirmations import ConfirmationKind, ConfirmationRecord
 from amw_runtime.errors import PreflightRefused
-from amw_runtime.preflight import PreflightReport, run_preflight
+from amw_runtime.preflight import (
+    JobPreflightScope,
+    PreflightReport,
+    mint_job_scope,
+    run_preflight,
+)
 from tests.adapters.conftest import packaged_with_render_minutes  # noqa: F401  (autouse)
 from tests.adapters.preflight_support import EVENING, ORG_ID, REAL_ENV, Lookup, limits
 from tests.orchestrator.test_executor import _job
 
 pytestmark = pytest.mark.unit
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _job_in_org(category: ChannelCategory) -> JobFacts:
@@ -112,10 +122,78 @@ def test_unset_or_unknown_category_is_finance_and_needs_fin_r10(raw: str | None)
 def test_the_flag_is_the_jobs_not_the_callers() -> None:
     # a caller cannot relax a finance job through kwargs: the job's own category wins
     fin = _job_in_org(ChannelCategory.FINANCE)
-    assert _codes(fin, _limits_only(), finance_rules_apply=False) == {"FIN_R10"}
-    # nor tighten or loosen it by anything else the caller passes
     non = _job_in_org(ChannelCategory.NON_FINANCE)
-    assert "LAG" not in _pf(non, _limits_only(), finance_rules_apply=True).checks_passed
+    forged = mint_job_scope(org_id=fin.org_id, job_id=fin.job_id, finance_rules_apply=False)
+    assert _codes(fin, _limits_only(), job_scope=forged) == {"FIN_R10"}  # overwritten by the job's
+    # the old public boolean no longer exists on either entry point
+    with pytest.raises(TypeError):
+        _pf(fin, _limits_only(), finance_rules_apply=False)
+    with pytest.raises(TypeError):
+        _pf(non, _limits_only(), finance_rules_apply=True)
+
+
+def test_run_preflight_has_no_public_boolean_and_a_scope_cannot_be_hand_built() -> None:
+    cfg = load_runtime_config(REAL_ENV)
+    records = _limits_only()
+    kw: dict[str, Any] = {
+        "env": REAL_ENV, "evidence": Lookup(records), "render_start": EVENING,
+        "org_id": str(ORG_ID),
+    }  # fmt: skip
+    with pytest.raises(TypeError):
+        run_preflight(cfg, records, finance_rules_apply=False, **kw)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):  # no key: not constructible
+        JobPreflightScope(str(ORG_ID), "job_x", False)
+    with pytest.raises(TypeError):
+        JobPreflightScope(str(ORG_ID), "job_x", False, object())
+    fake = SimpleNamespace(org_id=str(ORG_ID), job_id="job_x", finance_rules_apply=False)
+    with pytest.raises(PreflightRefused) as exc:  # a duck is not a scope
+        run_preflight(cfg, records, job_scope=fake, job_id="job_x", **kw)  # type: ignore[arg-type]
+    assert {i.code for i in exc.value.items} == {"JOB_SCOPE"}
+
+
+def test_a_scope_of_another_org_or_job_is_refused() -> None:
+    cfg = load_runtime_config(REAL_ENV)
+    records = _limits_only()
+    job_id = str(JOB.new())
+    kw: dict[str, Any] = {
+        "env": REAL_ENV, "evidence": Lookup(records), "render_start": EVENING,
+    }  # fmt: skip
+    for scope_org, scope_job in [(str(JOB.new()), job_id), (str(ORG_ID), str(JOB.new()))]:
+        scope = mint_job_scope(org_id=scope_org, job_id=scope_job, finance_rules_apply=False)
+        with pytest.raises(PreflightRefused) as exc:
+            run_preflight(cfg, records, job_scope=scope, org_id=str(ORG_ID), job_id=job_id, **kw)
+        assert {i.code for i in exc.value.items} == {"JOB_SCOPE"}
+    scope = mint_job_scope(org_id=str(ORG_ID), job_id="job_x", finance_rules_apply=False)
+    with pytest.raises(PreflightRefused) as exc2:  # no job id at all
+        run_preflight(cfg, records, job_scope=scope, org_id=str(ORG_ID), **kw)
+    assert {i.code for i in exc2.value.items} == {"JOB_SCOPE"}
+
+
+def test_only_the_orchestrator_job_preflight_mints_a_scope() -> None:
+    callers = []
+    for path in (ROOT / "packages").rglob("*.py"):
+        if "/src/" not in path.as_posix():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            name = (
+                node.func.id if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute) else ""
+            )  # fmt: skip
+            if name in {"mint_job_scope", "JobPreflightScope"}:
+                callers.append(path.relative_to(ROOT).as_posix())
+    assert sorted(set(callers)) == [
+        "packages/amw_orchestrator/src/amw_orchestrator/services.py",
+        "packages/amw_runtime/src/amw_runtime/preflight.py",
+    ]
+
+
+def test_the_report_carries_the_resolved_category() -> None:
+    for category in ChannelCategory:
+        rep = _pf(_job_in_org(category), limits() if category is ChannelCategory.FINANCE
+                  else _limits_only())  # fmt: skip
+        assert f"job channel category (from channels.category): {category.value}" in rep.notes
 
 
 def test_the_flag_cannot_come_from_config_or_confirmations() -> None:
@@ -123,9 +201,9 @@ def test_the_flag_cannot_come_from_config_or_confirmations() -> None:
     with pytest.raises(ValidationError):
         RuntimeConfig.model_validate({**base, "finance_rules_apply": False})
     with pytest.raises(ValidationError):
-        ConfirmationRecord(
+        ConfirmationRecord(  # type: ignore[call-arg]
             kind=ConfirmationKind.PROVIDER_LIMIT,
-            finance_rules_apply=False,  # type: ignore[call-arg]
+            finance_rules_apply=False,
         )
 
 
