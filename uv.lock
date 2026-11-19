@@ -107,10 +107,14 @@ version = "0.0.0"
 source = { editable = "packages/agents/agent_10_video_editor" }
 dependencies = [
     { name = "amw-core" },
+    { name = "fonttools" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+requires-dist = [
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "fonttools", specifier = ">=4.55" },
+]
 
 [[package]]
 name = "agent-11-thumbnail-design"

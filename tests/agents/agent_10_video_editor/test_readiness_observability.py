@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_10_video_editor.fonts import cmap_font_reader
 from agent_10_video_editor.observability import LogContext, MemoryMetrics, emit, labels
 from agent_10_video_editor.qc.selftest import SelfTestCase, SelfTestRecord
 from agent_10_video_editor.readiness import ReadinessProbe
@@ -38,6 +39,7 @@ def _probe(
     return ReadinessProbe(
         runner=runner or world.runner, cfg=world.cfg, scratch_root=tmp / "scratch-ready",
         selftests=selftests or _SelfTests(), admission=world.probe, pinned_build_id=pinned,
+        font_reader=cmap_font_reader,
     )  # fmt: skip
 
 
@@ -76,7 +78,7 @@ def test_s05_log_canary_no_script_subtitle_text_or_path_in_any_log_line(
     world.licences.snapshot_value = world.licences.snapshot_value
     with caplog.at_level(logging.INFO, logger="agent_10"):
         chain = run_chain(world)
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert chain["render"].status.value == "SUCCEEDED"
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert caplog.records
@@ -121,7 +123,7 @@ def test_metrics_carry_org_and_agent_labels(tmp_path: Path) -> None:
     deps = world.deps()
     from dataclasses import replace
 
-    RenderStage(replace(deps, metrics=metrics)).run(world.render_input(), world.attempt)
+    RenderStage(replace(deps, metrics=metrics)).execute(world.render_input(), world.attempt)
     names = {name for name, _ in metrics.counters}
     assert {"a10_segments_total", "a10_guard_checks_total"} <= names
     for _, label_items in metrics.counters:

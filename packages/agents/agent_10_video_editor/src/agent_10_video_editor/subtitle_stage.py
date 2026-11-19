@@ -10,6 +10,7 @@ from agent_10_video_editor.canonical import sha256_hex
 from agent_10_video_editor.checkpointing import CheckpointIO
 from agent_10_video_editor.contracts import SrtEntry, SubtitlesInput, SubtitlesOutput
 from agent_10_video_editor.deps import StageDeps
+from agent_10_video_editor.entry import run_task
 from agent_10_video_editor.errors import input_invalid, missing_dependency
 from agent_10_video_editor.guard import DrainSignal, HeavyTaskGuard
 from agent_10_video_editor.inputs import NarrationTimeline, ScriptStrings
@@ -32,6 +33,7 @@ from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import CheckVerdict, OutputRefKind, OutputStatus
 from amw_core.errors import IncompleteOutputError, SchemaInvalidError
+from amw_core.exec_context import ExecContext
 from amw_core.ids import ASSET, ActorRef
 from amw_core.interfaces.tenancy_context import TenantContext
 
@@ -58,7 +60,16 @@ class SubtitleStage:
     def __init__(self, deps: StageDeps) -> None:
         self._d = deps
 
-    def run(
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
+        return run_task(
+            task_input,
+            ctx,
+            self._d.clock,
+            lambda: self.execute(task_input, str(ctx.attempt_id), str(ctx.org_id)),
+        )
+
+    def execute(
         self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
     ) -> TaskOutput:
         d = self._d
@@ -134,7 +145,12 @@ class SubtitleStage:
         emit("subs.validated", log, cues=len(built.cues))
         sha = sha256_hex(built.srt)
         info = scope.put_bytes(
-            scope.uri("jobs", f"{task_input.job_id}/subtitles/{payload.language}-{sha[:16]}.srt"),
+            scope.artifact_uri(
+                task_input.job_id,
+                task_input.task_id,
+                attempt_id,
+                f"subtitles/{payload.language}-{sha[:16]}.srt",
+            ),
             built.srt,
         )
         with d.tenancy.transaction(ctx) as tx:

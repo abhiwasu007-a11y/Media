@@ -2,12 +2,13 @@
 
 Passes when the configuration and calendar are complete, ``ffmpeg`` and ``ffprobe`` run, the build
 ID equals the pinned one, every required filter exists, the scratch directory is writable and the
-QC self-test record for this build exists and passed. Each check reports an identifier-like detail
+QC self-test record for this build exists and passed, and a font cmap reader is wired (CCR-206).
+Each check reports an identifier-like detail
 only (no paths, no tool text).
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,12 +58,14 @@ class ReadinessProbe:
         admission: AdmissionProbe,
         pinned_build_id: str | None,
         required_filters: Sequence[str] = REQUIRED_FILTERS,
+        font_reader: Callable[[bytes], frozenset[int]] | None = None,
         ffmpeg_bin: str = "ffmpeg",
         ffprobe_bin: str = "ffprobe",
     ) -> None:
         self._runner, self._cfg, self._scratch = runner, cfg, scratch_root
         self._selftests, self._admission = selftests, admission
         self._pinned, self._filters = pinned_build_id, tuple(required_filters)
+        self._font_reader = font_reader
         self._argv = ArgvBuilder(cfg.render, ffmpeg_bin, ffprobe_bin)
 
     def run(self) -> ReadinessReport:
@@ -80,6 +83,7 @@ class ReadinessProbe:
         if placement is Placement.VPS:
             add(_check("vps_eta", self._cfg.render.eta_ms_per_output_s is not None, "ETA_NOT_SET"))
             add(_check("night_window", guard.night_window is not None, "NO_NIGHT_WINDOW"))
+        add(_check("font_reader", self._font_reader is not None, "FONT_READER_MISSING"))
         try:
             self._scratch.mkdir(parents=True, exist_ok=True)
             marker = self._scratch / ".ready"

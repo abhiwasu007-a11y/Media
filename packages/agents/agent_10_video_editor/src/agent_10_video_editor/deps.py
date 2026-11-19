@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agent_10_video_editor.config import AgentTenConfig
 from agent_10_video_editor.ffmpeg import FfmpegRunner
+from agent_10_video_editor.fonts import cmap_font_reader
 from agent_10_video_editor.guard import AdmissionProbe, TimerFactory
 from agent_10_video_editor.observability import MetricsSink
 from agent_10_video_editor.ports import (
@@ -42,7 +43,8 @@ class StageDeps:
     licences: LicenceReader
     audit: AuditLog | None = None
     metrics: MetricsSink | None = None
-    font_reader: Callable[[bytes], frozenset[int]] | None = None
+    font_reader: Callable[[bytes], frozenset[int]] | None = cmap_font_reader
+    """The F-10 cmap reader (CCR-206); ``None`` fails readiness and closed at render."""
     worker_id: str = "render-worker"
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"

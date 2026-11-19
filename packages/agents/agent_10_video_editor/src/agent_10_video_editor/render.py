@@ -39,6 +39,7 @@ from agent_10_video_editor.contracts import (
     SegmentsOut,
 )
 from agent_10_video_editor.deps import StageDeps
+from agent_10_video_editor.entry import run_task
 from agent_10_video_editor.errors import MeasurementUnavailable, config_invalid, input_invalid
 from agent_10_video_editor.ffmpeg import (
     ArgvBuilder,
@@ -121,6 +122,7 @@ from amw_core.errors import (
     RenderCrashError,
     SchemaInvalidError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     RENDER,
     ActorRef,
@@ -240,7 +242,16 @@ class RenderStage:
 
     # -- public --------------------------------------------------------------------------------
 
-    def run(
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
+        return run_task(
+            task_input,
+            ctx,
+            self._d.clock,
+            lambda: self.execute(task_input, str(ctx.attempt_id), str(ctx.org_id)),
+        )
+
+    def execute(
         self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
     ) -> TaskOutput:
         """``envelope_org``: organisation of the received envelope (compared with the input)."""
@@ -356,7 +367,7 @@ class _RenderRun:
             render_id = str(RENDER.new())
             state = RenderState(
                 render_id=render_id,
-                final_uri=self.scope.uri("jobs", f"{ti.job_id}/renders/{render_id}.mp4"),
+                final_uri=self.scope.render_uri(ti.job_id, f"{render_id}.mp4"),
             )
             self.ckpt.write("render.gated", state)
 
@@ -369,7 +380,7 @@ class _RenderRun:
             raise input_invalid("PLAN_CHANGED")
         self._bind_text(timeline, loaded, assets)
         timeline_blob = self.scope.put_bytes(
-            self.scope.uri("jobs", f"{ti.job_id}/renders/timelines/{timeline_sha}.json"),
+            self.scope.render_uri(ti.job_id, f"timelines/{timeline_sha}.json"),
             canonical_json(timeline.canonical()),
         )
         state = state.model_copy(
@@ -528,7 +539,12 @@ class _RenderRun:
         # by its recorded SHA-256, so only registered, hash-checked bytes are consulted.
         covered: set[int] = set()
         for font in fonts:
-            covered |= reader(self.scope.read_bytes(font.uri, font.sha256))
+            try:
+                covered |= reader(self.scope.read_bytes(font.uri, font.sha256))
+            except CorruptedOutputError:
+                raise
+            except Exception as exc:  # an unparsable font file (CCR-206)
+                raise config_invalid("FONT_COVERAGE_UNAVAILABLE") from exc
         FontCoverage.check(covered, list(bound.values()))
 
     def _existing_render(self, timeline_sha: str, preset_key: str) -> RenderRow | None:
@@ -599,7 +615,7 @@ class _RenderRun:
         command = self.argv.segment_command(sl)
         self.warnings.extend(command.warnings)
         key = SegmentKey.compute(sl.slice_sha256, sl.asset_sha256s(), command.args_sha256, build_id)
-        uri = self.scope.uri("jobs", f"{self.ti.job_id}/renders/segments/{key}.mp4")
+        uri = self.scope.render_uri(self.ti.job_id, f"segments/{key}.mp4")
         return _RenderRun._Plan(key, uri, command)
 
     def _facts(self, uri: str, work: Path) -> BlobFacts:
