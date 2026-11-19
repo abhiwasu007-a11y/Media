@@ -1,6 +1,7 @@
 """Typed Protocols for the 3A core services (implementations are lane L1; nothing here runs I/O)."""
 
 from amw_core.interfaces.audit_log import AuditEntry, AuditLog, ChainVerification, NewAuditEntry
+from amw_core.interfaces.breaker_read import BreakerReader
 from amw_core.interfaces.budget_guard import (
     Budget,
     BudgetGuard,
@@ -10,6 +11,13 @@ from amw_core.interfaces.budget_guard import (
     ReservationOutcome,
 )
 from amw_core.interfaces.checkpoint_store import CheckpointRecord, CheckpointStore, NewCheckpoint
+from amw_core.interfaces.claims import (
+    CitationRow,
+    ClaimStatusUpdate,
+    ClaimStore,
+    NewClaim,
+    RuleFlag,
+)
 from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.cost_ledger import CostEntry, CostLedger, CostTotals, NewCostEntry
 from amw_core.interfaces.idempotency_store import (
@@ -33,6 +41,8 @@ from amw_core.interfaces.knowledge_collections import (
     KnowledgeCollections,
     NewKnowledgeCollection,
 )
+from amw_core.interfaces.knowledge_reader import KnowledgeReader, SourceText
+from amw_core.interfaces.memory_items import MemoryItem, MemoryItems, StoredMemoryItem
 from amw_core.interfaces.owner_evidence import (
     DbRole,
     DbSession,
@@ -50,7 +60,10 @@ from amw_core.interfaces.queue import (
     QueueItem,
     TaskQueue,
 )
+from amw_core.interfaces.repositories import TenantRepository
+from amw_core.interfaces.script_registry import ScriptRegistry
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobStorage, BlobUri, ReadableStream
+from amw_core.interfaces.subject_documents import SubjectDocuments
 from amw_core.interfaces.system_functions import (
     BreakerKey,
     BreakerState,
@@ -74,6 +87,7 @@ __all__ = [
     "BlobStorage",
     "BlobUri",
     "BreakerKey",
+    "BreakerReader",
     "BreakerState",
     "Budget",
     "BudgetGuard",
@@ -82,7 +96,10 @@ __all__ = [
     "ChainVerification",
     "CheckpointRecord",
     "CheckpointStore",
+    "CitationRow",
     "ClaimRequest",
+    "ClaimStatusUpdate",
+    "ClaimStore",
     "ClaimedItem",
     "Clock",
     "CostEntry",
@@ -103,8 +120,12 @@ __all__ = [
     "JobTransition",
     "KnowledgeCollection",
     "KnowledgeCollections",
+    "KnowledgeReader",
+    "MemoryItem",
+    "MemoryItems",
     "NewAuditEntry",
     "NewCheckpoint",
+    "NewClaim",
     "NewCostEntry",
     "NewEvidence",
     "NewJob",
@@ -115,15 +136,21 @@ __all__ = [
     "ReadableStream",
     "Reservation",
     "ReservationOutcome",
+    "RuleFlag",
+    "ScriptRegistry",
     "SessionEvent",
     "SessionEventSource",
+    "SourceText",
+    "StoredMemoryItem",
     "StuckTask",
+    "SubjectDocuments",
     "SystemFunctions",
     "TaskQueue",
     "TaskRecord",
     "TaskTransition",
     "TenancyContext",
     "TenantContext",
+    "TenantRepository",
     "TenantTransaction",
     "VoiceConsentRecord",
     "VoiceRecord",

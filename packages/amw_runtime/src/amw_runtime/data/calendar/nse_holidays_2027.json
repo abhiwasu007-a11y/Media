@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "segment": "CM",
+  "year": 2027,
+  "status": "REQUIRES_REVIEW",
+  "source_id": "NSE-03",
+  "checked": "2026-11-19",
+  "need": "REQUIRES REVIEW (Phase 1): the official NSE 2027 trading-holiday list is not yet published; replace holidays and set status VERIFIED with source_id and checked date",
+  "special_sessions": null,
+  "holidays": null
+}
