@@ -18,8 +18,8 @@ from amw_core.enums import (
     VisualSourceTier,
 )
 
-# Owner-set status string (CCR-212; en dash). Single source: amw_runtime.disclaimer.DRAFT_STATUS
-# once that package is merged (ticket PASS6-K1); until then the value is kept identical to it.
+# Owner-set status string (CCR-212; en dash). Byte-equal to amw_runtime.disclaimer.DRAFT_STATUS;
+# the import that replaces this constant is ticket PASS6-K item 1.
 DRAFT_DISCLAIMER_LABEL: Final = "DRAFT – not lawyer-approved"  # noqa: RUF001 (owner-set label)
 """3A R5 report label (a fixed report string of 3A_SLICE_SPEC, not a threshold)."""
 
