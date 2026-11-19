@@ -18,8 +18,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+from agent_07_voice_production.blobs import put_once
 from agent_07_voice_production.config import AgentSevenConfig
-from agent_07_voice_production.context import AGENT_ID, ExecContext
+from agent_07_voice_production.context import AGENT_ID
 from agent_07_voice_production.pcm import decode_s16_bytes, trim_silence
 from agent_07_voice_production.ports import AudioTools, CircuitBreaker, TtsSynthesizer
 from agent_07_voice_production.text import PreparedSegment
@@ -32,6 +33,7 @@ from amw_core.errors import (
     LockConflictError,
     TemporaryError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     CostEntryId,
     IdempotencyKey,
@@ -45,6 +47,7 @@ from amw_core.interfaces.cost_ledger import CostEntry, CostLedger, NewCostEntry
 from amw_core.interfaces.idempotency_store import BeginAction, IdempotencyStore
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext
+from amw_core.tenancy.storage_paths import job_cache_uri
 
 CLIP_MEDIA_TYPES = ("audio/wav", "audio/x-wav", "audio/wave")
 
@@ -90,6 +93,8 @@ class ClipResult:
     characters: int
     cost_entry_id: CostEntryId | None
     amount_micros: int
+    reused: bool = False
+    """Taken from the job cache (an earlier task of the job), not from a call of this task."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +189,13 @@ class SegmentSynthesizer:
             return self._stored(ctx, prepared, settings, decision.record.result_ref)
         if decision.action is BeginAction.IN_FLIGHT:
             raise LockConflictError("another attempt holds the idempotency key")
+        cached = self._cached(ctx, prepared, request_hash, key)
+        if cached is not None:
+            # a clip of the same request already exists in the job cache (an earlier iteration or
+            # task): no guard, no provider call, no ledger row (03 section 8 rule 5, CCR-208)
+            with self._tenancy.transaction(ctx.tenant) as tx:
+                self._idem.complete(tx, key, cached.clip_uri, self._clock.now())
+            return cached
         try:
             self.guard(ctx, settings.provider, estimate)
             result = self._call(request, key, settings.provider)
@@ -200,7 +212,7 @@ class SegmentSynthesizer:
         self.unreturned = (entry.id, prepared.characters, estimate)
         try:
             samples = self._validate(result.audio, result.media_type, prepared)
-            clip_uri, clip_sha = self._store_clip(ctx, prepared, samples)
+            clip_uri, clip_sha = self._store_clip(ctx, prepared, samples, request_hash)
         except BaseException:
             self._fail_key(ctx, key)
             raise
@@ -313,8 +325,46 @@ class SegmentSynthesizer:
             _, samples = decode_s16_bytes(dst.read_bytes())
         return samples
 
+    def _cache_uri(self, ctx: ExecContext, prepared: PreparedSegment, request_hash: str) -> BlobUri:
+        """``jobs/<job>/cache/agent_07/<seg>-<sha>.wav``; ``<sha>`` is the hash of the TTS request
+        (text, voice, model, language, rate), so a later iteration finds it before any call."""
+        return BlobUri(
+            job_cache_uri(
+                ctx.org_id, ctx.job_id, AGENT_ID, f"{prepared.segment_id}-{request_hash}.wav"
+            )
+        )
+
+    def _cached(
+        self, ctx: ExecContext, prepared: PreparedSegment, request_hash: str, key: IdempotencyKey
+    ) -> ClipResult | None:
+        uri = self._cache_uri(ctx, prepared, request_hash)
+        head = self._storage.head(ctx.tenant, uri)
+        if not head.exists or head.sha256 is None:
+            return None
+        data = b"".join(self._storage.get(ctx.tenant, uri, head.sha256))
+        info, samples = decode_s16_bytes(data)
+        if (
+            info.frames == 0
+            or info.sample_rate_hz != self._config.sample_rate_hz
+            or info.channels != 1
+        ):
+            raise CorruptedOutputError("the cached clip is not a working-format clip")
+        return ClipResult(
+            prepared.segment_id,
+            samples,
+            str(uri),
+            head.sha256,
+            prepared.spoken_text_sha256,
+            key,
+            False,
+            prepared.characters,
+            None,
+            0,
+            True,
+        )
+
     def _store_clip(
-        self, ctx: ExecContext, prepared: PreparedSegment, samples: array[int]
+        self, ctx: ExecContext, prepared: PreparedSegment, samples: array[int], request_hash: str
     ) -> tuple[str, str]:
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as handle:
@@ -324,11 +374,8 @@ class SegmentSynthesizer:
             handle.writeframes(samples.tobytes())
         data = buffer.getvalue()
         sha = hashlib.sha256(data).hexdigest()
-        uri = self._storage.blob_uri(
-            ctx.tenant, "jobs", f"{ctx.job_id}/s07_voice/clips/{prepared.segment_id}-{sha[:16]}.wav"
-        )
-        if not self._storage.head(ctx.tenant, uri).exists:
-            self._storage.put(ctx.tenant, uri, io.BytesIO(data))
+        uri = self._cache_uri(ctx, prepared, request_hash)
+        put_once(self._storage, ctx.tenant, uri, data)  # a different clip at the path is refused
         return uri, sha
 
     def _stored(
