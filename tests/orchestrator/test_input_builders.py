@@ -74,7 +74,13 @@ def test_unmapped_revision_and_unknown_task_type_are_typed_refusals() -> None:
     with pytest.raises(InputInvalidError):
         table.build(_ctx(ChannelCategory.FINANCE, iteration=1))
     with pytest.raises(UnsupportedTaskError):
-        table.build(_bc(_job()))  # s05_script has no builder yet
+        # Agent 12 has no builder (not built, stage disabled by default); s05_script has one now
+        table.build(
+            replace(
+                _bc(_job()),
+                stage=_bc(_job()).stage.model_copy(update={"task_type": "agent_12.metadata"}),
+            )
+        )
 
 
 def test_no_builder_imports_an_agent_package() -> None:
