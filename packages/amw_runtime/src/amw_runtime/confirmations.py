@@ -2,10 +2,9 @@
 of 08/04: a CONFIRMED row verified by the verifier; R14 is not weakened).
 
 Binding (review M2): each record has a ``subject()`` key built from (kind, provider, amount,
-currency, org). A real-run preflight requires the evidence row to report the SAME ``subject`` and
-``org_id``, and distinct evidence per record, so one evidence id cannot clear two items. The
-evidence kinds themselves are filed in CCR-260 (PR #77); until its lookup reports ``subject`` and
-``org_id`` a real run is refused (fail closed).
+currency, org). A real-run preflight requires the evidence row to report the same org, kind and
+subject, a valid MAC and a REAL source, and distinct evidence per record, so one evidence id
+cannot clear two items. A row that lacks any attribute is refused with a typed item (fail closed).
 """
 
 from enum import StrEnum
@@ -55,9 +54,21 @@ class ConfirmationRecord(BaseModel):
         )
 
 
+# Binding constants (provisional until PR #77 / CCR-260 fixes the shared evidence contract in
+# amw_core; the attribute NAMES below are the agreed ones). The row's subject is the preflight
+# confirmation identified by ``ConfirmationRecord.subject()``.
+SUBJECT_KIND = "PREFLIGHT_CONFIRMATION"
+SOURCE_REAL = "REAL"
+SOURCE_TEST_FIXTURE = "TEST_FIXTURE"
+
+
 class EvidenceView(Protocol):
-    """What the runtime needs of an owner-evidence row (04/08 model). ``org_id`` and ``subject``
-    are the binding fields requested from PR #77 / CCR-260."""
+    """What the runtime needs of an owner-evidence row. The attribute names are those of the
+    shared evidence contract owned by PR #77 (``amw_core``, CCR-260/261). The runtime reads every
+    attribute defensively: a missing or wrongly typed one is a typed refusal, never an error."""
+
+    @property
+    def evidence_id(self) -> str: ...
 
     @property
     def evidence_state(self) -> str: ...  # "CONFIRMED" once the verifier confirmed it
@@ -66,10 +77,22 @@ class EvidenceView(Protocol):
     def recorded_from(self) -> str: ...  # "OWNER_CHAT_OPERATOR"
 
     @property
-    def org_id(self) -> str | None: ...
+    def org_id(self) -> str: ...
 
     @property
-    def subject(self) -> str | None: ...
+    def kind(self) -> str: ...  # the ConfirmationKind value
+
+    @property
+    def subject_kind(self) -> str: ...
+
+    @property
+    def subject_id(self) -> str: ...
+
+    @property
+    def source_kind(self) -> str: ...  # REAL | TEST_FIXTURE
+
+    @property
+    def mac_valid(self) -> bool: ...
 
 
 class EvidenceLookup(Protocol):

@@ -9,13 +9,30 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from pydantic import ValidationError
+
+from amw_core.errors import ConfigInvalidError
 from amw_runtime.calendar import MarketCalendar, now_utc
-from amw_runtime.config import RunMode, RuntimeConfig
-from amw_runtime.confirmations import ConfirmationKind, ConfirmationRecord, EvidenceLookup
+from amw_runtime.config import ENV_MODE, RunMode, RuntimeConfig, load_runtime_config
+from amw_runtime.confirmations import (
+    SOURCE_REAL,
+    SOURCE_TEST_FIXTURE,
+    SUBJECT_KIND,
+    ConfirmationKind,
+    ConfirmationRecord,
+    EvidenceLookup,
+)
 from amw_runtime.disclaimer import Disclaimer, get_disclaimer
 from amw_runtime.errors import DisclaimerError, PreflightRefused, UnmetItem
 
 SUPPORTED_LAG_UNIT = "CALENDAR_DAYS"
+# fields a caller may legitimately vary in a real run (all other fields must equal the data)
+_CALLER_VARIABLE_FIELDS = (
+    "per_video_cap_micros",
+    "total_cap_micros",
+    "chart_data_location",
+    "override_applied",
+)
 CONFIRMED = "CONFIRMED"
 OWNER_CHANNEL = "OWNER_CHAT_OPERATOR"
 
@@ -35,14 +52,25 @@ def _truthy(value: str | None) -> bool:
     return value is not None and value.strip().lower() not in {"", "0", "false", "no"}
 
 
+_MISSING = object()
+
+
+def _attrs(row: object, *names: str) -> dict[str, object] | None:
+    out = {n: getattr(row, n, _MISSING) for n in names}
+    return None if any(v is _MISSING for v in out.values()) else out
+
+
 def _evidence_problem(
     rec: ConfirmationRecord,
     evidence: EvidenceLookup | None,
     org_id: str | None,
     used_ids: set[str],
+    *,
+    real_run: bool = True,
 ) -> str | None:
-    """A record counts only if its evidence row is CONFIRMED, from the owner chat, bound to this
-    org and this exact subject, and not already used for another record (real-run rules)."""
+    """A record counts only if its evidence row is CONFIRMED, from the owner chat, MAC-valid,
+    bound to this org, kind and subject, REAL (a TEST_FIXTURE row only in a dry run), and not
+    already used for another record. Missing row attributes are a typed refusal."""
     if not rec.verified:
         return "confirmation not verified"
     if not (rec.evidence_id or rec.review_code):
@@ -54,10 +82,39 @@ def _evidence_problem(
     if rec.evidence_id in used_ids:
         return "the same evidence row cannot confirm two items"
     row = evidence.get(rec.evidence_id)
-    if row is None or row.evidence_state != CONFIRMED or row.recorded_from != OWNER_CHANNEL:
+    if row is None:
+        return "evidence row not found"
+    a = _attrs(
+        row,
+        "evidence_id",
+        "evidence_state",
+        "recorded_from",
+        "org_id",
+        "kind",
+        "subject_kind",
+        "subject_id",
+        "source_kind",
+        "mac_valid",
+    )
+    if a is None:
+        return "evidence row lacks required attributes (shared evidence contract)"
+    if a["mac_valid"] is not True:
+        return "evidence row MAC is not valid"
+    if a["evidence_state"] != CONFIRMED or a["recorded_from"] != OWNER_CHANNEL:
         return "evidence row is not CONFIRMED from the owner chat channel"
-    if row.org_id != org_id or row.subject != rec.subject():
-        return "evidence row is not bound to this org and subject"
+    if a["source_kind"] == SOURCE_TEST_FIXTURE:
+        if real_run:
+            return "TEST_FIXTURE evidence refused in real-run mode"
+    elif a["source_kind"] != SOURCE_REAL:
+        return "evidence row source is neither REAL nor TEST_FIXTURE"
+    if (
+        a["evidence_id"] != rec.evidence_id
+        or a["org_id"] != org_id
+        or a["kind"] != rec.kind.value
+        or a["subject_kind"] != SUBJECT_KIND
+        or a["subject_id"] != rec.subject()
+    ):
+        return "evidence row is not bound to this org, kind and subject"
     used_ids.add(rec.evidence_id)
     return None
 
@@ -91,7 +148,9 @@ def _limit_problem(
             else:
                 return None, True
         else:
-            problem = _evidence_problem(rec, evidence, org_id, used_ids)
+            problem = _evidence_problem(
+                rec, evidence, org_id, used_ids, real_run=config.mode is RunMode.REAL_RUN
+            )
             if problem is None:
                 return None, False
             reasons.append(problem)
@@ -125,6 +184,40 @@ def run_preflight(
         else:
             unmet.append(UnmetItem(code, message))
 
+    # N2: never trust the caller's rule objects. Re-run the config validators (model_copy and
+    # model_construct bypass them); in a real run the rules must equal the packaged data.
+    try:
+        config = RuntimeConfig.model_validate(config.model_dump(warnings=False))
+    except ValidationError:
+        raise PreflightRefused(
+            (UnmetItem("CONFIG", "runtime config fails re-validation at preflight time"),)
+        ) from None
+    ceiling_pv, ceiling_total = config.owner_per_video_cap_micros, config.owner_total_cap_micros
+    if config.mode is RunMode.REAL_RUN:
+        try:
+            packaged = load_runtime_config({ENV_MODE: RunMode.REAL_RUN.value})
+        except ConfigInvalidError:
+            raise PreflightRefused(
+                (UnmetItem("CONFIG", "packaged runtime config is missing or invalid"),)
+            ) from None
+        ceiling_pv = packaged.owner_per_video_cap_micros
+        ceiling_total = packaged.owner_total_cap_micros
+        mine, theirs = config.model_dump(), packaged.model_dump()
+        for key in _CALLER_VARIABLE_FIELDS:
+            mine.pop(key), theirs.pop(key)
+        check(
+            "CONFIG",
+            mine == theirs,
+            "real run: config differs from the packaged owner data (caps ceilings, providers, "
+            "environment, calendar, lag, render window or disclaimer rules)",
+        )
+        check(
+            "CALENDAR_SOURCE",
+            calendar is None,
+            "real run: a caller-supplied calendar is not accepted; the packaged one is used",
+        )
+        calendar = None
+
     # provider spending limits confirmed by the owner (R14 intact: evidence must be CONFIRMED)
     for prov in (p for p in config.providers if p.required):
         problem, used = _limit_problem(config, prov.name, confirmations, evidence, org_id, used_ids)
@@ -135,8 +228,8 @@ def run_preflight(
 
     # budgets present and within the owner caps (HARD STOP on breach is part of the config)
     caps_ok = (
-        0 < config.per_video_cap_micros <= config.owner_per_video_cap_micros
-        and 0 < config.total_cap_micros <= config.owner_total_cap_micros
+        0 < config.per_video_cap_micros <= ceiling_pv
+        and 0 < config.total_cap_micros <= ceiling_total
         and config.per_video_cap_micros <= config.total_cap_micros
         and config.hard_stop_on_breach
     )
@@ -193,7 +286,7 @@ def run_preflight(
         if rec.test_fixture:
             r10_problems.append("TEST fixture never confirms FIN-R10")
             continue
-        problem = _evidence_problem(rec, evidence, org_id, used_ids)
+        problem = _evidence_problem(rec, evidence, org_id, used_ids, real_run=True)
         if problem is None:
             r10_ok = True
             break

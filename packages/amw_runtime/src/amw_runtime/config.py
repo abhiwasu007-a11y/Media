@@ -118,8 +118,14 @@ def _lowered_caps(override: Path | None, budget: Mapping[str, Any]) -> dict[str,
     merged = dict(budget)
     if override is None:
         return merged
-    if override.is_symlink() or not override.is_file():
-        raise ConfigInvalidError("config override must be a regular file, not a symlink")
+    if (
+        not override.is_absolute()
+        or override.resolve() != override  # '..', symlinked parent or symlink
+        or not override.is_file()
+    ):
+        raise ConfigInvalidError(
+            "config override must be an absolute, fully resolved regular file path"
+        )
     try:
         raw = read_json(override)
     except ValueError as exc:
