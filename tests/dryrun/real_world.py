@@ -989,7 +989,7 @@ def build_agent_16_score(t: Tenant, storage: LocalDiskStorage, scratch: Path) ->
     from tests.fake_audit import RecordingAuditLog
 
     rows = t.shared.get("rows16") or Rows16(
-        t, t.shared.get("channel_category_label", "non_finance")
+        t, t.shared.get("channel_category_label", "non-finance")
     )
 
     class Renders:
@@ -1039,7 +1039,7 @@ def build_agent_16_gate(t: Tenant, storage: LocalDiskStorage, scratch: Path) -> 
             return None if row is None else str(row.content_sha256)
 
     approvals = Renders()
-    rows = Rows16(t, t.shared.get("channel_category_label", "non_finance"))
+    rows = Rows16(t, t.shared.get("channel_category_label", "non-finance"))
     t.shared["rows16"] = rows
     audit = RecordingAuditLog()
     extractor = DocumentGateFactExtractor(rows, cfg, None, Chunks16(t))

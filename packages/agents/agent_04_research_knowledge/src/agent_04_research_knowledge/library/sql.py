@@ -64,10 +64,15 @@ class SubjectDocuments(Protocol):
 RunnerFactory = Callable[[TenantScope], AbstractContextManager[SqlRunner]]
 
 SELECT_COLLECTIONS = """
-SELECT id, collection_key, title, restricted
-FROM knowledge_collections
-WHERE org_id = %(org_id)s AND channel_id = %(channel_id)s
-ORDER BY collection_key
+SELECT k.id, k.collection_key, k.title, k.restricted,
+       COALESCE((SELECT array_agg(DISTINCT s.language ORDER BY s.language)
+                 FROM knowledge_sources s
+                 WHERE s.org_id = k.org_id AND s.channel_id = k.channel_id
+                   AND s.collection_id = k.id AND s.status = 'INDEXED'),
+                ARRAY[]::text[]) AS languages
+FROM knowledge_collections k
+WHERE k.org_id = %(org_id)s AND k.channel_id = %(channel_id)s
+ORDER BY k.collection_key
 """
 
 SELECT_SOURCE = """
@@ -215,6 +220,7 @@ class SqlKnowledgeLibrary:
                 str(r["collection_key"]),
                 str(r["title"]),
                 bool(r["restricted"]),
+                tuple(str(x) for x in r["languages"]),
             )
             for r in rows
         ]

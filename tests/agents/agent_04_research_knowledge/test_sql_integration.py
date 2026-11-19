@@ -164,16 +164,18 @@ class Tenant:
         status: str = "INDEXED",
         ownership: str = "OWNED_COPY",
         version: int = 1,
+        language: str = "en",
     ) -> uuid.UUID:
         sid = uuid.uuid7()
         self.conn.execute(
             "INSERT INTO knowledge_sources (id, org_id, channel_id, collection_id, kind, title, language, ownership, content_sha256, size_bytes, status, ingest_version, release_approval_id) "
-            "VALUES (%s,%s,%s,%s,'BOOK','T','en',%s,%s,1,%s,%s,%s)",
+            "VALUES (%s,%s,%s,%s,'BOOK','T',%s,%s,%s,1,%s,%s,%s)",
             (
                 sid,
                 self.org,
                 self.channel,
                 collection,
+                language,
                 ownership,
                 hashlib.sha256(sid.bytes).digest(),
                 status,
@@ -645,3 +647,27 @@ def test_release_gate_rg01_to_rg12_through_real_sql(
         assert len(digest) == 64
     finally:
         other.conn.close()
+
+
+def test_collection_languages_are_the_distinct_indexed_source_languages_per_tenant(
+    scratch: dict[str, str],
+) -> None:
+    """CCR-289 PROVISIONAL: ``array_agg(DISTINCT language)`` over INDEXED sources of the collection
+    only, inside the tenant; same answer as the in-memory library."""
+    a, b = Tenant(scratch), Tenant(scratch)
+    try:
+        col_a, empty_a = a.collection(), a.collection()
+        a.source(col_a, language="mr")
+        a.source(col_a, language="en")
+        a.source(col_a, language="mr")
+        a.source(col_a, language="hi", status="FAILED")  # not searchable: not counted
+        a.source(empty_a, language="sa", status="REGISTERED")
+        col_b = b.collection()
+        b.source(col_b, language="ta")
+        lib = make_library(scratch)
+        by_id = {c.collection_id: c.languages for c in lib.collections_for_channel(a.scope)}
+        assert sorted(by_id.values()) == [(), ("en", "mr")]
+        assert [c.languages for c in lib.collections_for_channel(b.scope)] == [("ta",)]
+    finally:
+        a.conn.close()
+        b.conn.close()

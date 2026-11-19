@@ -2,7 +2,7 @@
 
 The global allow-list (PR #98) registers 31 names; ``agent_registry`` takes those from the
 global loader and uses this module's TEST models only for the names the allow-list does not
-register (agent_16 gate/score/authorisation outputs, svc_s02.*, svc_s07.request_approval.*)."""
+register (agent_16 gate/score/authorisation outputs, svc_s02.*)."""
 
 from pydantic import BaseModel, ConfigDict
 
@@ -81,18 +81,15 @@ OPEN_OUTPUTS = (
     "agent_16.quality_score.output",
     "agent_16.publication_authorisation.output",
     "svc_s02.uniqueness_check.output",
-    "svc_s07.request_approval.input",
-    "svc_s07.request_approval.output",
 )
 
 
 def agent_registry(*, real_outputs: bool = True) -> PayloadSchemaRegistry:
     """The GLOBAL allow-listed payload models (``load_payload_schema_plugins``, PR #98) wherever
     the name is registered there, and the TEST models of this module ONLY for the names that are
-    not registered globally (agent_16 gate/score/authorisation outputs, ``svc_s02.*``,
-    ``svc_s07.request_approval.*``). With ``real_outputs=False`` (stand-in workers) the outputs
-    of every stage use the permissive model instead, because the stand-ins return only the fields
-    the downstream builders read."""
+    not registered globally (agent_16 gate/score/authorisation outputs, ``svc_s02.*``).
+    With ``real_outputs=False`` (stand-in workers) the outputs of every stage use the permissive
+    model instead, because the stand-ins return only the fields the downstream builders read."""
     glob = PayloadSchemaRegistry()
     load_payload_schema_plugins(glob)
     reg = PayloadSchemaRegistry()

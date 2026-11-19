@@ -369,6 +369,11 @@ def intake(
         owner_topic=topic,
         currency=currency,
         channel_category=category,
+        channel_category_row=(
+            channel_category
+            if isinstance(channel_category, str) and channel_category.strip()
+            else None
+        ),
     )
 
 

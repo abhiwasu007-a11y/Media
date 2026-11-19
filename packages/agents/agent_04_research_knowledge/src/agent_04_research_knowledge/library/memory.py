@@ -57,11 +57,25 @@ class InMemoryKnowledgeLibrary:
     def collections_for_channel(self, scope: TenantScope) -> Sequence[CollectionView]:
         return sorted(
             (
-                v
+                replace(v, languages=self._languages(scope, v.collection_id))
                 for (o, c, _), v in self._collections.items()
                 if (o, c) == (scope.org_id, scope.channel_id)
             ),
             key=lambda v: v.collection_key,
+        )
+
+    def _languages(self, scope: TenantScope, collection_id: str) -> tuple[str, ...]:
+        """The SQL ``array_agg(DISTINCT language)`` over the collection's INDEXED sources."""
+        return tuple(
+            sorted(
+                {
+                    s.language
+                    for s in self._sources.values()
+                    if (s.org_id, s.channel_id, s.collection_id)
+                    == (scope.org_id, scope.channel_id, collection_id)
+                    and s.status is KnowledgeSourceStatus.INDEXED
+                }
+            )
         )
 
     def get_source(self, scope: TenantScope, source_id: str) -> SourceView | None:

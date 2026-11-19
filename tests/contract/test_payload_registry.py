@@ -196,11 +196,10 @@ REGISTERED = frozenset(
         "agent_16.quality_score.input", "agent_16.quality_score.output",
         "agent_16.publication_authorisation.input", "agent_16.publication_authorisation.output",
         "svc_s02.uniqueness_check.input", "svc_s02.uniqueness_check.output",
+        "svc_s07.request_approval.input", "svc_s07.request_approval.output",
     }
 )  # fmt: skip
 NOT_REGISTERED = (  # no model pairs the name with a payload yet: the executor refuses them
-    "svc_s07.request_approval.input",
-    "svc_s07.request_approval.output",
     "agent_12.metadata.input",
     "agent_12.metadata.output",
 )
@@ -210,7 +209,7 @@ def test_default_allow_list_loads_every_agent_package_and_pins_the_schema_names(
     reg = PayloadSchemaRegistry()
     loaded = load_payload_schema_plugins(reg)
     assert loaded == tuple(sorted(PAYLOAD_PLUGIN_PACKAGES))
-    assert len(loaded) == 11
+    assert len(loaded) == 12
     assert reg.names() == REGISTERED
 
 
@@ -219,6 +218,8 @@ def test_allow_list_namespaces_match_the_package_and_are_read_only() -> None:
         assert namespace.startswith(("agent_", "svc_s")) and not namespace.endswith(".")
         if namespace == "svc_s02":  # CCR-282 provisional default: S2 is hosted by Agent 16
             assert package == "agent_16_compliance_qa.svc_s02"
+        elif namespace == "svc_s07":  # CCR-282 clause 1 / CCR-283: the ApprovalWorker's package
+            assert package == "amw_orchestrator"
         else:
             assert package.startswith((namespace, "amw_delivery"))  # agent_13: amw_delivery
     with pytest.raises(TypeError):
@@ -281,8 +282,18 @@ def test_agent_16_cannot_register_into_the_svc_s02_namespace_nor_s02_into_agent_
     assert reg.names() == frozenset()
 
 
-def test_svc_s07_has_no_owner_and_no_model_until_its_schema_is_defined() -> None:
-    assert "svc_s07" not in PAYLOAD_PLUGIN_PACKAGES.values()  # CCR-283: not defined, fail closed
+def test_svc_s07_is_owned_by_the_orchestrator_and_only_by_it() -> None:
+    """CCR-282 clause 1 + CCR-283 (PROVISIONAL): ``amw_orchestrator`` registers ``svc_s07.*``; no
+    other package may, and the orchestrator may register nothing outside its namespace."""
+    assert {p for p, n in PAYLOAD_PLUGIN_PACKAGES.items() if n == "svc_s07"} == {"amw_orchestrator"}
     reg = PayloadSchemaRegistry()
+    with pytest.raises(ConfigInvalidError):
+        load_payload_schema_plugins(reg, {"amw_orchestrator": "agent_16"})
+    with pytest.raises(ConfigInvalidError):
+        load_payload_schema_plugins(reg, {"agent_16_compliance_qa": "svc_s07"})
+    assert reg.names() == frozenset()
     load_payload_schema_plugins(reg)
-    assert not any(n.startswith("svc_s07.") for n in reg.names())
+    assert {n for n in reg.names() if n.startswith("svc_s07.")} == {
+        "svc_s07.request_approval.input",
+        "svc_s07.request_approval.output",
+    }

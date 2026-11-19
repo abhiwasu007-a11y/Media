@@ -118,15 +118,18 @@ PAYLOAD_PLUGIN_PACKAGES: Final[Mapping[str, str]] = MappingProxyType(
         "agent_16_compliance_qa": "agent_16",
         "agent_16_compliance_qa.svc_s02": "svc_s02",
         "amw_delivery": "agent_13",
+        "amw_orchestrator": "svc_s07",
     }
 )
 """The fixed allow-list of ``package -> schema namespace`` whose ``<package>.payloads.register
 (registrar)`` the loader runs, each bound to its own namespace (``agent_07_voice_production`` ->
 ``agent_07``). The shared-service namespace ``svc_s02`` is provisionally owned by Agent 16
 (CCR-282): its entry names the sub-package ``agent_16_compliance_qa.svc_s02``, whose ``payloads``
-module registers ``svc_s02.*`` only. Nothing outside this table is imported (no entry points,
-no configuration). A new agent package adds its own line here together with its
-``payloads.py``; each plugin registers only schemas for which its package holds a model."""
+module registers ``svc_s02.*`` only; ``svc_s07`` is provisionally owned by ``amw_orchestrator``
+(its ``ApprovalWorker``; CCR-282 clause 1, schemas of CCR-283). Nothing outside this table is
+imported (no entry points, no configuration). A new agent package adds its own line here
+together with its ``payloads.py``; each plugin registers only schemas for which its package holds
+a model."""
 
 
 class PayloadRegistrar:

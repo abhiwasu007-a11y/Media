@@ -19,12 +19,11 @@ from amw_orchestrator.registry import job_graph
 from tests.dryrun.real_world import FACTORIES, LazyWorker
 from tests.orchestrator.agent_schemas import INPUTS, OUTPUTS, Open
 from tests.orchestrator.test_dryrun_builders import (
-    ApprovingDesk,
     RuntimeFacts,
     StandIns,
     _Clock,
 )
-from tests.orchestrator.world import LONG, Rig, build_rig
+from tests.orchestrator.world import LONG, Rig, TestDesk, build_rig
 
 
 class HybridRegistry:
@@ -50,10 +49,9 @@ class HybridRegistry:
 
 
 def hybrid_schemas(real: set[str]) -> PayloadSchemaRegistry:
-    """The GLOBAL registry of PR #98 (36 names), nothing added. Outputs of the stages served by
+    """The GLOBAL registry (38 names: CCR-283 adds ``svc_s07.request_approval.*``), nothing added. Outputs of the stages served by
     stand-ins use the permissive model (they carry only what the downstream builders read); the
-    outputs of the REAL stages (and agent_13) use the registered model. ``svc_s07.request_approval.*``
-    is not in the global registry and is NOT registered here: the driver fails ``a_final`` with it."""
+    outputs of the REAL stages (agent_13 and the ``ApprovalWorker`` included) use the registered model."""
     glob = PayloadSchemaRegistry()
     load_payload_schema_plugins(glob)
     reg = PayloadSchemaRegistry()
@@ -61,7 +59,10 @@ def hybrid_schemas(real: set[str]) -> PayloadSchemaRegistry:
         known = INPUTS.get(name) or OUTPUTS.get(name)
         found = glob.resolve(name, known[0] if known else "1.0.0")
         task_type = name.rsplit(".", 1)[0]
-        stand_in = task_type not in real and task_type != "agent_13.file_delivery"
+        stand_in = task_type not in real and task_type not in (
+            "agent_13.file_delivery",
+            "svc_s07.request_approval",
+        )  # the delivery stage and the ApprovalWorker are the real ones
         reg.register(
             name, found.version, Open if name.endswith(".output") and stand_in else found.model
         )
@@ -144,58 +145,13 @@ def put_doc(storage: LocalDiskStorage, org: str, name: str, doc: Mapping[str, An
     return DocRef(str(info.uri), info.sha256)
 
 
-def run_tail(res: Result, approval_id: str) -> dict[str, Any]:
-    """Run the stages BEHIND the approval (``s16_auth``, ``s13_deliver``) through the driver's own
-    executor, builders and build services, with an ``a_final`` output made by the real
-    ``ApprovalWorker`` (APPROVED) WITHOUT registering any ``svc_s07.request_approval`` schema: the
-    driver cannot get past ``a_final`` without that registration, which is reported as a break."""
-    from amw_core.enums import TaskState
-    from amw_core.ids import ATTEMPT, TASK
-    from amw_orchestrator.driver import _RunServices
-    from amw_orchestrator.executor import BuildContext, _approval_output
-    from amw_orchestrator.outputs import now_z
-
-    runner, report, job = res.rig.runner, res.report, res.job
-    upstream = {
-        sid: r.output
-        for sid, r in report.stages.items()
-        if "#" not in sid and r.output is not None and r.state is TaskState.COMPLETED
-    }
-    upstream["a_final"] = _approval_output(
-        "SUCCEEDED", {"state": "APPROVED", "approval_id": approval_id}, now_z()
-    )
-    task_ids = {sid: r.task_id for sid, r in report.stages.items() if "#" not in sid}
-    graph = {s.stage_id: s for s in job_graph(LONG)}
-    results: dict[str, Any] = {}
-    for sid in ("s16_auth", "s13_deliver"):
-        stage = graph[sid]
-        tid = str(TASK.new())
-        bc = BuildContext(
-            job=job, stage=stage, task_id=tid, iteration=0, attempt_no=1,
-            idempotency_key="idk_" + "d" * 64, resource_budget=runner._budgets.budget_for(stage),
-            upstream=upstream, upstream_task_ids=task_ids,
-            services=_RunServices(runner._io, runner._ctx(job), runner._build_services),
-        )  # fmt: skip
-        try:
-            prepared = runner._x.prepare(bc, str(ATTEMPT.new()))
-            out = runner._x.run(prepared)
-        except Exception as exc:
-            results[sid] = exc
-            break
-        results[sid] = out
-        if out.status.value != "SUCCEEDED":
-            break
-        upstream[sid] = out
-    return results
-
-
 def run_hybrid(
     dsn: str,
     tmp: Path,
     *,
     real: set[str],
     approve: bool = True,
-    max_attempts: int = 1,
+    max_attempts: int = 2,  # the resume of the suspended approval task is its second attempt
     language: str = "en-IN",
     options: Mapping[str, Any] | None = None,
 ) -> Result:
@@ -217,9 +173,11 @@ def run_hybrid(
     rig = build_rig(
         dsn, tmp / "blobs", registry_factory=factory,
         schemas=hybrid_schemas(real),
-        build_services=RuntimeFacts(), desk=ApprovingDesk(), max_attempts=max_attempts,
+        build_services=RuntimeFacts(), desk=TestDesk(), max_attempts=max_attempts,
     )  # fmt: skip
     base = intake_job(rig, language)
+    if "channel_category_label" in shared:  # the value the channel row stores (CCR-288)
+        base = replace(base, channel_category_row=str(shared["channel_category_label"]))
     org = base.org_id
     storage = rig.storage
     docs = JobDocuments(

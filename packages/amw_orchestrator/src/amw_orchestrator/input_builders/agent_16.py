@@ -16,7 +16,7 @@ from typing import Any
 
 from amw_core.enums import ContextRefPurpose
 from amw_core.errors import InputInvalidError, MissingDependencyError
-from amw_orchestrator.executor import BuildContext, BuiltInput, DocRef
+from amw_orchestrator.executor import BuildContext, BuiltInput, ChannelCategory, DocRef, JobFacts
 from amw_orchestrator.input_builders import common as c
 from amw_orchestrator.input_builders.settings import BuilderSettings
 
@@ -115,7 +115,7 @@ class ComplianceGateBuilder:
         data = {
             "subject": _subject(ctx),
             "iteration": ctx.iteration,
-            "channel_category": job.channel_category.value,
+            "channel_category": _channel_category(job),
             "production_type_key": job.production_type_key.value,
             "destination_kinds": list(self._s.destination_kinds),
             "evaluate_as_destination": self._s.evaluate_as_destination,
@@ -129,6 +129,23 @@ class ComplianceGateBuilder:
             "inputs": {**{k: c.as_wire(v) for k, v in refs.items()}, "metadata_ref": None},
         }
         return BuiltInput(GATE_SCHEMA, "1.0.0", data, tuple(_common_refs(ctx)))
+
+
+def _channel_category(job: JobFacts) -> str:
+    """CCR-288 (PROVISIONAL): the gate compares this value for equality with ``channels.category``
+    as the row stores it, so the builder sends the row value when the job carries it, else the
+    resolved label. The row value never changes what the job is: finance-ness stays the resolved
+    ``job.channel_category``; a row that says ``finance`` on a job resolved as non-finance is
+    refused (a finance channel must never look non-finance)."""
+    row = job.channel_category_row
+    if row is None:
+        return job.channel_category.value
+    if not job.finance_rules_apply and row.strip().lower() == ChannelCategory.FINANCE.value:
+        raise InputInvalidError(
+            "the channel row says finance but the job is resolved as non-finance",
+            details={"field": "channel_category"},
+        )
+    return row
 
 
 class QualityScoreBuilder:

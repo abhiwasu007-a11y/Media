@@ -230,3 +230,40 @@ def test_no_builder_imports_an_agent_package() -> None:
                 else []
             )
             assert not any(n.startswith(("agent_", "amw_delivery")) for n in names), path.name
+
+
+# --- CCR-288 PROVISIONAL: agent_16 compares the category with the channel row as stored ----------
+def _gate_category(jb: Any) -> str:
+    return str(_data(World(jb).ctx("s16_comp"))["channel_category"])
+
+
+def test_the_gate_gets_the_resolved_label_when_the_row_value_is_not_known() -> None:
+    assert _gate_category(job()) == "non_finance"
+    assert _gate_category(finance_job()) == "finance"
+
+
+@pytest.mark.parametrize("row", ["philosophy", "non-finance", "non_finance", "Philosophy "])
+def test_the_gate_gets_the_channel_row_value_verbatim_for_a_non_finance_job(row: str) -> None:
+    assert _gate_category(replace(job(), channel_category_row=row)) == row
+
+
+def test_the_row_value_never_changes_what_the_job_is() -> None:
+    """A finance job whose row stores free text still has the finance pack and finance wording."""
+    fj = replace(finance_job(), channel_category_row="philosophy")
+    assert _gate_category(fj) == "philosophy"
+    assert _data(World(fj).ctx("s05_script"))["active_rule_packs"] == [
+        "rp.youtube_general",
+        "rp.finance_sebi_in",
+    ]
+    assert fj.finance_rules_apply is True
+
+
+@pytest.mark.parametrize("row", ["finance", "Finance", " FINANCE "])
+def test_a_finance_row_on_a_non_finance_job_is_refused(row: str) -> None:
+    """A finance channel must never look non-finance: the contradiction is refused, not sent."""
+    with pytest.raises(InputInvalidError):
+        BuilderTable().build(World(replace(job(), channel_category_row=row)).ctx("s16_comp"))
+
+
+def test_a_finance_row_on_a_finance_job_is_sent() -> None:
+    assert _gate_category(replace(finance_job(), channel_category_row="finance")) == "finance"

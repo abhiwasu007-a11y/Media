@@ -312,8 +312,30 @@ class FakeRegistry:
         return self.builder
 
 
+def approval_output(
+    subject_sha256: str,
+    *,
+    kind: str = "FINAL_VIDEO",
+    state: str = "APPROVED",
+    target_stage: str | None = None,
+) -> dict[str, object]:
+    """An ``svc_s07.request_approval.output`` document in the CCR-283 PROVISIONAL shape."""
+    from amw_core.ids import APPROVAL, OWNER_EVIDENCE
+
+    owner = state in {"APPROVED", "REJECTED", "CHANGES_REQUESTED"}
+    return {
+        "approval_id": str(APPROVAL.new()),
+        "approval_kind": kind,
+        "state": state,
+        "subject_sha256": subject_sha256,
+        "evidence_ids": [str(OWNER_EVIDENCE.new())] if owner else [],
+        "parsed_target_stage_id": target_stage,
+    }
+
+
 class TestDesk:
-    """S7 stand-in: the owner's decision exists only after ``decide`` (test of the boundary)."""
+    """S7 stand-in: the owner's decision exists only after ``decide`` (test of the boundary). Its
+    payloads have the CCR-283 shape (a real approval ID and confirmed-evidence ID per decision)."""
 
     __test__ = False
 
@@ -321,13 +343,27 @@ class TestDesk:
         self.state = state
         self.opened: list[str] = []
         self.decisions: set[str] = set()
+        self.last_subject_sha256: str | None = None
+
+    def _payload(self, task_input: TaskInput, state: str) -> dict[str, object]:
+        data = task_input.payload.data or {}
+        subject = data.get("subject") or {}
+        self.last_subject_sha256 = str(subject.get("sha256", "0" * 64))
+        return approval_output(
+            self.last_subject_sha256,
+            kind=str(data.get("approval_kind", "FINAL_VIDEO")),
+            state=state,
+            target_stage="s05_script" if state == "CHANGES_REQUESTED" else None,
+        )
 
     def open(self, task_input: TaskInput, ctx: ExecContext) -> Mapping[str, object]:
         self.opened.append(str(ctx.task_id))
-        return {"state": "OPEN"}
+        return self._payload(task_input, "PENDING")
 
     def decision(self, task_input: TaskInput, ctx: ExecContext) -> Mapping[str, object] | None:
-        return {"state": self.state} if str(ctx.task_id) in self.decisions else None
+        if str(ctx.task_id) not in self.decisions:
+            return None
+        return self._payload(task_input, self.state)
 
     def decided(self, job_id: str, task_id: str) -> bool:
         return task_id in self.decisions
