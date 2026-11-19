@@ -581,3 +581,14 @@ def test_currency_without_exponent_entry_fails_closed_config_invalid() -> None:
     with pytest.raises(ConfigInvalidError):
         limit_micros(replace(row, currency="EUR"), settings())  # INR / USD listed, EUR not
     assert limit_micros(row, settings()) == 500 * 10_000
+
+
+@pytest.mark.parametrize("exponent", [7, -1, True, 100])
+def test_limit_micros_refuses_an_exponent_outside_zero_to_six(exponent: int) -> None:
+    from amw_core.budget_guard.core import limit_micros
+
+    base = settings()
+    fin = base.finance.model_copy(update={"currency_minor_exponent": {"INR": exponent}})
+    bad = base.model_copy(update={"finance": fin})
+    with pytest.raises(ConfigInvalidError):
+        limit_micros(budget(ORG.new(), BudgetPeriod.PILOT_TOTAL, 5), bad)

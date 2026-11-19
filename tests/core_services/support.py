@@ -6,7 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from amw_core.budget_guard import BudgetGuardCore, JobScope, MemoryBudgetBackend
-from amw_core.config import AmwSettings, load_settings
+from amw_core.config import AmwSettings, FinanceSettings, load_settings
 from amw_core.cost import MemoryCostLedger
 from amw_core.enums import (
     BudgetPeriod,
@@ -67,7 +67,7 @@ def settings(**finance: object) -> AmwSettings:
     """Settings with the INR / USD minor-unit exponents a test needs, loaded from the config
     data fixture (the code itself has no default for ``finance.currency_minor_exponent``)."""
     base = load_settings(environ={}, config_file=CURRENCY_EXPONENT_FIXTURE)
-    fin = base.finance.model_copy(update=finance)
+    fin = FinanceSettings.model_validate({**base.finance.model_dump(), **finance})
     return base.model_copy(update={"finance": fin})
 
 
