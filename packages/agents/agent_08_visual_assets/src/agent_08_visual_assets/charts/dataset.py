@@ -5,7 +5,8 @@ Format: UTF-8 CSV with header ``date,open,high,low,close`` (extra columns are ig
 carry an ISO date; a row with a clock time is refused as intraday, which the chart path does not
 support). The loader verifies the SHA-256 against the registered hash before parsing (S-06),
 requires ISO dates in strictly ascending order and decimal prices with no empty cell, NaN or
-infinity, no row longer than the header, and a bounded number of bars. Decimals only: no float ever touches a price.
+infinity, no row longer than the header, and a bounded number of bars. Decimals only: no float
+ever touches a price.
 """
 
 import csv
