@@ -73,3 +73,44 @@ def test_bad_name_is_refused() -> None:
 
 def test_process_registry_starts_without_invented_schemas() -> None:
     assert NAME not in PAYLOAD_SCHEMAS.names()
+
+
+class _Point:
+    """An entry point stand-in (name + load)."""
+
+    def __init__(self, name: str, fn: object) -> None:
+        self.name = name
+        self._fn = fn
+
+    def load(self) -> object:
+        return self._fn
+
+
+def test_plugins_register_schemas_at_startup() -> None:
+    from amw_core.contracts.payloads import load_payload_schema_plugins
+
+    r = PayloadSchemaRegistry()
+
+    def plugin(registry: PayloadSchemaRegistry) -> None:
+        registry.register(NAME, "1.0.0", Thing)
+
+    loaded = load_payload_schema_plugins(r, [_Point("agent_99", plugin)])  # type: ignore[list-item]
+    assert loaded == ("agent_99",)
+    assert r.validate(NAME, "1.0.0", {"topic": "t"})
+
+
+def test_failing_plugin_is_a_startup_error_not_a_silent_skip() -> None:
+    from amw_core.contracts.payloads import load_payload_schema_plugins
+    from amw_core.errors import ConfigInvalidError
+
+    def broken(registry: PayloadSchemaRegistry) -> None:
+        raise RuntimeError("boom")
+
+    with pytest.raises(ConfigInvalidError):
+        load_payload_schema_plugins(PayloadSchemaRegistry(), [_Point("a", broken)])  # type: ignore[list-item]
+
+
+def test_no_plugins_installed_loads_nothing() -> None:
+    from amw_core.contracts.payloads import load_payload_schema_plugins
+
+    assert load_payload_schema_plugins(PayloadSchemaRegistry(), []) == ()

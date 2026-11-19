@@ -42,13 +42,17 @@ class FakeTtsAdapter:
         ),
         failures: FailurePlan | None = None,
         fixtures: FixtureStore | None = None,
-        pace_control: ControlSupport = ControlSupport.NATIVE,
-        emotion_control: ControlSupport = ControlSupport.NATIVE,
+        pace_control: ControlSupport = ControlSupport.NONE,
+        emotion_control: ControlSupport = ControlSupport.NONE,
         max_chars_per_request: int | None = None,
+        phoneme_support: bool = False,
+        markup_delimiters: tuple[str, ...] = (),
     ) -> None:
         self._pace_control = pace_control
         self._emotion_control = emotion_control
         self._max_chars = max_chars_per_request
+        self._phoneme_support = phoneme_support
+        self._markup_delimiters = markup_delimiters
         self._provider = fake_provider(provider)
         self._currency = currency
         self._price = price_micros_per_character
@@ -64,9 +68,10 @@ class FakeTtsAdapter:
         return TtsCapabilities(
             pace_control=self._pace_control,
             emotion_control=self._emotion_control,
-            phoneme_support=True,
+            phoneme_support=self._phoneme_support,
             languages=tuple(languages),
             max_chars_per_request=self._max_chars,
+            markup_delimiters=self._markup_delimiters,
         )
 
     def synthesize(self, request: TtsRequest, *, idempotency_key: str) -> TtsResult:

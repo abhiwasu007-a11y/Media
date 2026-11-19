@@ -181,9 +181,18 @@ def test_tts_capabilities_and_style_controls() -> None:
     from amw_adapters.tts import ControlSupport, TtsEmotion, TtsPace
     from amw_core.errors import InputInvalidError
 
-    full = FakeTtsAdapter()
+    default = FakeTtsAdapter()
+    assert default.capabilities().pace_control is ControlSupport.NONE  # conservative default
+    assert default.capabilities().emotion_control is ControlSupport.NONE
+    assert default.capabilities().phoneme_support is False
+    full = FakeTtsAdapter(
+        pace_control=ControlSupport.NATIVE,
+        emotion_control=ControlSupport.NATIVE,
+        markup_delimiters=("[", "]"),
+    )
     caps = full.capabilities()
     assert caps.pace_control is ControlSupport.NATIVE
+    assert caps.markup_delimiters == ("[", "]")
     assert caps.languages == ("en", "hi", "mr")
     styled = TtsRequest(
         text="x",

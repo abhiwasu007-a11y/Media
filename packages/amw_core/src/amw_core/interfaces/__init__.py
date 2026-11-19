@@ -11,7 +11,13 @@ from amw_core.interfaces.budget_guard import (
     ReservationOutcome,
 )
 from amw_core.interfaces.checkpoint_store import CheckpointRecord, CheckpointStore, NewCheckpoint
-from amw_core.interfaces.claims import CitationRow, ClaimStatusUpdate, ClaimStore, NewClaim
+from amw_core.interfaces.claims import (
+    CitationRow,
+    ClaimStatusUpdate,
+    ClaimStore,
+    NewClaim,
+    RuleFlag,
+)
 from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.cost_ledger import CostEntry, CostLedger, CostTotals, NewCostEntry
 from amw_core.interfaces.idempotency_store import (
@@ -130,6 +136,7 @@ __all__ = [
     "ReadableStream",
     "Reservation",
     "ReservationOutcome",
+    "RuleFlag",
     "ScriptRegistry",
     "SessionEvent",
     "SessionEventSource",

@@ -12,15 +12,21 @@ name whose registered major differs, or a requested minor newer than the registe
 carries only field locations and error types, never the offending values.
 """
 
+import importlib.metadata
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from importlib.metadata import EntryPoint
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from amw_core.contracts.common import SchemaName, Semver
-from amw_core.errors import SchemaInvalidError, SchemaVersionUnsupportedError
+from amw_core.errors import (
+    ConfigInvalidError,
+    SchemaInvalidError,
+    SchemaVersionUnsupportedError,
+)
 
 _SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 _NAME = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)+$")
@@ -99,9 +105,43 @@ def register_payload_schema(name: SchemaName, version: Semver, model: type[BaseM
     PAYLOAD_SCHEMAS.register(name, version, model)
 
 
+ENTRY_POINT_GROUP = "amw.payload_schemas"
+"""Python entry-point group an agent package declares in its ``pyproject.toml`` to register its
+payload schemas: ``[project.entry-points."amw.payload_schemas"]`` ``agent_07 =
+"agent_07_voice_production.payloads:register"``, a ``register(registry)`` function that calls
+``registry.register(name, version, model)`` for each schema it owns. ``amw_core`` never imports an
+agent (layering); the orchestrator calls ``load_payload_schema_plugins`` once at start-up."""
+
+
+def load_payload_schema_plugins(
+    registry: PayloadSchemaRegistry = PAYLOAD_SCHEMAS,
+    entry_points: Iterable[EntryPoint] | None = None,
+) -> tuple[str, ...]:
+    """Run every registered plugin against ``registry``; returns the plugin names loaded. A
+    plugin that fails to load or register is a start-up error (``ConfigInvalidError``): a missing
+    schema must never silently disable payload validation."""
+    found = (
+        tuple(entry_points)
+        if entry_points is not None
+        else tuple(importlib.metadata.entry_points(group=ENTRY_POINT_GROUP))
+    )
+    loaded: list[str] = []
+    for point in sorted(found, key=lambda e: e.name):
+        try:
+            point.load()(registry)
+        except Exception as exc:
+            raise ConfigInvalidError(
+                "a payload schema plugin failed", details={"plugin": point.name}
+            ) from exc
+        loaded.append(point.name)
+    return tuple(loaded)
+
+
 __all__ = [
+    "ENTRY_POINT_GROUP",
     "PAYLOAD_SCHEMAS",
     "PayloadSchemaRegistry",
     "RegisteredPayloadSchema",
+    "load_payload_schema_plugins",
     "register_payload_schema",
 ]

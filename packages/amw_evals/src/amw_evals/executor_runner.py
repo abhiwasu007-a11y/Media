@@ -26,6 +26,11 @@ type Executor = Callable[[JsonObject], object]
 PROVIDER = "executor"
 
 
+class ExecutorCaseError(ValueError):
+    """A case cannot be run as written (its ``input`` is missing or not an object): the run is
+    refused, never silently run with an empty input."""
+
+
 def run_executor_eval(
     dataset: Path,
     executor: Executor,
@@ -33,17 +38,23 @@ def run_executor_eval(
     dataset_id: str,
     output_schema: JsonObject | None = None,
     records_out: Path | None = None,
+    currency: str | None = None,
 ) -> tuple[list[JsonObject], RunSummary]:
-    """Run every case of ``dataset/cases.jsonl`` through ``executor``."""
+    """Run every case of ``dataset/cases.jsonl`` through ``executor``. ``currency`` (from config,
+    ``finance``) is recorded as given; the run costs nothing. A case whose ``input`` is not an
+    object refuses the whole run (``ExecutorCaseError``)."""
     cases, errors = load_cases(dataset / "cases.jsonl")
     if errors:
         raise ValueError(f"cases.jsonl has {len(errors)} unreadable line(s); run the lint first")
     thresholds = parse_thresholds(dataset / "README.md")
+    bad = [str(c.get("case_id")) for c in cases if not isinstance(c.get("input"), dict)]
+    if bad:
+        raise ExecutorCaseError(f"case input is missing or not an object: {', '.join(bad[:10])}")
     run_id = "run_" + uuid.uuid4().hex
     records: list[JsonObject] = []
     for case in cases:
         raw_in, raw_exp = case.get("input"), case.get("expected")
-        payload: JsonObject = raw_in if isinstance(raw_in, dict) else {}
+        payload: JsonObject = raw_in if isinstance(raw_in, dict) else {}  # checked above
         expected: JsonObject = raw_exp if isinstance(raw_exp, dict) else {}
         started = datetime.now(UTC)
         t0 = perf_counter()
@@ -70,7 +81,7 @@ def run_executor_eval(
                 "tokens_out": 0,
                 "tokens_cached_in": 0,
                 "cost_micros": 0,
-                "currency": "USD",
+                "currency": currency,
                 "latency_ms": latency_ms,
                 "started_at": started.isoformat(),
                 "figure_kind": "ESTIMATE",
@@ -88,4 +99,4 @@ def run_executor_eval(
     return records, summary
 
 
-__all__ = ["Executor", "run_executor_eval"]
+__all__ = ["Executor", "ExecutorCaseError", "run_executor_eval"]

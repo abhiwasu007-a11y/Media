@@ -3,7 +3,9 @@
 import json
 from pathlib import Path
 
-from amw_evals.executor_runner import run_executor_eval
+import pytest
+
+from amw_evals.executor_runner import ExecutorCaseError, run_executor_eval
 from amw_evals.findings import JsonObject
 
 
@@ -69,3 +71,32 @@ def test_unreadable_cases_refuse_the_run(tmp_path: Path) -> None:
     (d / "cases.jsonl").write_text("{bad\n", encoding="utf-8")
     with pytest.raises(ValueError, match="unreadable"):
         run_executor_eval(d, upper, dataset_id="det")
+
+
+@pytest.mark.parametrize("bad_input", [None, "text", [1], 5])
+def test_case_input_that_is_not_an_object_refuses_the_run(
+    tmp_path: Path, bad_input: object
+) -> None:
+    good = case("A-1", "a", "b")
+    bad: dict[str, object] = {
+        "case_id": "A-2",
+        "category": "EDGE",
+        "input": bad_input,
+        "expected": {},
+    }
+    d = dataset(tmp_path, [good, bad], "")
+    with pytest.raises(ExecutorCaseError, match="A-2"):
+        run_executor_eval(d, upper, dataset_id="det")
+    no_input: dict[str, object] = {"case_id": "A-3", "category": "EDGE", "expected": {}}
+    (tmp_path / "x").mkdir()
+    d2 = dataset(tmp_path / "x", [no_input], "")
+    with pytest.raises(ExecutorCaseError, match="A-3"):
+        run_executor_eval(d2, upper, dataset_id="det")
+
+
+def test_currency_is_recorded_as_given_not_invented(tmp_path: Path) -> None:
+    d = dataset(tmp_path, [case("A-1", "a", "b")], "")
+    records, _ = run_executor_eval(d, upper, dataset_id="det")
+    assert records[0]["currency"] is None
+    records, _ = run_executor_eval(d, upper, dataset_id="det", currency="XXX")
+    assert records[0]["currency"] == "XXX"

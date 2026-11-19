@@ -52,6 +52,9 @@ class TtsCapabilities(AdapterModel):
     phoneme_support: bool
     languages: tuple[str, ...]
     max_chars_per_request: Annotated[int, Field(ge=1)] | None
+    markup_delimiters: tuple[str, ...] = ()
+    """Provider markup delimiters beyond ``< > &`` that the caller must escape in script text
+    (agent 07 blueprint 6.3 step 4); empty = none beyond the XML-significant three."""
 
 
 class TtsRequest(AdapterModel):
