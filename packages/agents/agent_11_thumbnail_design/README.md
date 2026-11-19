@@ -101,7 +101,7 @@ Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deploym
   `sha256`; it gets no fallback (its coverage and licence stay exactly what the tenant registered).
 - **Break 14 of the dry run ("boxes" in the thumbnail):** the three outlined rectangles right of the Marathi title were the code-drawn neutral
   glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Owner decision D11 item 4
-  (Q-O30, ticket PASS6-L) replaced it by `g1_rsi_line` (axes, two dashed guide lines, one oscillating line). The line has slopes, so the glyph is NOT on the finance neutral allow-list until the owner answers Q-O31; on finance channels the picture is then another neutral glyph or none (text only). Regression tests in
+  (Q-O30, ticket PASS6-L) replaced it by `g1_rsi_line` (axes, two dashed guide lines, one oscillating line). The line has slopes, so the glyph is NOT on the finance neutral allow-list. Owner decision D13 item 3 (Q-O31, 2026-11-19): no directional or RSI icon on finance thumbnails, the strict direction check stays, and finance thumbnails use no icon by default: a finance channel gets text only (`FINANCE_NO_ICON`) unless a glyph is on the neutral allow-list AND a template explicitly requests it (`requested_glyphs`); `g1_rsi_line` and `g2_arrow` are never offered there (`FINANCE_DIRECTION`). Other channels may use any glyph per their rule pack. Regression tests in
   `tests/agents/agent_11_thumbnail_design/test_brand_fonts.py` prove no `.notdef` for Marathi title and subject words (cmap and pixels) and
   that the subject area does not depend on the font.
 

@@ -103,6 +103,47 @@ def test_finance_never_gets_a_directional_glyph_and_falls_back_to_text_only() ->
     assert {e.reason for e in opts.excluded} == {"FINANCE_DIRECTION"}
 
 
+def _finance_opts(keys: set[str], *, finance: bool, requested: frozenset[str] = frozenset()):  # type: ignore[no-untyped-def]
+    from agent_11_thumbnail_design.subject_options import PictureBuildConfig, build_picture_options
+
+    return build_picture_options(
+        assets=[],
+        glyphs=[g.facts() for g in glyph_catalogue() if g.key in keys],
+        finance=finance,
+        cfg=PictureBuildConfig(min_w=1, min_h=1, faces_allowed=False, chart_still_allowed=False),
+        requested_glyphs=requested,
+    )
+
+
+def test_finance_defaults_to_no_icon_even_for_neutral_glyphs() -> None:
+    opts = _finance_opts({"g3_two_frames", "g4_blocks"}, finance=True)
+    assert [o.kind for o in opts.options] == ["NONE"]
+    assert {e.reason for e in opts.excluded} == {"FINANCE_NO_ICON"}
+
+
+def test_finance_neutral_glyph_only_when_explicitly_requested() -> None:
+    opts = _finance_opts(
+        {"g3_two_frames", "g4_blocks"}, finance=True, requested=frozenset({"g3_two_frames"})
+    )
+    assert [o.key for o in opts.options] == ["g3_two_frames", "none"]
+
+
+def test_finance_refuses_rsi_arrow_and_slopes_even_when_requested() -> None:
+    every = {g.key for g in glyph_catalogue()}
+    opts = _finance_opts(every, finance=True, requested=frozenset(every))
+    offered = {o.key for o in opts.options if o.kind == "CODE_GLYPH"}
+    assert offered == {"g3_two_frames", "g4_blocks"}
+    refused = {e.glyph for e in opts.excluded if e.reason == "FINANCE_DIRECTION"}
+    assert {"g1_rsi_line", "g2_arrow"} <= refused
+    assert all(g.neutral is False for g in glyph_catalogue() if g.key in refused)
+
+
+def test_non_finance_may_use_any_glyph() -> None:
+    every = {g.key for g in glyph_catalogue()}
+    opts = _finance_opts(every, finance=False)
+    assert {o.key for o in opts.options if o.kind == "CODE_GLYPH"} == every
+
+
 def test_templates_are_offered_by_language_and_finance_neutrality() -> None:
     specs = load_templates()
     assert len(offer_templates(specs, finance=True)) == len(specs)
