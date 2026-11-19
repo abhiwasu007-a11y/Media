@@ -1,4 +1,4 @@
-"""Run context, paid-call runner and checkpoints shared by both steps (07 section 10; ADR-007).
+"""Paid-call runner and checkpoints shared by both steps (07 section 10; ADR-007).
 
 ``PaidCallRunner`` is the only place a model is called: budget check (E2) before, the adapter call
 with a ``llm.call`` idempotency key, a cost-ledger row and ``after_call`` (E3) after, a parse into
@@ -26,14 +26,11 @@ from amw_core.errors import (
     LoopCapExceededError,
     OutputSchemaInvalidError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
-    ActorRef,
-    AttemptId,
     ChannelId,
-    CorrelationId,
     IdempotencyKey,
     JobId,
-    OrgId,
     TaskId,
     make_idempotency_key,
 )
@@ -48,27 +45,9 @@ from amw_core.interfaces import (
     NewCheckpoint,
     NewCostEntry,
     TenancyContext,
-    TenantContext,
 )
 
 AGENT_ID = "agent_06"
-
-
-@dataclass(frozen=True, slots=True)
-class RunContext:
-    """What the worker hands a step besides the Task Input."""
-
-    attempt_id: AttemptId
-    stage_id: str
-    iteration: int = 0
-    """The stage's revision counter (V2 check 6); ``None`` is never accepted."""
-
-    def tenant(self, task: TaskInput) -> TenantContext:
-        return TenantContext(
-            org_id=OrgId(task.org_id),
-            actor=ActorRef(AGENT_ID),
-            correlation_id=CorrelationId(task.correlation_id),
-        )
 
 
 @dataclass(slots=True)
@@ -112,7 +91,7 @@ class PaidCallRunner:
         self,
         *,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         usage: UsageTotals,
         step_key: str,
         prompt: RenderedPrompt,
@@ -163,7 +142,7 @@ class PaidCallRunner:
     def _call(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         usage: UsageTotals,
         step_key: str,
         seq: int,
@@ -171,7 +150,7 @@ class PaidCallRunner:
         messages: Sequence[LlmMessage],
         language: str,
     ) -> str:
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         key = make_idempotency_key(task.org_id, "llm.call", [task.task_id, step_key, seq])
         request = LlmRequest(
             model=self._settings.model,
@@ -201,7 +180,7 @@ class PaidCallRunner:
     def _record(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         usage: UsageTotals,
         response: LlmResponse,
         key: IdempotencyKey,
@@ -230,7 +209,7 @@ class PaidCallRunner:
             price_ref=u.price_ref,
             idempotency_key=key,
         )
-        with self._tenancy.transaction(ctx.tenant(task)) as tx:
+        with self._tenancy.transaction(ctx.tenant) as tx:
             row = self._ledger.record(tx, entry)
             self._budget.after_call(tx, row)
         usage.llm_calls += 1
@@ -271,7 +250,7 @@ class StepCheckpoints:
         tenancy: TenancyContext,
         clock: Clock,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
     ) -> None:
         self._store = store
         self._blobs = blobs
@@ -284,7 +263,7 @@ class StepCheckpoints:
         self._effects: list[IdempotencyKey] = []
 
     def load(self) -> dict[str, Any]:
-        tenant = self._ctx.tenant(self._task)
+        tenant = self._ctx.tenant
         with self._tenancy.transaction(tenant) as tx:
             record = self._store.latest(tx, task_key(self._task))
         if record is None:
@@ -305,7 +284,7 @@ class StepCheckpoints:
     def save(self, step_key: str, value: Any, progress: float | None = None) -> None:
         """Record ``value`` under ``step_key`` and write a new checkpoint row."""
         self.state[step_key] = value
-        tenant = self._ctx.tenant(self._task)
+        tenant = self._ctx.tenant
         body = canonical_json(self.state).encode("utf-8")
         job = self._task.job_id
         path = f"{job}/checkpoints/{self._task.task_id}/{self._seq + 1:04d}.json"
