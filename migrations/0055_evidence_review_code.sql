@@ -1,4 +1,4 @@
--- 0052 own review code for evidence without an approval (CCR-116; 04 section 5.16
+-- 0055 own review code for evidence without an approval (CCR-116; 04 section 5.16
 -- owner_instruction_evidence.review_code; 03 section 11.6 rule 7; ticket P4-01).
 -- An OWNER_TOPIC / DATASET_INTAKE evidence, and any other CONTENT / SCORE evidence that has no
 -- approval_id, carries its own review code: the format and alphabet of approvals.review_code

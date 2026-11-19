@@ -1,6 +1,6 @@
 """CCR-116 (ticket P4-01): evidence without an approval gets its own review code from the store,
 unique per org across approval and evidence codes; the confirmation names exactly that code.
-PostgreSQL side: migration 0052, ``tests/tenancy/test_evidence_review_code_db.py``."""
+PostgreSQL side: migration 0055, ``tests/tenancy/test_evidence_review_code_db.py``."""
 
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -145,7 +145,7 @@ def test_refused_row_needs_no_code_and_approval_rows_keep_the_approval_code() ->
 
 def test_approval_bound_evidence_cannot_carry_another_rows_code() -> None:
     """A code resolves to one row: copying an own code (or another approval's) into evidence tied
-    to an approval is refused (0052; the fake models the trigger)."""
+    to an approval is refused (0055; the fake models the trigger)."""
     h, t = harness(), tx()
     h.record(t, topic(review_code="Q9Z3"))
     approval = ids.APPROVAL.new()

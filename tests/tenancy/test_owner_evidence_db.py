@@ -121,7 +121,7 @@ def _insert_evidence(
         **(extra or {}),
     }
     if cols["approval_id"] is not None and "review_code" not in cols and state != "REFUSED":
-        # evidence tied to an approval carries that approval's code (0052)
+        # evidence tied to an approval carries that approval's code (0055)
         row = conn.execute(
             "SELECT review_code FROM approvals WHERE id = %s", (cols["approval_id"],)
         ).fetchone()

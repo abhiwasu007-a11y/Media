@@ -16,7 +16,7 @@ ALPHABET: Final = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 DIGITS: Final = frozenset("23456789")
 MIN_LENGTH: Final = 4
 MAX_LENGTH: Final = 8
-"""Bounds the database enforces for an own code (0052); the configured length is 4 (Q-O11)."""
+"""Bounds the database enforces for an own code (0055); the configured length is 4 (Q-O11)."""
 DEFAULT_LENGTH: Final = 4
 MAX_ATTEMPTS: Final = 64
 
