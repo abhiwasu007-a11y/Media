@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "note": "Provider catalogue: every number is cited to a RESEARCH_LOG id. Prices are integer micros of USD (1 USD = 1,000,000 micros). Values marked ESTIMATE are design defaults, not provider facts.",
+  "anthropic": {
+    "provider": "anthropic",
+    "base_url": "https://api.anthropic.com",
+    "api_version": "2026-10-21",
+    "api_version_source": "PR-08",
+    "currency": "USD",
+    "price_ref": "anthropic-pricing@PR-10",
+    "billed_refusal_categories": ["bio", "frontier_llm", "reasoning_extraction"],
+    "billed_refusal_categories_source": "PR-10",
+    "cache_ttl": "5m",
+    "connect_timeout_ms": 10000,
+    "connect_timeout_source": "ESTIMATE (design default; owner-tunable)",
+    "retry": {
+      "max_in_call_retries": 2,
+      "max_in_call_wait_ms": 30000,
+      "retry_429_without_retry_after": false,
+      "source": "PR-09 (official SDK default: two retries; a 429 without retry-after is a spend cap); max_in_call_wait_ms is ESTIMATE"
+    },
+    "models": {
+      "claude-opus-5-5": {
+        "source": "PR-10",
+        "max_output_tokens": 128000,
+        "prices": [
+          {"max_prompt_tokens": null, "input": 4000000, "cache_write_5m": 5000000, "cache_write_1h": 8000000, "cache_read": 200000, "output": 20000000}
+        ]
+      },
+      "claude-sonnet-5-5": {
+        "source": "PR-10",
+        "max_output_tokens": 128000,
+        "prices": [
+          {"max_prompt_tokens": null, "input": 2000000, "cache_write_5m": 2500000, "cache_write_1h": 4000000, "cache_read": 100000, "output": 10000000}
+        ]
+      },
+      "claude-haiku-5-5": {
+        "source": "PR-10",
+        "max_output_tokens": 128000,
+        "prices": [
+          {"max_prompt_tokens": 100000, "input": 100000, "cache_write_5m": 125000, "cache_write_1h": 200000, "cache_read": 10000, "output": 500000},
+          {"max_prompt_tokens": null, "input": 500000, "cache_write_5m": 625000, "cache_write_1h": 1000000, "cache_read": 50000, "output": 2500000}
+        ]
+      }
+    }
+  },
+  "elevenlabs": {
+    "provider": "elevenlabs",
+    "base_url": "https://api.elevenlabs.io",
+    "currency": "USD",
+    "price_ref": "elevenlabs-api-pricing@PR-12",
+    "character_count_rule": "UNICODE_CODE_POINTS",
+    "character_count_source": "PR-12 (every letter, number, punctuation mark and space; tags count). REQUIRES REVIEW (Phase 1): Devanagari code point vs grapheme counting, compare with the usage export in the pilot",
+    "connect_timeout_ms": 10000,
+    "synthesize_timeout_ms": 120000,
+    "list_timeout_ms": 30000,
+    "connect_timeout_source": "ESTIMATE (design defaults for all three timeouts; owner-tunable)",
+    "list_voices_page_size": 100,
+    "list_voices_max_pages": 10,
+    "list_voices_source": "PR-12 (page_size at most 100); max_pages is ESTIMATE",
+    "retry": {
+      "max_in_call_retries": 2,
+      "max_in_call_wait_ms": 30000,
+      "retry_429_without_retry_after": true,
+      "source": "PR-12 (429 rate_limit_exceeded / concurrent_limit_exceeded: back off and retry); counts and wait are ESTIMATE"
+    },
+    "wav_sample_rates_hz": [8000, 16000, 22050, 24000, 32000, 44100, 48000],
+    "wav_sample_rates_source": "PR-11 (output_format wav_<rate>). REQUIRES REVIEW (Phase 1): plan tier needed for 48 kHz WAV",
+    "forbidden_models": {
+      "eleven_multilingual_v2": "no Marathi (PR-04, PR-11); also the provider default model_id",
+      "eleven_flash_v2_5": "no Marathi (PR-04)",
+      "eleven_flash_v2": "no Marathi (PR-04)",
+      "eleven_turbo_v2_5": "no Marathi (PR-04, PR-11)",
+      "eleven_turbo_v2": "English only (PR-11)"
+    },
+    "emotion_audio_tags": {},
+    "emotion_audio_tags_source": "empty until the owner's 3B listening test fixes one audio tag per TtsEmotion (ADR-008 REQUIRES REVIEW); empty means emotion_control NONE",
+    "voice_settings": null,
+    "voice_settings_source": "null: the voice's stored settings are used; owner sets stability / similarity_boost after the listening test",
+    "models": {
+      "eleven_v4": {
+        "source": "PR-11, PR-12",
+        "enabled": true,
+        "languages": ["mr", "hi", "en"],
+        "max_chars_per_request": 10000,
+        "price_micros_per_1k_chars": 80000,
+        "speed_control": false,
+        "ipa_inline": true
+      },
+      "eleven_v3": {
+        "source": "PR-11, PR-12",
+        "enabled": true,
+        "languages": ["mr", "hi", "en"],
+        "max_chars_per_request": 5000,
+        "price_micros_per_1k_chars": 80000,
+        "speed_control": false,
+        "ipa_inline": false
+      },
+      "eleven_v4_turbo": {
+        "source": "PR-11, PR-12; REQUIRES REVIEW (Phase 1): character limit not documented",
+        "enabled": false,
+        "languages": ["mr", "hi", "en"],
+        "max_chars_per_request": null,
+        "price_micros_per_1k_chars": 40000,
+        "speed_control": false,
+        "ipa_inline": false
+      },
+      "eleven_v3_conversational": {
+        "source": "PR-11, PR-12; REQUIRES REVIEW (Phase 1): character limit not documented",
+        "enabled": false,
+        "languages": ["mr", "hi", "en"],
+        "max_chars_per_request": null,
+        "price_micros_per_1k_chars": 40000,
+        "speed_control": false,
+        "ipa_inline": false
+      }
+    }
+  }
+}
