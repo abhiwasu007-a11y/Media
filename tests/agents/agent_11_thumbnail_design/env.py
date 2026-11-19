@@ -22,7 +22,12 @@ from agent_11_thumbnail_design.ports import (
 from agent_11_thumbnail_design.prompting import PromptBundle
 from agent_11_thumbnail_design.stage import Lexicons, RulePacks, StageDeps, ThumbnailStage
 from agent_11_thumbnail_design.templates import glyph_catalogue, load_templates
+from amw_core.contracts.error import ErrorObject
 from amw_core.contracts.task_input import TaskInput
+from amw_core.contracts.task_output import TaskOutput
+from amw_core.enums import OutputStatus
+from amw_core.errors import AmwError
+from amw_core.exec_context import ExecContext
 from amw_core.ids import Prefix, new_id
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.testing.memory import MemoryCheckpointStore, MemoryIdempotencyStore
@@ -278,3 +283,31 @@ def make_env(
 
 
 _ = (glyph_catalogue, Ref, SubjectHint, FIN_LEXICON)
+
+
+_ATTEMPTS: dict[str, str] = {}
+
+
+def exec_ctx(ti: TaskInput, attempt: str = "att_1") -> ExecContext:
+    """The core ``ExecContext`` of a Task Input; one attempt name always gives one attempt ID."""
+    wire = _ATTEMPTS.setdefault(attempt, str(new_id(Prefix.TASK_ATTEMPT)))
+    return ExecContext.from_task_input(ti, wire, ti.agent_id, envelope_org_id=ti.org_id)
+
+
+def run_att(env: Env, ti: TaskInput, attempt: str = "att_1") -> TaskOutput:
+    """Run the stage's ``TaskWorker`` entry point as the named attempt."""
+    return env.stage.run(ti, exec_ctx(ti, attempt))
+
+
+def err_of(out: TaskOutput, cls: type[AmwError] | tuple[type[AmwError], ...]) -> ErrorObject:
+    """The Error object of a returned failure; its code must be one of ``cls``."""
+    assert out.status is not OutputStatus.SUCCEEDED
+    assert out.error is not None
+    allowed = {c.code for c in (cls if isinstance(cls, tuple) else (cls,))}
+    assert out.error.code in allowed, out.error.code
+    return out.error
+
+
+def violation_keys(error: ErrorObject) -> list[str]:
+    """The ``keyword`` of every ``details.violations[]`` item (03 section 6 rule 6)."""
+    return [v.keyword for v in error.details.violations or ()]
