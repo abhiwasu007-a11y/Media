@@ -34,7 +34,20 @@ from amw_core.errors import (
     MissingDependencyError,
     TenantMismatchError,
 )
-from amw_core.ids import AuditEntryId, CostEntryId, Prefix, TaskId, new_id
+from amw_core.exec_context import ExecContext
+from amw_core.ids import (
+    ActorRef,
+    AttemptId,
+    AuditEntryId,
+    ChannelId,
+    CorrelationId,
+    CostEntryId,
+    JobId,
+    OrgId,
+    Prefix,
+    TaskId,
+    new_id,
+)
 from amw_core.interfaces import (
     AuditEntry,
     BlobHead,
@@ -567,7 +580,17 @@ def verification_step(world: World, knowledge: MemoryKnowledge, **kw: Any) -> An
     )
 
 
-def run_context(stage: str = "s06_claims", iteration: int = 0) -> Any:
-    from agent_06_fact_checker.runtime import RunContext
-
-    return RunContext(attempt_id=ATT, stage_id=stage, iteration=iteration)  # type: ignore[arg-type]
+def run_context(stage: str = "s06_claims", iteration: int = 0) -> ExecContext:
+    """The worker context (CCR-203): tenant, ids, attempt, stage and iteration."""
+    return ExecContext(
+        tenant=TenantContext(
+            org_id=OrgId(ORG), actor=ActorRef("agent_06"), correlation_id=CorrelationId(COR)
+        ),
+        job_id=JobId(JOB),
+        task_id=TaskId(TASK),
+        attempt_id=AttemptId(ATT),
+        channel_id=ChannelId(CHANNEL),
+        attempt_no=1,
+        stage_id=stage,
+        iteration=iteration,
+    )

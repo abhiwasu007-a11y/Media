@@ -6,7 +6,7 @@ from typing import Any
 
 from agent_06_fact_checker.hashing import canonical_json, sha256_hex
 from agent_06_fact_checker.models import Verdict
-from agent_06_fact_checker.runtime import RunContext, UsageTotals
+from agent_06_fact_checker.runtime import UsageTotals
 from amw_core.contracts.common import PayloadObject
 from amw_core.contracts.error import error_object_from_exception
 from amw_core.contracts.task_input import TaskInput
@@ -37,6 +37,7 @@ from amw_core.errors import (
     TenantInactiveError,
     TenantMismatchError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.interfaces import BlobStorage, Clock, TenantContext
 
 _REJECTED = (
@@ -128,7 +129,7 @@ def write_blob(
     blobs: BlobStorage,
     tenant: TenantContext,
     task: TaskInput,
-    ctx: RunContext,
+    ctx: ExecContext,
     name: str,
     doc: Any,
 ) -> OutputRef:

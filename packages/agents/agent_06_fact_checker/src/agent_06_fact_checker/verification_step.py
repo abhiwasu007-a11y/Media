@@ -50,7 +50,6 @@ from agent_06_fact_checker.reconcile import (
 from agent_06_fact_checker.runtime import (
     AGENT_ID,
     PaidCallRunner,
-    RunContext,
     StepCheckpoints,
     UsageTotals,
     task_key,
@@ -77,6 +76,7 @@ from amw_core.errors import (
     SchemaInvalidError,
     SchemaVersionUnsupportedError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import ActorRef, ChannelId
 from amw_core.interfaces import (
     AuditLog,
@@ -143,7 +143,7 @@ class ClaimVerificationStep:
             max_repairs=settings.max_repairs,
         )
 
-    def run(self, task: TaskInput, ctx: RunContext) -> TaskOutput:
+    def run(self, task: TaskInput, ctx: ExecContext) -> TaskOutput:
         started = self._clock.monotonic_ms()
         state = _State()
         try:
@@ -191,7 +191,7 @@ class ClaimVerificationStep:
     def _validate(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         inp: VerificationInput,
         doc: Mapping[str, Any],
         resolver: EvidenceResolver,
@@ -201,7 +201,7 @@ class ClaimVerificationStep:
         if task.channel_id is None:
             raise InputInvalidError("channel_id is required (the library is channel scoped)")
         channel = ChannelId(task.channel_id)
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         if inp.channel_category == "finance" and "rp.finance_sebi_in" not in inp.active_rule_packs:
             raise InputInvalidError("a finance script needs the finance rule pack to be active")
         # (3) hashes
@@ -245,9 +245,9 @@ class ClaimVerificationStep:
             raise InputInvalidError("extraction_overall_verdict is below a stored claim verdict")
 
     # ------------------------------------------------------------------ the run
-    def _run(self, task: TaskInput, ctx: RunContext, state: _State, started: int) -> TaskOutput:
+    def _run(self, task: TaskInput, ctx: ExecContext, state: _State, started: int) -> TaskOutput:
         s = self._settings
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         inp, raw = self._parse(task)
         resolver = EvidenceResolver(
             self._knowledge, s, release_approved=inp.our_method_release_approved
@@ -351,7 +351,7 @@ class ClaimVerificationStep:
     def _verify_batch(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         state: _State,
         inp: VerificationInput,
         prompt: Any,
@@ -430,12 +430,12 @@ class ClaimVerificationStep:
     def _persist(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         inp: VerificationInput,
         result: StageResult,
         reads: int,
     ) -> None:
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         rows: list[CitationRow] = []
         kinds = {c.citation_ref: c.kind for c in inp.available_citations}
         for claim in result.claims:
@@ -474,7 +474,7 @@ class ClaimVerificationStep:
     def _assemble(
         self,
         task: TaskInput,
-        ctx: RunContext,
+        ctx: ExecContext,
         state: _State,
         started: int,
         inp: VerificationInput,
@@ -483,7 +483,7 @@ class ClaimVerificationStep:
         evidence: Mapping[str, ClaimEvidence],
         leaks: int,
     ) -> TaskOutput:
-        tenant = ctx.tenant(task)
+        tenant = ctx.tenant
         doc = output.to_doc()
         ref = write_blob(self._blobs, tenant, task, ctx, "claim_verification_output.json", doc)
         results = self._results(inp, output, outcomes, evidence, leaks)
