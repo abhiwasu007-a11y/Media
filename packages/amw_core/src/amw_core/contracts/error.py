@@ -2,6 +2,7 @@
 
 from collections.abc import Iterable, Mapping
 from datetime import datetime
+from itertools import islice
 from typing import Annotated, Any, ClassVar, Self
 
 from pydantic import ConfigDict, Field, StrictBool, StringConstraints, model_validator
@@ -39,29 +40,51 @@ def violation(code: str, path: str = "", message: str | None = None) -> Violatio
     return Violation(path=path, keyword=code, message=text[:MAX_VIOLATION_MESSAGE])
 
 
+_PLACEHOLDER = "INVALID_VIOLATION_ITEM"
+
+
 def _violation_item(item: object) -> Violation | dict[str, Any]:
-    """Normalise one ``violations`` item; a bare string becomes ``{"", s, s}`` (CCR-210)."""
-    if isinstance(item, Violation):
-        return item
-    if isinstance(item, Mapping):
-        keyword = str(item.get("keyword", ""))
-        return {
-            "path": str(item.get("path", "")),
-            "keyword": keyword,
-            "message": str(item.get("message", keyword))[:MAX_VIOLATION_MESSAGE],
-        }
-    return violation(str(item))
+    """Normalise one ``violations`` item; a bare string becomes ``{"", s, s}`` (CCR-210).
+
+    Never raises: an item that cannot be read or printed becomes a placeholder violation.
+    """
+    try:
+        if isinstance(item, Violation):
+            return item
+        if isinstance(item, Mapping):
+            keyword = str(item.get("keyword", ""))
+            return {
+                "path": str(item.get("path", "")),
+                "keyword": keyword,
+                "message": str(item.get("message", keyword))[:MAX_VIOLATION_MESSAGE],
+            }
+        return violation(str(item))
+    except Exception:  # hostile __str__/.get; CCR-210 "never fails because of its details"
+        return violation(_PLACEHOLDER)
+
+
+def _violation_items(raw: object) -> list[Violation | dict[str, Any]]:
+    """At most ``MAX_VIOLATIONS`` items; stops at the first iteration failure."""
+    out: list[Violation | dict[str, Any]] = []
+    if isinstance(raw, str | bytes | Mapping | Violation) or not isinstance(raw, Iterable):
+        return [_violation_item(raw)]
+    try:
+        for item in islice(raw, MAX_VIOLATIONS):
+            out.append(_violation_item(item))
+    except Exception:  # an iterator that fails midway keeps what it produced, plus a marker
+        out = [*out[: MAX_VIOLATIONS - 1], violation(_PLACEHOLDER)]
+    return out
 
 
 def _normalised_details(details: dict[str, Any]) -> dict[str, Any]:
-    raw = details.get("violations")
-    if raw is None:
+    try:
+        raw = details.get("violations")
+        rest = {k: v for k, v in details.items() if k != "violations"}
+        if raw is None:
+            return rest
+        return {**rest, "violations": _violation_items(raw)}
+    except Exception:  # last resort: drop the violations, keep the error
         return {k: v for k, v in details.items() if k != "violations"}
-    if isinstance(raw, str | bytes | Mapping | Violation) or not isinstance(raw, Iterable):
-        items: list[object] = [raw]
-    else:
-        items = list(raw)
-    return {**details, "violations": [_violation_item(i) for i in items[:MAX_VIOLATIONS]]}
 
 
 class ErrorDetails(AmwModel):

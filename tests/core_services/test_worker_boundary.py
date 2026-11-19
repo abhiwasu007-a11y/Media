@@ -267,3 +267,73 @@ def test_every_builder_output_passes_the_backend_parser() -> None:
         sp.render_uri(A.org_id, J, "a.b=c"),
     ]:
         parse_uri(uri)
+
+
+class _BadStr:
+    def __str__(self) -> str:
+        raise RuntimeError("boom")
+
+
+class _BadIter:
+    def __iter__(self) -> _BadIter:
+        raise RuntimeError("boom")
+
+
+class _BadGetMapping(dict[str, object]):
+    def get(self, *args: object) -> object:
+        raise RuntimeError("boom")
+
+
+def _midway() -> object:
+    yield "A_CODE"
+    raise RuntimeError("boom")
+
+
+def _infinite() -> object:
+    n = 0
+    while True:
+        n += 1
+        yield f"C{n}"
+
+
+def test_hostile_violations_never_raise_and_terminate() -> None:
+    import time
+
+    cases: dict[str, object] = {
+        "bad_iter": _BadIter(),
+        "bad_str_item": [_BadStr(), "OK_CODE"],
+        "bad_str_single": _BadStr(),
+        "midway": _midway(),
+        "bad_get": [_BadGetMapping(keyword="K")],
+        "infinite": _infinite(),
+    }
+    for name, raw in cases.items():
+        start = time.monotonic()
+        doc = _error_doc({"violations": raw})
+        assert time.monotonic() - start < 2, name
+        for v in doc["details"].get("violations", []):  # type: ignore[attr-defined]
+            assert set(v) == {"path", "keyword", "message"}, name
+    inf = _error_doc({"violations": _infinite()})
+    assert len(inf["details"]["violations"]) == 200  # type: ignore[index]
+    mid = _error_doc({"violations": _midway()})["details"]["violations"]  # type: ignore[index]
+    assert [v["keyword"] for v in mid] == ["A_CODE", "INVALID_VIOLATION_ITEM"]
+
+
+def test_stage_id_bool_and_str_subclass() -> None:
+    class S(str):
+        pass
+
+    ti = _ti()
+    with pytest.raises(InputInvalidError):
+        ExecContext.from_task_input(
+            ti,
+            ATTEMPT.new(),
+            "agent_07",
+            envelope_org_id=ti.org_id,
+            stage_id=True,  # type: ignore[arg-type]
+        )
+    ctx = ExecContext.from_task_input(
+        ti, ATTEMPT.new(), "agent_07", envelope_org_id=ti.org_id, stage_id=S("voice")
+    )
+    assert ctx.stage_id == "voice"
+    assert type(ctx.stage_id) is str

@@ -78,6 +78,8 @@ class ExecContext:
             )
         if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
             raise InputInvalidError("iteration must be an integer >= 0")
+        if stage_id is not None:
+            stage_id = str.__str__(stage_id)  # a str subclass is accepted as a plain str
         try:
             return cls(
                 tenant=TenantContext(
