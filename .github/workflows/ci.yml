@@ -20,7 +20,10 @@ jobs:
             || { echo "PR title must follow Conventional Commits: $TITLE"; exit 1; }
 
   gates:
-    runs-on: ubuntu-latest
+    # Pinned to the 24.04 image (FFmpeg 6.1.1, the build the real-encode tests were written against):
+    # on ubuntu-latest (26.04, FFmpeg 8.0.1) nine agent_10 tests fail because ffprobe reports no
+    # colour primaries/transfer for the segments (see the PR text); moving to FFmpeg 8 is a product fix.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:18
