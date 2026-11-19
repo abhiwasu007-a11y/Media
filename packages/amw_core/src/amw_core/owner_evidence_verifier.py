@@ -74,6 +74,7 @@ from amw_core.enums import (
     QualityDimension,
 )
 from amw_core.ids import ActorRef, ApprovalId, JobId, Prefix, UserId, WireId
+from amw_core.text_normalise import normalise_for_matching
 
 VerificationKind = EvidenceVerificationKind
 USER_ROLE: Final = "user"
@@ -84,8 +85,19 @@ NEEDS_CLARIFICATION: Final = "needs_clarification"
 NEGATION_OR_WITHHOLDING: Final = "negation_or_withholding"
 QUESTION_OR_DEFERRED: Final = "question_or_deferred"
 QUOTED_OR_FORWARDED: Final = "quoted_or_forwarded"
+EMBEDDED_PART_UNMARKED: Final = "embedded_part_unmarked"
+"""A6 (CCR-125): a reply embeds an earlier message and the event source does not mark which part
+the owner wrote: ``NEEDS_CLARIFICATION``, nothing is recorded."""
+OWNER_PART_MISMATCH: Final = "owner_part_not_in_event"
+"""A6 (CCR-125): the marked owner-authored part is not a part of the event content."""
 CLARIFICATION_REASONS: Final = frozenset(
-    {NEEDS_CLARIFICATION, NEGATION_OR_WITHHOLDING, QUESTION_OR_DEFERRED, QUOTED_OR_FORWARDED}
+    {
+        NEEDS_CLARIFICATION,
+        NEGATION_OR_WITHHOLDING,
+        QUESTION_OR_DEFERRED,
+        QUOTED_OR_FORWARDED,
+        EMBEDDED_PART_UNMARKED,
+    }
 )
 """Refusals where the operator must ask the owner to restate (nothing is recorded)."""
 
@@ -218,6 +230,11 @@ class SessionEvent:
     """The platform account that authored the message."""
     parent_session_id: str | None
     """``None`` for a top-level session; set for a child / sub-agent session."""
+    embeds_earlier_message: bool = False
+    """The platform marks this event as a reply that embeds an earlier message (CCR-125)."""
+    owner_authored_content: str | None = None
+    """The part of ``content`` the owner wrote, as marked by the event source (CCR-125). ``None``
+    = the source marks nothing: valid only for an event with no embedded text."""
 
 
 @runtime_checkable
@@ -381,6 +398,55 @@ def whitelist_tokens(text: str) -> list[str]:
     folded = unicodedata.normalize("NFKC", text).casefold()
     kept = "".join(c if unicodedata.category(c)[0] in "LMN" else " " for c in folded)
     return kept.split()
+
+
+_EMBED_START = re.compile(
+    r"^(?:[>\u203a\u00bb\u2265|]|-{2,}\s*(?:original|forwarded)\s+message|-\s*original\s+message"
+    r"\s*-|_{5,}|={5,}|begin forwarded message|on\s.{1,200}\swrote:?$)",
+)
+_EMBED_END = re.compile(
+    r"(?:wrote|writes|said|\u092e\u094d\u0939\u0923\u093e\u0932\u0947|"
+    r"\u092e\u094d\u0939\u0923\u093e\u0932\u093e|\u0932\u093f\u0916\u093e|"
+    r"\u0915\u0939\u093e)\s*:$"
+)
+_HEADER_FROM = re.compile(r"^(?:from|de|von)\s*:\s*\S")
+_HEADER_OTHER = re.compile(r"^(?:sent|date|to|cc|subject|\u0935\u093f\u0937\u092f)\s*:\s*\S")
+
+
+def _lines_for_embed_check(content: str) -> list[str]:
+    """Each line normalised on its own (``amw_core.text_normalise``: NFKC, casefold, invisible and
+    format characters such as U+200B / U+2060 / U+200E / U+FEFF removed, look-alikes folded), so a
+    quote marker hidden behind an invisible prefix is still at the start of its line."""
+    lines = re.split(r"[\r\n\u2028\u2029\u0085]+", content)
+    return [normalise_for_matching(line).text for line in lines if line.strip()]
+
+
+def _looks_embedded(content: str) -> bool:
+    """Quote-prefix lines (greater-than, single / double angle quotes, pipe), a forwarded or
+    original-message rule, an "On ... wrote:" header, a line ending "... wrote:", or an
+    Outlook-style ``From:`` header block (``From:`` plus ``Sent:`` / ``To:`` / ``Subject:``)."""
+    lines = _lines_for_embed_check(content)
+    if any(_EMBED_START.match(line) or _EMBED_END.search(line) for line in lines):
+        return True
+    return any(_HEADER_FROM.match(line) for line in lines) and any(
+        _HEADER_OTHER.match(line) for line in lines
+    )
+
+
+def owner_part(event: SessionEvent) -> tuple[str | None, str]:
+    """``(problem, text)``: the owner-authored text every check reads (CCR-125). ``problem`` is
+    ``EMBEDDED_PART_UNMARKED`` (embedded text, no marking), ``OWNER_PART_MISMATCH`` (the marked
+    part is not in the content) or ``None``; the embedded text never counts."""
+    marked = event.owner_authored_content
+    if marked is None:
+        if event.embeds_earlier_message or _looks_embedded(event.content):
+            return EMBEDDED_PART_UNMARKED, ""
+        return None, event.content
+    if not marked.strip() or marked not in event.content:
+        return OWNER_PART_MISMATCH, ""
+    if _looks_embedded(marked):
+        return EMBEDDED_PART_UNMARKED, ""  # the marked part itself carries embedded text
+    return None, marked
 
 
 def _wholly_quoted(content: str) -> bool:
@@ -576,7 +642,7 @@ def verify_owner_event(
     """
     if event is None:
         return EventUnavailable(evidence.session_id, evidence.event_uuid)
-    content = event.content
+    part_problem, content = owner_part(event)
     kind = policy.record_kind_rules.get(evidence.record_kind)
     session_id = evidence.session_id if purpose == RECORD else event.session_id
     checks: dict[str, bool] = {"rule_defined": kind is not None}
@@ -599,7 +665,9 @@ def verify_owner_event(
         "owner_account": event.sender_account in policy.owner_account_ids,
         "top_level_session": not policy.require_top_level_session
         or event.parent_session_id is None,
-        "quote_verbatim": bool(quote) and quote in content,
+        EMBEDDED_PART_UNMARKED: part_problem != EMBEDDED_PART_UNMARKED,
+        OWNER_PART_MISMATCH: part_problem != OWNER_PART_MISMATCH,
+        "quote_verbatim": part_problem is None and bool(quote) and quote in content,
         "timestamp_equal": message_at is None or message_at == event.timestamp,
         "message_order": order_ok,
         "distinct_event": distinct_from_event_uuid is None
