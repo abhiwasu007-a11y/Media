@@ -273,8 +273,8 @@ def test_confirmation_event_confirms_only_once() -> None:
 )
 def test_freshness_window(kind: EvidenceRecordKind) -> None:
     text = "RSI divergence on a weekly chart"
-    ne = evidence(record_kind=kind, quote=text, parsed_decision=None)
-    message = f"R7K2 {text}"
+    ne = evidence(record_kind=kind, quote=text, parsed_decision=None, review_code=None)
+    message = text  # CCR-116: no subject reference before the job
     fresh = harness(event(message)), tx()
     assert (
         fresh[0].verify_recorded(fresh[1], fresh[0].record(fresh[1], ne).id, None, NOW).state

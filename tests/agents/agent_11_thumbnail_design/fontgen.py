@@ -11,6 +11,7 @@ from fontTools.fontBuilder import FontBuilder  # type: ignore[import-untyped]
 from fontTools.pens.ttGlyphPen import TTGlyphPen  # type: ignore[import-untyped]
 
 ADVANCE = 600
+FIXED_STAMP = 3660681600  # 2020-01-01T00:00:00Z in the OpenType epoch (1904-01-01)
 DEVANAGARI = {
     "ka": 0x0915,
     "ssa": 0x0937,
@@ -62,6 +63,11 @@ def build_font() -> bytes:
         **{cp: n for n, cp in names.items()},
     }
     fb = FontBuilder(1000, isTTF=True)
+    # Reproducible bytes: fontTools stamps head.created / head.modified with the wall clock unless
+    # told not to. Two builds a second apart gave different font hashes (a flake of
+    # test_same_inputs_give_byte_identical_files); fix the stamps and stop the recalculation.
+    fb.font.recalcTimestamp = False
+    fb.setupHead(unitsPerEm=1000, created=FIXED_STAMP, modified=FIXED_STAMP)
     fb.setupGlyphOrder(glyph_order)
     fb.setupCharacterMap(cmap)
     glyphs = {}

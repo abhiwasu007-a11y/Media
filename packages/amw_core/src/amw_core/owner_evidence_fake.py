@@ -16,6 +16,13 @@ What it models:
   never both a row's event and another row's confirmation (one message = one subject = one step).
 * **Human rows.** ``human_record_apply`` (``amw_operator``) requires ``CONFIRMED`` and a valid
   MAC and writes the one human row the evidence names, once.
+* **Own review codes (CCR-116, migration 0055).** An ``OWNER_TOPIC`` / ``DATASET_INTAKE``
+  evidence, and any other ``CONTENT`` / ``SCORE`` evidence without ``approval_id``, carries its
+  own review code (CCR-090 format, upper case), unique per org across approval codes
+  (``register_approval_code`` models ``approvals.review_code``) and evidence codes, compared
+  case-insensitively. The fake plays the evidence store too: an insert without one is issued a
+  fresh code (``generate_review_code``) before ``evidence_sha256`` is computed; PostgreSQL
+  refuses a live row without one, because its store supplies the code with the INSERT.
 * ``superuser_tamper`` models the documented superuser bypass (08): it changes a row without
   the functions, which ``mac_valid`` then detects.
 """
@@ -42,12 +49,29 @@ from amw_core.ids import OWNER_EVIDENCE, OrgId, WireId
 from amw_core.interfaces.owner_evidence import DbRole, DbSession, EvidenceRecord, HumanRecord
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.owner_evidence_mac import MacKeyring
+from amw_core.owner_evidence_review_code import (
+    ALPHABET,
+    DEFAULT_LENGTH,
+    DIGITS,
+    MAX_LENGTH,
+    MIN_LENGTH,
+    generate_review_code,
+)
 from amw_core.owner_evidence_verifier import (
     DEFAULT_RECORD_KIND_RULES,
     NewEvidence,
     SessionEvent,
     evidence_sha256,
 )
+
+
+def needs_own_review_code(kind: EvidenceRecordKind) -> bool:
+    """CONTENT / SCORE kinds (03 section 11.6 rule 7 table): without an approval they carry their
+    own review code (CCR-116; PostgreSQL: ``amw_evidence_own_code_kind``)."""
+    return DEFAULT_RECORD_KIND_RULES[kind] in (
+        EvidenceVerificationKind.CONTENT,
+        EvidenceVerificationKind.SCORE,
+    )
 
 
 class MemorySessionEventSource:
@@ -97,11 +121,21 @@ def _mac_fields(row: EvidenceRecord) -> dict[str, Any]:
 class FakeEvidenceDatabase:
     """Implements ``amw_core.interfaces.owner_evidence.EvidenceDatabase`` in memory."""
 
-    def __init__(self, passwords: Mapping[DbRole, str], keyring: MacKeyring) -> None:
+    def __init__(
+        self,
+        passwords: Mapping[DbRole, str],
+        keyring: MacKeyring,
+        *,
+        review_code_length: int = DEFAULT_LENGTH,
+    ) -> None:
         self.__passwords = dict(passwords)
         self.__keyring = keyring
+        self._review_code_length = review_code_length
+        """``approvals.review_code.length`` (default 4, owner-confirmable, Q-O11)."""
         self._rows: dict[tuple[OrgId, WireId], EvidenceRecord] = {}
         self._applied: dict[tuple[OrgId, WireId], HumanRecord] = {}
+        self._approval_codes: dict[OrgId, set[str]] = {}
+        self._approval_code_of: dict[tuple[OrgId, str], str] = {}
 
     # --- sessions -----------------------------------------------------------------------
     def login(self, role: DbRole, password: str) -> FakeDbSession:
@@ -148,6 +182,73 @@ class FakeEvidenceDatabase:
             if o == org and r.confirmation_event_uuid is not None
         }
 
+    # --- review codes (CCR-116) -----------------------------------------------------------
+    def _codes_in_use(self, org: OrgId) -> set[str]:
+        own = {
+            r.evidence.review_code.upper()
+            for (o, _), r in self._rows.items()
+            if o == org and r.evidence.approval_id is None and r.evidence.review_code
+        }
+        return own | self._approval_codes.get(org, set())
+
+    def register_approval_code(
+        self, tx: TenantTransaction, code: str, approval_id: str | None = None
+    ) -> None:
+        """Models an ``approvals`` row's ``review_code`` (the 0055 ``review_codes`` registry):
+        refused when any approval or evidence code of the org equals it, case-insensitively.
+        With ``approval_id``, evidence tied to that approval must carry exactly this code."""
+        org = tx.context.org_id
+        if code.upper() in self._codes_in_use(org):
+            raise IdempotencyConflictError("review code already used in this org")
+        self._approval_codes.setdefault(org, set()).add(code.upper())
+        if approval_id is not None:
+            self._approval_code_of[(org, approval_id)] = code.upper()
+
+    def _check_approval_code(self, org: OrgId, evidence: NewEvidence, state: EvidenceState) -> None:
+        """0055: evidence tied to an approval carries that approval's code and never another
+        row's code (an own code, or another approval's), so a code resolves to one row."""
+        code = (evidence.review_code or "").upper()
+        if not code:
+            return
+        expected = self._approval_code_of.get((org, str(evidence.approval_id)))
+        if expected is not None and code != expected:
+            raise PermissionDeniedError("evidence must carry its approval's review code")
+        own = {
+            r.evidence.review_code.upper()
+            for (o, _), r in self._rows.items()
+            if o == org and r.evidence.approval_id is None and r.evidence.review_code
+        }
+        if code in own:
+            raise PermissionDeniedError("evidence must carry its approval's review code")
+
+    def _own_code(self, org: OrgId, evidence: NewEvidence, state: EvidenceState) -> NewEvidence:
+        """The store's own review code for evidence without an approval (CCR-116)."""
+        if evidence.approval_id is not None:
+            self._check_approval_code(org, evidence, state)
+            return evidence
+        if not needs_own_review_code(evidence.record_kind):
+            return evidence
+        taken = self._codes_in_use(org)
+        code = evidence.review_code
+        if code is None:
+            if state is EvidenceState.REFUSED:
+                return evidence
+            fresh = generate_review_code(
+                lambda c: c.upper() in taken, length=self._review_code_length
+            )
+            return replace(evidence, review_code=fresh)
+        well_formed = (
+            MIN_LENGTH <= len(code) <= MAX_LENGTH
+            and all(c in ALPHABET for c in code)
+            and any(c in DIGITS for c in code)
+            and any(c not in DIGITS for c in code)
+        )
+        if not well_formed:
+            raise PermissionDeniedError("malformed own review code (CCR-090 format, upper case)")
+        if code.upper() in taken:
+            raise IdempotencyConflictError("review code already used in this org")
+        return evidence
+
     # --- amw_operator ---------------------------------------------------------------------
     def insert_evidence(
         self,
@@ -183,6 +284,7 @@ class FakeEvidenceDatabase:
                 raise IdempotencyConflictError("one owner message backs one evidence row")
             if evidence.event_uuid in self._confirmation_events(org):
                 raise IdempotencyConflictError("this message already confirmed another record")
+        evidence = self._own_code(org, evidence, state)
         row = EvidenceRecord(
             id=OWNER_EVIDENCE.new(),
             org_id=org,
