@@ -15,6 +15,7 @@
 2. Agents never call each other. The orchestrator (Agent 01) creates every task, reads every output and decides the next task from code (§2 of the directive). An output's `downstream_agent` and `next_action` are **advisory** (§5.3).
 3. Every contract carries `org_id`, either directly (Input, Envelope) or by being stored and transmitted only inside an envelope (Output). No component accepts a message whose tenant does not match its transaction's tenant context (§10.2).
 4. Per-agent payload contents are defined by the agent blueprints as named payload schemas (`<task_type>.input` / `<task_type>.output`, GLOSSARY §2.4). They live inside the `payload` object (§3.2); they never change the envelope or the top-level fields.
+5. **Worker entry point (CCR-203).** Every task type has exactly one entry point in its package, `run(task_input: TaskInput, ctx: ExecContext) -> TaskOutput` (`amw_core.interfaces.TaskWorker`). `ExecContext` is the one per-attempt context of CCR-130 (`amw_core.exec_context`: tenant context, job, task and attempt IDs, channel, `attempt_no`), extended by CCR-203 with the two facts Task Input does not carry: `stage_id` (04 §5.3 `tasks.stage_id`, CCR-214) and `iteration` (04 §5.3 `tasks.iteration`); the worker builds it from the Task Input and the task row after the §7.1 checks (the envelope org has already been compared with the Task Input org at step 6, so `ExecContext` carries no second org). No other per-attempt context type exists. Domain failures, rejections and refusals are returned as a Task Output (§5, §7.2), never raised past the entry point; an agent-internal result type (a step result, a `StageResult`) never crosses it. Inputs are read only from the Task Input (`payload`, `context_refs`) and from the documents and rows they reference; nothing is handed over as an in-process object. The orchestrator's input builder for the task type (`amw_orchestrator/input_builders/`, SOURCE_LAYOUT rule 2, CCR-047) is the only code that builds that Task Input.
 
 ## 2. Schema registry and versioning
 
@@ -34,7 +35,7 @@
 
 ### 2.3 Compatibility rules
 1. A producer always emits the exact `schema_version` it was built with; the validator validates against that exact version file. Because the file is immutable and shipped to every component in `amw_core`, top-level `additionalProperties: false` is safe.
-2. A consumer must accept every MINOR version of each MAJOR it supports. After validation it ignores fields it does not use.
+2. A consumer must accept every MINOR version of each MAJOR it supports. After validation it ignores fields it does not use. **Reading another component's document (CCR-200):** the document is validated against its producer's registered schema (§2.1) where that schema is shipped; the consumer then maps it with its own *slice* model that lists only the fields it reads and **ignores every other field** (Pydantic `extra = "ignore"`). A slice model of another component's document never forbids unknown fields (`extra = "forbid"` is only for a component's own documents and its own payload input), so a field the producer adds, or one the consumer does not read, never refuses a valid document.
 3. During a MAJOR migration, consumers support **N and N−1**; the deprecation window is configuration `contracts.deprecation_window_ms` (default: two releases; the window is a project rule, not an external fact). Deprecated versions log a `contract.deprecated_version_used` warning metric per use.
 4. A version outside the supported set is rejected with `PERMANENT.SCHEMA_VERSION_UNSUPPORTED`.
 5. Changes to any Wave A contract go through `CONTRACT_CHANGE_REQUESTS.md`; Wave B documents must not create variants.
@@ -491,6 +492,7 @@ Rules:
 3. `message` and `details` never contain secrets, tokens, raw provider keys, personal data beyond IDs, or another tenant's data. Tracebacks are stored separately (redacted) as `dead_letter.traceback_ref`.
 4. `attempt_no` is 0 for rejections at validation (no attempt started); `amw.task_output` enforces it for `REJECTED` together with `payload = null` and no `output_refs` (CCR-057).
 5. `details` is deliberately open (no `additionalProperties: false`): each code may add its own keys (e.g. `unresolved_shots`, `missing_inputs`), documented by the blueprint that raises it; rule 3 applies to every key (CCR-057).
+6. Every item of `details.violations[]` is the object of the schema above, never a bare string (CCR-210). A payload-local reason code (e.g. `SCRIPT_HASH_MISMATCH`, `TEMPLATE_MISMATCH:ov03`) is written as `{"path": <JSON Pointer of the failing location, or "">, "keyword": <the reason code>, "message": <short text without content, rule 3>}`; `amw_core.contracts` offers one helper that builds such an item, and building an Error object from a typed exception never fails because of its `details`.
 
 ## 7. Validation before processing and structured rejection
 
@@ -525,6 +527,7 @@ Rules:
 2. Blobs are **write-once**: a new version gets a new path; nothing is overwritten. Final media is always written to persistent storage, never only to temp (§3.3 Disaster recovery).
 3. A reader resolves a URI only after checking the URI's org equals the transaction's `app.org_id` (or `platform` for read-only access). Mismatch = `PERMANENT.CROSS_TENANT_REF`, logged as a security event and escalated L3.
 4. Every input consumed by a task carries a SHA-256; the reader verifies it.
+5. **Paths inside the areas (CCR-208).** The first path segment is always one of the areas above; there is no other area (no `checkpoints`, `llm`, `thumbnails` or agent-named area). Under `jobs` the second segment is the job's wire ID and only these sub-paths exist: `tasks/<task>/attempts/<att>/{input.json,output.json}`; `tasks/<task>/attempts/<att>/artifacts/<name>` for every write-once file a task produces (documents, images, manifests, recorded provider responses, reports); `checkpoints/<task>/<name>` for checkpoint blobs (04 §5.7 rows point to them; later attempts of the same task read them); `cache/<agent_id>/<name>` for content-addressed write-once blobs that later tasks of the same job may reuse (the name carries the content SHA-256, e.g. Agent 07's per-segment clips; never overwritten, never the only copy of a final output); `renders/`; `deliveries/<pub>/`. `<name>` may be a relative path of several segments (e.g. `<att>/<step>.json`). The `evidence` area holds only Agent 04's external-reference snapshots (above); another agent's evidence or report file is a task artifact. Paths are built only by the core storage-path builders (`amw_core.tenancy.storage_paths`, next to `blob_uri`) from wire IDs, never from titles or payload text; the storage backend refuses a `jobs` URI whose sub-path is not one of these.
 
 ## 9. Idempotency keys
 
@@ -542,7 +545,7 @@ Rules:
 | Scope | Natural key parts | Effect |
 |---|---|---|
 | `job.create` | `org_id`, requesting source (calendar entry, brief, API request ID or human request ID) | Job creation (`jobs.idempotency_key`) |
-| `task.<task_type>` | `job_id`, `stage_id`, `task_type`, `iteration` (revision loop number) | Task-level key (Task Input `idempotency_key`). `stage_id` (CCR-005) separates two stages of one graph that use the same task type (`a_script` / `a_final`, `s06_verify` / `s06_chart`) |
+| `task.<task_type>` | `job_id`, `stage_id`, `task_type`, `iteration` (the stage's revision iteration, 24 §3.3 rule 1) | Task-level key (Task Input `idempotency_key`). `stage_id` (CCR-005) separates two stages of one graph that use the same task type (`a_script` / `a_final`, `s06_verify` / `s06_chart`) |
 | `llm.call` | `task_id`, `step_key`, `call_seq` | LLM call + its cost ledger row |
 | `tts.synthesize` | `task_id`, `segment_id`, text SHA-256, voice ID | Paid TTS call |
 | `media.generate` | `task_id`, `shot_id`, prompt SHA-256 | Image/video generation |
