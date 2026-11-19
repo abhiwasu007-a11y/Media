@@ -10,7 +10,7 @@
     "pillow": "Not shown to matter beyond the bundled FreeType: box raster identical for Pillow 11.3.0, 12.0.0, 12.1.0, 13.0.0. Pillow is pinned exactly in uv.lock anyway.",
     "machine": "Local measurements are x86_64. CI run 44447278617 (strict) matched the FreeType 2.14.3 canaries on x86_64 Ubuntu 24.04 (FriBiDi 1.0.13), x86_64 Ubuntu 26.04 (FriBiDi 1.0.16) and arm64 Ubuntu 24.04.",
     "png_bytes": "Not part of the key: file bytes depend on the zlib build; the verifier's PNG hash difference is UNEXPLAINED (see PR #72, scripts/probe_render_env.py).",
-    "mukta": "Mukta (static, hinted TrueType): the two Mukta canaries are identical for FreeType 2.13.3, 2.14.1 and 2.14.3 (Pillow 11.3.0, 12.0.0, 12.1.0, 13.0.0). Only the fallback canary (Mukta Bold + the Noto variable font for U+0978) follows the Noto difference between 2.13.3 and 2.14.x."
+    "mukta": "Mukta (static, hinted TrueType): the two Mukta canaries are identical for FreeType 2.13.3, 2.14.1 and 2.14.3 (Pillow 11.3.0, 12.0.0, 12.1.0, 13.0.0). Only the fallback canary (Mukta Bold + the Noto variable font at wght 700 for U+0978) follows the Noto difference between 2.13.3 and 2.14.x."
   },
   "environments": [
     {
@@ -20,7 +20,7 @@
         "noto_sans_devanagari_vf": "8acac1dd2f84654d5febaa1fc334b736714a509ac98dc45256799b94d380cf76",
         "mukta_regular": "7d24286cf95b03efa5c7810c60a3c9460341e373d6a0adbf31df316e9a440439",
         "mukta_bold": "e328d38e4af7230824db57ee3584c04969d6f841419ccbd4dcb78d269df174c9",
-        "mukta_bold_noto_fallback": "f30caf0df7454c080e15a32fce0967c8bfdf55f485289c566bd6bdf018cd47eb"
+        "mukta_bold_noto_fallback": "17415560226de19bd5a792dcc99ee28c0c5952e1228b7d3dfbb55e45ecc8c941"
       },
       "measured_with": [
         {
@@ -40,7 +40,7 @@
         "noto_sans_devanagari_vf": "d56c11116c8da64837cd7dbabb0f990d186959de64c393bd04606bb1aa81362b",
         "mukta_regular": "7d24286cf95b03efa5c7810c60a3c9460341e373d6a0adbf31df316e9a440439",
         "mukta_bold": "e328d38e4af7230824db57ee3584c04969d6f841419ccbd4dcb78d269df174c9",
-        "mukta_bold_noto_fallback": "0d30b3566260166a6d6ceb7240cb2e852ac10761cb5e40ca983a41f9d5556e2c"
+        "mukta_bold_noto_fallback": "bed1b5e3340ffa6e8f4a8b430d784ea46063e47b4bacba72fb7ff5e6d6f813e1"
       },
       "measured_with": [
         {
@@ -68,7 +68,7 @@
         "noto_sans_devanagari_vf": "d56c11116c8da64837cd7dbabb0f990d186959de64c393bd04606bb1aa81362b",
         "mukta_regular": "7d24286cf95b03efa5c7810c60a3c9460341e373d6a0adbf31df316e9a440439",
         "mukta_bold": "e328d38e4af7230824db57ee3584c04969d6f841419ccbd4dcb78d269df174c9",
-        "mukta_bold_noto_fallback": "0d30b3566260166a6d6ceb7240cb2e852ac10761cb5e40ca983a41f9d5556e2c"
+        "mukta_bold_noto_fallback": "bed1b5e3340ffa6e8f4a8b430d784ea46063e47b4bacba72fb7ff5e6d6f813e1"
       },
       "measured_with": [
         {

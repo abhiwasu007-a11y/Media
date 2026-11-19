@@ -4,7 +4,7 @@ Used by the canary tests and by ``scripts/probe_render_env.py``. Nothing here re
 """
 
 from agent_11_thumbnail_design.composer import RenderSpec
-from agent_11_thumbnail_design.pinning import pinned_font_bytes
+from agent_11_thumbnail_design.pinning import font_manifest, pinned_font_bytes
 from agent_11_thumbnail_design.templates import glyph_catalogue, load_templates, palette
 
 CANARY_ORG = "org_00000000-0000-7000-8000-000000000001"
@@ -59,6 +59,9 @@ def canary_spec(font_key: str) -> RenderSpec:
         font_step_px=8,
         fallback_font_bytes=fallback,
         fallback_font_sha256=hashlib.sha256(fallback).hexdigest() if fallback else None,
+        fallback_weight=(
+            font_manifest()[hashlib.sha256(data).hexdigest()].weight if fallback else None
+        ),
     )
 
 

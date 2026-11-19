@@ -12,7 +12,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
 from PIL import Image, ImageDraw, ImageFont
 
 from agent_11_thumbnail_design.errors import (
@@ -29,9 +28,15 @@ from agent_11_thumbnail_design.pinning import (
 from agent_11_thumbnail_design.revision import canonical_json
 from agent_11_thumbnail_design.templates import GlyphSpec, TemplateSpec
 from agent_11_thumbnail_design.textutil import contains_sequence, folded_words, words
+from amw_core.font_coverage import (
+    IGNORED_CODE_POINTS,
+    fallback_code_points,
+    read_cmap,
+    uncovered_code_points,
+)
 
 RGB = tuple[int, int, int]
-_IGNORED = frozenset({0x200C, 0x200D, 0x200B, 0x20, 0xA0})
+_IGNORED = IGNORED_CODE_POINTS
 
 
 def hex_to_rgb(value: str) -> RGB:
@@ -64,6 +69,8 @@ class RenderSpec:
     fallback_font_bytes: bytes | None = None
     """Per-glyph fallback font (a manifest font): used only for code points the primary lacks."""
     fallback_font_sha256: str | None = None
+    fallback_weight: int | None = None
+    """``wght`` set on a variable fallback font, so Bold text gets Bold fallback glyphs."""
 
     def description(self) -> bytes:
         return canonical_json(
@@ -82,7 +89,7 @@ class RenderSpec:
                 ],
                 "font": self.font_sha256,
                 **(
-                    {"font_fallback": self.fallback_font_sha256}
+                    {"font_fallback": [self.fallback_font_sha256, self.fallback_weight]}
                     if self.fallback_font_sha256
                     else {}
                 ),
@@ -115,6 +122,8 @@ class RenderResult:
     composition_sha256: str
     text_box_px: tuple[int, int, int, int]
     missing_glyphs: tuple[str, ...] = field(default=())
+    fallback_used: bool = False
+    """True when at least one glyph of the text was drawn by the fallback font."""
 
 
 class ImageComposer(Protocol):
@@ -152,6 +161,21 @@ class FontProvider(Protocol):
 
 class WidthProvider(Protocol):
     def __call__(self, text: str, px: int) -> float: ...
+
+
+def _set_weight(font: ImageFont.FreeTypeFont, weight: int) -> None:
+    """Set the ``wght`` axis of a variable font (other axes keep their default)."""
+    try:
+        axes = font.get_variation_axes()
+    except OSError:  # not a variable font: the static file is used as it is
+        return
+    values: list[float] = []
+    for axis in axes:
+        raw_name: object = axis["name"]
+        name = raw_name.decode("latin-1") if isinstance(raw_name, bytes) else str(raw_name)
+        lo, hi, default = (float(axis[k] or 0) for k in ("minimum", "maximum", "default"))
+        values.append(min(max(float(weight), lo), hi) if name.lower() == "weight" else default)
+    font.set_variation_by_axes(values)
 
 
 def font_pieces(
@@ -193,15 +217,18 @@ class PillowComposer:
         self._cmaps: dict[str, frozenset[int]] = {}
 
     # --- fonts ---------------------------------------------------------------------------
-    def _font(self, org_id: str, sha: str, data: bytes, px: int) -> ImageFont.FreeTypeFont:
-        key = f"amw:{org_id}:a11:{sha}:{px}"
+    def _font(
+        self, org_id: str, sha: str, data: bytes, px: int, weight: int | None = None
+    ) -> ImageFont.FreeTypeFont:
+        key = f"amw:{org_id}:a11:{sha}:{px}:{weight}"
         if key not in self._fonts:
             try:
                 # Always from memory (verified bytes): never a name or path, so no system font
                 # lookup or fallback can happen.
-                self._fonts[key] = ImageFont.truetype(
-                    io.BytesIO(data), px, layout_engine=ImageFont.Layout.RAQM
-                )
+                font = ImageFont.truetype(io.BytesIO(data), px, layout_engine=ImageFont.Layout.RAQM)
+                if weight is not None:
+                    _set_weight(font, weight)
+                self._fonts[key] = font
             except OSError as exc:
                 raise ComposeFailedError("font could not be loaded") from exc
         return self._fonts[key]
@@ -210,8 +237,7 @@ class PillowComposer:
         sha = hashlib.sha256(font_bytes).hexdigest()
         key = f"amw:{org_id}:a11cmap:{sha}"
         if key not in self._cmaps:
-            cmap = TTFont(io.BytesIO(font_bytes), lazy=True).getBestCmap() or {}
-            self._cmaps[key] = frozenset(cmap)
+            self._cmaps[key] = read_cmap(font_bytes)
         return self._cmaps[key]
 
     def missing_glyphs(
@@ -226,14 +252,12 @@ class PillowComposer:
         """Characters no font of the set covers (cmap lookup; the fallback is checked per glyph)."""
         if font_sha256 is not None:
             verify_font(font_bytes, font_sha256)  # FontIntegrityError on a mismatch
-        cmap_set = self._cmap(org_id, font_bytes)
+        cmaps = [self._cmap(org_id, font_bytes)]
         if fallback_font_bytes is not None:
             if fallback_font_sha256 is not None:
                 verify_font(fallback_font_bytes, fallback_font_sha256)
-            cmap_set = cmap_set | self._cmap(org_id, fallback_font_bytes)
-        return tuple(
-            sorted({ch for ch in text if ord(ch) not in cmap_set and ord(ch) not in _IGNORED})
-        )
+            cmaps.append(self._cmap(org_id, fallback_font_bytes))
+        return tuple(sorted(chr(cp) for cp in uncovered_code_points([text], cmaps)))
 
     def raqm_available(self) -> bool:
         from PIL import features
@@ -278,6 +302,14 @@ class PillowComposer:
             composition_sha256=hashlib.sha256(spec.description()).hexdigest(),
             text_box_px=box,
             missing_glyphs=missing,
+            fallback_used=bool(
+                spec.fallback_font_bytes is not None
+                and fallback_code_points(
+                    spec.lines,
+                    self._cmap(spec.org_id, spec.font_bytes),
+                    self._cmap(spec.org_id, spec.fallback_font_bytes),
+                )
+            ),
         )
 
     def _subject(self, img: Image.Image, draw: ImageDraw.ImageDraw, spec: RenderSpec) -> None:
@@ -337,7 +369,7 @@ class PillowComposer:
         def fb_at(px: int) -> ImageFont.FreeTypeFont:
             if fb_bytes is None:
                 raise ComposeFailedError("no fallback font is set")
-            return self._font(spec.org_id, fb_sha, fb_bytes, px)
+            return self._font(spec.org_id, fb_sha, fb_bytes, px, spec.fallback_weight)
 
         def pieces(text: str) -> list[tuple[str, bool]]:
             return font_pieces(text, primary_cmap, fb_cmap)

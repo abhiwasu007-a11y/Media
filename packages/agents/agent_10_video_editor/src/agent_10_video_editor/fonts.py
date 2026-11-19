@@ -1,18 +1,9 @@
 """Font cmap reader for the F-10 coverage check (the ``font_reader`` port of ``Deps``).
 
-The reader only parses the bytes it is given (verified by the caller against the asset's recorded
-SHA-256); it never looks up a font by name, so no system font can be consulted.
+It is the shared reader of ``amw_core.font_coverage`` (the same rule agent 11 applies), and parses
+only the bytes it is given (verified by the caller against the asset's recorded SHA-256).
 """
 
-import io
-
-from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
-
-
-def cmap_font_reader(font_bytes: bytes) -> frozenset[int]:
-    """The set of Unicode code points the font maps to a glyph."""
-    cmap = TTFont(io.BytesIO(font_bytes), lazy=True).getBestCmap() or {}
-    return frozenset(cmap)
-
+from amw_core.font_coverage import read_cmap as cmap_font_reader
 
 __all__ = ["cmap_font_reader"]

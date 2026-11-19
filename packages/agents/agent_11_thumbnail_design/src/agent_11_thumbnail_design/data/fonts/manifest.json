@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Only fonts listed here may be rasterised (pinning.verify_font). Add a font only with a verified licence and a RESEARCH_LOG.md entry.",
+  "note": "Fonts listed here are the repo-pinned fonts. A font is rasterised only if its bytes hash to the hash recorded for it; a tenant brand-kit font (registered asset, licence row) may also be used unless the channel's agent_11.fonts.policy is MANIFEST_ONLY (the owner channel: manifest fonts only). Add a manifest font only with a verified licence and a RESEARCH_LOG.md entry.",
   "fonts": [
     {
       "key": "mukta_regular",

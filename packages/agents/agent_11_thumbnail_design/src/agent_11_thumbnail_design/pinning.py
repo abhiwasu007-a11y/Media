@@ -46,6 +46,7 @@ class PinnedFont:
     sha256: str
     purpose: str
     licence: str
+    weight: int | None = None
 
 
 @cache
@@ -54,7 +55,9 @@ def font_manifest() -> dict[str, PinnedFont]:
     raw: dict[str, Any] = json.loads(_data("fonts/manifest.json"))
     out: dict[str, PinnedFont] = {}
     for f in raw["fonts"]:
-        pinned = PinnedFont(f["key"], f["file"], f["sha256"], f["purpose"], f["licence"])
+        pinned = PinnedFont(
+            f["key"], f["file"], f["sha256"], f["purpose"], f["licence"], f.get("weight")
+        )
         out[pinned.sha256] = pinned
     return out
 

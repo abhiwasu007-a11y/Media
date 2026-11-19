@@ -106,14 +106,10 @@ version = "0.0.0"
 source = { editable = "packages/agents/agent_10_video_editor" }
 dependencies = [
     { name = "amw-core" },
-    { name = "fonttools" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "amw-core", editable = "packages/amw_core" },
-    { name = "fonttools", specifier = ">=4.55" },
-]
+requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
 
 [[package]]
 name = "agent-11-thumbnail-design"
@@ -161,6 +157,7 @@ name = "amw-core"
 version = "0.0.0"
 source = { editable = "packages/amw_core" }
 dependencies = [
+    { name = "fonttools" },
     { name = "jsonschema" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -169,6 +166,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fonttools", specifier = ">=4.55" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.10" },

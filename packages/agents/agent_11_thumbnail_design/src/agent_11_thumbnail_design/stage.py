@@ -395,6 +395,8 @@ class _Run:
         self.font_source = "tenant_asset"
         self.fallback_font_bytes: bytes | None = None
         self.fallback_font_source: str | None = None
+        self.fallback_weight: int | None = None
+        self.fallback_asset_id: str | None = None
         self.scanner = InjectionScanner(
             stage.d.lexicons.injection_markers, stage.d.lexicons.instruction_phrases
         )
@@ -482,6 +484,11 @@ class _Run:
                 "the font bytes do not match the recorded hash of the font asset",
                 details={"check_id": "a11.pre.config", "missing": ["font_hash_match"]},
             ) from exc
+        if self.s.fonts_policy == "MANIFEST_ONLY" and self.font_source == "tenant_asset":
+            raise MissingDependencyError(
+                "the font policy of this channel allows only repo-manifest fonts",
+                details={"check_id": "a11.pre.config", "missing": ["font_manifest_only"]},
+            )
         self._pick_fallback(font_bytes)
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
@@ -1028,6 +1035,7 @@ class _Run:
                 if self.fallback_font_bytes
                 else None
             ),
+            fallback_weight=self.fallback_weight,
         )
 
     def _pick_fallback(self, font_bytes: bytes) -> None:
@@ -1036,6 +1044,7 @@ class _Run:
         font gets no fallback: its coverage and licence stay as the tenant registered them."""
         self.fallback_font_bytes = None
         self.fallback_font_source = None
+        self.fallback_weight = None
         pinned = font_manifest().get(hashlib.sha256(font_bytes).hexdigest())
         if pinned is None or pinned.purpose != "brand_primary":
             return
@@ -1043,6 +1052,7 @@ class _Run:
         if fallback != font_bytes:
             self.fallback_font_bytes = fallback
             self.fallback_font_source = f"repo_manifest:{FALLBACK_FONT_KEY}"
+            self.fallback_weight = pinned.weight
 
     def _compose_and_persist(
         self,
@@ -1194,6 +1204,10 @@ class _Run:
         with self.tx() as t:
             lic_id = self.d.repo.licence_id_code_generated(t)
             wanted = {("FONT", font.asset_id)} | {("TEMPLATE", b[1].template_key) for b in built}
+            if any(b[2].fallback_used for b in built):
+                # The fallback font drew pixels: it is a used FONT like any other (asset, licence
+                # row, ledger row, LicenceFact). The registry row key is the manifest font key.
+                wanted.add(("FONT", FALLBACK_FONT_KEY))
             if any(b[1].picture.kind == "CODE_GLYPH" for b in built):
                 wanted.add(("TEMPLATE", "glyphset"))
             registered = self.d.repo.registered_assets(t, sorted(wanted))
@@ -1211,10 +1225,14 @@ class _Run:
                     (registered[("TEMPLATE", facts.template_key)].asset_id, "TEMPLATE"),
                     (registered[("FONT", font.asset_id)].asset_id, "FONT"),
                 ]
+                if _rr.fallback_used:
+                    planned.append((registered[("FONT", FALLBACK_FONT_KEY)].asset_id, "FONT"))
                 if facts.picture.kind == "OWNER_IMAGE":
                     planned.append((owner_by_sha[facts.picture.key].asset_id, "IMAGE"))
                 elif facts.picture.kind == "CODE_GLYPH":
                     planned.append((registered[("TEMPLATE", "glyphset")].asset_id, "TEMPLATE"))
+            if ("FONT", FALLBACK_FONT_KEY) in wanted:
+                self.fallback_asset_id = registered[("FONT", FALLBACK_FONT_KEY)].asset_id
             expected = [LedgerRow(a, k, job, False) for a, k in planned]
             checks = self._set_checks(
                 promise,
@@ -1248,6 +1266,8 @@ class _Run:
                 )
                 files.append((asset_id, uri, size, sha))
                 used = [("TEMPLATE", facts.template_key), ("FONT", font.asset_id)]
+                if rr.fallback_used:
+                    used.append(("FONT", FALLBACK_FONT_KEY))
                 for kind, key in used:
                     self.d.repo.insert_ledger_row(
                         t, NewLedgerRow(registered[(kind, key)].asset_id, kind, job, task)
@@ -1483,6 +1503,8 @@ class _Run:
         reg("FONT", font.asset_id)
         for b in built:
             f: VariantFacts = b[1]
+            if b[2].fallback_used:
+                reg("FONT", FALLBACK_FONT_KEY)
             reg("TEMPLATE", f.template_key)
             if f.picture.kind == "CODE_GLYPH":
                 reg("TEMPLATE", "glyphset")
@@ -1510,9 +1532,13 @@ class _Run:
             "config_key_families": ["agent_11.", "llm.agent_11.thumbnail_variants.concepts."],
             "composer_version": "pillow-raqm",
             "template_set_sha256": template_set_sha256(),
-            "font_asset_ids": [font.asset_id],
+            "font_asset_ids": [
+                font.asset_id,
+                *([self.fallback_asset_id] if self.fallback_asset_id else []),
+            ],
             "font_source": self.font_source,
             "font_fallback_source": self.fallback_font_source,
+            "font_fallback_used": self.fallback_asset_id is not None,
             "render_environment": render_environment(),
             "calls": self.calls.records,
         }

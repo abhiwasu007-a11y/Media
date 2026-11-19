@@ -22,8 +22,10 @@ from agent_11_thumbnail_design.pinning import (
     font_manifest,
     pinned_font_bytes,
 )
+from agent_11_thumbnail_design.ports import RegisteredAsset
 from agent_11_thumbnail_design.templates import glyph_catalogue
 from tests.agents.agent_11_thumbnail_design.env import make_env
+from tests.agents.agent_11_thumbnail_design.fontgen import build_font
 from tests.agents.agent_11_thumbnail_design.test_composer import ORG, spec
 
 #: Title and subject words of the dry run (the Marathi title of ``thumb_v1.png``) and a
@@ -246,11 +248,144 @@ def test_stage_with_mukta_records_primary_and_fallback_in_the_provenance() -> No
     assert prov["font_fallback_source"] == f"repo_manifest:{FALLBACK_FONT_KEY}"
 
 
-def test_a_tenant_font_gets_no_fallback() -> None:
-    env = make_env()  # the generated test font stands for a tenant font
-    out = env.stage.run(env.ti, "att_1")
+def _non_manifest_font() -> bytes:
+    """A valid font whose bytes are not in the repo manifest (stands for a tenant's own font)."""
+    tt = TTFont(io.BytesIO(build_font()))
+    tt["head"].fontRevision = 7.0
+    out = io.BytesIO()
+    tt.save(out)
+    data = out.getvalue()
+    assert hashlib.sha256(data).hexdigest() not in font_manifest()
+    return data
+
+
+def _provenance(env: object) -> dict[str, object]:
+    out = env.stage.run(env.ti, "att_1")  # type: ignore[attr-defined]
     assert out.payload is not None
     assert out.payload.data is not None
-    prov = out.payload.data["provenance"]
-    assert prov["font_source"].startswith("repo_manifest:")  # the test font is in the manifest
-    assert prov["font_fallback_source"] is None  # but it is not a brand_primary font
+    prov: dict[str, object] = out.payload.data["provenance"]
+    return prov
+
+
+def test_a_tenant_font_gets_no_fallback() -> None:
+    env = make_env(font=_non_manifest_font())
+    prov = _provenance(env)
+    assert prov["font_source"] == "tenant_asset"
+    assert prov["font_fallback_source"] is None
+    assert prov["font_fallback_used"] is False
+
+
+def test_manifest_only_policy_refuses_a_non_manifest_font_but_not_manifest_fonts() -> None:
+    from amw_core.errors import MissingDependencyError
+
+    env = make_env(font=_non_manifest_font(), agent_11__fonts__policy="MANIFEST_ONLY")
+    with pytest.raises(MissingDependencyError) as info:
+        env.stage.run(env.ti, "att_1")
+    assert "font_manifest_only" in str(info.value.details)
+    ok = make_env(
+        language="mr-IN",
+        promise=_marathi(),
+        font=pinned_font_bytes("mukta_bold"),
+        agent_11__fonts__policy="MANIFEST_ONLY",
+    )
+    assert _provenance(ok)["font_source"] == "repo_manifest:mukta_bold"
+    free = make_env(font=_non_manifest_font(), agent_11__fonts__policy="TENANT_ALLOWED")
+    assert _provenance(free)["font_source"] == "tenant_asset"
+
+
+def _with_fallback_glyph() -> tuple[Promise, Brief]:
+    return (
+        Promise(
+            promise_statement="डायव्हर्जन्स कसा वाचायचा ते तुम्ही शिकाल.",
+            promise_key_terms=("डायव्हर्जन्स",),
+            working_title_local="डायव्हर्जन्स ॸ वाचा",
+        ),
+        Brief(
+            subject_idea="outline of level steps",
+            text_idea_local="डायव्हर्जन्स ॸ",
+            must_not_promise=("profit",),
+        ),
+    )
+
+
+def test_noto_is_registered_and_licensed_whenever_it_draws_a_glyph() -> None:
+    env = make_env(
+        language="mr-IN", promise=_with_fallback_glyph(), font=pinned_font_bytes("mukta_bold")
+    )
+    env.repo.registered[("FONT", FALLBACK_FONT_KEY)] = RegisteredAsset(
+        "ast_noto", "FONT", FALLBACK_FONT_KEY, "ACTIVE", True, "FONT"
+    )
+    prov = _provenance(env)
+    assert prov["font_fallback_used"] is True
+    assert "ast_noto" in prov["font_asset_ids"]  # type: ignore[operator]
+    assert {r.asset_id for r in env.repo.ledger if r.usage_kind == "FONT"} == {
+        "ast_font",
+        "ast_noto",
+    }
+
+
+def test_unregistered_noto_refuses_when_it_would_draw_a_glyph_and_is_not_needed_otherwise() -> None:
+    from amw_core.errors import MissingDependencyError
+
+    need = make_env(
+        language="mr-IN", promise=_with_fallback_glyph(), font=pinned_font_bytes("mukta_bold")
+    )
+    with pytest.raises(MissingDependencyError):
+        need.stage.run(need.ti, "att_1")
+    plain = make_env(language="mr-IN", promise=_marathi(), font=pinned_font_bytes("mukta_bold"))
+    prov = _provenance(plain)  # Mukta covers everything: Noto is not used, so not required
+    assert prov["font_fallback_used"] is False
+    assert prov["font_asset_ids"] == ["ast_font"]
+
+
+# ---------------------------------------------------------------------------- one coverage rule
+
+
+def test_agent_10_and_agent_11_agree_on_what_the_font_set_covers() -> None:
+    from agent_10_video_editor.fonts import cmap_font_reader
+    from agent_10_video_editor.timeline import FontCoverage
+    from amw_core.errors import InputInvalidError
+
+    mukta, noto = pinned_font_bytes("mukta_bold"), pinned_font_bytes(FALLBACK_FONT_KEY)
+    comp = PillowComposer()
+    sets = {"mukta": (mukta, None), "mukta+noto": (mukta, noto)}
+    for name, (primary, fallback) in sets.items():
+        cps = [cmap_font_reader(primary)] + ([cmap_font_reader(fallback)] if fallback else [])
+        covered_by_10 = frozenset().union(*cps)
+        for ch in "ॸडायव्हर्जन्स ?ऱळ₹→▲▼a ":
+            try:
+                FontCoverage.check(covered_by_10, [ch])
+                ten_ok = True
+            except InputInvalidError:
+                ten_ok = False
+            eleven_ok = not comp.missing_glyphs(ORG, primary, ch, None, fallback)
+            assert ten_ok == eleven_ok, (name, ch)
+    assert comp.missing_glyphs(ORG, mukta, "ॸ") == ("ॸ",)
+    assert comp.missing_glyphs(ORG, mukta, "ॸ", None, noto) == ()
+
+
+# ---------------------------------------------------------------------------- weight, arrows
+
+
+def test_fallback_glyph_uses_the_weight_of_the_requested_mukta_weight() -> None:
+    from dataclasses import replace
+
+    bold = canary_spec("mukta_bold_noto_fallback")
+    assert bold.fallback_weight == 700
+    regular = replace(bold, fallback_weight=400)
+    assert (
+        PillowComposer().render(bold).pixel_sha256 != PillowComposer().render(regular).pixel_sha256
+    )
+
+
+@pytest.mark.parametrize("ch", ["→", "↑", "▲", "▼", "⬆"])
+def test_arrows_and_triangles_are_in_neither_font_and_are_refused_not_drawn_as_boxes(
+    ch: str,
+) -> None:
+    mukta, noto = pinned_font_bytes("mukta_bold"), pinned_font_bytes(FALLBACK_FONT_KEY)
+    comp = PillowComposer()
+    assert comp.missing_glyphs(ORG, mukta, ch, None, noto) == (ch,)
+    from dataclasses import replace
+
+    with pytest.raises(GlyphMissingError):
+        comp.render(replace(canary_spec("mukta_bold_noto_fallback"), lines=(f"ट्रेंड {ch}",)))

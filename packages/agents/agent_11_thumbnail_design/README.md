@@ -61,7 +61,7 @@ What the code does:
   `a11-render-determinism` (`A11_REQUIRE_RECORDED_ENV=1`). No perceptual tolerance exists: nothing measured needs one.
 - **Fonts**: bytes must hash to the recorded hash (registered asset `sha256`, or a manifest entry), else `FontIntegrityError` (stage:
   `PERMANENT.MISSING_DEPENDENCY`, `font_hash_match`), also on the glyph-coverage path. Tenant brand-kit fonts (FR-09) stay allowed; the stage
-  still requires a registered asset with a licence row. Fonts load from memory only, so a system font is never used.
+  still requires a registered asset with a licence row. Fonts load from memory only, so a system font is never used (the old system-font test now uses the pinned Mukta).
 - **Lock**: `pillow==13.0.0` exactly in `pyproject.toml` and `uv.lock`; fontTools (test-font generator) is locked. FreeType, HarfBuzz and Raqm
   are inside the Pillow wheel; FriBiDi and zlib are system libraries.
 - **Probe**: `scripts/probe_render_env.py` prints the full fingerprint, loaded libraries, canary raster, PNG and font hashes of a host
@@ -92,9 +92,10 @@ Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deploym
   goes to Noto only when Mukta has no glyph for it (cmap, fontTools), mixed runs sit on Mukta's baseline, and the coverage gate
   (`a11.q.language_glyphs`) passes only if one of the two fonts covers every character (a character neither covers is refused, never drawn
   as a `.notdef` box). Text Mukta fully covers renders pixel-identically with or without the fallback. The manifest provenance records
-  `font_fallback_source` (CCR-245). Only manifest fonts load; no system font is ever consulted.
-- **Tenants:** "use only these" is the rule of the owner's channel (its brand kit registers Mukta and Noto). The tenant brand-kit mechanism of
-  FR-09 is unchanged for other tenants: a tenant font is a registered `FONT` asset with a licence row whose bytes hash to the recorded
+  `font_fallback_source` (CCR-245). Fonts load from memory by verified hash; no system font is ever consulted. Noto is a used `FONT` like any other: whenever it draws a glyph of a variant, the stage requires a registered `FONT` asset with key `noto_sans_devanagari_vf` (registry), writes its licence-ledger row and `LicenceFact`, and lists it in `font_asset_ids`; the fallback uses the Noto weight of the Mukta weight in use (Bold: `wght` 700). Agent 10 and agent 11 share one coverage rule (`amw_core.font_coverage`). Characters in neither font (arrows, triangles) are refused, never drawn as boxes.
+- **Owner channel:** "use only these" is enforced by `agent_11.fonts.policy = MANIFEST_ONLY` (set for the owner channel; CCR-246): a font that is
+  not a repo-manifest font is refused (`font_manifest_only`). **Tenants:** the default `TENANT_ALLOWED` keeps the tenant brand-kit mechanism of
+  FR-09 unchanged: a tenant font is a registered `FONT` asset with a licence row whose bytes hash to the recorded
   `sha256`; it gets no fallback (its coverage and licence stay exactly what the tenant registered).
 - **Break 14 of the dry run ("boxes" in the thumbnail):** the three outlined rectangles right of the Marathi title were the code-drawn neutral
   glyph `g1_level_steps` (three `rect` ops), not missing font glyphs; the Marathi title rendered correctly. Regression tests in
