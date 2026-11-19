@@ -96,9 +96,7 @@ class Env:
             title="c",
         )
         self.font = w.add_font()
-        self.tpl = w.add_asset(
-            AssetKind.TEMPLATE, "e" * 64, "tpl", LicenceSourceType.CODE_GENERATED
-        )
+        self.tpl = w.add_template("tpl1", "e" * 64)
         self.stage = AssetSourcingStage(
             tenancy=FakeTenancy(),
             assets=w.assets,
@@ -166,14 +164,14 @@ class Env:
             "changed_shot_ids": [],
         }
         job = JobScope("job_x", task_id, "chn_x", w.org)
-        return self.stage.run(
+        return self.stage.source(
             ctx=w.ctx,
             envelope_org=w.org,
             scope=job,
             inp=SourcingInput.model_validate({**data, **inp}),
             script_bytes=script_bytes,
             plan_bytes=plan,
-            brand=BrandKit(PALETTE, (self.font,), {"tpl1": self.tpl}),
+            brand=BrandKit(PALETTE, (self.font,)),
             timeline_end_ms=end_ms,
             previous=previous,
             job_destination=LicenceDestination.MONETIZED_YOUTUBE,
@@ -317,14 +315,29 @@ def test_input_hash_mismatch_is_input_invalid() -> None:
     with pytest.raises(InputInvalidError):
         env.run(plan(), OVERLAYS, plan_hash="b" * 64)
     env2 = Env()
-    original = env2.stage.run
+    original = env2.stage.source
 
     def bad_script(**kw: Any) -> Any:
         return original(**{**kw, "script_bytes": kw["script_bytes"] + b" "})
 
-    env2.stage.run = bad_script
+    env2.stage.source = bad_script
     with pytest.raises(InputInvalidError):
         env2.run(plan(), OVERLAYS)
+
+
+@pytest.mark.integration
+def test_source_without_a_job_destination_fails_closed() -> None:
+    env = Env()
+    original = env.stage.source
+
+    def no_dest(**kw: Any) -> Any:
+        return original(**{**kw, "job_destination": None})
+
+    env.stage.source = no_dest
+    for dest in ("MONETIZED_YOUTUBE", "NON_MONETIZED"):
+        with pytest.raises(MissingDependencyError):
+            env.run(plan(), OVERLAYS, destination=dest)
+    assert not list(env.w.ledger.for_job(env.w.tx, "job_x"))
 
 
 @pytest.mark.integration
@@ -667,7 +680,7 @@ def test_two_tenants_share_repositories_without_seeing_each_other() -> None:
     b_env = a
     b_env.font, b_env.tpl = (
         b_world.add_font(),
-        b_world.add_asset(AssetKind.TEMPLATE, "d" * 64, "tpl", LicenceSourceType.CODE_GENERATED),
+        b_world.add_template("tpl1", "d" * 64),
     )
     res_b = b_env.run(plan(), OVERLAYS, world=b_world)
     assert res_b.task_status == "FAILED"

@@ -112,6 +112,19 @@ class IntentClassifier:
 
 class ShotPlanReader:
     @staticmethod
+    def total_duration_ms(plan_json: bytes | Mapping[str, Any]) -> int:
+        """The timeline end (CCR-205): the plan's ``total_duration_ms`` (narration end plus the
+        end-screen segment), read from the one plan blob (CCR-203)."""
+        try:
+            doc = json.loads(plan_json) if isinstance(plan_json, bytes) else dict(plan_json)
+            total = doc.get("data", doc)["total_duration_ms"]
+        except KeyError, TypeError, ValueError:
+            raise InputInvalidError("shot plan has no total_duration_ms") from None
+        if isinstance(total, bool) or not isinstance(total, int) or total <= 0:
+            raise InputInvalidError("shot plan total_duration_ms must be a positive integer")
+        return total
+
+    @staticmethod
     def read(
         plan_json: bytes | Mapping[str, Any],
     ) -> tuple[list[ShotRequirement], list[OverlayRequirement]]:

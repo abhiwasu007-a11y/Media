@@ -1,6 +1,6 @@
 """Deterministic rule functions F-04...F-09 (FIN-R4, R9, R10, R11/YTG-R2, R12, YTG-R3, R5, R6,
 YTG-R7 V11a). Arguments are the minimal facts each function reads (the ``compliance_rules_core``
-argument objects); ``inputs.facts`` derives them from the upstream rows."""
+argument objects); ``inputs.extractors`` derives them from the upstream documents and rows."""
 
 from typing import Final, Literal
 
@@ -17,10 +17,11 @@ from amw_core.enums import (
     PresenterKind,
     VisualSourceTier,
 )
+from amw_runtime.disclaimer import DRAFT_STATUS
 
-# Owner-set status string (CCR-212; en dash). Byte-equal to amw_runtime.disclaimer.DRAFT_STATUS;
-# the import that replaces this constant is ticket PASS6-K item 1.
-DRAFT_DISCLAIMER_LABEL: Final = "DRAFT – not lawyer-approved"  # noqa: RUF001 (owner-set label)
+# Owner-set status string (CCR-212; en dash), single source ``amw_runtime.disclaimer``: the report
+# label is that module's constant, never a second copy of the text (ticket PASS6-K item 1).
+DRAFT_DISCLAIMER_LABEL: Final = DRAFT_STATUS
 """3A R5 report label (a fixed report string of 3A_SLICE_SPEC, not a threshold)."""
 
 
