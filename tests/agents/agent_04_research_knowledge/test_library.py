@@ -336,7 +336,14 @@ def make_sql_lib(runner: RecordingRunner) -> sqlmod.SqlKnowledgeLibrary:
     def factory(scope: TenantScope) -> Iterator[RecordingRunner]:
         yield runner
 
-    return sqlmod.SqlKnowledgeLibrary(factory, FtsQueryBuilder({"en": "english"}, "simple"))
+    return sqlmod.SqlKnowledgeLibrary(
+        factory, FtsQueryBuilder({"en": "english"}, "simple"), _NoDocuments()
+    )
+
+
+class _NoDocuments:
+    def read(self, scope: TenantScope, subject_ref: str) -> bytes | None:
+        return None
 
 
 def test_sql_library_parameters_and_mapping() -> None:
@@ -418,3 +425,57 @@ def test_insert_chunks_typed_errors_in_memory() -> None:
         w.library.insert_chunks(scope, [row("kch_a", 2)])
     with pytest.raises(InputInvalid):  # a channel other than the scope's is never relabelled
         w.library.insert_chunks(scope, [row("kch_b", 3, channel="chn_other")])
+
+
+class _Docs:
+    def __init__(self, docs: dict[str, bytes]) -> None:
+        self.docs = docs
+
+    def read(self, scope: TenantScope, subject_ref: str) -> bytes | None:
+        return self.docs.get(subject_ref)
+
+
+@pytest.mark.parametrize(
+    ("ref", "sha_ok", "body", "expected"),
+    [
+        ("amw-blob://d", True, b'{"chunk_ids": ["chk_a", "chk_b"]}', {"chk_a", "chk_b"}),
+        (None, True, b'{"chunk_ids": ["chk_a"]}', set()),  # no subject_ref
+        ("amw-blob://missing", True, b"", set()),  # document absent
+        ("amw-blob://d", False, b'{"chunk_ids": ["chk_a"]}', set()),  # hash mismatch
+        ("amw-blob://d", True, b"not json", set()),
+        ("amw-blob://d", True, b'["chk_a"]', set()),  # not an object
+        ("amw-blob://d", True, b'{"chunk_ids": "chk_a"}', set()),  # not a list
+    ],
+)
+def test_sql_released_chunk_ids_reads_the_subject_document_fail_closed(
+    ref: str | None, sha_ok: bool, body: bytes, expected: set[str]
+) -> None:
+    import hashlib
+    from dataclasses import replace
+
+    from agent_04_research_knowledge.guards.restricted import ApprovalView
+    from amw_core.enums import ApprovalKind, ApprovalState
+
+    @contextmanager
+    def factory(scope: TenantScope) -> Iterator[RecordingRunner]:
+        yield RecordingRunner()
+
+    docs = _Docs({"amw-blob://d": body} if ref == "amw-blob://d" else {})
+    lib = sqlmod.SqlKnowledgeLibrary(factory, FtsQueryBuilder({"en": "english"}, "simple"), docs)
+    sha = hashlib.sha256(body).hexdigest() if sha_ok else "0" * 64
+    view = ApprovalView(
+        approval_id="apr_x",
+        org_id="org_x",
+        kind=ApprovalKind.KNOWLEDGE_RELEASE,
+        state=ApprovalState.APPROVED,
+        subject_sha256=sha,
+        subject_ref=ref,
+    )
+    lib.approval = lambda scope, approval_id: replace(view)  # type: ignore[method-assign]
+    scope = TenantScope(org_id="org_x", channel_id="chn_x")
+    assert lib.released_chunk_ids(scope, "apr_x", "col_x") == expected
+    unknown = sqlmod.SqlKnowledgeLibrary(
+        factory, FtsQueryBuilder({"en": "english"}, "simple"), docs
+    )
+    unknown.approval = lambda scope, approval_id: None  # type: ignore[method-assign]
+    assert unknown.released_chunk_ids(scope, "apr_x", "col_x") == frozenset()

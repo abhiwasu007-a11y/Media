@@ -44,7 +44,6 @@ from agent_04_research_knowledge.steps.external import (
     SnapshotWriter,
     fetch_key,
     html_to_text,
-    normalise_url,
 )
 from agent_04_research_knowledge.steps.notes import (
     EvidenceNoter,
@@ -757,7 +756,7 @@ def test_fetch_ok_html_to_passages_and_key(tmp_path: Any) -> None:
     assert fetch_key(w.org, w.task, "r1", "https://example.org/a") != fetch_key(
         w.org, w.task, "r1", "https://example.org/b"
     )
-    assert normalise_url("https://A.org") == "https://a.org/" and html_to_text("<b>x</b>") == "x"
+    assert html_to_text("<b>x</b>") == "x"
 
 
 @pytest.mark.parametrize("status", [403, 404, 410])
