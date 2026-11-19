@@ -11,3 +11,7 @@ class GlyphMissingError(Exception):
 
 class ComposeFailedError(Exception):
     """Rasterising or encoding failed (mapped by the stage to AGENT.CRASH)."""
+
+
+class FontIntegrityError(Exception):
+    """Font bytes differ from their hash or are not in the pinned font manifest (fail closed)."""
