@@ -33,6 +33,27 @@ Test images are generated at test time from synthetic OHLC data, never from priv
   `remedy_stage_id`), `ChangedShotSelector`, `CheckpointManager.resume`, `AdapterErrorMapper`, `TenantGuard`.
 - Pydantic models equal to the blueprint JSON Schemas (validated against the schemas in the document).
 
+## data_pack chart scenes (owner decision: the real skeleton run includes them)
+
+- **Intake (R20):** the pack stays outside git. The operator tool calls
+  `AssetRegistrar.register_data_pack_series` (human actor, operator tool, class `data_pack`; the guard
+  runs and is audited BEFORE the pack is read). `FileDataPackReader` opens only the configured bare file
+  names (`charts.data_pack_files`) under `charts.data_pack_root` (unset = CONFIG_INVALID); the root must
+  end in `course/data_pack`, contain no symbolic link and no Trade research area component (IS, VAL,
+  OOS, *holdout*); a file must be a regular file in the root (no symlink, `O_NOFOLLOW`) within a size cap.
+  The registered blob is exactly the bytes read; the pack manifest hash is recorded on the asset.
+- **Render:** a chart case with `window_dates` (CCR-259) routes the stage's chart attempt to
+  `DataPackChartBuilder`, which draws from the registered blob (hash verified against
+  `content_sha256`, intake class, instrument and timeframe checked). The as-of date is the IST calendar
+  date of the stage's system clock only; no payload, case or caller can set it.
+- **Lag:** every bar must satisfy `as_of - bar_end >= 30` (IN-02; weekly bars end at date + 6); a newer
+  bar makes the shot `UNRESOLVED(DATA_WITHIN_LAG)` (gate to `s05_script`); clipping only on request;
+  arithmetic equal to Agent 06 `price_age.classify` (parity test).
+- **Output:** reveal stills, the `CHART` asset (tier C, `CODE_GENERATED`, provenance attributes:
+  lag proof, pack manifest hash), the contract `agent_08.chart_facts` document through the existing
+  stage path. Divergence markers use the proposed `CONNECT_BARS` kind (CCR-255). RSI of a flat span is
+  undefined (not drawn). Labels of this template sit above the plot area.
+
 ## Open items (not done, not faked)
 
 - Stock (B), AI video (D) and AI still (E) acquisition through the adapters is not wired in the stage
@@ -41,8 +62,12 @@ Test images are generated at test time from synthetic OHLC data, never from priv
   are not built; the stage takes a `FootageSelector`. The `query_plan` / `candidate_rank` packs: the runner
   is exercised but their `expected` blocks are case summaries, not schema-valid outputs, so a recorded
   replay cannot pass the schema check; model-in-the-loop run listed.
-- Devanagari: matplotlib has no complex-script shaping (test U-13 not met); a shaping library and font
-  choice is needed before Marathi/Hindi text appears in charts or graphics.
+- Devanagari: matplotlib 3.11.2 shapes text through libraqm (measured: the pre-base vowel sign and
+  conjuncts render correctly with Noto Sans Devanagari); the data_pack chart builder checks libraqm and
+  glyph coverage. The brand-font default (Mukta vs Noto, Q-O6) is the owner's decision; the stage's
+  older chart path and the graphics templates still draw Latin allowlist text only.
+- data_pack charts: the stage is not yet behind the CCR-203 `run(task_input, attempt)` entry point (not
+  on main); job publish date is not used as the lag base (today is stricter; Agent 16 re-checks).
 - Music bed sourcing (3B), checkpoint persistence through `CheckpointStore`, budget/cost-ledger calls,
   idempotency-store use for paid effects, observability, near-duplicate calibration (3B).
 - Persistence is behind Protocols with in-memory fakes only (`testing/memory.py`); no SQL yet.
@@ -72,7 +97,8 @@ Test images are generated at test time from synthetic OHLC data, never from priv
 | Checkpoint persistence, budget/cost-ledger calls | Planned |
 | SQL persistence (only in-memory fakes exist) | Planned |
 | Music bed (3B) | Planned |
-| Devanagari shaping (U-13) | Open: matplotlib has no complex-script shaping; needs a shaping library and font decision |
+| Devanagari shaping (U-13) | Implemented, Tested for data_pack charts (libraqm in matplotlib 3.11.2; glyph coverage and shaping asserted); font default is owner question Q-O6 |
+| data_pack chart scenes (`charts/datapack.py`, `charts/datapack_builder.py`): reader port (file-backed at `charts.data_pack_root`, unset = CONFIG_INVALID; in-memory double), per-bar SEBI lag (refuse, clip only on request), RSI (Wilder), 1920x1080 render with bilingual source label and as-of range, contract chart facts, provenance (lag proof, pack manifest hash), CHART asset registration (CODE_GENERATED self-grant) | Implemented, Tested (unit + stage, synthetic bars); called by the stage for cases with `window_dates` (CCR-255 to CCR-259 proposed) |
 
 Measured numbers (package-local config, `coveragerc` in this directory; the root config does not
 measure agent packages, listed under core_needs): see the final report of the PR; command:

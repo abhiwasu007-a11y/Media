@@ -275,3 +275,18 @@ def test_to_minor_rounds_half_up() -> None:
     assert to_minor(5_000, "INR", EXP) == 1  # 0.5 paise -> 1
     assert to_minor(4_999, "INR", EXP) == 0
     assert str(to_minor(1, "JPY", EXP)).startswith("REQUIRES REVIEW")
+
+
+@pytest.mark.parametrize("exponent", [7, -1, 100, True])
+def test_to_minor_refuses_an_exponent_outside_zero_to_six(exponent: int) -> None:
+    """A wrong exponent must not print a figure 10x too large (7) or 0 (-1): it is marked for
+    review like a missing entry."""
+    out = to_minor(1_234_567, "INR", {"INR": exponent})
+    assert isinstance(out, str)
+    assert "outside 0..6" in out
+
+
+def test_to_minor_valid_exponents() -> None:
+    assert to_minor(1_234_567, "JPY", {"JPY": 0}) == 1
+    assert to_minor(1_234_567, "KWD", {"KWD": 3}) == 1235
+    assert to_minor(1_234_567, "XXX", {"XXX": 6}) == 1_234_567
