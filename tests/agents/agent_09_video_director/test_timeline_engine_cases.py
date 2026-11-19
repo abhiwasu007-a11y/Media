@@ -66,6 +66,7 @@ from amw_core.enums import CheckVerdict
 from amw_core.errors import AmwError
 from tests.agents.agent_09_video_director.support import (
     EVALS,
+    codes,
     ctx_of,
     make_request,
     make_step,
@@ -163,7 +164,7 @@ def te_hook(case: dict[str, Any]) -> None:
         with pytest.raises(AmwError) as ei:
             analyze_hook(segs, aspect, c.hook_window_ms)
         assert ei.value.code == exp["error"]
-        assert ei.value.details["violations"] == exp["violations"]
+        assert codes(ei.value.details) == exp["violations"]
         return
     h = analyze_hook(segs, aspect, c.hook_window_ms)
     assert (h.end_ms, h.first_payoff_ms) == (exp["hook_end_ms"], exp["first_payoff_ms"])
@@ -342,7 +343,7 @@ def te_gate_hash(case: dict[str, Any]) -> None:
             script_sha256=inp["script_sha256"], ref_sha256=inp["script_sha256"],
             verified_script_sha256=inp["verified_script_sha256"], stage_verdict=inp["stage_verdict"],
         )  # fmt: skip
-    assert ei.value.code == exp["error"] and ei.value.details["violations"] == exp["violations"]
+    assert ei.value.code == exp["error"] and codes(ei.value.details) == exp["violations"]
 
 
 def te_timemap(case: dict[str, Any]) -> None:
@@ -364,7 +365,7 @@ def te_timemap(case: dict[str, Any]) -> None:
         with pytest.raises(AmwError) as ei:
             build_time_map(ids, NarrationTimeline.model_validate(var["timeline"]))
         assert ei.value.code == want["error"]
-        assert ei.value.details["violations"] == want["violations"]
+        assert codes(ei.value.details) == want["violations"]
 
 
 def te_rebase(case: dict[str, Any]) -> None:
@@ -388,7 +389,7 @@ def te_rebase(case: dict[str, Any]) -> None:
         if "error" in var["expect"]:
             with pytest.raises(AmwError) as ei:
                 rebase_shots(shots, old, new, c)
-            assert ei.value.details["violations"] == var["expect"]["violations"]
+            assert codes(ei.value.details) == var["expect"]["violations"]
         else:
             got = rebase_shots(shots, old, new, c)
             assert [(s.shot_id, s.start_ms, s.end_ms) for s in got] == [

@@ -8,7 +8,8 @@ from typing import Any
 import pytest
 
 from agent_09_video_director.assemble import plan_hash
-from agent_09_video_director.contracts import AspectRatio, RevisionFeedback, Scene, ShotPlan
+from agent_09_video_director.contracts import AspectRatio, RevisionFeedback, Scene
+from agent_09_video_director.output import ShotPlanDocument, build_document
 from agent_09_video_director.persistence import load_model, persist_plan
 from agent_09_video_director.step import Verification as Verif
 from agent_09_video_director.views import Views, build_views, view_matches_shots
@@ -23,7 +24,7 @@ from amw_core.errors import (
     QualityRepeatedFailureError,
     TenantMismatchError,
 )
-from amw_core.ids import ORG
+from amw_core.ids import ATTEMPT, JOB, ORG, TASK
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
 from tests.agents.agent_09_video_director.support import (
@@ -31,6 +32,7 @@ from tests.agents.agent_09_video_director.support import (
     SHA_A,
     ResponderLlm,
     cfg,
+    codes,
     make_request,
     make_step,
     respond,
@@ -140,7 +142,7 @@ def test_gates_fail_before_any_model_call(
     step, llm, rec = make_step()
     with pytest.raises(error) as ei:
         step.run(make_request(script, durs, **over))
-    assert code in ei.value.details["violations"]
+    assert code in codes(ei.value.details)
     assert llm.requests == [] and rec.rows == []  # zero model calls (T4)
 
 
@@ -157,7 +159,7 @@ def test_hook_window_exceeded_fails_input_invalid() -> None:
     durs = {**durs, "s1": 31_000}
     with pytest.raises(InputInvalidError) as ei:
         make_step()[0].run(make_request(script, durs))
-    assert ei.value.details["violations"] == ["HOOK_WINDOW_EXCEEDED"]
+    assert codes(ei.value.details) == ["HOOK_WINDOW_EXCEEDED"]
 
 
 def test_tenant_isolation() -> None:  # S-01
@@ -208,7 +210,7 @@ def test_fallback_share_fails_quality_repeated_failure() -> None:  # U-121
     )
     with pytest.raises(QualityRepeatedFailureError) as ei:
         step.run(make_request(script, durs))
-    assert ei.value.details["violations"] == ["FALLBACK_SHARE"]
+    assert codes(ei.value.details) == ["FALLBACK_SHARE"]
     ok_step, _, _ = make_step(
         llm=ResponderLlm(always_bad), config=cfg(fallback_max_share_permille=1000)
     )
@@ -223,7 +225,7 @@ def test_blocking_check_failure_fails_the_task() -> None:
     step, _, _ = make_step(config=cfg(first_dropoff_start_ms=900_000, first_dropoff_end_ms=950_000))
     with pytest.raises(QualityRepeatedFailureError) as ei:
         step.run(make_request(script, durs))
-    assert "a09.q.interrupt_first" in ei.value.details["violations"]
+    assert "a09.q.interrupt_first" in codes(ei.value.details)
 
 
 def test_resume_after_batch_does_not_repeat_calls() -> None:  # FI-10
@@ -301,7 +303,7 @@ def test_unmatched_chart_request_is_refused() -> None:
     )
     with pytest.raises(InputInvalidError) as ei:
         make_step()[0].run(make_request(script.model_copy(update={"scenes": scenes}), durs))
-    assert ei.value.details["violations"] == ["CHART_REQUEST_UNMATCHED"]
+    assert codes(ei.value.details) == ["CHART_REQUEST_UNMATCHED"]
 
 
 # ---------------------------------------------------------------- persistence (F-30)
@@ -357,22 +359,28 @@ def test_plan_blob_is_write_once_and_round_trips() -> None:
 
     script, durs = sample_script()
     plan = make_step()[0].run(make_request(script, durs)).plan
+    doc = build_document(plan, script)
+    job, tid, aid = JOB.new(), TASK.new(), ATTEMPT.new()
     store = MemBlob()
     ctx = TenantContext(org_id=ORG_ID, actor=actor_ref("agent_09"))  # type: ignore[arg-type]
-    ref = persist_plan(store, ctx, plan, task_path="tsk_1/attempts/att_1/output.json")
-    again = persist_plan(store, ctx, plan, task_path="tsk_1/attempts/att_1/output.json")
+    ref = persist_plan(store, ctx, doc, job_id=job, task_id=tid, attempt_id=aid)
+    again = persist_plan(store, ctx, doc, job_id=job, task_id=tid, attempt_id=aid)
     assert ref == again and len(store.data) == 1
-    loaded = load_model(store, ctx, ref.uri, ref.sha256, ShotPlan)
-    assert plan_hash(loaded) == plan_hash(plan)
+    loaded = load_model(store, ctx, ref.uri, ref.sha256, ShotPlanDocument)
+    assert loaded == doc and "plan_ref" not in loaded.model_dump() and loaded.views.agent_08_shots
     changed = plan.model_copy(update={"iteration": 9})
     with pytest.raises(CorruptedOutputError):
-        persist_plan(store, ctx, changed, task_path="tsk_1/attempts/att_1/output.json")
+        persist_plan(
+            store, ctx, build_document(changed, script), job_id=job, task_id=tid, attempt_id=aid
+        )
     other = TenantContext(org_id=ORG.new(), actor=actor_ref("agent_09"))
     with pytest.raises(CrossTenantRefError):
-        load_model(store, other, ref.uri, ref.sha256, ShotPlan)
+        load_model(store, other, ref.uri, ref.sha256, ShotPlanDocument)
     store.data[ref.uri] = b"{bad"
     with pytest.raises(CorruptedOutputError):
-        load_model(store, ctx, ref.uri, __import__("hashlib").sha256(b"{bad").hexdigest(), ShotPlan)
+        load_model(
+            store, ctx, ref.uri, __import__("hashlib").sha256(b"{bad").hexdigest(), ShotPlanDocument
+        )
 
 
 _ = BytesIO

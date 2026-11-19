@@ -61,6 +61,7 @@ from agent_09_video_director.timeline.hook import HookInfo, TimedSegment, analyz
 from agent_09_video_director.timeline.rebase import rebase_shots
 from agent_09_video_director.timeline.timemap import TimeMap, build_time_map
 from amw_adapters.llm.protocol import LlmAdapter
+from amw_core.contracts.error import violation
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import CheckVerdict
 from amw_core.errors import BudgetExhaustedError, ConfigInvalidError, QualityRepeatedFailureError
@@ -302,7 +303,8 @@ class ShotPlanStep:
             and fallbacks * 1000 > cfg.fallback_max_share_permille * len(model_slots)
         ):
             raise QualityRepeatedFailureError(
-                "too many slots ended as fallback", details={"violations": ["FALLBACK_SHARE"]}
+                "too many slots ended as fallback",
+                details={"violations": [violation("FALLBACK_SHARE")]},
             )
         ainp = AssembleInput(
             script=req.script,
@@ -358,7 +360,8 @@ class ShotPlanStep:
         log.info("plan.checks", extra={"shots": len(plan.shots), "failed": len(failed)})
         if failed:
             raise QualityRepeatedFailureError(
-                "blocking plan checks failed", details={"violations": failed}
+                "blocking plan checks failed",
+                details={"violations": [violation(c) for c in failed]},
             )
         return StepResult(
             plan, plan_hash(plan), results, meter, result.state, result.guard_hits, accepted

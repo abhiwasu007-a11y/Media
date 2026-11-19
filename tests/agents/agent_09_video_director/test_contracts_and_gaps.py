@@ -16,14 +16,13 @@ import pytest
 from agent_09_video_director.assemble import derive_holds
 from agent_09_video_director.contracts import AspectRatio, NarrationTimeline
 from agent_09_video_director.direction.runner import ResumeState
-from agent_09_video_director.output import ShotPlanPayload
+from agent_09_video_director.output import ShotPlanPayload, build_document, build_task_output
 from agent_09_video_director.persistence import (
     OutputRefData,
     load_checkpoint,
     persist_plan,
     save_checkpoint,
 )
-from agent_09_video_director.protocol import ShotPlanTask
 from agent_09_video_director.step import Verification
 from agent_09_video_director.views import build_views
 from amw_adapters.common import FailurePlan
@@ -38,8 +37,9 @@ from amw_core.errors import (
     StorageUnavailableError,
     Upstream5xxError,
 )
-from amw_core.ids import ATTEMPT, ORG, TASK, OrgId, actor_ref
+from amw_core.ids import ATTEMPT, JOB, ORG, TASK, OrgId, actor_ref
 from amw_core.interfaces.tenancy_context import TenantContext
+from amw_core.tenancy.storage_paths import task_artifact_uri
 from amw_core.testing.memory import MemoryCheckpointStore, MemoryTransaction
 from tests.agents.agent_09_video_director.support import (
     ORG_ID,
@@ -47,6 +47,7 @@ from tests.agents.agent_09_video_director.support import (
     TASK_ID,
     ResponderLlm,
     cfg,
+    codes,
     make_request,
     make_step,
     sample_script,
@@ -77,10 +78,14 @@ def run_task(**over: Any) -> tuple[Any, Any, MemBlob]:
     req = make_request(script, durs, **over)
     store = MemBlob()
     step, _, _ = make_step()
-    out = ShotPlanTask(step, store).run(
-        req, ctx(), task_path=f"{TASK_ID}/attempts/a1/output.json",
-        now=datetime(2026, 1, 1, tzinfo=UTC), currency="USD",
-    )  # fmt: skip
+    res = step.run(req)
+    doc = build_document(res.plan, req.script)
+    ref = persist_plan(
+        store, ctx(), doc, job_id=JOB.new(), task_id=TASK.new(), attempt_id=ATTEMPT.new()
+    )
+    out = build_task_output(
+        res, doc, ref, now=datetime(2026, 1, 1, tzinfo=UTC), duration_ms=0, currency="USD"
+    )
     return out, req, store
 
 
@@ -218,14 +223,14 @@ def test_changed_timeline_is_rebased_and_limit_failure_is_reachable() -> None:
     step, llm, _ = make_step()
     with pytest.raises(InputInvalidError) as ei:
         step.run(bad)
-    assert ei.value.details["violations"] == ["REBASE_LIMIT"] and llm.requests == []
+    assert codes(ei.value.details) == ["REBASE_LIMIT"] and llm.requests == []
     with pytest.raises(InputInvalidError) as ei2:  # the previous timeline is required
         step.run(
             make_request(
                 script, grown, iteration=1, previous_plan=first.plan, timeline_sha256="c" * 64
             )
         )
-    assert ei2.value.details["violations"] == ["PREVIOUS_TIMELINE_MISSING"]
+    assert codes(ei2.value.details) == ["PREVIOUS_TIMELINE_MISSING"]
 
 
 # ---------------------------------------------------------------- (2) gate wiring
@@ -239,7 +244,7 @@ def test_script_gate_receives_claim_and_status(kw: dict[str, Any], code: str) ->
     step, llm, _ = make_step()
     with pytest.raises(InputInvalidError) as ei:
         step.run(make_request(script, durs, verification=Verification(SHA_A, "ALLOWED", **kw)))
-    assert code in ei.value.details["violations"] and llm.requests == []
+    assert code in codes(ei.value.details) and llm.requests == []
 
 
 # ---------------------------------------------------------------- (3) refusal WARN
@@ -295,13 +300,16 @@ def test_checkpoint_roundtrip_and_stale_checkpoint_is_discarded() -> None:
     first = step.run(make_request(script, durs), checkpoint=states.append)
     tx = MemoryTransaction(ctx())
     store, blobs = MemoryCheckpointStore(), MemBlob()
-    tid, aid = TASK.new(), ATTEMPT.new()
+    job, tid, aid = JOB.new(), TASK.new(), ATTEMPT.new()
     now = datetime(2026, 1, 1, tzinfo=UTC)
     for st in states[:2]:
-        save_checkpoint(store, tx, blobs, ctx(), task_id=tid, attempt_id=aid, state=st, now=now)
+        save_checkpoint(
+            store, tx, blobs, ctx(), job_id=job, task_id=tid, attempt_id=aid, state=st, now=now
+        )
     h = states[0].input_sha256
     loaded = load_checkpoint(store, tx, blobs, ctx(), task_id=tid, input_sha256=h)
     assert loaded == states[1] and len(blobs.data) == 2
+    assert all(f"/jobs/{job}/checkpoints/{tid}/" in u for u in blobs.data)  # CCR-208
     assert load_checkpoint(store, tx, blobs, ctx(), task_id=tid, input_sha256="0" * 64) is None
     assert load_checkpoint(store, tx, blobs, ctx(), task_id=TASK.new(), input_sha256=h) is None
     llm2 = ResponderLlm()  # resuming with the right hash skips the stored batches
@@ -341,7 +349,9 @@ def test_fi12_provider_errors_propagate_typed(error: Any) -> None:
 # ---------------------------------------------------------------- FI-11, S-03
 def test_fi11_failed_blob_write_leaves_no_partial_file_and_paths_come_from_core() -> None:
     script, durs = sample_script()
-    plan = make_step()[0].run(make_request(script, durs)).plan
+    req = make_request(script, durs)
+    doc = build_document(make_step()[0].run(req).plan, script)
+    job, tid, aid = JOB.new(), TASK.new(), ATTEMPT.new()
 
     class Dying(MemBlob):
         built: list[str]
@@ -363,11 +373,12 @@ def test_fi11_failed_blob_write_leaves_no_partial_file_and_paths_come_from_core(
 
     store = Dying()
     with pytest.raises(StorageUnavailableError):
-        persist_plan(store, ctx(), plan, task_path="t/output.json")
+        persist_plan(store, ctx(), doc, job_id=job, task_id=tid, attempt_id=aid)
     assert store.data == {}
     store.die = False
-    ref = persist_plan(store, ctx(), plan, task_path="t/output.json")
-    assert store.built and ref.uri == store.built[0]  # S-03: URI built by the storage, not here
+    ref = persist_plan(store, ctx(), doc, job_id=job, task_id=tid, attempt_id=aid)
+    # S-03 (CCR-208): the path is built by the core helper, in the artifacts sub-path
+    assert ref.uri == task_artifact_uri(ctx().org_id, job, tid, aid, "shot_plan.json")
     assert ref.uri.startswith(f"amw-blob://{ORG_ID}/")
 
 
