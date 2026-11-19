@@ -75,7 +75,8 @@ def needs_own_review_code(kind: EvidenceRecordKind) -> bool:
 
 
 class MemorySessionEventSource:
-    """In-memory stand-in for the platform session event store (the real one is ticket 3A-13)."""
+    """In-memory TEST stand-in for the session record (dry run only; the real source is
+    ``amw_adapters.session_record``, and real mode refuses this one)."""
 
     def __init__(self, events: Sequence[SessionEvent] = ()) -> None:
         self._events: dict[tuple[str, str], SessionEvent] = {}

@@ -51,10 +51,10 @@ Every list (decision words, neutral words, negation, withholding, quote markers,
 interrogatives, review-code shape, owner accounts, top-level-session test, the rule table) is
 configuration (``approvals.owner_chat.*``) with defaults marked **owner to confirm**.
 
-**Limitation (honest status).** The real ``SessionEventSource`` that reads the platform's session
-record is ticket 3A-13. Until then only the in-memory fake
-(``amw_core.testing.memory.MemorySessionEventSource``) exists, so no 3A approval recorded through
-this path may be treated as production-verified.
+**Session record (3A-13 / WS-08):** the real source is
+``amw_adapters.session_record.ClaudeSessionJsonlSource`` (wired by
+``amw_core.owner_evidence_real``); approvals recorded through the in-memory fake are TEST
+fixtures (dry run only). Residual risks: ``docs/v4/runtime/EVIDENCE_PATH.md``.
 """
 
 import hashlib
@@ -241,8 +241,8 @@ class SessionEvent:
 class SessionEventSource(Protocol):
     """Read access to the platform's session event store (one event by ID), owned by the store.
 
-    Limitation: the real adapter is ticket 3A-13; until then only the in-memory fake exists and
-    3A approvals recorded with it are not production-verified (see the module docstring).
+    Real source: ``amw_adapters.session_record.ClaudeSessionJsonlSource`` (3A-13); the in-memory
+    fake is the dry-run TEST path only (see the module docstring).
     """
 
     def fetch(self, session_id: str, event_uuid: str) -> SessionEvent | None:

@@ -6,8 +6,10 @@ It runs under the ``amw_verifier`` database role: it fetches the owner's event t
 verification result, event or check list from a caller, and it is the only component that holds
 the verifier session; the operator tool holds only an ``amw_operator`` session.
 
-**Limitation:** the real session-store adapter is ticket 3A-13; until then only the in-memory
-fake exists, and 3A approvals recorded through it are not production-verified.
+**Session record (3A-13 / WS-08):** the real source is
+``amw_adapters.session_record.ClaudeSessionJsonlSource`` (wired by
+``amw_core.owner_evidence_real``); approvals recorded through the in-memory fake are TEST
+fixtures (dry run only). Residual risks: ``docs/v4/runtime/EVIDENCE_PATH.md``.
 """
 
 from datetime import datetime
