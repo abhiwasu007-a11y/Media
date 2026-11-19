@@ -1,6 +1,6 @@
 # 21 — PRICING AND PACKAGING (client plans; every price is a PROPOSAL)
 
-> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines are marked `(unfiled CCR)` and listed in `audit/b2_unfiled_ccr_requests_adr_business.md`; this file changes no contract.
+> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines carry their CCR number and status (filed and decided in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)); this file changes no contract.
 
 | Field | Value |
 |---|---|
@@ -126,8 +126,8 @@ The directive form is price = cost / (1 − margin); the gateway fee is carried 
 | `labour_cost` | `review_minutes` from the pilot (`09` §9: ESTIMATE until the pilot); `review_rate` = cost per hour of the reviewer | **REQUIRES REVIEW (Phase 1): pilot minutes; A6-c weekly review time; reviewer rate (owner)** |
 | `fixed_alloc` | stock footage is $21-$30 / month on annual billing for one channel but Small Business **excludes agencies and production companies** and Business is by quote (PR-06); the voice provider's agency/client clause is NOT CONFIRMED (PR-05) | **REQUIRES REVIEW (Phase 1): Business/agency licences for stock, music, voice, AI B-roll; quoted prices enter here** |
 | `rework_allowance` | retry and revision counts from the ledger and `07` | **REQUIRES REVIEW (Phase 1): measure in 3B** |
-| `target_gross_margin` | **config variable** `pricing.target_gross_margin` (unfiled CCR), per plan family; no default value is proposed | **REQUIRES REVIEW (Phase 1): owner sets** |
-| `gateway_fee_rate` | **config variable** `pricing.gateway_fee_rate` (unfiled CCR) | **REQUIRES REVIEW (Phase 1): payment-gateway ADR** |
+| `target_gross_margin` | **config variable** `pricing.target_gross_margin` (CCR-165, needs owner Q-O21), per plan family; no default value is proposed | **REQUIRES REVIEW (Phase 1): owner sets** |
+| `gateway_fee_rate` | **config variable** `pricing.gateway_fee_rate` (CCR-165, needs owner Q-O21) | **REQUIRES REVIEW (Phase 1): payment-gateway ADR** |
 | FX | USD vendor prices to INR | **REQUIRES REVIEW (Phase 1): FX source and refresh rule** |
 
 Rules:
@@ -148,7 +148,7 @@ base             = the cheapest sellable combination (owner decides after 3B)
 price_per_credit = cost_per_video(base) / (1 − target_gross_margin − gateway_fee_rate)
 ```
 
-| Dimension | Values (PROPOSAL; catalogue keys unfiled CCR) | Anchored to |
+| Dimension | Values (PROPOSAL; catalogue keys CCR-165, Q-O21) | Anchored to |
 |---|---|---|
 | Length band | short-form (`SHORTS`); standard long-form; extended long-form. Boundaries: **REQUIRES REVIEW (Phase 1): `19_NICHE_BENCHMARKS.md` and the measured cost curve** (Vidpros uses up to 60 s / up to 15 min; Vidchops 5-60 min: SECONDARY context only) | `24` §7.1, §7.2 `duration_targets_ms` |
 | Quality tier | **Standard**: 1080p master, SRT, thumbnail set, QC at the publish threshold. **Premium**: adds 1440p where render budget allows, more thumbnail variants or extra languages. The 100-point score, the publish threshold (≥ 85) and every compliance gate are **identical in all tiers**; a tier never lowers a gate | `24` §4 presets `yt_master_1080p`, `yt_master_1440p`, `srt_per_language`, `thumbnail_set`; `18_PRODUCTION_QUALITY_STANDARD.md` |
@@ -168,8 +168,8 @@ Rules: a credit is consumed when the job reaches the state that the platform def
 | Render minutes | per period; render only in the night window, never in market hours | existing key; meter `RENDER_MINUTES` | yes | yes | yes |
 | AI spend cap | upper bound on paid provider spend per tenant per period; hard stop on breach as in `09` §4 | existing key; meter `AI_SPEND` | yes | yes | yes |
 | Revisions | loops per video | ceiling `24` §7.1 `max_revision_loops` 3 | included | included | contract |
-| Channels | channels per tenant | **(unfiled CCR: new `limits` key)** | 1 per unit | n/a | contract |
-| Approver seats | named client users | **(unfiled CCR: new `limits` key)** | few | few | contract |
+| Channels | channels per tenant | **(CCR-165, Q-O21: new `limits` key)** | 1 per unit | n/a | contract |
+| Approver seats | named client users | **(CCR-165, Q-O21: new `limits` key)** | few | few | contract |
 | Storage / retention | stored assets, audit retention | existing keys; meter `STORAGE_BYTES` | yes | yes | contract |
 | Languages | per video | MVP single language (`24` §7.1) | 1 | 1 | contract |
 
@@ -206,9 +206,9 @@ All numeric values: **PROPOSAL - REQUIRES REVIEW (Phase 1): needs measured capac
 
 | Need | Existing contract | Gap |
 |---|---|---|
-| Plan catalogue and limits | `plans` (`key`, `name`, `limits`, `price_minor`, `currency`, `status`) | `limits` keys for credits, rollover, overage mode, channels, seats, weights: **(unfiled CCR)** |
+| Plan catalogue and limits | `plans` (`key`, `name`, `limits`, `price_minor`, `currency`, `status`) | `limits` keys for credits, rollover, overage mode, channels, seats, weights: **(CCR-165, Q-O21)** |
 | Subscription | `subscriptions` | none |
-| Usage | `usage_events` meters `VIDEOS`, `VIDEO_MINUTES`, `RENDER_MINUTES`, `AI_SPEND`, `STORAGE_BYTES`; source = S4 cost tracking | `CREDITS` meter **(unfiled CCR)**; alternative: derive credits from `VIDEOS` × tier at invoice time |
+| Usage | `usage_events` meters `VIDEOS`, `VIDEO_MINUTES`, `RENDER_MINUTES`, `AI_SPEND`, `STORAGE_BYTES`; source = S4 cost tracking | `CREDITS` meter **(CCR-165, Q-O21)**; alternative: derive credits from `VIDEOS` × tier at invoice time |
 | Cost per video per tenant | `cost_ledger` | none |
 | Invoices | `invoices` (`amount_minor`, `tax_minor`, `currency`, `status`, `idempotency_key`) | none |
 | Per-video margin view (owner only; never shown to the client) | derived: price consumed vs `cost_per_video` | format in the Agent 15 blueprint |
@@ -251,7 +251,7 @@ All numeric values: **PROPOSAL - REQUIRES REVIEW (Phase 1): needs measured capac
 | 10 | Exact "delivered" state that consumes a credit (`03` state machine) |
 | 11 | GST rate and registration treatment (⚖ CA) |
 
-## 14. Contract change requests (unfiled; listed in `audit/b2_unfiled_ccr_requests_adr_business.md`)
+## 14. Contract change requests (filed as CCR-165, needs owner Q-O21; CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5))
 
 | # | Target | Need |
 |---|---|---|
