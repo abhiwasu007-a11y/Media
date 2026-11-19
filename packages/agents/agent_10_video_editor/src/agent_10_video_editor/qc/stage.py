@@ -6,6 +6,7 @@ NOT a failed task: the task is ``SUCCEEDED`` with ``gate: true`` results and ``g
 FAILED``. A missing or unparseable measurement is never ``PASS``: it raises and the task is retried.
 """
 
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
@@ -1098,7 +1099,20 @@ def _timeline(data: bytes) -> Timeline:
 
 
 def _words(text: str) -> list[str]:
-    return text.casefold().split()
+    """Words for the subtitle-vs-script comparison (18 section 7.6).
+
+    Only invisible and format characters (zero-width, soft hyphen, bidi, controls) are removed
+    and whitespace is unified; case is folded. Meaning-bearing characters stay exact: digits,
+    signs, currency symbols, percent, separators and Devanagari marks (nukta, anusvara,
+    chandrabindu), so ``+5%`` / ``-5%``, ``50%`` / ``50`` or a nasalisation change is a
+    difference. ``amw_core.text_normalise`` folds those characters, so it is not used here
+    (it is for lexicon matching, CCR-105)."""
+    kept = "".join(
+        ch
+        for ch in unicodedata.normalize("NFC", text)
+        if ch.isspace() or unicodedata.category(ch) not in ("Cf", "Cc", "Co", "Cn", "Cs")
+    )
+    return kept.casefold().split()
 
 
 def _word_overlap_permille(cues: list[Any], segment_ids: list[str], script: ScriptStrings) -> int:
