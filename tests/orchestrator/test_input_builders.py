@@ -16,7 +16,7 @@ from amw_orchestrator import input_builders
 from amw_orchestrator.executor import BuildContext, ChannelCategory, TaskExecutor
 from amw_orchestrator.input_builders import BuilderTable
 from tests.orchestrator.test_executor import _bc, _job, _Worker
-from tests.orchestrator.world import LONG, ok_output
+from tests.orchestrator.world import LONG, no_plugins, ok_output
 
 pytestmark = pytest.mark.unit
 RESEARCH = (
@@ -61,7 +61,7 @@ def test_the_whole_path_through_the_executor_with_the_real_model() -> None:
         __import__("tests.orchestrator.world", fromlist=["Open"]).Open,
     )
     worker = _Worker(ok_output("agent_04.research_pack.output", {"pack": 1}))
-    ex = TaskExecutor(_Reg(BuilderTable(), worker), schemas=reg)
+    ex = TaskExecutor(_Reg(BuilderTable(), worker), schemas=reg, load_plugins=no_plugins)
     out = ex.run(ex.prepare(_ctx(ChannelCategory.NON_FINANCE), str(ATTEMPT.new())))
     ((task_input, ctx),) = worker.seen
     assert out.status.value == "SUCCEEDED"

@@ -2,7 +2,21 @@
 name = "amw-orchestrator"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core", "amw-adapters", "amw-runtime"]
+dependencies = [
+    "amw-core",
+    "amw-adapters",
+    "amw-runtime",
+    "agent-04-research-knowledge",
+    "agent-05-scriptwriter",
+    "agent-06-fact-checker",
+    "agent-07-voice-production",
+    "agent-08-visual-assets",
+    "agent-09-video-director",
+    "agent-10-video-editor",
+    "agent-11-thumbnail-design",
+    "agent-16-compliance-qa",
+    "amw-delivery",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -15,3 +29,13 @@ packages = ["src/amw_orchestrator"]
 amw-core = { workspace = true }
 amw-adapters = { workspace = true }
 amw-runtime = { workspace = true }
+agent-04-research-knowledge = { workspace = true }
+agent-05-scriptwriter = { workspace = true }
+agent-06-fact-checker = { workspace = true }
+agent-07-voice-production = { workspace = true }
+agent-08-visual-assets = { workspace = true }
+agent-09-video-director = { workspace = true }
+agent-10-video-editor = { workspace = true }
+agent-11-thumbnail-design = { workspace = true }
+agent-16-compliance-qa = { workspace = true }
+amw-delivery = { workspace = true }
