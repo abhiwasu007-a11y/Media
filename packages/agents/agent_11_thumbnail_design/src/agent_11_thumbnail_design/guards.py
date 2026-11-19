@@ -116,7 +116,7 @@ def rationale_ok(r: str, ctx: GuardContext) -> bool:
         if pos == 0 or tokens[pos - 1][-1:] in ".!?":
             continue
         bare = tok.strip(".,;:!?\"'()")
-        if bare[:1].isupper() and bare.casefold() not in ctx.neutral_lexicon:
+        if bare[:1].isupper() and fold(bare) not in ctx.neutral_lexicon:
             return False
     return True
 
