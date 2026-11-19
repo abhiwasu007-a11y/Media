@@ -11,6 +11,11 @@ from typing import Any, Final
 
 from agent_16_compliance_qa.authorisation.guards import CHECK_IDS, AuthDecision
 from agent_16_compliance_qa.base import Model
+from agent_16_compliance_qa.payload_models import (
+    PublicationAuthorisationOutput,
+    UniquenessCheckOutput,
+    emit,
+)
 from agent_16_compliance_qa.uniqueness import Measures, Thresholds, UniquenessDecision
 from amw_core.contracts.common import PayloadObject
 from amw_core.contracts.task_output import (
@@ -165,58 +170,66 @@ def auth_payload(
     report_uri: str,
 ) -> dict[str, Any]:
     """``agent_16.publication_authorisation.output`` 1.0.0 (section 8.5)."""
-    return {
-        "verdict": decision.verdict.value,
-        "is_final": True,
-        "authorised_action": decision.authorised_action,
-        "subject": dict(subject),
-        "guards": [g.model_dump(mode="json") for g in decision.guards],
-        "human_wins_total": decision.human_wins_total,
-        "per_dimension_used": [u.model_dump(mode="json") for u in decision.per_dimension_used],
-        "evaluation_date": evaluation_date.isoformat(),
-        "earliest_compliant_publish_date": earliest.isoformat() if earliest else None,
-        "evaluated_publish_date": None,
-        "authorisation_verdict_id": authorisation_verdict_id,
-        "disclosure_verdict_id": disclosure_verdict_id,
-        "evidence_ids": list(evidence_ids),
-        "report_ref": report_uri,
-    }
+    return emit(
+        PublicationAuthorisationOutput,
+        {
+            "verdict": decision.verdict.value,
+            "is_final": True,
+            "authorised_action": decision.authorised_action,
+            "subject": dict(subject),
+            "guards": [g.model_dump(mode="json") for g in decision.guards],
+            "human_wins_total": decision.human_wins_total,
+            "per_dimension_used": [u.model_dump(mode="json") for u in decision.per_dimension_used],
+            "evaluation_date": evaluation_date.isoformat(),
+            "earliest_compliant_publish_date": earliest.isoformat() if earliest else None,
+            "evaluated_publish_date": None,
+            "authorisation_verdict_id": authorisation_verdict_id,
+            "disclosure_verdict_id": disclosure_verdict_id,
+            "evidence_ids": list(evidence_ids),
+            "report_ref": report_uri,
+        },
+    )
 
 
 def uniqueness_payload(
     d: UniquenessDecision, m: Measures, t: Thresholds, report_uri: str
 ) -> dict[str, Any]:
     """``svc_s02.uniqueness_check.output`` 1.0.0 (section 8.3)."""
-    return {
-        "verdict": d.verdict.value,
-        "measures": {
-            "masked_structure_identical_to_template": m.masked_structure_identical_to_template,
-            "template_text_share": m.template_text_share,
-            "section_role_sequence_equal_to_template": m.section_role_sequence_equal_to_template,
-            "shot_type_sequence_identity": m.shot_type_sequence_identity,
-            "cross_video": {
-                "status": d.cross_video_status,
-                "prior_videos_compared": m.prior_videos_on_channel
-                if d.cross_video_status == "COMPARED"
-                else 0,
-                "max_similarity": m.cross_video_max_similarity
-                if d.cross_video_status == "COMPARED"
-                else None,
+    return emit(
+        UniquenessCheckOutput,
+        {
+            "verdict": d.verdict.value,
+            "measures": {
+                "masked_structure_identical_to_template": m.masked_structure_identical_to_template,
+                "template_text_share": m.template_text_share,
+                "section_role_sequence_equal_to_template": (
+                    m.section_role_sequence_equal_to_template
+                ),
+                "shot_type_sequence_identity": m.shot_type_sequence_identity,
+                "cross_video": {
+                    "status": d.cross_video_status,
+                    "prior_videos_compared": m.prior_videos_on_channel
+                    if d.cross_video_status == "COMPARED"
+                    else 0,
+                    "max_similarity": m.cross_video_max_similarity
+                    if d.cross_video_status == "COMPARED"
+                    else None,
+                },
             },
+            "thresholds": t.model_dump(mode="json"),
+            "precondition": "cross-video comparator is 3C"
+            if d.cross_video_status != "COMPARED"
+            else None,
+            "revision_findings": [
+                {
+                    "rule_id": "YTG-R1",
+                    "item_ref": r.check_id,
+                    "finding": r.message[:500],
+                    "remedy_stage_id": r.remedy_stage_id,
+                }
+                for r in d.results
+                if r.verdict is CheckVerdict.FAIL
+            ],
+            "report_ref": report_uri,
         },
-        "thresholds": t.model_dump(mode="json"),
-        "precondition": "cross-video comparator is 3C"
-        if d.cross_video_status != "COMPARED"
-        else None,
-        "revision_findings": [
-            {
-                "rule_id": "YTG-R1",
-                "item_ref": r.check_id,
-                "finding": r.message[:500],
-                "remedy_stage_id": r.remedy_stage_id,
-            }
-            for r in d.results
-            if r.verdict is CheckVerdict.FAIL
-        ],
-        "report_ref": report_uri,
-    }
+    )

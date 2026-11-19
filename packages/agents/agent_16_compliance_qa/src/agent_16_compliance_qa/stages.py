@@ -57,6 +57,7 @@ from agent_16_compliance_qa.output import (
     uniqueness_payload,
 )
 from agent_16_compliance_qa.packs import LoadedPacks
+from agent_16_compliance_qa.payload_models import RenderId, ScriptId, StageId
 from agent_16_compliance_qa.uniqueness import (
     Measures,
     Segment,
@@ -75,10 +76,10 @@ from agent_16_compliance_qa.verdicts import (
     WriteScope,
 )
 from amw_adapters.llm.protocol import LlmAdapter
-from amw_core.contracts.common import storage_uri_owner
+from amw_core.contracts.common import ChannelIdStr, Sha256Hex, StorageUri, storage_uri_owner
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
-from amw_core.enums import ActorKind, ComplianceVerdict
+from amw_core.enums import ActorKind, ComplianceVerdict, ProductionTypeKey
 from amw_core.errors import CrossTenantRefError, SchemaInvalidError
 from amw_core.exec_context import ExecContext
 from amw_core.ids import (
@@ -393,8 +394,8 @@ class ComplianceGateStage:
 
 # --- S2 uniqueness ------------------------------------------------------------------------
 class UniqRef(Model):
-    uri: str = Field(min_length=1)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    uri: StorageUri
+    sha256: Sha256Hex
 
 
 class UniqInputs(Model):
@@ -405,27 +406,27 @@ class UniqInputs(Model):
 
 
 class UniqSubject(Model):
-    script_id: str = Field(pattern=r"^scr_")
-    script_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    render_id: str | None = None
-    render_sha256: str | None = None
+    script_id: ScriptId
+    script_sha256: Sha256Hex
+    render_id: RenderId | None = None
+    render_sha256: Sha256Hex | None = None
 
 
 class UniqRouting(Model):
-    script_stage_id: str = Field(pattern=r"^[a-z0-9_]{2,32}$")
+    script_stage_id: StageId
 
 
 class UniqPriorWindow(Model):
-    max_prior_jobs: int = Field(ge=0)
+    max_prior_jobs: int = Field(strict=True, ge=0)
 
 
 class UniquenessInput(Model):
-    """``svc_s02.uniqueness_check.input`` 1.0.0 (section 7.3)."""
+    """``svc_s02.uniqueness_check.input`` 1.0.0 (section 7.3), exact to the document schema."""
 
     subject: UniqSubject
-    iteration: int = Field(ge=0)
-    channel_id: str = Field(pattern=r"^chn_")
-    production_type_key: str
+    iteration: int = Field(strict=True, ge=0)
+    channel_id: ChannelIdStr
+    production_type_key: ProductionTypeKey
     routing: UniqRouting
     inputs: UniqInputs
     prior_window: UniqPriorWindow

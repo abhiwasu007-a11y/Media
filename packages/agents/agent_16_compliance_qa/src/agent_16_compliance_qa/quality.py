@@ -16,6 +16,7 @@ from agent_16_compliance_qa.base import Model
 from agent_16_compliance_qa.config import Agent16Config
 from agent_16_compliance_qa.judge.models import QualityOutput
 from agent_16_compliance_qa.judge.quality import CheckId, JudgedCheckRow, apply_quality
+from agent_16_compliance_qa.payload_models import QualityScoreOutput, emit
 from agent_16_compliance_qa.scoring.aggregate import (
     CriterionScore,
     DeterministicInputs,
@@ -136,54 +137,57 @@ def score_payload(
     res: ScoreResult, qsc_ids: list[str], provenance: Mapping[str, Any]
 ) -> dict[str, Any]:
     """``agent_16.quality_score.output`` 1.0.0 (section 8.4)."""
-    return {
-        "gate": res.gate,
-        "machine_total": res.machine_total,
-        "threshold": res.threshold,
-        "rubric_version": RUBRIC_VERSION,
-        "dimensions": [
-            {
-                "dimension": r.dimension.value,
-                "max_points": r.max_points,
-                "points": r.points,
-                "scorer_kind": r.scorer_kind,
-                "criteria": [
-                    {
-                        "criterion_id": c.criterion_id,
-                        "kind": c.kind,
-                        "max": c.max,
-                        "earned": c.earned,
-                        "status": c.status,
-                        "precondition": c.precondition,
-                        "evidence_refs": list(c.evidence_refs),
-                    }
-                    for c in r.criteria
-                ],
-            }
-            for r in res.dimensions
-        ],
-        "judged_checks": [
-            {
-                "check_id": c.check_id,
-                "verdict": c.verdict,
-                "elements": [{"element_id": e, "score": s} for e, s in c.elements],
-                "rationale": c.rationale[:500],
-            }
-            for c in res.judged_checks
-        ],
-        "quality_score_ids": qsc_ids,
-        "judge_calls": res.judge_calls,
-        "revision_findings": [
-            {
-                "rule_id": None,
-                "item_ref": c.criterion_id,
-                "finding": c.finding[:500],
-                "remedy_stage_id": None,
-            }
-            for r in res.dimensions
-            for c in r.criteria
-            if c.finding
-        ],
-        "gate_verdict": "FAILED" if res.gate == "FAIL" else "PASSED",
-        "provenance": dict(provenance) | {"rubric_version": RUBRIC_VERSION},
-    }
+    return emit(
+        QualityScoreOutput,
+        {
+            "gate": res.gate,
+            "machine_total": res.machine_total,
+            "threshold": res.threshold,
+            "rubric_version": RUBRIC_VERSION,
+            "dimensions": [
+                {
+                    "dimension": r.dimension.value,
+                    "max_points": r.max_points,
+                    "points": r.points,
+                    "scorer_kind": r.scorer_kind,
+                    "criteria": [
+                        {
+                            "criterion_id": c.criterion_id,
+                            "kind": c.kind,
+                            "max": c.max,
+                            "earned": c.earned,
+                            "status": c.status,
+                            "precondition": c.precondition,
+                            "evidence_refs": list(c.evidence_refs),
+                        }
+                        for c in r.criteria
+                    ],
+                }
+                for r in res.dimensions
+            ],
+            "judged_checks": [
+                {
+                    "check_id": c.check_id,
+                    "verdict": c.verdict,
+                    "elements": [{"element_id": e, "score": s} for e, s in c.elements],
+                    "rationale": c.rationale[:500],
+                }
+                for c in res.judged_checks
+            ],
+            "quality_score_ids": qsc_ids,
+            "judge_calls": res.judge_calls,
+            "revision_findings": [
+                {
+                    "rule_id": None,
+                    "item_ref": c.criterion_id,
+                    "finding": c.finding[:500],
+                    "remedy_stage_id": None,
+                }
+                for r in res.dimensions
+                for c in r.criteria
+                if c.finding
+            ],
+            "gate_verdict": "FAILED" if res.gate == "FAIL" else "PASSED",
+            "provenance": dict(provenance) | {"rubric_version": RUBRIC_VERSION},
+        },
+    )

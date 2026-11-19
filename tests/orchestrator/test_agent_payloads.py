@@ -59,20 +59,61 @@ def test_a_registered_output_that_does_not_match_its_model_is_refused_with_the_r
     assert result.resource_usage.cost_estimate_micros == 5
 
 
-def test_an_output_without_a_registered_model_is_refused_fail_closed() -> None:
-    """Agent 16 builds its three outputs as plain mappings: no model, so no registration."""
+def _through_the_default_executor(out: TaskOutput) -> TaskOutput:
+    ex = TaskExecutor(_Reg(BuilderTable(), _Worker(out)), schemas=PayloadSchemaRegistry())
+    return ex.run(ex.prepare(_ctx(ChannelCategory.NON_FINANCE), str(ATTEMPT.new())))
+
+
+def test_the_real_compliance_gate_output_is_accepted_and_a_broken_one_refused() -> None:
     w = gate_world()
     real = w.stage.run(w.ti, ctx_of(w.ti))
     assert real.status is OutputStatus.SUCCEEDED and real.payload is not None
     assert real.payload.payload_schema == "agent_16.compliance_gate.output"
-    ex = TaskExecutor(_Reg(BuilderTable(), _Worker(real)), schemas=PayloadSchemaRegistry())
-    result = ex.run(ex.prepare(_ctx(ChannelCategory.NON_FINANCE), str(ATTEMPT.new())))
+    ok = _through_the_default_executor(real)
+    assert ok.status is OutputStatus.SUCCEEDED and ok.error is None
+    broken = {k: v for k, v in (real.payload.data or {}).items() if k != "disclosure"}
+    bad = _through_the_default_executor(
+        _with_payload(real, real.payload.model_copy(update={"data": broken}))
+    )
+    assert bad.status is OutputStatus.FAILED and bad.error is not None
+    assert bad.error.code == "PERMANENT.SCHEMA_INVALID"
+
+
+def test_the_real_quality_score_and_uniqueness_outputs_are_accepted() -> None:
+    from tests.agents.agent_16_compliance_qa.test_entry_points import score_world
+    from tests.agents.agent_16_compliance_qa.test_stages import uniq_world
+
+    sw = score_world()
+    score = sw.stage.run(sw.ti, ctx_of(sw.ti))
+    stage, ti, _, _ = uniq_world(False)
+    uniq = stage.run(ti, ctx_of(ti))
+    for real, schema in (
+        (score, "agent_16.quality_score.output"),
+        (uniq, "svc_s02.uniqueness_check.output"),
+    ):
+        assert real.status is OutputStatus.SUCCEEDED and real.payload is not None
+        assert real.payload.payload_schema == schema
+        done = _through_the_default_executor(real)
+        assert done.status is OutputStatus.SUCCEEDED and done.error is None, schema
+
+
+def test_the_approval_output_is_still_refused_fail_closed() -> None:
+    """``svc_s07.request_approval.output`` has no schema in any Wave A document (CCR-283)."""
+    out = _real_agent_04_output()
+    assert out.payload is not None
+    approval = out.payload.model_copy(
+        update={
+            "payload_schema": "svc_s07.request_approval.output",
+            "data": {"state": "APPROVED"},
+        }
+    )
+    result = _through_the_default_executor(_with_payload(out, approval))
     assert result.status is OutputStatus.FAILED and result.error is not None
     assert result.error.code == "PERMANENT.SCHEMA_INVALID"
 
 
 @pytest.mark.parametrize(
-    "schema", ["agent_12.metadata.input", "svc_s02.uniqueness_check.input", "agent_99.x.input"]
+    "schema", ["agent_12.metadata.input", "svc_s07.request_approval.input", "agent_99.x.input"]
 )
 def test_an_unregistered_input_never_reaches_the_worker(schema: str) -> None:
     worker = _Worker()
