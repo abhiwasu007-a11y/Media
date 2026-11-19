@@ -324,10 +324,9 @@ class World:
             "agent_08.asset_sourcing.output": {"shots": entries},
             "agent_07.audio_master.output": audio,
             "agent_07.voice_synthesis.output": {
-                "source": "PROVIDER_CLIPS",
                 "language": "mr",
                 "narration": {"asset_id": self.narration_asset_id},
-                "segments": narration,
+                "timeline": {"source": "PROVIDER_CLIPS", "segments": narration},
             },
             "agent_05.script_document": {"script_sha256": script_sha, "segments": segments},
         }

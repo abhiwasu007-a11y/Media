@@ -498,11 +498,7 @@ class _QcRun:
         pr = m.probe
         total_ms = row.duration_ms
         shots_ms = [(s.shot_id, s.plan_start_ms, s.plan_end_ms) for s in timeline.shots]
-        narration_end = (
-            narration.end_ms
-            if narration.end_ms is not None
-            else max((s.end_ms for s in narration.segments), default=0)
-        )
+        narration_end = narration.end_ms
         end_screen_ms = (
             timeline.end_screen.plan_end_ms - timeline.end_screen.plan_start_ms
             if timeline.end_screen

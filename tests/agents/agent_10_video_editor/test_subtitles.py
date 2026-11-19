@@ -70,11 +70,18 @@ def test_cue_builder_never_changes_text_and_rejects_bad_limit() -> None:
 @pytest.mark.unit
 def test_core_build_requires_text_for_every_segment_and_refuses_unaligned() -> None:
     timeline = NarrationTimeline.model_validate(
-        {"source": "OWNER_MARKS", "segments": [{"segment_id": "s1", "start_ms": 0, "end_ms": 2000}]}
+        {
+            "timeline": {
+                "source": "OWNER_MARKS",
+                "segments": [{"segment_id": "s1", "start_ms": 0, "end_ms": 2000}],
+            }
+        }
     )
     with pytest.raises(InputInvalidError):
         SubtitleStageCore.build(timeline, {}, 20, 5000)
-    unaligned = NarrationTimeline.model_validate({"source": "UNALIGNED", "segments": []})
+    unaligned = NarrationTimeline.model_validate(
+        {"timeline": {"source": "UNALIGNED", "segments": []}}
+    )
     with pytest.raises(InputInvalidError):
         SubtitleStageCore.build(unaligned, {}, 20, 5000)
     ok = SubtitleStageCore.build(timeline, {"s1": "hello world"}, 20, 5000)
@@ -186,7 +193,7 @@ def test_subtitle_checks_fail_when_text_would_differ(tmp_path: Path) -> None:
     world = World(tmp_path)
     chain = run_chain(world)
     # a segment shorter than its cue count triggers CUE_TOO_SHORT
-    world.docs["agent_07.voice_synthesis.output"]["segments"][0]["end_ms"] = 3
+    world.docs["agent_07.voice_synthesis.output"]["timeline"]["segments"][0]["end_ms"] = 3
     import json
 
     uri, sha = world.put(

@@ -12,7 +12,9 @@ from typing import Any, Protocol, runtime_checkable
 
 from agent_10_video_editor.inputs import AssetRecord
 from amw_core.enums import CheckKind, CheckVerdict, RenderStatus
+from amw_core.errors import InputInvalidError
 from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.text_normalise import normalise_for_matching
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,11 +159,23 @@ class ChannelProfile:
 
     @property
     def is_finance(self) -> bool:
-        """Finance when the category says so or the finance pack is active; a channel with no
-        category is unknown and therefore finance (fail closed)."""
-        if self.category is None:
+        """Finance when the category says so or the finance pack is active. Fail closed: a
+        missing, empty or unparseable category is unknown and therefore finance. The category
+        and pack IDs are compared after the shared normaliser (case, padding, invisible
+        characters), so ``" Finance"`` is finance."""
+        category = _matching_form(self.category)
+        if not category or category == FINANCE_CATEGORY:
             return True
-        return self.category == FINANCE_CATEGORY or FINANCE_PACK_ID in self.active_pack_ids
+        return any(_matching_form(p) == FINANCE_PACK_ID for p in self.active_pack_ids)
+
+
+def _matching_form(value: str | None) -> str:
+    if value is None:
+        return ""
+    try:
+        return normalise_for_matching(value).text
+    except InputInvalidError:  # over-long or unparseable: unknown
+        return ""
 
 
 @runtime_checkable

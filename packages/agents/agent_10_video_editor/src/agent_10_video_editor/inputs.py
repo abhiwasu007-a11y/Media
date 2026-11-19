@@ -264,14 +264,33 @@ class NarrationAsset(_Model):
     asset_id: str | None = None
 
 
+class NarrationTimelineBlock(_Model):
+    """``timeline`` of ``agent_07.voice_synthesis.output`` (agent_07 8.1)."""
+
+    source: Literal["PROVIDER_CLIPS", "OWNER_MARKS", "UNALIGNED"]
+    segments: tuple[NarrationSegment, ...]
+
+
 class NarrationTimeline(_Model):
-    """``agent_07.voice_synthesis`` timeline (agent_07 section 8)."""
+    """``agent_07.voice_synthesis.output`` as Agent 10 reads it (agent_07 8.1 nesting:
+    ``language``, ``narration {asset_id}``, ``timeline {source, segments[]}``)."""
 
     narration: NarrationAsset = NarrationAsset()
-    source: Literal["PROVIDER_CLIPS", "OWNER_MARKS", "UNALIGNED"]
     language: str | None = None
-    segments: tuple[NarrationSegment, ...]
-    end_ms: StrictInt | None = None
+    timeline: NarrationTimelineBlock
+
+    @property
+    def source(self) -> str:
+        return self.timeline.source
+
+    @property
+    def segments(self) -> tuple[NarrationSegment, ...]:
+        return self.timeline.segments
+
+    @property
+    def end_ms(self) -> int:
+        """End of the last sentence (the contract carries no separate end field)."""
+        return max((s.end_ms for s in self.timeline.segments), default=0)
 
 
 class ScriptStrings(_Model):
