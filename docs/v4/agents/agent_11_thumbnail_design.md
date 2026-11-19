@@ -685,7 +685,7 @@ Payload §8.1; `output_refs` (images, manifest). Readers: §2.3. The stable text
 | Fallback planner | 07 §3.5, flag default false (CCR-023) | NFR-4, §4.1, §11, §16, §18 |
 | FIN text lexicon | config `compliance.finance_sebi_in.markers.*` (CCR-046) | §6.2 |
 | Devanagari font and shaping | 3A_SLICE_SPEC R21 (CCR-043) | NFR-7 |
-Owner questions (CCR register §6, provisional defaults apply): Q-O4 (`fallback_on_unavailable` false everywhere), Q-O6 (OFL Devanagari font acceptable), Q-O7 (the owner's own photo on finance thumbnails: never; licensed stock stills in 3A: no).
+Owner questions (CCR register §6, provisional defaults apply): Q-O4 (`fallback_on_unavailable` false everywhere), Q-O6 (decided, D11: owner channel Mukta / Noto only; other tenants from their brand kit with the glyph-coverage check), Q-O7 (the owner's own photo on finance thumbnails: never; licensed stock stills in 3A: no).
 
 ---
 
