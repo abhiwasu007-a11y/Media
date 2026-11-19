@@ -24,6 +24,7 @@ from agent_09_video_director.direction.parser import parse_direction_output
 from agent_09_video_director.direction.prompt import RenderedPrompt, render_prompt
 from agent_09_video_director.direction.repair import default_interrupt_device, fallback_direction
 from agent_09_video_director.problems import input_invalid
+from amw_core.contracts.error import Violation
 from amw_core.errors import (
     AmwError,
     InsufficientInputError,
@@ -80,10 +81,11 @@ def _call_and_parse(
         raw = client.complete(prompt, batch_id, seq)
         return parse_direction_output(raw, slot_ids), seq
     except (InvalidJsonError, OutputSchemaInvalidError) as first:
-        paths = first.details.get("violations") or [first.code]
+        items = first.details.get("violations") or [first.code]
+        paths = [f"{v.path}: {v.keyword}" if isinstance(v, Violation) else str(v) for v in items]
         hint = (
             "Your previous output was rejected: "
-            + "; ".join(map(str, paths[:20]))
+            + "; ".join(paths[:20])
             + ". Return only valid JSON."
         )
         raw = client.complete(prompt, batch_id, seq + 1, extra_user=hint)

@@ -47,11 +47,8 @@ class CheckpointIO:
         progress: Decimal | None = None,
     ) -> None:
         data = state.model_dump_json().encode()
-        path = (
-            f"{self._job}/tasks/{self._task}/attempts/{self._attempt}/checkpoints/"
-            f"{step_key}-{sha256_hex(data)[:16]}.json"
-        )
-        info = self._scope.put_bytes(self._scope.uri("jobs", path), data)
+        name = f"{self._attempt}/{step_key}-{sha256_hex(data)[:16]}.json"
+        info = self._scope.put_bytes(self._scope.checkpoint_uri(self._job, self._task, name), data)
         with self._tenancy.transaction(self._context) as tx:
             self._store.write(
                 tx,

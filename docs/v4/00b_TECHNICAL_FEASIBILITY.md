@@ -19,7 +19,7 @@
 | Marathi + Hindi narration | Agent 07 | **Feasible** with ElevenLabs v3/v4-class models (Marathi is not on Multilingual v2/Flash) | PR-04 |
 | Owner voice clone | Agent 07 | Feasible with a recorded consent; YouTube does not require disclosure for one's own cloned voice | PR-04, YT-07 |
 | Automated technical QC (loudness, black, freeze, silence) | Agent 10 | **Feasible** with stock FFmpeg filters | INF-09 |
-| Delivery spec (H.264, AAC-LC 48 kHz 384 kbps) | Agent 10 | Feasible; the directive's 15–25 Mbps at 1080p is above YouTube's 8 Mbps recommendation | INF-10 |
+| Delivery spec (H.264, AAC-LC 48 kHz 384 kbps) | Agent 10 | Feasible; video at YouTube's encoder target (8 Mbps at 1080p 24–30 fps), owner decision D10 / ADR-014 (the directive's 15–25 Mbps band is withdrawn by the owner, D11 item 5) | INF-10, INF-12 |
 | Postgres queue without Redis | Agent 01 | **Feasible**: two maintained MIT libraries with SKIP LOCKED + LISTEN/NOTIFY | INF-05, INF-06 |
 | Tenant isolation in the DB | all | **Feasible** with FORCE RLS + non-owner app role + `SET LOCAL` | INF-11 |
 | Hard caps for the factory on the shared server | Agent 01/S5 | **Feasible in principle** (cgroup v2 only on 26.04; systemd slice directives). Compose-to-slice placement is **not confirmed by docs**, so it must be proved by an acceptance test | INF-02, INF-03, INF-04 |

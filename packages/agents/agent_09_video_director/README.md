@@ -1,11 +1,11 @@
 # agent_09_video_director (ticket 3A-08)
 
 Task `agent_09.shot_plan`, stage `s09_plan`. Blueprint: `docs/v4/agents/agent_09_video_director.md`.
-Status: **implemented and tested offline (fakes only); not yet wired to the worker, DB or a real provider.**
+Status: **implemented and tested offline (fakes only); not yet wired to the worker, DB or a real provider. Open: checkpoint wiring in the entry point; Agent 05 has not registered `agent_05.script_document` in `PAYLOAD_SCHEMAS`, so the producer-schema check is skipped until it does.**
 
 ## What exists
 - Pure engine (`timeline/`, `assemble.py`, `checks.py`): slot grid, charts, interrupts, J/L, transitions, tiers, overlays, end screen, chapters, vertical plan, audio plan, rebase (FR-16, called by the step when the timeline hash changed; `REBASE_LIMIT` reachable), 24 `a09.q.*` checks plus `a09.q.vertical.safe_zone` and the `a09.q.visual_guard.refusal` WARN.
-- `ShotPlanStep` (gates incl. claim/status, fail-closed budget and rule packs, direction loop, revision reuse), `ShotPlanTask` (plan blob write-once, Task Output, `plan_ref`, views), hash-bound checkpoints through the core `CheckpointStore`.
+- `ShotPlanStep` (gates incl. claim/status, fail-closed budget and rule packs, direction loop, revision reuse), `ShotPlanTask` (plan blob write-once, Task Output, `plan_ref`, views). Checkpoint helpers (`persistence.save_checkpoint` / `load_checkpoint`, hash-bound, core `CheckpointStore`) exist and are tested, but **`ShotPlanTask` does not call them yet (NOT DONE, CCR-267, ticket PASS6-H2): a retry repeats the paid calls.** An error output reports the real cost of the calls made before the failure (unknown cost = worst-case upper bound, never 0).
 
 ## What the tests prove, and what they do not
 - `timeline_engine` (39 cases): every `expected` function output is compared exactly; every `a09.q.*` verdict named in `expected` is produced by the real check on a plan built from the case input; gate cases (TE-12/27/28/34) also run through the step with zero model calls. Through the `amw_evals` runner: **not run** (the runner has no function-level assertions; core/evals need). Run by pytest (`test_timeline_engine_cases.py`).

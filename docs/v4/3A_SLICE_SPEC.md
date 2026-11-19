@@ -185,7 +185,7 @@ Rules on the flow:
 
 | # | File | Produced by | Preset / record | Spec source |
 |---|---|---|---|---|
-| 1 | Final MP4, 16:9 | `agent_10.render`, `qc_results` PASS | `yt_master_1080p` (1440p optional) | 24 §4; 18 §6; INF-10 (YouTube's 1080p SDR figure, 8 Mbps, is the floor; the directive target is 15–25 Mbps) |
+| 1 | Final MP4, 16:9 | `agent_10.render`, `qc_results` PASS | `yt_master_1080p` (1440p optional) | 24 §4; 18 §6; INF-12, INF-13 (YouTube's 1080p SDR figure, 8 Mbps at 24–30 fps, is the encoder target, not a floor; owner decision D10, ADR-014) |
 | 2 | Final MP4, 9:16 (where applicable) | child `SHORTS` job | `shorts_9x16`; 1080×1920 is a PROPOSAL (18 §10) | official Shorts spec: R11 in §12 |
 | 3 | Thumbnail options (3 variants) | `agent_11.thumbnail_variants` | `thumbnail_set` | YT-08 (up to 3 for the Studio A/B test), YT-05 (50 MB maximum); dimensions: R12 |
 | 4 | SRT (one language in the MVP) | `agent_10.subtitles` | `srt_per_language` | 24 §4; 18 §7.6 |
@@ -252,6 +252,7 @@ Per ADR-012 (Proposed):
 | Localisation / dubbing, ads, corporate and e-commerce production types | 3C, Tier 1+ |
 | Outbound notifications (email and others) | 3C |
 | Any public video | never without the 3C publish path, approval and authorisation (rule 5) |
+| **Separate verifier host (D11 item 2)** | **MANDATORY, blocking: before any YouTube publish and before the first client.** Until then the R14 residual limitation is accepted for 3A only (owner-evidence record is the operator's record, not production-verified) |
 
 ## 10. 3B golden-sample procedure [3B · Tier 0]
 
@@ -292,7 +293,7 @@ Each provisional default below applies until it is answered (owner rule A.9).
 | R2 | Self-grant licence rows for owner-made and code-made items (18 §2.2 a; **decided, CCR-031**; package templates and fonts are tenant `assets` rows) | Every shot needs a licence-ledger row; charts and motion graphics are the main 3A visuals | Tenant-held `licences` rows with `source_type` `OWNER_MADE` / `CODE_GENERATED`, `covers_monetized_youtube = true`, as 18 states |
 | R3 | Licence check destination in 3A (18 §2.2 b) | Decides which licences pass when there is no upload | Check as if the destination were monetized YouTube (18) |
 | R4 | Presenter-kind field "neutral narration vs persona" (13 §3.2; a CCR filed by 13) | FIN-R11 / YTG-R2 must be checkable in the 3A compliance gate | **Owner** confirms. The check reads the voice record (owner voice, owner clone or neutral TTS), the `is_realistic_synthetic` asset flags and first-person identity claims in the script. No synthetic presenter asset is allowed on the finance channel in 3A |
-| R5 | FIN-R10 disclaimer wording, duration and placement (13 §5.6, lawyer item) | Without a text, every finance video fails the compliance gate | The owner supplies a draft text as a versioned template. The gate checks it is present and which version it is. The QC report marks it "DRAFT, not lawyer-approved". Lawyer-approved text is required before any publish (3C) |
+| R5 | FIN-R10 disclaimer wording, duration and placement (13 §5.6, lawyer item) | Without a text, every finance video fails the compliance gate | The owner supplies a draft text as a versioned template. The gate checks it is present and which version it is. The QC report marks it "DRAFT – not lawyer-approved" (the owner-set status string, single source `amw_runtime.disclaimer`, CCR-212). Lawyer-approved text is required before any publish (3C) |
 | R6 | FIN-R9: 30 calendar days or trading days (13 §5.5, lawyer item) | Sets the newest chart data a 3A render may contain | **Owner / lawyer.** The 13 reading (calendar days). In 3A it is checked against render time and the data end date shown in the QC report; it is re-checked at publish in 3C |
 | R7 | Uniqueness and near-copy thresholds (13 §3.1, §8) | `s02u_unique` is a blocking gate in the 3A graph | Deterministic checks run and record their measures. A hit goes to `NEEDS_HUMAN_REVIEW` (owner decides at the approval) until 3B sets the thresholds. Cross-video part `SKIPPED` (13 §3.1) |
 | R8 | Book library (K1) and Devanagari text search (ADR-013; 04 §5.10) | Agent 04's source base in 3A | Course notes (Q24) and sources the owner attaches per topic. Full-text search with the `simple` configuration for Devanagari (ADR-013 fallback). Books are added when K1 is answered |

@@ -126,10 +126,11 @@ from amw_core.errors import (
     LockConflictError,
     SchemaInvalidError,
     SchemaVersionUnsupportedError,
+    TenantMismatchError,
     UnsupportedTaskError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
-    AttemptId,
     ExecutorId,
     IdempotencyKey,
     JobId,
@@ -150,12 +151,14 @@ from amw_core.interfaces import (
     TenantContext,
 )
 from amw_core.interfaces.idempotency_store import BeginAction
+from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri, task_io_uri
 
 TASK_TYPE = "agent_04.research_pack"
 STAGE_ID = "s04_research"
 AGENT = ExecutorId("agent_04")
 S0, S1, S5, S7 = "S0_validated", "S1_planned", "S5_assembled", "S7_persisted"
-ARTIFACT = "artifacts/research_pack.json"
+ARTIFACT = "research_pack.json"
+"""File name under ``attempts/<att>/artifacts/`` (03 section 8 rule 5, CCR-208)."""
 LOCK_MS = 600_000
 REPAIRED_CODES = frozenset({"AGENT.INVALID_JSON", "AGENT.OUTPUT_SCHEMA_INVALID"})
 S0_ERRORS = frozenset(
@@ -283,13 +286,10 @@ class ResearchPackStep:
         self._guard = TenantGuard(deps.directory, deps.library)
 
     # ------------------------------------------------------------------ entry point
-    def run(
-        self,
-        task_input: TaskInput,
-        attempt_id: AttemptId,
-        attempt_no: int = 1,
-        envelope_org_id: str | None = None,
-    ) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
+        attempt_id, attempt_no = ctx.attempt_id, ctx.attempt_no
+        envelope_org_id = str(ctx.org_id)
         started = self._d.clock.monotonic_ms()
         cpu0 = time.process_time()
         log = EventLogger(
@@ -303,6 +303,7 @@ class ResearchPackStep:
         )
         usage = RunInfoHolder()
         try:
+            self._check_ctx(task_input, ctx)
             data, check = self._validate(task_input, envelope_org_id)
         except AmwError as exc:
             if isinstance(exc, CrossTenantRefError):
@@ -315,7 +316,7 @@ class ResearchPackStep:
                 cpu0,
                 usage.run,
             )
-        context = TenantContext(task_input.org_id, AGENT, task_input.correlation_id)  # type: ignore[arg-type]
+        context = ctx.tenant
         run = RunInfo(
             context=context,
             scope=check.scope,
@@ -354,6 +355,12 @@ class ResearchPackStep:
             return self._error_output(task_input, exc, attempt_no, started, cpu0, run)
 
     # ------------------------------------------------------------------ S0
+    @staticmethod
+    def _check_ctx(task: TaskInput, ctx: ExecContext) -> None:
+        """The context and the Task Input must name the same job and task (19.1 layer 1)."""
+        if str(ctx.job_id) != task.job_id or str(ctx.task_id) != task.task_id:
+            raise TenantMismatchError("execution context does not match the Task Input")
+
     def _validate(
         self, task: TaskInput, envelope_org_id: str | None
     ) -> tuple[ResearchPackInput, TenantCheck]:
@@ -812,10 +819,10 @@ class ResearchPackStep:
     def _checkpoint(self, run: RunInfo, step_key: str, state: StepState, progress: float) -> None:
         body = state.model_dump_json().encode()
         sha = hashlib.sha256(body).hexdigest()
-        uri = self._d.storage.blob_uri(
-            run.context,
-            "jobs",
-            f"{run.job_id}/checkpoints/{run.task_id}/{run.attempt_id}/{step_key}.json",
+        uri = BlobUri(
+            checkpoint_uri(
+                run.context.org_id, run.job_id, run.task_id, f"{run.attempt_id}/{step_key}.json"
+            )
         )
         self._d.storage.put(run.context, uri, BytesIO(body))
         from decimal import Decimal
@@ -914,10 +921,8 @@ class ResearchPackStep:
         doc = pack.to_doc()
         body = canonical(doc)
         sha = hashlib.sha256(body).hexdigest()
-        uri = self._d.storage.blob_uri(
-            run.context,
-            "jobs",
-            f"{run.job_id}/tasks/{run.task_id}/attempts/{run.attempt_id}/{ARTIFACT}",
+        uri = BlobUri(
+            task_artifact_uri(run.context.org_id, run.job_id, run.task_id, run.attempt_id, ARTIFACT)
         )
         if not self._d.storage.head(run.context, uri).exists:
             self._d.storage.put(run.context, uri, BytesIO(body))
@@ -932,7 +937,7 @@ class ResearchPackStep:
             org_id=task.org_id,
             channel_id=run.scope.channel_id,
             workspace_id=check.workspace_id,
-            project_id=task.project_id or "",
+            project_id=str(task.project_id),
             job_id=task.job_id,
             iteration=pack.iteration,
             task_id=task.task_id,
@@ -975,10 +980,8 @@ class ResearchPackStep:
         return output
 
     def _store_output(self, run: RunInfo, output: TaskOutput) -> BlobUri:
-        uri = self._d.storage.blob_uri(
-            run.context,
-            "jobs",
-            f"{run.job_id}/tasks/{run.task_id}/attempts/{run.attempt_id}/output.json",
+        uri = BlobUri(
+            task_io_uri(run.context.org_id, run.job_id, run.task_id, run.attempt_id, "output.json")
         )
         if not self._d.storage.head(run.context, uri).exists:
             self._d.storage.put(run.context, uri, BytesIO(output.model_dump_json().encode()))

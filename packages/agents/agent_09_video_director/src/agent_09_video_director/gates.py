@@ -31,11 +31,14 @@ def script_gate(
     ref_sha256: str,
     verified_script_sha256: str,
     stage_verdict: str,
-    approval_approved: bool = False,
-    claim_blocked: bool = False,
-    script_status: str = "ACTIVE",
+    approval_approved: bool,
+    claim_blocked: bool,
+    script_status: str,
 ) -> None:
-    """FR-02: the plan is made only on the script that Agent 06 verified and that is allowed."""
+    """FR-02: the plan is made only on the script that Agent 06 verified and that is allowed.
+
+    Fail closed: no default for the database facts, and a ``script_status`` outside the GLOSSARY
+    values is refused (``SCRIPT_STATUS_UNKNOWN``), never read as current."""
     violations: list[str] = []
     if not (script_sha256 == verified_script_sha256 == ref_sha256):
         violations.append("SCRIPT_HASH_MISMATCH")
@@ -48,6 +51,8 @@ def script_gate(
         violations.append("CLAIM_BLOCKED")
     if script_status in {"REJECTED", "SUPERSEDED"}:
         violations.append("SCRIPT_NOT_CURRENT")
+    elif script_status not in {"DRAFT", "IN_REVIEW", "APPROVED"}:
+        violations.append("SCRIPT_STATUS_UNKNOWN")
     if violations:
         first, *rest = violations
         raise input_invalid(first, extra=rest)

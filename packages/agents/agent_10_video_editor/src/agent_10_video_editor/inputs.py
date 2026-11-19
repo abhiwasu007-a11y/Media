@@ -6,7 +6,7 @@ read (``extra = ignore``) so a producer may add fields; a missing required field
 validation error. All models are frozen.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints
 
@@ -220,6 +220,8 @@ class AssetRecord(_Model):
     status: str = "ACTIVE"
     media_type: str | None = None
     ai_item: bool = False
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    """``assets.attributes`` (04 section 5.15); a ``TEMPLATE`` asset carries ``template_id``."""
 
 
 class CodecProfile(_Model):

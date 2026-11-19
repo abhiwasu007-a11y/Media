@@ -96,17 +96,34 @@ def test_kind_without_rule_is_refused() -> None:
 
 # --- CONTENT kinds -------------------------------------------------------------------------
 
-CONTENT_KINDS = [
-    EvidenceRecordKind.CONTRIBUTION,
-    EvidenceRecordKind.OWNER_TOPIC,
-    EvidenceRecordKind.DATASET_INTAKE,
-]
 
-
-@pytest.mark.parametrize("kind", CONTENT_KINDS)
-def test_content_with_review_code_is_verified(kind: EvidenceRecordKind) -> None:
+def test_content_with_review_code_is_verified() -> None:
     message = f"For R7K2: {CONTRIBUTION_TEXT}."
-    assert run(event(message), evidence(kind, CONTRIBUTION_TEXT)).state is EvidenceState.VERIFIED
+    ne = evidence(EvidenceRecordKind.CONTRIBUTION, CONTRIBUTION_TEXT)
+    assert run(event(message), ne).state is EvidenceState.VERIFIED
+
+
+PRE_JOB_KINDS = [EvidenceRecordKind.OWNER_TOPIC, EvidenceRecordKind.DATASET_INTAKE]
+
+
+@pytest.mark.parametrize("kind", PRE_JOB_KINDS)
+def test_pre_job_content_without_reference_is_verified(kind: EvidenceRecordKind) -> None:
+    # CCR-116 / 03 A8 exception: the first message precedes the job and the own code.
+    ne = evidence(kind, CONTRIBUTION_TEXT, review_code=None, job_id=None)
+    assert run(event(CONTRIBUTION_TEXT), ne).state is EvidenceState.VERIFIED
+
+
+@pytest.mark.parametrize("kind", PRE_JOB_KINDS)
+@pytest.mark.parametrize(
+    "message",
+    [f"For R7K2: {CONTRIBUTION_TEXT}", f"{JOB} {CONTRIBUTION_TEXT}",
+     f"{ids.JOB.new()} {CONTRIBUTION_TEXT}", f"{CONTRIBUTION_TEXT} q9z3"],
+)  # fmt: skip
+def test_pre_job_content_with_a_reference_is_refused(
+    kind: EvidenceRecordKind, message: str
+) -> None:
+    ne = evidence(kind, CONTRIBUTION_TEXT, review_code=None)
+    refused(run(event(message), ne), "subject_reference")
 
 
 def test_content_with_job_reference_is_verified() -> None:
@@ -153,8 +170,8 @@ def test_content_authenticity(change: dict[str, Any], reason: str) -> None:
 
 def test_owner_topic_short_title_is_fine() -> None:
     # The 20-character minimum is the editorial-contribution rule only (04 5.16).
-    ne = evidence(EvidenceRecordKind.OWNER_TOPIC, "RSI divergence")
-    assert run(event("R7K2 RSI divergence"), ne).state is EvidenceState.VERIFIED
+    ne = evidence(EvidenceRecordKind.OWNER_TOPIC, "RSI divergence", review_code=None)
+    assert run(event("RSI divergence"), ne).state is EvidenceState.VERIFIED
 
 
 # --- SCORE kinds ---------------------------------------------------------------------------

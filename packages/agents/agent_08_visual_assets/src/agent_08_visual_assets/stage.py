@@ -17,7 +17,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+
+from pydantic import ValidationError
 
 from agent_08_visual_assets.cascade.selection import (
     Assessment,
@@ -38,6 +40,12 @@ from agent_08_visual_assets.cascade.tier_cascade import (
     skip_with,
 )
 from agent_08_visual_assets.charts.cases import ChartCase, ChartRequest, StoredCase
+from agent_08_visual_assets.charts.datapack_builder import (
+    DataPackChartBuilder,
+    DataPackChartRequest,
+    RegisteredDataset,
+    is_data_within_lag,
+)
 from agent_08_visual_assets.charts.dataset import BarSeries, DatasetLoader
 from agent_08_visual_assets.charts.lag import EarliestPublishDate
 from agent_08_visual_assets.charts.pipeline import BuiltChart, ChartContext, ChartPath
@@ -108,32 +116,60 @@ from agent_08_visual_assets.reuse.engine import (
 from agent_08_visual_assets.reuse.fingerprint import ALGO_VERSION, Fingerprinter
 from agent_08_visual_assets.settings import AssetSettings
 from agent_08_visual_assets.sources.graphics import GraphicKind, GraphicTemplateRenderer
-from amw_core.contracts.task_output import ValidationResult
+from agent_08_visual_assets.templates import TemplateResolver
+from amw_core.contracts.common import PayloadObject
+from amw_core.contracts.error import error_object_from_exception
+from amw_core.contracts.task_input import TaskInput
+from amw_core.contracts.task_output import (
+    NextAction,
+    OutputRef,
+    ResourceUsage,
+    TaskOutput,
+    ValidationResult,
+)
 from amw_core.enums import (
     AssetKind,
     AssetStatus,
     ChartDataKind,
     CheckKind,
     CheckVerdict,
+    ContextRefPurpose,
     LicenceDestination,
     LicenceSourceType,
     LicenceUsageKind,
+    NextActionType,
+    OutputRefKind,
+    OutputStatus,
     ShotIntentKind,
     ShotSourcingStatus,
+    ShotUnresolvedReason,
     SourcingWarning,
     VisualSkipReason,
     VisualSourceTier,
 )
 from amw_core.errors import (
+    AgentError,
+    AmwError,
+    BudgetExhaustedError,
     ConfigInvalidError,
     CorruptedOutputError,
+    CrossTenantRefError,
     InputInvalidError,
     MissingDependencyError,
+    PermanentError,
     QualityRepeatedFailureError,
+    SchemaInvalidError,
+    SchemaVersionUnsupportedError,
+    TenantInactiveError,
+    TenantMismatchError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
+from amw_core.tenancy.storage_paths import task_artifact_uri
+
+AGENT_ID = "agent_08"
 
 _PASS, _FAIL, _WARN, _SKIP = (
     CheckVerdict.PASS,
@@ -149,8 +185,6 @@ class BrandKit:
 
     palette: BrandPalette
     font_asset_ids: tuple[str, ...]
-    template_assets: Mapping[str, str]
-    """overlay ``template_ref`` -> registered template asset id."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +197,20 @@ class FootageChoice:
     order: tuple[str, ...] = ()
     prohibited: bool = False
     refusal_reason: str | None = None
+
+
+class BrandKitReader(Protocol):
+    """Reads the ``BRAND_KIT`` context ref of the Task Input (04 section 5.12) inside the tenant
+    transaction; ``None`` for a ref that does not resolve to the tenant's brand kit."""
+
+    def brand_kit(self, tx: TenantTransaction, uri: str, sha256: str | None) -> BrandKit | None: ...
+
+
+class JobDestinationReader(Protocol):
+    """Reads ``jobs.monetized_destination`` (CCR-028) of the task's job inside the tenant
+    transaction; ``None`` when the row or the value is not readable."""
+
+    def monetized_destination(self, tx: TenantTransaction, job_id: str) -> bool | None: ...
 
 
 class FootageSelector(Protocol):
@@ -231,16 +279,209 @@ class AssetSourcingStage:
         clock: Clock,
         settings: AssetSettings,
         selector: FootageSelector | None = None,
+        brand_kits: BrandKitReader | None = None,
+        job_destinations: JobDestinationReader | None = None,
     ) -> None:
         self._tenancy, self._assets, self._licences = tenancy, assets, licences
         self._ledger, self._fp, self._approvals = ledger, fingerprints, approvals
         self._blobs, self._clock, self._s, self._selector = blobs, clock, settings, selector
+        self._brand_kits, self._templates = brand_kits, TemplateResolver(assets)
+        self._job_destinations = job_destinations
         self._destination = LicenceDestination.MONETIZED_YOUTUBE
         self._reset(JobScope("", "", "", ""))
 
     # -- public --------------------------------------------------------------------------------
 
-    def run(
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203). Reads ``shot_plan_ref`` and
+        ``script_ref`` itself, runs the stage and returns ``amw.task_output``; ``StageResult``
+        never crosses. Typed permanent failures are returned, never raised."""
+        started = self._clock.monotonic_ms()
+        validated = False
+        try:
+            check_ctx(task_input, ctx)
+            call = self._prepare(task_input, ctx)
+            validated = True
+            result = self.source(**call)
+            return self._task_output(task_input, ctx, result, started)
+        except (PermanentError, AgentError, BudgetExhaustedError) as exc:
+            return error_output(
+                exc,
+                task=task_input,
+                clock=self._clock,
+                started_ms=started,
+                attempt_no=task_input.retry_count,
+                validated=validated,
+            )
+
+    def _prepare(self, task: TaskInput, ctx: ExecContext) -> dict[str, Any]:
+        """E0: payload, tenant guard, the two blobs (hash-verified), brand kit, previous output."""
+        if task.agent_id != AGENT_ID:
+            raise InputInvalidError("task is not addressed to agent_08")
+        data = task.payload.data
+        if data is None:
+            raise SchemaInvalidError("payload must carry inline data")
+        try:
+            inp = SourcingInput.model_validate(data)
+        except ValidationError:
+            raise SchemaInvalidError("payload is not agent_08.asset_sourcing.input") from None
+        tenant = ctx.tenant
+        uris = [inp.shot_plan_ref.uri, inp.script_ref.uri]
+        if inp.previous_sourcing_ref is not None:
+            uris.append(inp.previous_sourcing_ref.uri)
+        uris.extend(r.uri for r in task.context_refs)
+        TenantGuard.check_task(
+            context_org=str(tenant.org_id),
+            envelope_org=task.org_id,
+            input_org=task.org_id,
+            uris=uris,
+            write=False,
+        )
+        plan_bytes = self._read(
+            tenant, inp.shot_plan_ref.uri, inp.shot_plan_ref.sha256, "shot plan"
+        )
+        script_bytes = self._read(tenant, inp.script_ref.uri, inp.script_ref.sha256, "script")
+        previous: SourcingOutput | None = None
+        if inp.previous_sourcing_ref is not None:
+            prev = inp.previous_sourcing_ref
+            raw = self._read(tenant, prev.uri, prev.sha256, "previous sourcing manifest")
+            try:
+                previous = SourcingOutput.model_validate(json.loads(raw))
+            except ValueError:
+                raise InputInvalidError("previous sourcing manifest is not valid") from None
+        total = ShotPlanReader.total_duration_ms(plan_bytes)
+        return {
+            "ctx": tenant,
+            "envelope_org": task.org_id,
+            "scope": JobScope(
+                task.job_id, task.task_id, str(ctx.channel_id or task.channel_id or ""), task.org_id
+            ),
+            "inp": inp,
+            "script_bytes": script_bytes,
+            "plan_bytes": plan_bytes,
+            "brand": self._brand(task, tenant),
+            "job_destination": self._job_destination(task, tenant),
+            "timeline_end_ms": total,
+            "previous": previous,
+        }
+
+    def _read(self, tenant: TenantContext, uri: str, sha256: str, what: str) -> bytes:
+        try:
+            return b"".join(self._blobs.get(tenant, BlobUri(uri), sha256))
+        except CorruptedOutputError:
+            raise InputInvalidError(f"{what} hash does not match its reference") from None
+
+    def _brand(self, task: TaskInput, tenant: TenantContext) -> BrandKit:
+        if self._brand_kits is None:
+            raise ConfigInvalidError("no brand kit reader is configured")
+        refs = [r for r in task.context_refs if r.purpose is ContextRefPurpose.BRAND_KIT]
+        if len(refs) != 1:
+            raise MissingDependencyError(
+                "the task needs exactly one BRAND_KIT context ref", details={"class": "brand_kit"}
+            )
+        try:
+            with self._tenancy.transaction(tenant) as tx:
+                kit = self._brand_kits.brand_kit(tx, refs[0].uri, refs[0].sha256)
+        except AmwError:
+            raise
+        except Exception:  # a failing port is a missing dependency, never an escaping exception
+            raise MissingDependencyError(
+                "brand kit reader failed", details={"class": "brand_kit"}
+            ) from None
+        if not isinstance(kit, BrandKit):
+            raise MissingDependencyError("brand kit not found", details={"class": "brand_kit"})
+        return kit
+
+    def _job_destination(self, task: TaskInput, tenant: TenantContext) -> LicenceDestination:
+        """The job's own destination; the payload value is never trusted here. Fails CLOSED: an
+        unreadable destination refuses the task instead of falling back to the payload."""
+        if self._job_destinations is None:
+            raise ConfigInvalidError("no job destination reader is configured")
+        try:
+            with self._tenancy.transaction(tenant) as tx:
+                monetized = self._job_destinations.monetized_destination(tx, task.job_id)
+        except AmwError:
+            raise
+        except Exception:  # a failing port is a missing dependency, never an escaping exception
+            raise MissingDependencyError(
+                "the job's monetized destination reader failed", details={"class": "job"}
+            ) from None
+        # the port is typed bool | None: only a real bool is a value ("", 0, "false" are not)
+        if monetized is True:
+            return LicenceDestination.MONETIZED_YOUTUBE
+        if monetized is False:
+            return LicenceDestination.NON_MONETIZED
+        raise MissingDependencyError(
+            "the job's monetized destination is not readable", details={"class": "job"}
+        )
+
+    def _task_output(
+        self, task: TaskInput, ctx: ExecContext, result: StageResult, started: int
+    ) -> TaskOutput:
+        if result.payload is None or result.task_status != "SUCCEEDED":
+            code = result.error_code or QualityRepeatedFailureError.code
+            cls = AmwError.registry.get(code, QualityRepeatedFailureError)
+            raise cls("asset sourcing failed", details={"stage_result": result.task_status})
+        doc = result.payload.to_doc()
+        body = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+        tenant = ctx.tenant
+        name = "sourcing_manifest.json"
+        uri = task_artifact_uri(ctx.org_id, ctx.job_id, ctx.task_id, ctx.attempt_id, name)
+        blob = BlobUri(uri)
+        head = self._blobs.head(tenant, blob)
+        if not head.exists:
+            self._blobs.put(tenant, blob, io.BytesIO(body))
+        elif head.sha256 != hashlib.sha256(body).hexdigest():
+            raise InputInvalidError("a manifest of this attempt exists with different content")
+        refs = [
+            OutputRef(
+                uri=uri,
+                kind=OutputRefKind.DATA,
+                sha256=hashlib.sha256(body).hexdigest(),
+                size_bytes=len(body),
+                media_type="application/json",
+            )
+        ]
+        for extra in result.blobs.values():
+            h = self._blobs.head(tenant, BlobUri(extra))
+            if h.sha256 is None or h.size_bytes is None:
+                raise CorruptedOutputError("an output blob is missing")
+            refs.append(
+                OutputRef(
+                    uri=extra,
+                    kind=OutputRefKind.DATA,
+                    sha256=h.sha256,
+                    size_bytes=h.size_bytes,
+                    media_type="application/json",
+                )
+            )
+        failed = result.gate_verdict == "FAILED"
+        now = self._clock.now()
+        return TaskOutput(
+            status=OutputStatus.SUCCEEDED,
+            payload=PayloadObject(
+                payload_schema="agent_08.asset_sourcing.output",
+                payload_schema_version="1.0.0",
+                data=doc,
+            ),
+            output_refs=tuple(refs),
+            quality_score=None,
+            confidence=None,
+            validation_results=result.validation_results,
+            duration=max(0, self._clock.monotonic_ms() - started),
+            resource_usage=zero_usage(task.resource_budget.currency),
+            error=None,
+            next_action=NextAction(
+                type=NextActionType.CONTINUE,
+                wait_reason=None,
+                escalation_level=None,
+                reason=f"gate FAILED: {GATE_CHECK_ID}" if failed else "gate PASSED",
+            ),
+            downstream_agent=None,
+            timestamp=now,
+        )
+
+    def source(
         self,
         *,
         ctx: TenantContext,
@@ -271,7 +512,12 @@ class AssetSourcingStage:
             raise InputInvalidError("shot plan hash does not match its reference")
         if hashlib.sha256(script_bytes).hexdigest() != inp.script_ref.sha256:
             raise InputInvalidError("script hash does not match its reference")
-        if job_destination is not None and job_destination is not inp.destination:
+        if not isinstance(job_destination, LicenceDestination):
+            # fail closed for direct callers too: the job's own destination is mandatory
+            raise MissingDependencyError(
+                "the job's destination is required", details={"class": "job"}
+            )
+        if job_destination is not inp.destination:
             raise InputInvalidError("destination disagrees with the job's monetized destination")
         self._pre["a08.pre.refs"] = True
         self._destination = inp.destination
@@ -609,6 +855,8 @@ class AssetSourcingStage:
                 palette,
             )
             stored = ChartPath.case_for(base)
+            if stored is not None and stored.case.window_dates is not None:
+                return self._datapack_chart(tx, stored, base, licences, shot)
             series, ds_id, released = None, None, False
             if stored is not None:
                 series, ds_id = self._dataset(tx, ctx, stored.case.dataset_asset_id)
@@ -764,6 +1012,61 @@ class AssetSourcingStage:
             out.append(rec)
         return sorted(out, key=lambda r: r.asset_id)[: self._s.max_candidates_per_shot]
 
+    def _datapack_chart(
+        self,
+        tx: TenantTransaction,
+        stored: StoredCase,
+        base: ChartContext,
+        licences: Mapping[LicenceSourceType, LicenceRecord],
+        shot: ShotRequirement,
+    ) -> ChartAttempt[_Sourced]:
+        """Tier C data_pack chart scene: an owner case with a date window (CCR-259) over a
+        registered data_pack dataset, drawn by ``DataPackChartBuilder`` with the stage's clock as
+        the only as-of source; registered like every other chart."""
+        case = stored.case
+        series, ds_id = self._dataset(tx, tx.context, case.dataset_asset_id)
+        rec = self._assets.get(tx, ds_id) if ds_id is not None else None
+        if series is None or rec is None or case.window_dates is None or case.instrument is None:
+            return ChartAttempt(unresolved=ShotUnresolvedReason.NO_DATASET)
+        if case.method_content and not self._approvals.is_released(
+            tx, stored.asset_id, stored.sha256
+        ):
+            return ChartAttempt(unresolved=ShotUnresolvedReason.METHOD_NOT_RELEASED)
+        request = DataPackChartRequest(
+            chart_id=base.request.chart_id,
+            instrument=case.instrument,
+            timeframe=case.timeframe,
+            window_start=case.window_dates.start_date,
+            window_end=case.window_dates.end_date,
+            indicators=case.indicators,
+            annotations=case.annotations,
+            connectors=case.connectors,
+            on_screen_text_allowlist=tuple(base.on_screen_text_allowlist),
+            rsi_guides=case.rsi_guides,
+            reveal_steps=base.change_events + 1,
+            aspect_ratio=base.aspect_ratio,
+        )
+        builder = DataPackChartBuilder(
+            palette=base.palette,
+            clock=self._clock,
+            lag_days=self._s.price_data_lag_days,
+            platform_min_lag_days=self._s.price_data_lag_platform_min_days,
+            width_px=base.width_px,
+            height_px=base.height_px,
+        )
+        dataset = RegisteredDataset(
+            rec.asset_id, rec.asset.content_sha256, rec.asset.attributes, series
+        )
+        try:
+            chart = builder.build(request, dataset)
+        except InputInvalidError as exc:
+            if is_data_within_lag(exc):
+                return ChartAttempt(unresolved=ShotUnresolvedReason.DATA_WITHIN_LAG)
+            raise
+        return ChartAttempt(
+            accepted=self._register_chart(tx, chart.as_built(stored), licences, ds_id, shot)
+        )
+
     def _register_chart(
         self,
         tx: TenantTransaction,
@@ -774,6 +1077,7 @@ class AssetSourcingStage:
     ) -> _Sourced:
         lic = licences[LicenceSourceType.CODE_GENERATED]
         attrs = {
+            **built.extra_attributes,
             "dataset_asset_id": ds_id,
             "case_id": built.case.case.case_id,
             "spec_sha256": built.spec_sha256,
@@ -936,6 +1240,7 @@ class AssetSourcingStage:
         from agent_08_visual_assets.models.shot_plan import OverlayRequirement
 
         reqs = [o for o in overlays if isinstance(o, OverlayRequirement)]
+        resolved = self._templates.resolve(tx, (o.template_ref for o in reqs if o.template_ref))
         planned = TimelineLedgerPlanner.plan(
             [
                 OverlayInput(
@@ -943,7 +1248,8 @@ class AssetSourcingStage:
                     o.kind,
                     o.start_ms,
                     o.end_ms,
-                    None if o.template_ref is None else brand.template_assets.get(o.template_ref),
+                    None if o.template_ref is None else resolved[o.template_ref],
+                    o.template_ref,
                 )
                 for o in reqs
             ],
@@ -1485,3 +1791,98 @@ def _allowlists(script: Mapping[str, object]) -> dict[str, list[str]]:
     for sc in raw if isinstance(raw, list) else []:
         out[sc["scene_id"]] = [str(t) for t in sc.get("on_screen_text", [])]
     return out
+
+
+_REJECTED = (
+    SchemaInvalidError,
+    SchemaVersionUnsupportedError,
+    InputInvalidError,
+    TenantMismatchError,
+    CrossTenantRefError,
+    TenantInactiveError,
+    MissingDependencyError,
+)
+
+
+def check_ctx(task: TaskInput, ctx: ExecContext) -> None:
+    """The context and the Task Input must name the same org, job and task (19.1 layer 1)."""
+    if (
+        str(ctx.org_id) != task.org_id
+        or str(ctx.job_id) != task.job_id
+        or str(ctx.task_id) != task.task_id
+    ):
+        raise TenantMismatchError("execution context does not match the Task Input")
+
+
+def zero_usage(currency: str) -> ResourceUsage:
+    """3A runs no paid call here; ``cpu_ms`` and ``peak_rss_bytes`` are the worker's to measure."""
+    return ResourceUsage(
+        cpu_ms=0,
+        peak_rss_bytes=0,
+        tokens_in=0,
+        tokens_out=0,
+        tokens_cached_in=0,
+        llm_calls=0,
+        provider_calls=0,
+        cost_estimate_micros=0,
+        currency=currency,
+        cost_entry_ids=(),
+    )
+
+
+def error_output(
+    exc: AmwError,
+    *,
+    task: TaskInput,
+    clock: Clock,
+    started_ms: int,
+    attempt_no: int,
+    validated: bool,
+) -> TaskOutput:
+    """``REJECTED`` for an input never accepted, ``SUSPENDED`` for a budget wait, else ``FAILED``
+    (blueprint 18); retryable infrastructure errors propagate to the worker, which owns retry."""
+    suspended = isinstance(exc, BudgetExhaustedError)
+    rejected = isinstance(exc, _REJECTED) and not validated
+    status = (
+        OutputStatus.SUSPENDED
+        if suspended
+        else OutputStatus.REJECTED
+        if rejected
+        else OutputStatus.FAILED
+    )
+    now = clock.now()
+    error = error_object_from_exception(
+        exc,
+        actor=AGENT_ID,
+        attempt_no=0 if rejected else attempt_no,
+        occurred_at=now,
+        correlation_id=task.correlation_id,
+    )
+    if suspended:
+        action = NextAction(
+            type=NextActionType.WAIT,
+            wait_reason=exc.spec.wait_reason,
+            escalation_level=None,
+            reason=exc.code,
+        )
+    else:
+        action = NextAction(
+            type=NextActionType.RETRY if exc.retryable else NextActionType.STOP,
+            wait_reason=None,
+            escalation_level=None,
+            reason=exc.code,
+        )
+    return TaskOutput(
+        status=status,
+        payload=None,
+        output_refs=(),
+        quality_score=None,
+        confidence=None,
+        validation_results=(),
+        duration=max(0, clock.monotonic_ms() - started_ms),
+        resource_usage=zero_usage(task.resource_budget.currency),
+        error=error,
+        next_action=action,
+        downstream_agent=None,
+        timestamp=now,
+    )

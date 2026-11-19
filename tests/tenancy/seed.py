@@ -378,6 +378,15 @@ def _core(conn: Conn, w: World) -> None:
     ins(
         conn,
         w,
+        "review_codes",
+        with_id=False,
+        code=job.hex[-6:].upper(),
+        owner_kind="APPROVAL",
+        owner_id=w["approval"],
+    )
+    ins(
+        conn,
+        w,
         "dead_letter",
         task_id=tasks[1],
         job_id=job,

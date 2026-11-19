@@ -24,7 +24,7 @@ from amw_core.errors import (
     MissingDependencyError,
     StorageUnavailableError,
 )
-from amw_core.ids import ORG, ActorRef, new_uuid7
+from amw_core.ids import JOB, ORG, ActorRef, new_uuid7
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.storage import LocalDiskStorage, parse_uri, storage_from_settings
@@ -33,6 +33,7 @@ from amw_core.storage.local import TEMP_PREFIX
 pytestmark = pytest.mark.unit
 A = TenantContext(ORG.new(), ActorRef("agent_10"))
 B = TenantContext(ORG.new(), ActorRef("agent_10"))
+J = str(JOB.new())
 DATA = b"x" * 5000 + b"tail"
 SHA = hashlib.sha256(DATA).hexdigest()
 
@@ -42,7 +43,7 @@ def store(tmp_path: Path) -> LocalDiskStorage:
     return LocalDiskStorage(tmp_path / "root", chunk_bytes=1024)
 
 
-def _uri(ctx: TenantContext, path: str = "jobs/job_1/renders/master.mp4") -> BlobUri:
+def _uri(ctx: TenantContext, path: str = f"jobs/{J}/renders/master.mp4") -> BlobUri:
     return BlobUri(f"amw-blob://{ctx.org_id}/{path}")
 
 
@@ -53,16 +54,16 @@ def test_is_a_blob_storage(store: LocalDiskStorage) -> None:
 def test_put_get_head_roundtrip_and_physical_mapping(
     store: LocalDiskStorage, tmp_path: Path
 ) -> None:
-    uri = store.blob_uri(A, "jobs", "job_1/renders/master.mp4")
+    uri = store.blob_uri(A, "jobs", f"{J}/renders/master.mp4")
     info = store.put(A, uri, io.BytesIO(DATA))
     assert (info.sha256, info.size_bytes, info.uri) == (SHA, len(DATA), uri)
     assert b"".join(store.get(A, uri, SHA)) == DATA
     head = store.head(A, uri)
     assert (head.exists, head.sha256, head.size_bytes) == (True, SHA, len(DATA))
-    physical = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / "jobs/job_1/renders/master.mp4"
+    physical = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / f"jobs/{J}/renders/master.mp4"
     assert (physical.is_file() and not os.access(physical, os.W_OK)) or os.geteuid() == 0
     assert oct(physical.stat().st_mode & 0o777) == "0o444"
-    assert store.head(A, _uri(A, "jobs/job_1/none.bin")).exists is False
+    assert store.head(A, _uri(A, f"jobs/{J}/renders/none.bin")).exists is False
 
 
 def test_write_once_refuses_even_identical_content(store: LocalDiskStorage) -> None:
@@ -130,32 +131,37 @@ def test_get_verifies_sha_before_the_last_chunk(store: LocalDiskStorage, tmp_pat
     assert b"".join(received) != DATA
     assert len(b"".join(received)) < len(DATA)
     # tamper with the stored bytes: detected by the reader
-    physical = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / "jobs/job_1/renders/master.mp4"
+    physical = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / f"jobs/{J}/renders/master.mp4"
     physical.chmod(0o644)
     physical.write_bytes(DATA[:-1] + b"!")
     with pytest.raises(CorruptedOutputError):
         b"".join(store.get(A, uri, SHA))
     with pytest.raises(MissingDependencyError):
-        store.get(A, _uri(A, "jobs/missing.bin"), SHA)
+        store.get(A, _uri(A, f"jobs/{J}/renders/missing.bin"), SHA)
 
 
 def test_small_and_empty_blobs(store: LocalDiskStorage) -> None:
-    empty = _uri(A, "jobs/j/empty.json")
+    empty = _uri(A, f"jobs/{J}/renders/empty.json")
     info = store.put(A, empty, io.BytesIO(b""))
     assert b"".join(store.get(A, empty, info.sha256)) == b""
-    small = _uri(A, "jobs/j/small.json")
+    small = _uri(A, f"jobs/{J}/renders/small.json")
     info = store.put(A, small, io.BytesIO(b"{}"))
     assert b"".join(store.get(A, small, info.sha256.upper())) == b"{}"
 
 
 def test_list_prefix_skips_temp_files(store: LocalDiskStorage, tmp_path: Path) -> None:
-    store.put(A, _uri(A, "jobs/j1/a.json"), io.BytesIO(b"a"))
-    store.put(A, _uri(A, "jobs/j1/deep/b.json"), io.BytesIO(b"bb"))
+    store.put(A, _uri(A, f"jobs/{J}/renders/a.json"), io.BytesIO(b"a"))
+    store.put(A, _uri(A, f"jobs/{J}/renders/deep/b.json"), io.BytesIO(b"bb"))
     store.put(A, _uri(A, "assets/ast_1/c.png"), io.BytesIO(b"c"))
-    orphan = tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / "jobs" / "j1" / f"{TEMP_PREFIX}x"
+    orphan = (
+        tmp_path / "root" / str(ORG.to_uuid(A.org_id)) / "jobs" / J / "renders" / f"{TEMP_PREFIX}x"
+    )
     orphan.write_bytes(b"partial")
     listed = {(i.uri, i.size_bytes) for i in store.list_prefix(A, A.org_id, "jobs")}
-    assert listed == {(_uri(A, "jobs/j1/a.json"), 1), (_uri(A, "jobs/j1/deep/b.json"), 2)}
+    assert listed == {
+        (_uri(A, f"jobs/{J}/renders/a.json"), 1),
+        (_uri(A, f"jobs/{J}/renders/deep/b.json"), 2),
+    }
     with pytest.raises(InputInvalidError):
         store.list_prefix(A, A.org_id, "nope")
     assert store.remove_orphan_temp_files(older_than_s=0, now_s=time.time() + 1) == 1
@@ -177,7 +183,7 @@ class _Exploding(io.RawIOBase):
 def test_failed_stream_leaves_no_final_and_no_temp_file(
     store: LocalDiskStorage, tmp_path: Path
 ) -> None:
-    uri = _uri(A, "jobs/j/broken.bin")
+    uri = _uri(A, f"jobs/{J}/renders/broken.bin")
     with pytest.raises(StorageUnavailableError):
         store.put(A, uri, _Exploding())
     assert not store.head(A, uri).exists
@@ -192,7 +198,7 @@ def test_disk_full_maps_to_resource_disk_full(
         raise OSError(errno.ENOSPC, "No space left on device")
 
     monkeypatch.setattr(os, "fsync", no_space)
-    uri = _uri(A, "jobs/j/full.bin")
+    uri = _uri(A, f"jobs/{J}/renders/full.bin")
     with pytest.raises(DiskFullError):
         store.put(A, uri, io.BytesIO(b"z"))
     monkeypatch.undo()
@@ -238,7 +244,7 @@ _KILL_SCRIPT = textwrap.dedent(
 def test_kill_during_put_leaves_no_file_at_the_final_path(tmp_path: Path) -> None:
     """07 section 8.4: a hard kill mid-write never leaves a corrupt file at a final path."""
     root = tmp_path / "root"
-    uri = _uri(A, "jobs/j/killed.mp4")
+    uri = _uri(A, f"jobs/{J}/renders/killed.mp4")
     script = tmp_path / "writer.py"
     script.write_text(_KILL_SCRIPT, encoding="utf-8")
     proc = subprocess.Popen(  # noqa: S603 - fixed interpreter and test-owned script
@@ -273,11 +279,11 @@ def test_settings_factory(tmp_path: Path) -> None:
 
 def test_parse_uri() -> None:
     org = ORG.from_uuid(new_uuid7())
-    parsed = parse_uri(f"amw-blob://{org}/jobs/job_1/x.json")
+    parsed = parse_uri(f"amw-blob://{org}/jobs/{J}/renders/x.json")
     assert (parsed.owner, parsed.area, parsed.path, parsed.is_platform) == (
         org,
         "jobs",
-        "job_1/x.json",
+        f"{J}/renders/x.json",
         False,
     )
     assert parse_uri("amw-blob://platform/templates/a").is_platform

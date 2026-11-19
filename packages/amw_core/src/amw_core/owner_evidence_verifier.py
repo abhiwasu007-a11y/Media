@@ -30,6 +30,12 @@ test parses the document):
   the owner to type, e.g. ``approve R7K2`` / ``R7K2 मंजूर``. A whole message wrapped in quotation
   marks is also refused. This is stricter than the "closed grammar" sentence of 03 rule 7
   (raised with the contract integrator).
+* Records without an approval (CCR-116): ``OWNER_TOPIC``, ``DATASET_INTAKE`` and any other
+  ``CONTENT`` / ``SCORE`` evidence without ``approval_id`` get their **own** review code from the
+  evidence store at recording (``amw_core.owner_evidence_review_code``; unique per org across
+  approval and evidence codes); the echo shows it and the confirmation names exactly that code.
+  The first ``OWNER_TOPIC`` / ``DATASET_INTAKE`` message carries no subject reference (A8
+  exception: a code-shaped token or job wire ID in it refuses it).
 * ``CONTENT`` (``CONTRIBUTION``, ``OWNER_TOPIC``, ``DATASET_INTAKE``): no decision; the quote
   carries content (contributions >= ``min_contribution_chars``); refused for negation or
   withholding language (English, Marathi and Hindi, Devanagari or Romanised and inflected),
@@ -45,10 +51,10 @@ Every list (decision words, neutral words, negation, withholding, quote markers,
 interrogatives, review-code shape, owner accounts, top-level-session test, the rule table) is
 configuration (``approvals.owner_chat.*``) with defaults marked **owner to confirm**.
 
-**Limitation (honest status).** The real ``SessionEventSource`` that reads the platform's session
-record is ticket 3A-13. Until then only the in-memory fake
-(``amw_core.testing.memory.MemorySessionEventSource``) exists, so no 3A approval recorded through
-this path may be treated as production-verified.
+**Session record (3A-13 / WS-08):** the real source is
+``amw_adapters.session_record.ClaudeSessionJsonlSource`` (wired by
+``amw_core.owner_evidence_real``); approvals recorded through the in-memory fake are TEST
+fixtures (dry run only). Residual risks: ``docs/v4/runtime/EVIDENCE_PATH.md``.
 """
 
 import hashlib
@@ -67,7 +73,8 @@ from amw_core.enums import (
     InstructionSourceKind,
     QualityDimension,
 )
-from amw_core.ids import ActorRef, ApprovalId, JobId, UserId, WireId
+from amw_core.ids import ActorRef, ApprovalId, JobId, Prefix, UserId, WireId
+from amw_core.text_normalise import normalise_for_matching
 
 VerificationKind = EvidenceVerificationKind
 USER_ROLE: Final = "user"
@@ -78,8 +85,19 @@ NEEDS_CLARIFICATION: Final = "needs_clarification"
 NEGATION_OR_WITHHOLDING: Final = "negation_or_withholding"
 QUESTION_OR_DEFERRED: Final = "question_or_deferred"
 QUOTED_OR_FORWARDED: Final = "quoted_or_forwarded"
+EMBEDDED_PART_UNMARKED: Final = "embedded_part_unmarked"
+"""A6 (CCR-125): a reply embeds an earlier message and the event source does not mark which part
+the owner wrote: ``NEEDS_CLARIFICATION``, nothing is recorded."""
+OWNER_PART_MISMATCH: Final = "owner_part_not_in_event"
+"""A6 (CCR-125): the marked owner-authored part is not a part of the event content."""
 CLARIFICATION_REASONS: Final = frozenset(
-    {NEEDS_CLARIFICATION, NEGATION_OR_WITHHOLDING, QUESTION_OR_DEFERRED, QUOTED_OR_FORWARDED}
+    {
+        NEEDS_CLARIFICATION,
+        NEGATION_OR_WITHHOLDING,
+        QUESTION_OR_DEFERRED,
+        QUOTED_OR_FORWARDED,
+        EMBEDDED_PART_UNMARKED,
+    }
 )
 """Refusals where the operator must ask the owner to restate (nothing is recorded)."""
 
@@ -212,14 +230,19 @@ class SessionEvent:
     """The platform account that authored the message."""
     parent_session_id: str | None
     """``None`` for a top-level session; set for a child / sub-agent session."""
+    embeds_earlier_message: bool = False
+    """The platform marks this event as a reply that embeds an earlier message (CCR-125)."""
+    owner_authored_content: str | None = None
+    """The part of ``content`` the owner wrote, as marked by the event source (CCR-125). ``None``
+    = the source marks nothing: valid only for an event with no embedded text."""
 
 
 @runtime_checkable
 class SessionEventSource(Protocol):
     """Read access to the platform's session event store (one event by ID), owned by the store.
 
-    Limitation: the real adapter is ticket 3A-13; until then only the in-memory fake exists and
-    3A approvals recorded with it are not production-verified (see the module docstring).
+    Real source: ``amw_adapters.session_record.ClaudeSessionJsonlSource`` (3A-13); the in-memory
+    fake is the dry-run TEST path only (see the module docstring).
     """
 
     def fetch(self, session_id: str, event_uuid: str) -> SessionEvent | None:
@@ -292,6 +315,8 @@ class VerifierPolicy:
     )
     neutral_tokens: frozenset[str] = DEFAULT_NEUTRAL_TOKENS
     confirm_words: frozenset[str] = DEFAULT_CONFIRM_WORDS
+    decision_confirm_words: frozenset[str] = frozenset({"approve", "मंजूर"})
+    """PROPOSED CCR-264: approval words that also confirm an APPROVED record after the echo."""
     stage_words: Mapping[str, tuple[str, ...]] = field(
         default_factory=lambda: dict(DEFAULT_STAGE_WORDS)
     )
@@ -377,6 +402,55 @@ def whitelist_tokens(text: str) -> list[str]:
     return kept.split()
 
 
+_EMBED_START = re.compile(
+    r"^(?:[>\u203a\u00bb\u2265|]|-{2,}\s*(?:original|forwarded)\s+message|-\s*original\s+message"
+    r"\s*-|_{5,}|={5,}|begin forwarded message|on\s.{1,200}\swrote:?$)",
+)
+_EMBED_END = re.compile(
+    r"(?:wrote|writes|said|\u092e\u094d\u0939\u0923\u093e\u0932\u0947|"
+    r"\u092e\u094d\u0939\u0923\u093e\u0932\u093e|\u0932\u093f\u0916\u093e|"
+    r"\u0915\u0939\u093e)\s*:$"
+)
+_HEADER_FROM = re.compile(r"^(?:from|de|von)\s*:\s*\S")
+_HEADER_OTHER = re.compile(r"^(?:sent|date|to|cc|subject|\u0935\u093f\u0937\u092f)\s*:\s*\S")
+
+
+def _lines_for_embed_check(content: str) -> list[str]:
+    """Each line normalised on its own (``amw_core.text_normalise``: NFKC, casefold, invisible and
+    format characters such as U+200B / U+2060 / U+200E / U+FEFF removed, look-alikes folded), so a
+    quote marker hidden behind an invisible prefix is still at the start of its line."""
+    lines = re.split(r"[\r\n\u2028\u2029\u0085]+", content)
+    return [normalise_for_matching(line).text for line in lines if line.strip()]
+
+
+def _looks_embedded(content: str) -> bool:
+    """Quote-prefix lines (greater-than, single / double angle quotes, pipe), a forwarded or
+    original-message rule, an "On ... wrote:" header, a line ending "... wrote:", or an
+    Outlook-style ``From:`` header block (``From:`` plus ``Sent:`` / ``To:`` / ``Subject:``)."""
+    lines = _lines_for_embed_check(content)
+    if any(_EMBED_START.match(line) or _EMBED_END.search(line) for line in lines):
+        return True
+    return any(_HEADER_FROM.match(line) for line in lines) and any(
+        _HEADER_OTHER.match(line) for line in lines
+    )
+
+
+def owner_part(event: SessionEvent) -> tuple[str | None, str]:
+    """``(problem, text)``: the owner-authored text every check reads (CCR-125). ``problem`` is
+    ``EMBEDDED_PART_UNMARKED`` (embedded text, no marking), ``OWNER_PART_MISMATCH`` (the marked
+    part is not in the content) or ``None``; the embedded text never counts."""
+    marked = event.owner_authored_content
+    if marked is None:
+        if event.embeds_earlier_message or _looks_embedded(event.content):
+            return EMBEDDED_PART_UNMARKED, ""
+        return None, event.content
+    if not marked.strip() or marked not in event.content:
+        return OWNER_PART_MISMATCH, ""
+    if _looks_embedded(marked):
+        return EMBEDDED_PART_UNMARKED, ""  # the marked part itself carries embedded text
+    return None, marked
+
+
 def _wholly_quoted(content: str) -> bool:
     text = content.strip()
     return len(text) >= 2 and text[0] in _QUOTES and text[-1] in _QUOTES
@@ -453,10 +527,21 @@ def read_decision(
     return reading[0] if reading else None
 
 
-def is_confirmation(content: str, review_code: str | None, policy: VerifierPolicy) -> bool:
+def is_confirmation(
+    content: str,
+    review_code: str | None,
+    policy: VerifierPolicy,
+    *,
+    decision: ApprovalStepState | None = None,
+) -> bool:
     """Confirmation whitelist (CCR-101): exactly the record's own review code, exactly one confirm
     word, every other token neutral. A dispute, correction, new decision or second code is never a
-    confirmation."""
+    confirmation.
+
+    ``decision`` (PROPOSED CCR-264, used only by the verifier worker for a reply that comes after
+    the operator's echo): for an ``APPROVED`` record, the owner's established approval form also
+    confirms: exactly the code and exactly one word of ``policy.decision_confirm_words``
+    (``approve`` / ``मंजूर``), nothing else."""
     if not review_code:
         return False
     rest = _without_code(content, review_code)
@@ -465,7 +550,12 @@ def is_confirmation(content: str, review_code: str | None, policy: VerifierPolic
     confirm = {" ".join(whitelist_tokens(w)) for w in policy.confirm_words}
     neutral = {" ".join(whitelist_tokens(n)) for n in policy.neutral_tokens}
     hits = [w for w in rest if w in confirm]
-    return len(hits) == 1 and all(w in confirm or w in neutral for w in rest)
+    if len(hits) == 1 and all(w in confirm or w in neutral for w in rest):
+        return True
+    if decision is not ApprovalStepState.APPROVED:
+        return False
+    words = {" ".join(whitelist_tokens(w)) for w in policy.decision_confirm_words}
+    return len(rest) == 1 and rest[0] in words
 
 
 def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
@@ -487,13 +577,35 @@ def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
     return None
 
 
+_ALNUM_RUN = re.compile(r"[^\W_]+")
+
+
+def _strict_words(content: str) -> list[str]:
+    """Strict token boundary: invisible (``Cf``) characters are removed, then every run of letters
+    and digits is a word (an apostrophe, underscore or any punctuation ends it), so ``R7K2's``,
+    ``R7K2_`` and ``R<ZWSP>7K2`` all contain the code-shaped word ``r7k2``."""
+    folded = normalise("".join(c for c in content if unicodedata.category(c) != "Cf"))
+    return _ALNUM_RUN.findall(folded)
+
+
 def _subject_reference(content: str, evidence: NewEvidence, policy: VerifierPolicy) -> bool:
     """A8 for CONTENT / SCORE: the review code exactly once (and no other code-shaped token) or
-    the job wire ID."""
+    the job wire ID. Exception (CCR-116): ``OWNER_TOPIC`` / ``DATASET_INTAKE`` precede the job and
+    their own code is issued only at recording, so their first message carries **no** subject
+    reference: any code-shaped token or job wire ID refuses it."""
+    shape = re.compile(policy.review_code_pattern)
+    if evidence.record_kind in _NO_ANCHOR_KINDS:
+        if evidence.job_id is not None and evidence.job_id in content:
+            return False
+        job_prefix = f"{Prefix.JOB.value}_"
+        strict = _strict_words(content)
+        clean = normalise("".join(c for c in content if unicodedata.category(c) != "Cf"))
+        return job_prefix not in clean and not any(
+            shape.fullmatch(w) for w in (*tokens(content), *strict)
+        )
     text = content.replace(evidence.job_id, " ") if evidence.job_id else content
     words = tokens(text)
     code = normalise(evidence.review_code) if evidence.review_code else None
-    shape = re.compile(policy.review_code_pattern)
     other_codes = [w for w in words if shape.fullmatch(w) and w != code]
     if other_codes:
         return False
@@ -536,6 +648,7 @@ def verify_owner_event(
     policy: VerifierPolicy,
     now: datetime,
     allowed_stages: frozenset[str] | None = None,
+    confirm_decision: ApprovalStepState | None = None,
 ) -> VerificationOutcome:
     """Pure check of one fetched event against the operator's claims (03 section 11.6 rule 7).
 
@@ -548,7 +661,7 @@ def verify_owner_event(
     """
     if event is None:
         return EventUnavailable(evidence.session_id, evidence.event_uuid)
-    content = event.content
+    part_problem, content = owner_part(event)
     kind = policy.record_kind_rules.get(evidence.record_kind)
     session_id = evidence.session_id if purpose == RECORD else event.session_id
     checks: dict[str, bool] = {"rule_defined": kind is not None}
@@ -571,14 +684,18 @@ def verify_owner_event(
         "owner_account": event.sender_account in policy.owner_account_ids,
         "top_level_session": not policy.require_top_level_session
         or event.parent_session_id is None,
-        "quote_verbatim": bool(quote) and quote in content,
+        EMBEDDED_PART_UNMARKED: part_problem != EMBEDDED_PART_UNMARKED,
+        OWNER_PART_MISMATCH: part_problem != OWNER_PART_MISMATCH,
+        "quote_verbatim": part_problem is None and bool(quote) and quote in content,
         "timestamp_equal": message_at is None or message_at == event.timestamp,
         "message_order": order_ok,
         "distinct_event": distinct_from_event_uuid is None
         or event.event_uuid != distinct_from_event_uuid,
     }
     if purpose == CONFIRMATION:
-        confirmed = is_confirmation(content, evidence.review_code, policy)
+        confirmed = is_confirmation(
+            content, evidence.review_code, policy, decision=confirm_decision
+        )
         checks["confirmation_grammar"] = confirmed
         checks["subject_reference"] = confirmed
         checks["clarity"] = confirmed

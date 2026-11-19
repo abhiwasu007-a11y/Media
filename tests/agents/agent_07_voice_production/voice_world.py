@@ -32,6 +32,7 @@ from amw_core.enums import (
     VoiceKind,
 )
 from amw_core.errors import RateLimitedError
+from amw_core.exec_context import ExecContext
 from amw_core.ids import CHANNEL, CORRELATION, JOB, TASK, Prefix, new_id
 from amw_core.interfaces.voices import VoiceConsentRecord, VoiceRecord
 from amw_core.testing.memory import MemoryCheckpointStore, MemoryIdempotencyStore
@@ -51,6 +52,7 @@ from tests.agents.agent_07_voice_production.support import (
     ViewOf,
     capabilities,
     config,
+    exec_ctx,
     tone_samples,
     wav_bytes,
 )
@@ -99,8 +101,11 @@ class VoiceWorld:
     budget: FakeBudget
     org: str
 
+    def ctx(self, attempt: str | None = None) -> ExecContext:
+        return exec_ctx(self.task_input, attempt or _ATTEMPT)
+
     def run(self, attempt: str | None = None) -> TaskOutput:
-        return self.stage.run(self.task_input, attempt or _ATTEMPT)
+        return self.stage.run(self.task_input, self.ctx(attempt))
 
 
 _ATTEMPT = new_id(Prefix.TASK_ATTEMPT)

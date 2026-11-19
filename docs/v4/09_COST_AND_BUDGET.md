@@ -90,6 +90,8 @@ A VERIFIED row replaces its ESTIMATE in the sum through `estimate_entry_id`; bot
 
 If any applicable budget cannot cover the hold, no reservation is made on any of them (all-or-nothing), the task goes to T05. A task's `max_cost_micros` is set per task type (07 §9; 27 §3 key `llm.<task_type>.cost_budget_micros`); the values are **REQUIRES REVIEW (Phase 1): set from measured cost in the skeleton, then confirmed by the owner**.
 
+**Task types without a paid call (CCR-205).** A stage whose 24 record lists none of the paid capabilities (GLOSSARY §6.20: `llm`, `tts`, `image_gen`, `video_gen`, `stock_search`, `music_search`; every other capability, e.g. `web_fetch`, `doc_extract`, `media_probe`, `render_ffmpeg`, `file_delivery`, is not paid) gets `max_cost_micros = 0` and `max_llm_calls = 0` in its `resource_budget`, written by the orchestrator and never configured. In the 3A graphs (24 §7.1a / §7.2a) these are `s07_master`, `s10_render`, `s10_subs`, `s10_qc`, `s02u_unique`, `a_script`, `a_final`, `s16_auth` and `s13_deliver`; Agent 10 refuses any other value (agent_10 §7.4). At T03 a zero hold writes no `budget_reservations` row (nothing to reserve; §4 B4 lets such work run during a breach). A stage that lists a paid capability takes its cap from its task type's configured key; an unset key refuses the job at validation (J02, `PERMANENT.CONFIG_INVALID`), never a silent 0 or a default. Per-job caps (`PER_VIDEO`, `PER_JOB`, CCR-107) are read and reported per job: every status read of such a budget names the job.
+
 ## 4. Behaviour on breach
 
 | Rule | Behaviour |

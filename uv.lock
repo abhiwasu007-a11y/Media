@@ -19,6 +19,7 @@ members = [
     "amw-evals",
     "amw-media-factory",
     "amw-orchestrator",
+    "amw-runtime",
 ]
 
 [[package]]
@@ -107,10 +108,14 @@ version = "0.0.0"
 source = { editable = "packages/agents/agent_10_video_editor" }
 dependencies = [
     { name = "amw-core" },
+    { name = "fonttools" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+requires-dist = [
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "fonttools", specifier = ">=4.55" },
+]
 
 [[package]]
 name = "agent-11-thumbnail-design"
@@ -137,10 +142,14 @@ version = "0.0.0"
 source = { editable = "packages/agents/agent_16_compliance_qa" }
 dependencies = [
     { name = "amw-core" },
+    { name = "amw-runtime" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+requires-dist = [
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "amw-runtime", editable = "packages/amw_runtime" },
+]
 
 [[package]]
 name = "amw-adapters"
@@ -158,6 +167,7 @@ name = "amw-core"
 version = "0.0.0"
 source = { editable = "packages/amw_core" }
 dependencies = [
+    { name = "fonttools" },
     { name = "jsonschema" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
@@ -166,6 +176,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fonttools", specifier = ">=4.55" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.10" },
@@ -217,6 +228,7 @@ dependencies = [
     { name = "amw-delivery" },
     { name = "amw-evals" },
     { name = "amw-orchestrator" },
+    { name = "amw-runtime" },
 ]
 
 [package.dev-dependencies]
@@ -246,6 +258,7 @@ requires-dist = [
     { name = "amw-delivery", editable = "packages/amw_delivery" },
     { name = "amw-evals", editable = "packages/amw_evals" },
     { name = "amw-orchestrator", editable = "packages/amw_orchestrator" },
+    { name = "amw-runtime", editable = "packages/amw_runtime" },
 ]
 
 [package.metadata.requires-dev]
@@ -269,6 +282,23 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+
+[[package]]
+name = "amw-runtime"
+version = "0.0.0"
+source = { editable = "packages/amw_runtime" }
+dependencies = [
+    { name = "agent-06-fact-checker" },
+    { name = "amw-core" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agent-06-fact-checker", editable = "packages/agents/agent_06_fact_checker" },
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "pydantic", specifier = ">=2" },
+]
 
 [[package]]
 name = "annotated-types"

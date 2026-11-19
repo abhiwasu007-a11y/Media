@@ -20,6 +20,7 @@
 | **Workspace** | A brand or client-account area inside an organisation (directive "Workspaces/Brands"). An agency org has one workspace per end-client brand. A workspace owns brand kits, channels and projects. | `workspaces` |
 | **Brand** | The identity a workspace presents. Not a separate entity; the brand's look is its **brand kit**. | — |
 | **Brand kit** | Versioned brand identity: logo, colours, fonts, lower-thirds, intro/outro, voice, tone rules, banned words (§1C.6). | `brand_kits` |
+| **Template ID** | The stable name of a visual template (an overlay card, a sting, an end screen, a chart base), `^[a-z][a-z0-9_]{1,63}$`, e.g. `chapter_card`. It is the `attributes.template_id` of the tenant's `TEMPLATE` asset that holds the current version (04 §5.15, CCR-031/032); the brand kit's `intro_ref`, `outro_ref` and `lower_third_template_ref` and the shot plan's overlay `template_ref` hold template IDs, never URIs or asset IDs; only Agent 08 resolves a template ID to an asset (CCR-204). | `assets.attributes.template_id` |
 | **Channel** | A publishing destination account (YouTube channel first) owned by a workspace. | `channels` |
 | **Project** | A container of jobs with one purpose: a series, a campaign, a client order or an internal job group. | `projects` |
 | **Production type** | A registry entry that defines one product the platform makes: stages, inputs, approvals, templates, QC, rule packs, deliverables, cost model (§3.4). | `production_types`, 24_PRODUCTION_TYPES.md |
@@ -208,7 +209,7 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 | Ratios / probabilities / confidence | Decimal 0.0–1.0 | `confidence numeric(4,3)` |
 | Quality score | 0–100 points (§1A.7) | `numeric(5,2)` |
 | YouTube quota | Units per bucket (YT-02) | `units bigint` |
-| Language | BCP 47 tag (e.g. `mr`, `mr-IN`, `hi`, `en-IN`) | `language text` |
+| Language | BCP 47 tag (e.g. `mr`, `mr-IN`, `hi`, `en-IN`). One tag per job (CCR-205): every payload, document and file of a job carries `jobs.language` byte-for-byte (the owner topic, the script, the plan, subtitles, QC); consumers compare by exact string equality and no stage rewrites, shortens or extends the tag | `language text` |
 | Country | ISO 3166-1 alpha-2 | `country char(2)` |
 | Aspect ratio | String `W:H` from §6.50 | — |
 
@@ -325,7 +326,7 @@ Same value set as `task_state` **without `RETRY_WAIT`** (retries are task-level 
 `A_OWNER_REAL` · `B_LICENSED_STOCK` · `C_CODE_MOTION` · `D_AI_VIDEO` · `E_AI_STILL`.
 
 ### 6.20 `capability` (worker / task)
-`llm` · `tts` · `image_gen` · `video_gen` · `stock_search` · `music_search` (CCR-007; 3B) · `render_ffmpeg` · `media_probe` · `doc_extract` (CCR-014; document text extraction for `agent_04.knowledge_ingest`) · `web_fetch` (CCR-015; allow-listed HTTPS reference fetch) · `publish_youtube` · `file_delivery` · `analytics_ingest` · `notify_email`. New capabilities are additive via CCR.
+`llm` · `tts` · `image_gen` · `video_gen` · `stock_search` · `music_search` (CCR-007; 3B) · `render_ffmpeg` · `media_probe` · `doc_extract` (CCR-014; document text extraction for `agent_04.knowledge_ingest`) · `web_fetch` (CCR-015; allow-listed HTTPS reference fetch) · `publish_youtube` · `file_delivery` · `analytics_ingest` · `notify_email`. New capabilities are additive via CCR. **Paid** capabilities (a call can cost money; 09 §3.4, CCR-205): `llm`, `tts`, `image_gen`, `video_gen`, `stock_search`, `music_search`; all others are not paid.
 
 ### 6.21 `third_party_permission`
 `PERMITTED` · `NOT_PERMITTED` · `UNKNOWN`. `UNKNOWN` blocks use for any tenant other than the licence holder's own channels (§1C.8).

@@ -9,8 +9,9 @@ Per gate decision, in the caller's tenant transaction:
 * one ``qc_results`` row per ``gate: true`` validation result;
 * ``claims.final_verdict`` of every claim inside a judged item: the worst verdict over the rule
   rows that name the item (Agent 16 is the final authority, 04 table ``claims``);
-* the evidence blob ``evidence/<job>/compliance_gate-<task>-<iteration>.json`` (write-once; an
-  identical existing blob is reused, a different one is refused);
+* the evidence blob ``jobs/<job>/tasks/<task>/attempts/<att>/artifacts/compliance_gate-<iter>.json``
+  (03 section 8 rule 5, CCR-208; write-once per attempt; an identical existing blob is reused,
+  a different one is refused);
 * one ``audit_log`` entry ``compliance.gate.verdicts_written`` (NF-09).
 
 Every row write carries an ``idempotency_key`` of scope ``db.output`` over (task, kind, key), so
@@ -36,15 +37,19 @@ from amw_core.enums import ActorKind, ComplianceVerdict, DisclosureDecision
 from amw_core.errors import IdempotencyConflictError
 from amw_core.ids import (
     ActorRef,
+    AttemptId,
     CorrelationId,
     IdempotencyKey,
     IdempotencyScope,
     JobId,
+    OrgId,
+    TaskId,
     make_idempotency_key,
 )
 from amw_core.interfaces.audit_log import AuditLog, NewAuditEntry
-from amw_core.interfaces.storage import BlobStorage
+from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.tenancy.storage_paths import task_artifact_uri
 
 AGENT_ID = "agent_16"
 
@@ -100,6 +105,7 @@ class GateSubjectRef:
 class WriteScope:
     job_id: str
     task_id: str
+    attempt_id: str
     iteration: int
     correlation_id: str
     occurred_at: datetime
@@ -135,10 +141,14 @@ class VerdictWriter:
     ) -> tuple[str, str, int]:
         data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
         sha = hashlib.sha256(data).hexdigest()
-        uri = self._storage.blob_uri(
-            tx.context,
-            "evidence",
-            f"{scope.job_id}/compliance_gate-{scope.task_id}-{scope.iteration}.json",
+        uri = BlobUri(
+            task_artifact_uri(
+                OrgId(tx.context.org_id),
+                JobId(scope.job_id),
+                TaskId(scope.task_id),
+                AttemptId(scope.attempt_id),
+                f"compliance_gate-{scope.iteration}.json",
+            )
         )
         head = self._storage.head(tx.context, uri)
         if head.exists:

@@ -1,7 +1,9 @@
 """Test support: sample worlds (plan, manifest, assets, audio) for Agent 10 tests."""
 
+from fractions import Fraction
 from typing import Any
 
+from agent_10_video_editor.encode import encode_table
 from agent_10_video_editor.inputs import (
     AssetManifest,
     AssetRecord,
@@ -76,7 +78,11 @@ def compile_case(i: dict[str, Any]) -> Timeline:
         }
     )
     manifest = AssetManifest.model_validate({"shots": entries})
-    cfg = make_config(render={"fps_num": fps_num, "fps_den": fps_den})
+    render: dict[str, Any] = {"fps_num": fps_num, "fps_den": fps_den}
+    if encode_table().target_for(1920, 1080, Fraction(fps_num, fps_den)) is None:
+        # no INF-12 row (e.g. 30000/1001): operator test values (ADR-014 REQUIRES REVIEW)
+        render |= {"video_bitrate_bps": 8_000_000, "gop_frames": 15}
+    cfg = make_config(render=render)
     return TimelineCompiler.compile(plan, manifest, assets, audio_master(total), cfg, "16:9")
 
 
@@ -428,7 +434,7 @@ def run_chain(world: World) -> dict[str, Any]:
     from agent_10_video_editor.render import RenderStage
     from agent_10_video_editor.subtitle_stage import SubtitleStage
 
-    render_out = RenderStage(world.deps()).run(
+    render_out = RenderStage(world.deps()).execute(
         world.render_input(), world.attempt, envelope_org=world.org
     )
     assert render_out.payload is not None
@@ -456,7 +462,7 @@ def run_chain(world: World) -> dict[str, Any]:
             "agent_05.script_document",
         ],
     )
-    subs_out = SubtitleStage(world.deps()).run(subs_in, world.attempt)
+    subs_out = SubtitleStage(world.deps()).execute(subs_in, world.attempt)
     assert subs_out.payload is not None
     assert subs_out.payload.data is not None
     s_uri, s_sha = world.put(

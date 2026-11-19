@@ -23,6 +23,7 @@ from agent_07_voice_production.ports import (
 )
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.errors import AgentCrashError, RenderCrashError
+from amw_core.exec_context import ExecContext
 from amw_core.ids import CHANNEL, Prefix, new_id
 from amw_core.testing.memory import MemoryCheckpointStore
 from tests.agents.agent_07_voice_production.support import (
@@ -32,6 +33,7 @@ from tests.agents.agent_07_voice_production.support import (
     MemoryBlobs,
     MemoryTenancy,
     config,
+    exec_ctx,
 )
 from tests.agents.agent_07_voice_production.voice_world import OTHER_ORG, make_task_input
 
@@ -136,11 +138,14 @@ class MasterWorld:
     control: FakeControl
     deps: MasterDeps
 
+    def ctx(self, attempt: str | None = None) -> ExecContext:
+        return exec_ctx(self.task_input, attempt or new_id(Prefix.TASK_ATTEMPT))
+
     def run(self, attempt: str | None = None) -> TaskOutput:
-        return self.stage.run(self.task_input, attempt or new_id(Prefix.TASK_ATTEMPT))
+        return self.stage.run(self.task_input, self.ctx(attempt))
 
     def master_written(self) -> bool:
-        return any("/s07_master/" in u and u.endswith("master.wav") for u in self.blobs.data)
+        return any(u.endswith("/artifacts/master.wav") for u in self.blobs.data)
 
 
 def build(case: dict[str, Any], scratch: Path) -> MasterWorld:

@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt
 
 from agent_10_video_editor.canonical import canonical_json, canonical_sha256, sha256_hex
 from agent_10_video_editor.config import AgentTenConfig
-from agent_10_video_editor.errors import input_invalid, missing_dependency
+from agent_10_video_editor.errors import input_invalid, missing_dependency, violations_of
 from agent_10_video_editor.frames import FrameQuantiser
 from agent_10_video_editor.inputs import (
     AssetManifest,
@@ -26,6 +26,8 @@ from agent_10_video_editor.inputs import (
     ScriptStrings,
     ShotPlan,
 )
+from amw_core.errors import AmwError
+from amw_core.font_coverage import uncovered_code_points
 
 END_SCREEN_SHOT_ID = "end_screen"
 
@@ -335,7 +337,7 @@ class TimelineCompiler:
                     )
                 except Exception as exc:
                     invalid.extend(
-                        getattr(exc, "details", {}).get("violations", ["REVEAL_INVALID"])
+                        violations_of(exc) if isinstance(exc, AmwError) else ["REVEAL_INVALID"]
                     )
                     continue
             if not steps and media is not None and media.duration_ms is not None:
@@ -450,7 +452,11 @@ class TimelineCompiler:
             record = assets.get(mo.template_asset_id) if mo else None
             if mo is None or record is None:
                 raise missing_dependency(f"NO_ASSET:{po.overlay_id}")
-            if po.template_ref is not None and po.template_ref != record.uri:
+            # CCR-204: ``template_ref`` is a template ID, compared with the ID the manifest's
+            # template asset carries in ``attributes.template_id``; never a URI.
+            if po.template_ref is not None and po.template_ref != record.attributes.get(
+                "template_id"
+            ):
                 raise input_invalid(f"TEMPLATE_MISMATCH:{po.overlay_id}")
             start_f, end_f = fr(po.start_ms), fr(po.end_ms)
             if end_f <= start_f:
@@ -528,8 +534,6 @@ class FontCoverage:
 
     @staticmethod
     def check(font_code_points: set[int] | frozenset[int], texts: Sequence[str]) -> None:
-        missing = sorted(
-            {ord(ch) for text in texts for ch in text if not ch.isspace()} - set(font_code_points)
-        )
+        missing = sorted(uncovered_code_points(texts, [frozenset(font_code_points)]))
         if missing:
             raise input_invalid(*(f"GLYPH_MISSING:U+{cp:04X}" for cp in missing))

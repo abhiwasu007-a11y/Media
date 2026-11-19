@@ -9,11 +9,12 @@ cannot finish before ``act_by``, its scratch ``.part`` is discarded.
 """
 
 import math
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -31,11 +32,14 @@ from agent_10_video_editor.contracts import (
     GuardsOut,
     ProbeOut,
     ProvenanceOut,
+    QualityMetricOut,
+    RateControlOut,
     RenderInput,
     RenderOutput,
     SegmentsOut,
 )
 from agent_10_video_editor.deps import StageDeps
+from agent_10_video_editor.entry import run_task
 from agent_10_video_editor.errors import MeasurementUnavailable, config_invalid, input_invalid
 from agent_10_video_editor.ffmpeg import (
     ArgvBuilder,
@@ -60,8 +64,13 @@ from agent_10_video_editor.inputs import (
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
 from agent_10_video_editor.observability import LogContext, emit, labels
 from agent_10_video_editor.ports import RenderRow
-from agent_10_video_editor.probe import PacketParser, ProbeResult
-from agent_10_video_editor.qc.checks import a10_q_colour_tags, a10_q_gop_settings
+from agent_10_video_editor.probe import PacketParser, ProbeResult, SsimParser, X264SeiParser
+from agent_10_video_editor.qc.checks import (
+    a10_q_colour_tags,
+    a10_q_gop_settings,
+    sei_mismatches,
+    x264_expected,
+)
 from agent_10_video_editor.qc.result import CheckResult, passed, skipped
 from agent_10_video_editor.scope import ScratchDir, TenantScope, one_ref_per_schema
 from agent_10_video_editor.segments import (
@@ -83,6 +92,7 @@ from agent_10_video_editor.taskio import (
     drain_action,
     ffmpeg_cost_entry,
     output_ref,
+    parse_blob,
     to_validation_result,
     usage,
     validate_budget,
@@ -113,6 +123,7 @@ from amw_core.errors import (
     RenderCrashError,
     SchemaInvalidError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     RENDER,
     ActorRef,
@@ -155,13 +166,25 @@ def load_inputs(task_input: TaskInput, scope: TenantScope) -> LoadedInputs:
 
     try:
         return LoadedInputs(
-            plan=ShotPlan.model_validate_json(blob("agent_09.shot_plan.output")),
-            manifest=AssetManifest.model_validate_json(blob("agent_08.asset_sourcing.output")),
-            audio=AudioMaster.model_validate_json(blob("agent_07.audio_master.output")),
-            narration=NarrationTimeline.model_validate_json(
-                blob("agent_07.voice_synthesis.output")
+            plan=parse_blob(
+                ShotPlan, blob("agent_09.shot_plan.output"), "agent_09.shot_plan.output"
             ),
-            script=ScriptStrings.model_validate_json(blob("agent_05.script_document")),
+            manifest=parse_blob(
+                AssetManifest,
+                blob("agent_08.asset_sourcing.output"),
+                "agent_08.asset_sourcing.output",
+            ),
+            audio=parse_blob(
+                AudioMaster, blob("agent_07.audio_master.output"), "agent_07.audio_master.output"
+            ),
+            narration=parse_blob(
+                NarrationTimeline,
+                blob("agent_07.voice_synthesis.output"),
+                "agent_07.voice_synthesis.output",
+            ),
+            script=parse_blob(
+                ScriptStrings, blob("agent_05.script_document"), "agent_05.script_document"
+            ),
             script_sha256=refs["agent_05.script_document"][1],
         )
     except ValidationError as exc:
@@ -192,6 +215,34 @@ def _tenant_context(task_input: TaskInput) -> TenantContext:
     )
 
 
+VmafStatus = Literal["LIBVMAF_NOT_IN_BUILD", "LIBVMAF_IN_BUILD_NOT_USED"]
+_SSIM_Q = Decimal("0.000001")
+
+
+def quality_metric(
+    records: Iterable[SegmentRecord], total_frames: int, vmaf_status: VmafStatus
+) -> QualityMetricOut:
+    """Frame-weighted mean of the per-segment SSIM ``All`` values (the mean over all frames up
+    to the filter's 6-decimal rounding, as ``All`` is a per-frame mean) and the lowest segment."""
+    measured = [(Decimal(r.ssim_all), r.ssim_frames) for r in records if r.ssim_all is not None]
+    frames = sum(n for _, n in measured)
+    if frames == 0:
+        mean = low = None
+    else:
+        weighted = sum((v * n for v, n in measured), Decimal(0)) / frames
+        mean = str(weighted.quantize(_SSIM_Q, rounding=ROUND_HALF_UP))
+        low = str(min(v for v, _ in measured).quantize(_SSIM_Q, rounding=ROUND_HALF_UP))
+    return QualityMetricOut(
+        metric="SSIM",
+        reference="FFV1_LOSSLESS_SEGMENT",
+        ssim_all=mean,
+        ssim_min_segment=low,
+        frames_measured=frames,
+        frames_total=total_frames,
+        vmaf_status=vmaf_status,
+    )
+
+
 def _progress(done_frames: int, total_frames: int) -> Decimal:
     return (Decimal(done_frames) / Decimal(total_frames)).quantize(Decimal("0.001"))
 
@@ -204,7 +255,16 @@ class RenderStage:
 
     # -- public --------------------------------------------------------------------------------
 
-    def run(
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
+        return run_task(
+            task_input,
+            ctx,
+            self._d.clock,
+            lambda: self.execute(task_input, str(ctx.attempt_id), str(ctx.org_id)),
+        )
+
+    def execute(
         self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
     ) -> TaskOutput:
         """``envelope_org``: organisation of the received envelope (compared with the input)."""
@@ -257,6 +317,8 @@ class _RenderRun:
         self.reused = 0
         self.resumed = False
         self._audio_bps = 0
+        self._vmaf_status: VmafStatus = "LIBVMAF_NOT_IN_BUILD"
+        self._settings_sha256: str | None = None
 
     def close(self) -> None:
         self.guard.disarm()
@@ -304,6 +366,12 @@ class _RenderRun:
         probe = ProbeService(d.runner, self.argv, work)
         version = d.runner.run(self.argv.version(), cwd=work, limits=RunLimits())
         build_id = ffmpeg_build_id(version.stdout)
+        listing = d.runner.run(self.argv.filters(), cwd=work, limits=RunLimits())
+        self._vmaf_status = (
+            "LIBVMAF_IN_BUILD_NOT_USED"
+            if re.search(r"^\s*\S+\s+libvmaf\s", listing.stdout, flags=re.M)
+            else "LIBVMAF_NOT_IN_BUILD"
+        )
 
         restored = self.ckpt.latest(RenderState, "render.")
         state = restored[0] if restored else None
@@ -312,7 +380,7 @@ class _RenderRun:
             render_id = str(RENDER.new())
             state = RenderState(
                 render_id=render_id,
-                final_uri=self.scope.uri("jobs", f"{ti.job_id}/renders/{render_id}.mp4"),
+                final_uri=self.scope.render_uri(ti.job_id, f"{render_id}.mp4"),
             )
             self.ckpt.write("render.gated", state)
 
@@ -325,7 +393,7 @@ class _RenderRun:
             raise input_invalid("PLAN_CHANGED")
         self._bind_text(timeline, loaded, assets)
         timeline_blob = self.scope.put_bytes(
-            self.scope.uri("jobs", f"{ti.job_id}/renders/timelines/{timeline_sha}.json"),
+            self.scope.render_uri(ti.job_id, f"timelines/{timeline_sha}.json"),
             canonical_json(timeline.canonical()),
         )
         state = state.model_copy(
@@ -479,8 +547,21 @@ class _RenderRun:
         fonts = [assets[f.asset_id] for f in loaded.manifest.fonts if f.asset_id in assets]
         if reader is None or not fonts:
             raise config_invalid("FONT_COVERAGE_UNAVAILABLE")
-        data = self.scope.read_bytes(fonts[0].uri, fonts[0].sha256)
-        FontCoverage.check(reader(data), list(bound.values()))
+        # Brand font first, then the fallback fonts of the manifest: a code point is covered when
+        # any listed font has it (per-glyph fallback; owner decision WS-06). Each font is read
+        # by its recorded SHA-256, so only registered, hash-checked bytes are consulted.
+        covered: set[int] = set()
+        for font in fonts:
+            # Storage errors (CrossTenantRef, MissingDependency, CorruptedOutput, ...) are typed
+            # AmwErrors: read outside the parse guard so they keep their class.
+            data = self.scope.read_bytes(font.uri, font.sha256)
+            try:
+                covered |= reader(data)
+            except AmwError:
+                raise
+            except Exception as exc:  # only the reader's parse failure: unparsable font (CCR-206)
+                raise config_invalid("FONT_COVERAGE_UNAVAILABLE") from exc
+        FontCoverage.check(covered, list(bound.values()))
 
     def _existing_render(self, timeline_sha: str, preset_key: str) -> RenderRow | None:
         with self.d.tenancy.transaction(self.ctx) as tx:
@@ -550,7 +631,7 @@ class _RenderRun:
         command = self.argv.segment_command(sl)
         self.warnings.extend(command.warnings)
         key = SegmentKey.compute(sl.slice_sha256, sl.asset_sha256s(), command.args_sha256, build_id)
-        uri = self.scope.uri("jobs", f"{self.ti.job_id}/renders/segments/{key}.mp4")
+        uri = self.scope.render_uri(self.ti.job_id, f"segments/{key}.mp4")
         return _RenderRun._Plan(key, uri, command)
 
     def _facts(self, uri: str, work: Path) -> BlobFacts:
@@ -630,21 +711,26 @@ class _RenderRun:
             )
 
         limits = RunLimits(threads=self.d.cfg.render.threads)
-        try:
-            run_checked(self.d.runner, list(cmd.argv), cwd=work, limits=limits, stop=stop)
-        except AmwError as exc:
-            part.unlink(missing_ok=True)
-            if isinstance(exc, RenderCrashError):
-                self._raise_unreadable_asset(cmd, probe)
-            raise
-        except StopRequested:
-            part.unlink(missing_ok=True)
-            raise
-        try:
-            self._verify_segment(part, segment, probe)
-        except MeasurementUnavailable, RenderCrashError:
-            part.unlink(missing_ok=True)
-            raise
+        reference = work / cmd.reference_name
+        try:  # the FFV1 reference is scratch only: deleted on every path (ADR-014)
+            try:
+                run_checked(self.d.runner, list(cmd.argv), cwd=work, limits=limits, stop=stop)
+            except AmwError as exc:
+                part.unlink(missing_ok=True)
+                if isinstance(exc, RenderCrashError):
+                    self._raise_unreadable_asset(cmd, probe)
+                raise
+            except StopRequested:
+                part.unlink(missing_ok=True)
+                raise
+            try:
+                self._verify_segment(part, segment, probe)
+                ssim_all, ssim_frames = self._ssim(part, reference, segment, limits, probe)
+            except MeasurementUnavailable, RenderCrashError:
+                part.unlink(missing_ok=True)
+                raise
+        finally:
+            reference.unlink(missing_ok=True)
         info = self.scope.put_file(self._free_uri(plan), part)
         part.unlink(missing_ok=True)
         for staged in cmd.inputs:
@@ -656,7 +742,44 @@ class _RenderRun:
             sha256=info.sha256,
             size_bytes=info.size_bytes,
             frames=segment.frames,
+            ssim_all=ssim_all,
+            ssim_frames=ssim_frames,
         )
+
+    def _ssim(
+        self,
+        part: Path,
+        reference: Path,
+        segment: Segment,
+        limits: RunLimits,
+        probe: ProbeService,
+    ) -> tuple[str | None, int]:
+        """SSIM of one segment and the number of frame pairs it covers.
+
+        Both sides are counted: the encode's frame count is verified by ``_verify_segment``,
+        the reference's decoded frame count must equal the sampled frame count, and the filter's
+        pair count must equal it too (the filter repeats the last frame of a shorter input, so
+        the pair count alone cannot see a short or long reference). Any mismatch is reported as
+        not measured (warning ``SSIM_*_COUNT``), never as a value."""
+        every = self.d.cfg.render.quality_sample_every
+        expected = -(-segment.frames // every)
+        reference_frames = probe.frame_count(reference.name)
+        if reference_frames != expected:
+            self.warnings.append(
+                f"SSIM_REFERENCE_COUNT:{segment.ordinal}:{reference_frames}/{expected}"
+            )
+            return None, 0
+        result = run_checked(
+            self.d.runner,
+            self.argv.ssim(part.name, reference.name, every),
+            cwd=part.parent,
+            limits=limits,
+        )
+        pairs = sum(1 for line in result.stdout.splitlines() if line.startswith("n:"))
+        if pairs != expected:
+            self.warnings.append(f"SSIM_PAIR_COUNT:{segment.ordinal}:{pairs}/{expected}")
+            return None, 0
+        return SsimParser.parse(result.stderr), pairs
 
     def _check_sources_long_enough(self, cmd: SegmentCommand, probe: ProbeService) -> None:
         """A moving source shorter than the shot would be frozen by ``tpad=clone``: refuse it."""
@@ -707,10 +830,28 @@ class _RenderRun:
         est_ms: int,
     ) -> tuple[Any, ProbeResult, int]:
         names: list[str] = []
+        sei_hashes: list[str] = []
+        enc = self.d.cfg.render.encode
+        want = x264_expected(
+            gop_frames=enc.gop_frames,
+            bframes=enc.bframes,
+            cabac=enc.cabac,
+            target_bps=enc.target_bps,
+            maxrate_bps=enc.maxrate_bps,
+            bufsize_bps=enc.bufsize_bps,
+        )
         for record in records:
             name = f"seg_{record.ordinal}.mp4"
             self.scope.read_to(record.uri, record.sha256, work / name)  # CorruptedOutput -> retry
             names.append(name)
+            # every segment (encoded now, reused or adopted) carries the configured settings
+            texts = X264SeiParser.texts_in_file(work / name)
+            if len(texts) != 1 or sei_mismatches(X264SeiParser.parse_text(texts[0]), want):
+                raise RenderCrashError(
+                    "segment encoder settings differ", details={"ordinal": record.ordinal}
+                )
+            sei_hashes.append(sha256_hex(texts[0].encode()))
+        self._settings_sha256 = sha256_hex(canonical_json(sei_hashes))
         self.scope.read_to(
             loaded.audio.master.master_uri, loaded.audio.master.sha256, work / "master.wav"
         )
@@ -909,7 +1050,7 @@ class _RenderRun:
                 gate=False,
             ),
             a10_q_colour_tags(probed=probe.video.colour, configured=cfg.colour.model_dump()),
-            a10_q_gop_settings(recorded=gop, configured_gop_frames=cfg.gop_frames),
+            a10_q_gop_settings(recorded=gop, configured_gop_frames=cfg.effective_gop_frames),
         ]
         return results
 
@@ -954,12 +1095,17 @@ class _RenderRun:
                 args_sha256=args_sha,
                 preset_key=cfg.preset_key,
                 gop=GopOut(
-                    gop_frames=int(gop.get("gop_frames", cfg.gop_frames)),
+                    gop_frames=int(gop.get("gop_frames", cfg.effective_gop_frames)),
                     closed_gop=bool(gop.get("closed_gop", True)),
                     idr_at_segment_start=bool(gop.get("idr_at_segment_start", True)),
                 ),
                 colour=ColourOut(**cfg.colour.model_dump()),
                 audio_bitrate_nominal_bps=max(nominal, 1),
+                rate_control=RateControlOut(**cfg.encode.recorded()),
+                quality_metric=quality_metric(
+                    state.segments.values(), timeline.total_frames, self._vmaf_status
+                ),
+                settings_sha256=self._settings_sha256,
             ),
             probe=ProbeOut(
                 width_px=probe.video.width,
@@ -1036,6 +1182,11 @@ class _RenderRun:
         self.scope.read_to(row.storage_ref, row.content_sha256, final)
         result = probe_service.full(final.name)
         count = probe_service.packet_count(final.name)
+        # the final blob is bound to the renders row by its SHA-256 (registered after the
+        # per-segment settings checks of the original render)
+        self._settings_sha256 = sha256_hex(
+            canonical_json([sha256_hex(t.encode()) for t in X264SeiParser.texts_in_file(final)])
+        )
         target = target_frames_of(
             self.d.cfg.render.segment_target_ms, timeline.fps.num, timeline.fps.den
         )

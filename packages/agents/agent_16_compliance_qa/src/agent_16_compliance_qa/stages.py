@@ -4,21 +4,18 @@ DI; blueprint section 9 ``stages.py``).
 * ``ComplianceGateStage`` (F-01, ``agent_16.compliance_gate``, gate ``s16_comp``)
 * ``UniquenessCheckStage`` (F-17, ``svc_s02.uniqueness_check``, gate ``s02u_unique``)
 
-The blueprint signature is ``run(ti, ctx: ExecContext)``; ``ExecContext`` does not exist in
-``amw_core`` (core_need), so ``run`` takes the attempt id like the other 3A stages. Everything a
-stage does happens inside ONE tenant transaction opened from the envelope org. Every task emits
-``audit_log`` entries (``<task>.started``, ``.completed`` / ``.blocked`` / ``.failed``,
-``security.*``; NF-09); logs carry the 27 section 7.3.6 fields and no content text.
+Each stage has the one entry point ``run(task_input, ctx: ExecContext) -> TaskOutput`` (03 section
+1 rule 5, CCR-203): a context that does not match the Task Input is ``TENANT_MISMATCH`` before any
+step runs, and every failure is returned as a Task Output carrying the cost incurred so far.
+Everything a stage does happens inside ONE tenant transaction opened from the envelope org.
+Every task emits ``audit_log`` entries (``<task>.started``, ``.completed`` / ``.blocked`` /
+``.failed``, ``security.*``; NF-09); logs carry the 27 section 7.3.6 fields and no content text.
 
-What is a port here (implemented by lane L1 or by the upstream lanes, see the package
-README): the SQL repositories (``VerdictStore``, ``RenderHashReader``, ``ApprovalReader``,
-``PackSource``, ``UniquenessSource``), the upstream-output extractors (``GateFactExtractor``,
-``UniquenessExtractor``) and the breaker read.
+What is a port here (implemented by lane L1): the SQL repositories (``VerdictStore``,
+``RenderHashReader``, ``ApprovalReader``, ``PackSource``, ``UniquenessSource``, ``FactRowReader``)
+and the breaker read. The extractors are this package's own (``inputs/extractors.py``).
 """
 
-import hashlib
-import io
-import json
 import logging
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -31,6 +28,7 @@ from agent_16_compliance_qa.assembler import ComplianceGateInput, GateInputAssem
 from agent_16_compliance_qa.authorisation.evidence import OwnerEvidenceVerifier
 from agent_16_compliance_qa.base import Model
 from agent_16_compliance_qa.config import Agent16Config, LlmStepConfig
+from agent_16_compliance_qa.entry import Spend, put_artifact_once, run_guarded
 from agent_16_compliance_qa.gate import (
     ComplianceGate,
     GateDecision,
@@ -81,7 +79,8 @@ from amw_core.contracts.common import storage_uri_owner
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import ActorKind, ComplianceVerdict
-from amw_core.errors import CrossTenantRefError, IdempotencyConflictError, SchemaInvalidError
+from amw_core.errors import CrossTenantRefError, SchemaInvalidError
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     ActorRef,
     AttemptId,
@@ -98,6 +97,7 @@ from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.cost_ledger import CostLedger
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
+from amw_core.tenancy.storage_paths import task_artifact_uri
 
 _LOG = logging.getLogger(__name__)
 AGENT_ID: Final = "agent_16"
@@ -199,6 +199,7 @@ def _mac_events(audit: _Audit, tx: TenantTransaction, evidence: OwnerEvidenceVer
 class ComplianceGateStage:
     def __init__(self, deps: GateStageDeps) -> None:
         self.d = deps
+        self._spend = Spend()
 
     def _judges(
         self,
@@ -220,6 +221,7 @@ class ComplianceGateStage:
             "frames": cfg.step("llm_frames"),
         }  # a missing step config is PERMANENT.CONFIG_INVALID before any call
         meter = CallMeter.for_task(list(steps.values()), cfg.gate_max_llm_calls, ti.resource_budget)
+        self._spend.meter = meter  # an error output reports what was really spent
         scope = CallScope(tx, JobId(ti.job_id), TaskId(ti.task_id), AttemptId(attempt_id))
         texts = {k: d.pack_texts[k] for k in sorted(packs.keys) if k in d.pack_texts}
 
@@ -255,7 +257,20 @@ class ComplianceGateStage:
 
         return meter, policy, paraphrase, frames
 
-    def run(self, ti: TaskInput, attempt_id: str) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (F-01); every failure is returned, never raised."""
+        return run_guarded(
+            agent_id=AGENT_ID,
+            actor=AGENT_ID,
+            task_input=task_input,
+            ctx=ctx,
+            spend=self._spend,
+            now=self.d.clock.now,
+            body=lambda: self._run(task_input, str(ctx.attempt_id)),
+            event="a16.gate.failed",
+        )
+
+    def _run(self, ti: TaskInput, attempt_id: str) -> TaskOutput:
         d = self.d
         fields = log_fields(ti, attempt_id, AGENT_ID)
         d.evidence.log_fields = fields
@@ -274,7 +289,9 @@ class ComplianceGateStage:
                 )
                 gate = ComplianceGate(d.config, packs, policy, paraphrase, frames, fields)
                 decision = gate.evaluate(inputs)
-                out = self._write(tx, ti, req, decision, packs, meter, inputs.items, audit)
+                out = self._write(
+                    tx, ti, attempt_id, req, decision, packs, meter, inputs.items, audit
+                )
         except Exception as exc:
             _LOG.warning(
                 "a16.gate.failed", extra=fields | {"code": getattr(exc, "code", type(exc).__name__)}
@@ -293,6 +310,7 @@ class ComplianceGateStage:
         self,
         tx: TenantTransaction,
         ti: TaskInput,
+        attempt_id: str,
         req: ComplianceGateInput,
         decision: GateDecision,
         packs: LoadedPacks,
@@ -315,7 +333,9 @@ class ComplianceGateStage:
             packs,
             results,
             {i.ref: tuple(i.claim_ids) for i in items if i.claim_ids},
-            WriteScope(ti.job_id, ti.task_id, req.iteration, ti.correlation_id, d.clock.now()),
+            WriteScope(
+                ti.job_id, ti.task_id, attempt_id, req.iteration, ti.correlation_id, d.clock.now()
+            ),
             evidence,
         )
         payload = gate_payload(
@@ -324,7 +344,16 @@ class ComplianceGateStage:
         expected_rows = sum(1 for r in payload["rules"] if r["compliance_verdict"] is not None)
         checks = [
             *results,
-            integrity("tenant", True, "every reference in the envelope org"),
+            # defence-in-depth restatement of the parse() check; cannot fail independently
+            integrity(
+                "tenant",
+                all(
+                    storage_uri_owner(ref.uri) == ti.org_id
+                    for _, ref in req.inputs
+                    if ref is not None
+                ),
+                "every reference in the envelope org",
+            ),
             integrity(
                 "rows",
                 len(written.verdict_ids) == expected_rows,
@@ -441,6 +470,7 @@ class UniquenessStageDeps:
 class UniquenessCheckStage:
     def __init__(self, deps: UniquenessStageDeps) -> None:
         self.d = deps
+        self._spend = Spend()
 
     @staticmethod
     def parse(ti: TaskInput) -> UniquenessInput:
@@ -460,7 +490,20 @@ class UniquenessCheckStage:
                 )
         return req
 
-    def run(self, ti: TaskInput, attempt_id: str) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (F-17); every failure is returned, never raised."""
+        return run_guarded(
+            agent_id=S02_ID,
+            actor=S02_ID,
+            task_input=task_input,
+            ctx=ctx,
+            spend=self._spend,
+            now=self.d.clock.now,
+            body=lambda: self._run(task_input, str(ctx.attempt_id)),
+            event="a16.uniqueness.failed",
+        )
+
+    def _run(self, ti: TaskInput, attempt_id: str) -> TaskOutput:
         d, cfg = self.d, self.d.config
         fields = log_fields(ti, attempt_id, S02_ID)
         tc = TenantContext(OrgId(ti.org_id), ActorRef(S02_ID), CorrelationId(ti.correlation_id))
@@ -505,8 +548,14 @@ class UniquenessCheckStage:
                 cfg.cross_video_skip_below_prior_count,
                 req.routing.script_stage_id,
             )
-            uri = d.storage.blob_uri(
-                tc, "evidence", f"{ti.job_id}/uniqueness-{ti.task_id}-{req.iteration}.json"
+            uri = BlobUri(
+                task_artifact_uri(
+                    OrgId(ti.org_id),
+                    JobId(ti.job_id),
+                    TaskId(ti.task_id),
+                    AttemptId(attempt_id),
+                    f"uniqueness-{req.iteration}.json",
+                )
             )
             payload = uniqueness_payload(decision, measures, thresholds, str(uri))
             for r in decision.results:
@@ -514,7 +563,7 @@ class UniquenessCheckStage:
                     ti.org_id, IdempotencyScope.DB_OUTPUT, [ti.task_id, req.iteration, r.check_id]
                 )
                 d.store.insert_qc_result(tx, NewQcRow(ti.job_id, ti.task_id, None, r), key)
-            info = _put_once(d.storage, tc, uri, payload)
+            info = put_artifact_once(d.storage, tc, uri, payload)
             audit(
                 tx,
                 "uniqueness_check.blocked"
@@ -536,17 +585,3 @@ class UniquenessCheckStage:
             verdict=decision.verdict,
             downstream=None,
         )
-
-
-def _put_once(
-    storage: BlobStorage, tc: TenantContext, uri: BlobUri, payload: Mapping[str, Any]
-) -> BlobRef:
-    data = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    sha = hashlib.sha256(data).hexdigest()
-    head = storage.head(tc, uri)
-    if head.exists:
-        if head.sha256 != sha:
-            raise IdempotencyConflictError("a different report blob already exists for this task")
-        return BlobRef(uri=str(uri), sha256=sha, size_bytes=len(data))
-    info = storage.put(tc, uri, io.BytesIO(data))
-    return BlobRef(uri=str(info.uri), sha256=info.sha256, size_bytes=info.size_bytes)

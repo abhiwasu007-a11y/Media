@@ -38,11 +38,13 @@ from amw_core.errors import (
     InputInvalidError,
     MissingDependencyError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import ASSET, COST_ENTRY, AssetId, ChannelId, OrgId, WireId
 from amw_core.interfaces.budget_guard import CallCheck
 from amw_core.interfaces.cost_ledger import CostEntry, NewCostEntry
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
+from amw_core.storage.local import parse_uri
 from amw_core.testing.memory import MemoryTransaction
 
 NOW = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
@@ -91,6 +93,7 @@ class MemoryBlobs:
 
     def put(self, context: TenantContext, uri: BlobUri, stream: Any) -> BlobInfo:
         self._check(context, uri)
+        parse_uri(uri)  # every write must be one the real LocalDiskStorage accepts (03 section 8)
         if uri in self.data:
             raise InputInvalidError("write-once path already exists")
         body = stream.read()
@@ -372,3 +375,14 @@ def config(**overrides: Any) -> AgentSevenConfig:
     }
     values.update(overrides)
     return AgentSevenConfig.checked(**values)
+
+
+def exec_ctx(task_input: Any, attempt_id: str, *, stage_id: str | None = None) -> ExecContext:
+    """The core ``ExecContext`` of one attempt, built the way the orchestrator builds it."""
+    return ExecContext.from_task_input(
+        task_input,
+        attempt_id,
+        "agent_07",
+        envelope_org_id=task_input.org_id,
+        stage_id=stage_id,
+    )

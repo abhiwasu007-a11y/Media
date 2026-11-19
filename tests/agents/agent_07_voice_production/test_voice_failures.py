@@ -232,7 +232,7 @@ def test_cross_tenant_refs_and_rows_are_never_read(tmp_path: Path) -> None:
 def test_task_for_another_agent_or_org_is_a_tenant_error(tmp_path: Path) -> None:
     w = build(copy.deepcopy(BY_ID["VS-01"]), tmp_path)
     wrong = w.task_input.model_copy(update={"agent_id": "agent_08"})
-    out = w.stage.run(wrong, "att_01939e5a-7c3b-7d1e-8a4f-0123456789a1")
+    out = w.stage.run(wrong, w.ctx("att_01939e5a-7c3b-7d1e-8a4f-0123456789a1"))
     assert code(out) == "PERMANENT.TENANT_MISMATCH"
 
 

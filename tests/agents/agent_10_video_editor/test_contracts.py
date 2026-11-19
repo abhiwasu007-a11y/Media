@@ -133,7 +133,7 @@ def test_real_outputs_validate_against_the_blueprint_schemas(tmp_path: Path) -> 
 
             return SelfTestRecord(build_id, (SelfTestCase("c", "PASS", "PASS"),))
 
-    qc = QcStage(world.deps(), _ST()).run(chain["qc_input"], world.attempt)
+    qc = QcStage(world.deps(), _ST()).execute(chain["qc_input"], world.attempt)
     data = payload_data(qc)
     _validate("agent_10.technical_qc.output", data)
     manifest_uri = data["evidence"]["manifest_ref"]["uri"]

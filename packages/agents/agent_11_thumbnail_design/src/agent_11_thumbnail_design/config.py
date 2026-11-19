@@ -41,6 +41,12 @@ class Agent11Settings(BaseModel):
     distinct_min_hash_distance_bits: Annotated[int, Field(ge=0, le=64)]
     asset_min_width_px: Annotated[int, Field(ge=1)]
     asset_min_height_px: Annotated[int, Field(ge=1)]
+    fonts_policy: Annotated[str, Field(pattern=r"^(TENANT_ALLOWED|MANIFEST_ONLY)$")] = (
+        "MANIFEST_ONLY"
+    )
+    """``agent_11.fonts.policy``. Default MANIFEST_ONLY (secure by default; the owner channel, the
+    only channel today): a font that is not a repo-manifest font is refused. A tenant channel that
+    uses its own brand-kit fonts (FR-09) opts in with TENANT_ALLOWED in its channel config."""
     faces_allowed: bool = False
     chart_still_allowed: bool = False
     ai_still_enabled: bool = False

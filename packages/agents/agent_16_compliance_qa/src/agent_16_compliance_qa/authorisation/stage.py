@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal, Protocol
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from agent_16_compliance_qa.authorisation.evidence import (
     OPERATOR_ACTOR,
@@ -50,6 +50,17 @@ from agent_16_compliance_qa.authorisation.guards import (
 )
 from agent_16_compliance_qa.base import Model
 from agent_16_compliance_qa.config import Agent16Config
+from agent_16_compliance_qa.entry import Spend, put_artifact_once, run_guarded
+from agent_16_compliance_qa.output import (
+    Usage,
+    auth_payload,
+    auth_results,
+    build_task_output,
+    integrity,
+)
+from amw_core.contracts.error import violation
+from amw_core.contracts.task_input import TaskInput
+from amw_core.contracts.task_output import TaskOutput
 from amw_core.enums import (
     ActorKind,
     ApprovalChannel,
@@ -63,11 +74,25 @@ from amw_core.enums import (
     QualityDimension,
     RenderStatus,
 )
-from amw_core.errors import InputInvalidError
-from amw_core.ids import ActorRef, ApprovalId, OrgId, Prefix, UserId, WireId, is_valid_id
+from amw_core.errors import InputInvalidError, SchemaInvalidError
+from amw_core.exec_context import ExecContext
+from amw_core.ids import (
+    ActorRef,
+    ApprovalId,
+    IdempotencyScope,
+    OrgId,
+    Prefix,
+    UserId,
+    WireId,
+    is_valid_id,
+    make_idempotency_key,
+)
 from amw_core.interfaces.audit_log import AuditLog, NewAuditEntry
-from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.interfaces.clock import Clock
+from amw_core.interfaces.storage import BlobStorage, BlobUri
+from amw_core.interfaces.tenancy_context import TenancyContext, TenantTransaction
 from amw_core.owner_evidence_review_code import is_valid_review_code
+from amw_core.tenancy.storage_paths import task_artifact_uri
 
 _SHA = r"^[0-9a-f]{64}$"
 
@@ -713,4 +738,102 @@ class PublicationAuthorisationStage:
             disclosure_verdict_id=gate.disclosure_verdict_id if gate else verdict_id,
             earliest_compliant_publish_date=earliest,
             authorisation_verdict_id=verdict_id,
+        )
+
+
+AUTH_INPUT = "agent_16.publication_authorisation.input"
+AUTH_OUTPUT = "agent_16.publication_authorisation.output"
+
+
+class PublicationAuthorisationWorker:
+    """The ``agent_16.publication_authorisation`` entry point (``run(task_input, ctx)``, 03
+    section 1 rule 5, CCR-203): wraps ``PublicationAuthorisationStage`` (the guards over rows) in
+    the Task Input / Task Output boundary. It never raises out of ``run``; a ``BLOCKED``
+    authorisation is a ``SUCCEEDED`` task (03 section 5.3), and the report is a write-once task
+    artifact (03 section 8 rule 5, CCR-208)."""
+
+    def __init__(
+        self,
+        stage: PublicationAuthorisationStage,
+        tenancy: TenancyContext,
+        storage: BlobStorage,
+        clock: Clock,
+    ) -> None:
+        self._stage, self._tenancy, self._storage, self._clock = stage, tenancy, storage, clock
+        self._spend = Spend()
+
+    @staticmethod
+    def parse(ti: TaskInput) -> AuthorisationInput:
+        if ti.payload.payload_schema != AUTH_INPUT or ti.payload.data is None:
+            raise SchemaInvalidError("payload is not agent_16.publication_authorisation.input")
+        try:
+            return AuthorisationInput.model_validate(ti.payload.data)
+        except ValidationError as exc:
+            raise SchemaInvalidError(
+                "agent_16.publication_authorisation.input invalid",
+                details={
+                    "violations": [
+                        violation("FIELD_INVALID", "/" + "/".join(map(str, e["loc"])))
+                        for e in exc.errors()[:20]
+                    ]
+                },
+            ) from exc
+
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        return run_guarded(
+            agent_id="agent_16",
+            actor="agent_16",
+            task_input=task_input,
+            ctx=ctx,
+            spend=self._spend,
+            now=self._clock.now,
+            body=lambda: self._run(task_input, ctx),
+            event="a16.auth.failed",
+        )
+
+    def _run(self, ti: TaskInput, ctx: ExecContext) -> TaskOutput:
+        req = self.parse(ti)
+        now = self._clock.now()
+        key = make_idempotency_key(
+            ti.org_id, IdempotencyScope.DB_OUTPUT, [ti.task_id, "authorisation", req.iteration]
+        )
+        with self._tenancy.transaction(ctx.tenant) as tx:
+            res = self._stage.run(tx, req, now, key)
+            d = res.decision
+            uri = BlobUri(
+                task_artifact_uri(
+                    ctx.org_id,
+                    ctx.job_id,
+                    ctx.task_id,
+                    ctx.attempt_id,
+                    f"publication_authorisation-{req.iteration}.json",
+                )
+            )
+            payload = auth_payload(
+                d,
+                req.subject.model_dump(mode="json"),
+                now.date(),
+                res.earliest_compliant_publish_date,
+                res.authorisation_verdict_id,
+                res.disclosure_verdict_id,
+                res.evidence_ids,
+                str(uri),
+            )
+            blob = put_artifact_once(self._storage, ctx.tenant, uri, payload)
+        results = [
+            *auth_results(d),
+            integrity("tenant", res.rows.all_refs_same_org, "every row read in the envelope org"),
+            integrity("evidence", True, "authorisation report written"),
+        ]
+        return build_task_output(
+            payload_schema=AUTH_OUTPUT,
+            data=payload,
+            results=results,
+            blob=blob,
+            usage=Usage(),
+            now=now,
+            currency=ti.resource_budget.currency,
+            quality_score=d.human_wins_total,
+            verdict=d.verdict,
+            downstream="agent_13" if d.verdict is ComplianceVerdict.ALLOWED else None,
         )

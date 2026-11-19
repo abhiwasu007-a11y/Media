@@ -165,6 +165,21 @@ class World:
             other.licences.add(lic(other.org, st))
         return other
 
+    def add_template(self, template_id: str, sha: str) -> str:
+        """A ``TEMPLATE`` asset holding ``attributes.template_id`` (CCR-031/032, CCR-204)."""
+        return self.assets.insert(
+            self.tx,
+            NewAsset(
+                kind=AssetKind.TEMPLATE,
+                source_type=LicenceSourceType.CODE_GENERATED,
+                content_sha256=sha,
+                uri=f"amw-blob://{self.org}/assets/{sha}",
+                size_bytes=1,
+                title=template_id,
+                attributes={"template_id": template_id, "template_version": 1},
+            ),
+        ).asset_id
+
     def add_asset(self, kind: AssetKind, sha: str, title: str, st: LicenceSourceType) -> str:
         return self.assets.insert(
             self.tx,

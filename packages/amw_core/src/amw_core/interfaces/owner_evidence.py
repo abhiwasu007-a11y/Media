@@ -18,8 +18,10 @@ functions and triggers; ``amw_core.owner_evidence_fake.FakeEvidenceDatabase`` mo
 memory. The verification itself (fetch the event, run 03 section 11.6 rule 7) is
 ``amw_core.owner_evidence_service.EvidenceVerifierService``.
 
-**Limitation:** the real session-store adapter is ticket 3A-13; until then only the in-memory
-fake exists, and 3A approvals recorded through it are not production-verified.
+**Session record (3A-13 / WS-08):** the real source is
+``amw_adapters.session_record.ClaudeSessionJsonlSource`` (wired by
+``amw_core.owner_evidence_real``); approvals recorded through the in-memory fake are TEST
+fixtures (dry run only). Residual risks: ``docs/v4/runtime/EVIDENCE_PATH.md``.
 """
 
 from collections.abc import Mapping, Sequence

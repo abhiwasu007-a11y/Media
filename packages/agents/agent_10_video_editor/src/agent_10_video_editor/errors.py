@@ -8,6 +8,7 @@ No new error code exists: every violation is carried in ``details["violations"]`
 
 from collections.abc import Sequence
 
+from amw_core.contracts import Violation, violation
 from amw_core.errors import (
     AgentCrashError,
     AmwError,
@@ -26,21 +27,41 @@ class MeasurementUnavailable(Exception):  # noqa: N818 - blueprint name (F-18)
         self.missing: tuple[str, ...] = tuple(missing)
 
 
-def input_invalid(*violations: str) -> InputInvalidError:
-    return InputInvalidError("input invalid", details={"violations": list(violations)})
+def _item(text: str | Violation) -> Violation:
+    """One violation item through the core builder (03 section 6 rule 6, CCR-210):
+    the reason code (before the first ``:``) is the ``keyword``; the whole text is the message."""
+    if isinstance(text, Violation):
+        return text
+    return violation(text.split(":", 1)[0], "", text)
 
 
-def missing_dependency(*violations: str) -> MissingDependencyError:
-    return MissingDependencyError("missing dependency", details={"violations": list(violations)})
+def _items(violations: Sequence[str | Violation]) -> list[Violation]:
+    return [_item(v) for v in violations]
 
 
-def config_invalid(*violations: str) -> ConfigInvalidError:
-    return ConfigInvalidError("configuration invalid", details={"violations": list(violations)})
+def input_invalid(*violations: str | Violation) -> InputInvalidError:
+    return InputInvalidError("input invalid", details={"violations": _items(violations)})
+
+
+def missing_dependency(*violations: str | Violation) -> MissingDependencyError:
+    return MissingDependencyError("missing dependency", details={"violations": _items(violations)})
+
+
+def config_invalid(*violations: str | Violation) -> ConfigInvalidError:
+    return ConfigInvalidError("configuration invalid", details={"violations": _items(violations)})
 
 
 def violations_of(error: AmwError) -> list[str]:
-    raw = error.details.get("violations", [])
-    return [str(item) for item in raw]
+    """The message of every violation item (the ``CODE:detail`` text this agent builds)."""
+    out: list[str] = []
+    for item in error.details.get("violations", []):
+        if isinstance(item, Violation):
+            out.append(item.message)
+        elif isinstance(item, dict):
+            out.append(str(item.get("message", item.get("keyword", ""))))
+        else:
+            out.append(str(item))
+    return out
 
 
 def map_measurement_error(error: MeasurementUnavailable, *, process_died: bool) -> AmwError:
