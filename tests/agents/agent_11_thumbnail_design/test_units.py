@@ -306,3 +306,23 @@ def test_guard_g8_evidence_defaults() -> None:
 
 def test_fixture_step_is_json() -> None:
     assert json.dumps(fixture_step("FX-EDU", 1))
+
+
+@pytest.mark.parametrize(
+    "category", [None, "", " ", "unknown", "Education", "EDUCATION", "education ", 7, b"education"]
+)
+def test_unknown_or_malformed_channel_category_is_finance_fail_closed(category: object) -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    lex = Lexicons((), (), (), frozenset(), frozenset({"education"}))
+    assert lex.is_finance(category) is True
+
+
+def test_only_an_explicit_known_category_is_non_finance_and_default_is_all_finance() -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    assert (
+        Lexicons((), (), (), frozenset(), frozenset({"education"})).is_finance("education") is False
+    )
+    assert Lexicons((), (), (), frozenset()).is_finance("education") is True
+    assert Lexicons((), (), (), frozenset()).is_finance("finance") is True

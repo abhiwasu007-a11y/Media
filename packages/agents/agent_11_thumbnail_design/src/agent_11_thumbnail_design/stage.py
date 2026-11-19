@@ -180,7 +180,13 @@ class Lexicons:
     injection_markers: tuple[str, ...]
     instruction_phrases: tuple[str, ...]
     neutral_words: frozenset[str]
-    finance_categories: frozenset[str] = frozenset({"finance"})
+    non_finance_categories: frozenset[str] = frozenset()
+    """Explicitly known non-finance channel categories (exact match, injected from the rule
+    pack). Fail closed (owner D13, CCR-273): any other value (None, empty, unknown, wrong type,
+    other case) is treated as finance; the default (empty) makes every channel finance."""
+
+    def is_finance(self, category: object) -> bool:
+        return not (isinstance(category, str) and category in self.non_finance_categories)
 
 
 @dataclass(frozen=True, slots=True)
@@ -594,7 +600,7 @@ class _Run:
                 )
                 if prev_manifest is None:
                     raise MissingDependencyError("previous thumbnail set manifest is unreadable")
-        finance = category in self.d.lexicons.finance_categories
+        finance = self.d.lexicons.is_finance(category)
         self._preflight(finance)  # a11.pre.config: fail closed before any model call
         font_bytes = self._read_blob(font.uri, font.sha256)
         try:

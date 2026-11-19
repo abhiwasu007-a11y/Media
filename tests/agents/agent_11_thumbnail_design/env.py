@@ -212,7 +212,11 @@ def make_env(
             hashlib.sha256(prompt_text.encode()).hexdigest(),
         ),
         lexicons=Lexicons(
-            FIN_MARKERS, tuple(INJECTION_MARKERS), ("ignore all rules",), frozenset({"the"})
+            FIN_MARKERS,
+            tuple(INJECTION_MARKERS),
+            ("ignore all rules",),
+            frozenset({"the"}),
+            frozenset({"education"}),
         ),
         packs=RulePacks(
             {"rp.youtube_general": "PLATFORM-PACK", "rp.finance_sebi_in": "FIN-PACK"},

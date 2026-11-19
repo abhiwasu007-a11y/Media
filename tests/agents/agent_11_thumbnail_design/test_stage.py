@@ -511,3 +511,12 @@ def test_config_load_rejects_missing_and_bad_keys() -> None:
 
 def test_registered_asset_unused_import() -> None:
     assert RegisteredAsset("a", "TEMPLATE", "k", "ACTIVE", True, "CODE_GENERATED").expired is False
+
+
+def test_unknown_channel_category_runs_as_finance_with_no_glyph() -> None:
+    env = make_env(finance=False)
+    env.repo.category = "Education-Unlisted"  # not an explicitly known non-finance category
+    out = run_att(env, env.ti, "att_1")
+    d = data(out)
+    assert all(v["picture"]["kind"] != "CODE_GLYPH" for v in d["variants"])
+    assert d["option_stats"]["picture_excluded"].get("FINANCE_DIRECTION") == 2
