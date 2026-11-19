@@ -279,15 +279,35 @@ name = "amw-orchestrator"
 version = "0.0.0"
 source = { editable = "packages/amw_orchestrator" }
 dependencies = [
+    { name = "agent-04-research-knowledge" },
+    { name = "agent-05-scriptwriter" },
+    { name = "agent-06-fact-checker" },
+    { name = "agent-07-voice-production" },
+    { name = "agent-08-visual-assets" },
+    { name = "agent-09-video-director" },
+    { name = "agent-10-video-editor" },
+    { name = "agent-11-thumbnail-design" },
+    { name = "agent-16-compliance-qa" },
     { name = "amw-adapters" },
     { name = "amw-core" },
+    { name = "amw-delivery" },
     { name = "amw-runtime" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-04-research-knowledge", editable = "packages/agents/agent_04_research_knowledge" },
+    { name = "agent-05-scriptwriter", editable = "packages/agents/agent_05_scriptwriter" },
+    { name = "agent-06-fact-checker", editable = "packages/agents/agent_06_fact_checker" },
+    { name = "agent-07-voice-production", editable = "packages/agents/agent_07_voice_production" },
+    { name = "agent-08-visual-assets", editable = "packages/agents/agent_08_visual_assets" },
+    { name = "agent-09-video-director", editable = "packages/agents/agent_09_video_director" },
+    { name = "agent-10-video-editor", editable = "packages/agents/agent_10_video_editor" },
+    { name = "agent-11-thumbnail-design", editable = "packages/agents/agent_11_thumbnail_design" },
+    { name = "agent-16-compliance-qa", editable = "packages/agents/agent_16_compliance_qa" },
     { name = "amw-adapters", editable = "packages/amw_adapters" },
     { name = "amw-core", editable = "packages/amw_core" },
+    { name = "amw-delivery", editable = "packages/amw_delivery" },
     { name = "amw-runtime", editable = "packages/amw_runtime" },
 ]
 

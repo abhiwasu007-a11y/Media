@@ -1,3 +1,4 @@
+# ruff: noqa: PT018
 """Payload schema registry (CCR-130, P4-17): lookup by major, typed errors, no values leaked."""
 
 from collections.abc import Callable
@@ -7,6 +8,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from amw_core.contracts.payloads import (
+    PAYLOAD_PLUGIN_PACKAGES,
     PAYLOAD_SCHEMAS,
     PayloadRegistrar,
     PayloadSchemaRegistry,
@@ -172,5 +174,96 @@ def test_failing_or_missing_plugin_is_a_startup_error(failure: object) -> None:
         )
 
 
-def test_default_allow_list_loads_with_this_pr() -> None:
-    assert load_payload_schema_plugins(PayloadSchemaRegistry()) == ()
+# --- the real allow-list: every agent package registers its own schemas (ticket "agent payload
+# registration"); the names are pinned so a dropped or extra schema is a visible diff -------------
+REGISTERED = frozenset(
+    {
+        "agent_04.research_pack.input", "agent_04.research_pack.output",
+        "agent_05.script_draft.input", "agent_05.script_draft.output",
+        "agent_05.shorts_adaptation.input", "agent_05.shorts_adaptation.output",
+        "agent_06.claim_extraction.input", "agent_06.claim_extraction.output",
+        "agent_06.claim_verification.input", "agent_06.claim_verification.output",
+        "agent_07.voice_synthesis.input", "agent_07.voice_synthesis.output",
+        "agent_07.audio_master.input", "agent_07.audio_master.output",
+        "agent_08.asset_sourcing.input", "agent_08.asset_sourcing.output",
+        "agent_09.shot_plan.input", "agent_09.shot_plan.output",
+        "agent_10.render.input", "agent_10.render.output",
+        "agent_10.subtitles.input", "agent_10.subtitles.output",
+        "agent_10.technical_qc.input", "agent_10.technical_qc.output",
+        "agent_11.thumbnail_variants.input", "agent_11.thumbnail_variants.output",
+        "agent_13.file_delivery.input", "agent_13.file_delivery.output",
+        "agent_16.compliance_gate.input", "agent_16.quality_score.input",
+        "agent_16.publication_authorisation.input",
+    }
+)  # fmt: skip
+NOT_REGISTERED = (  # no model pairs the name with a payload yet: the executor refuses them
+    "agent_16.compliance_gate.output",
+    "agent_16.quality_score.output",
+    "agent_16.publication_authorisation.output",
+    "svc_s02.uniqueness_check.input",
+    "svc_s02.uniqueness_check.output",
+    "svc_s07.request_approval.input",
+    "svc_s07.request_approval.output",
+    "agent_12.metadata.input",
+    "agent_12.metadata.output",
+)
+
+
+def test_default_allow_list_loads_every_agent_package_and_pins_the_schema_names() -> None:
+    reg = PayloadSchemaRegistry()
+    loaded = load_payload_schema_plugins(reg)
+    assert loaded == tuple(sorted(PAYLOAD_PLUGIN_PACKAGES))
+    assert len(loaded) == 10
+    assert reg.names() == REGISTERED
+
+
+def test_allow_list_namespaces_match_the_package_and_are_read_only() -> None:
+    for package, namespace in PAYLOAD_PLUGIN_PACKAGES.items():
+        assert namespace.startswith("agent_") and not namespace.endswith(".")
+        assert package.startswith((namespace, "amw_delivery"))  # agent_13 is hosted by amw_delivery
+    with pytest.raises(TypeError):
+        PAYLOAD_PLUGIN_PACKAGES["evil_pkg"] = "agent_07"  # type: ignore[index]
+
+
+@pytest.mark.parametrize("name", NOT_REGISTERED)
+def test_a_schema_without_a_model_is_refused_not_waved_through(name: str) -> None:
+    reg = PayloadSchemaRegistry()
+    load_payload_schema_plugins(reg)
+    with pytest.raises(SchemaInvalidError):
+        reg.validate(name, "1.0.0", {})
+
+
+def test_a_real_plugin_registering_outside_its_namespace_is_refused() -> None:
+    """agent_05's real ``register`` bound to agent_07's namespace: refused, nothing registered."""
+    reg = PayloadSchemaRegistry()
+    with pytest.raises(ConfigInvalidError) as err:
+        load_payload_schema_plugins(reg, {"agent_05_scriptwriter": "agent_07"})
+    assert err.value.details["namespace"] == "agent_07"
+    assert reg.names() == frozenset()
+
+
+def test_a_real_plugin_cannot_take_over_another_packages_schema() -> None:
+    """Both real plugins loaded, then agent_05's ``register`` run again under agent_04's
+    namespace: the name check fires before the registry is touched."""
+    reg = PayloadSchemaRegistry()
+    load_payload_schema_plugins(reg)
+    before = reg.names()
+    with pytest.raises(ConfigInvalidError):
+        load_payload_schema_plugins(reg, {"agent_05_scriptwriter": "agent_04"})
+    assert reg.names() == before
+
+
+def test_a_real_plugin_registering_a_schema_twice_is_refused() -> None:
+    from agent_07_voice_production.payloads import register
+
+    registrar = PayloadRegistrar(PayloadSchemaRegistry(), "agent_07")
+    register(registrar)
+    with pytest.raises(ConfigInvalidError):
+        register(registrar)  # the same registrar sees every name a second time
+
+
+def test_loading_twice_into_one_registry_is_idempotent() -> None:
+    reg = PayloadSchemaRegistry()
+    load_payload_schema_plugins(reg)
+    load_payload_schema_plugins(reg)  # a second executor in the same process
+    assert reg.names() == REGISTERED
