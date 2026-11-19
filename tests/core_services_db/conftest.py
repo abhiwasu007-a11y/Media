@@ -9,20 +9,34 @@ from typing import Any
 import psycopg
 import pytest
 
+from amw_core.audit.pg import PgAuditLog
+from amw_core.config import AmwSettings
 from amw_core.ids import (
     ATTEMPT,
     JOB,
+    ORG,
     TASK,
     USER,
     AttemptId,
     JobId,
+    OrgId,
     TaskId,
     UserId,
     new_uuid7,
 )
 from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.retries.pg import PgBreakerFunctions
 from amw_core.tenancy import PgTenancy, connection_of, dsn_connection_factory, translate_db_error
-from tests.pg_fixtures import Tenant, admin, empty_dsn, pg_dsn, tenancy, tenant_a, tenant_b
+from tests.pg_fixtures import (
+    Tenant,
+    admin,
+    empty_dsn,
+    make_tenant,
+    pg_dsn,
+    tenancy,
+    tenant_a,
+    tenant_b,
+)
 
 __all__ = ["admin", "empty_dsn", "pg_dsn", "readonly", "tenancy", "tenant_a", "tenant_b"]
 
@@ -104,6 +118,26 @@ def make_user(conn: Conn) -> UserId:
         (user, f"u{user.hex[-10:]}@example.invalid"),
     )
     return USER.from_uuid(user)
+
+
+def ensure_platform_owner(pg_dsn: str) -> OrgId:
+    """The one platform owner organisation of the test database (04 section 5.1: at most one),
+    created on first use. Breaker transitions of platform credentials go to its chain."""
+    with psycopg.connect(pg_dsn, autocommit=True) as conn:
+        row = conn.execute("SELECT id FROM organisations WHERE is_platform_owner").fetchone()
+        if row is not None:
+            return ORG.from_uuid(row[0])
+        return make_tenant(conn, platform_owner=True).org_id
+
+
+def breaker_functions(pg_dsn: str, settings: AmwSettings) -> PgBreakerFunctions:
+    """``PgBreakerFunctions`` as ``amw_app`` auditing into the platform owner org's chain."""
+    return PgBreakerFunctions(
+        dsn_connection_factory(pg_dsn, role="amw_app"),
+        settings,
+        audit=PgAuditLog(),
+        platform_owner_org=ensure_platform_owner(pg_dsn),
+    )
 
 
 @pytest.fixture

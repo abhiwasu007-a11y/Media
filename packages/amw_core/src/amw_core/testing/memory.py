@@ -93,6 +93,8 @@ class MemoryIdempotencyStore:
             self._rows[(org, key)] = row
             return BeginDecision(BeginAction.PROCEED, row)
         if row.locked_until is not None and row.locked_until < now:
+            row = replace(row, locked_until=locked_until)  # the reconciler holds the key now
+            self._rows[(org, key)] = row
             return BeginDecision(BeginAction.RECONCILE, row)
         return BeginDecision(BeginAction.IN_FLIGHT, row)
 

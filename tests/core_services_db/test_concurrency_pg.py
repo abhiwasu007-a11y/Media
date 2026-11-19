@@ -34,7 +34,7 @@ from amw_core.retries.breaker import BreakerRow, admit, new_row, record
 from amw_core.retries.pg import PgBreakerFunctions
 from amw_core.tenancy import PgTenancy, dsn_connection_factory
 from tests.core_services.support import T0, FixedClock, budget, settings
-from tests.core_services_db.conftest import Work, make_task, make_user, make_work
+from tests.core_services_db.conftest import Work, breaker_functions, make_task, make_user, make_work
 from tests.pg_fixtures import Tenant
 
 pytestmark = pytest.mark.integration
@@ -217,7 +217,7 @@ def _fns(pg_dsn: str, **cfg: int | None) -> PgBreakerFunctions:
     base = {"open_ms": 100, "open_ms_max": 400, "half_open_probe_timeout_ms": 5_000}
     breaker = BreakerSettings(**(base | cfg))
     s = settings().model_copy(update={"breaker_default": breaker})
-    return PgBreakerFunctions(dsn_connection_factory(pg_dsn, role="amw_app"), s)
+    return breaker_functions(pg_dsn, s)
 
 
 def _open_breaker(fns: PgBreakerFunctions, key: BreakerKey) -> None:
@@ -317,10 +317,7 @@ def test_breaker_sql_matches_the_pure_model(pg_dsn: str, admin: Any, seed: int) 
         half_open_successes_to_close=2,
         half_open_probe_timeout_ms=600_000,
     )
-    fns = PgBreakerFunctions(
-        dsn_connection_factory(pg_dsn, role="amw_app"),
-        settings().model_copy(update={"breaker_default": cfg}),
-    )
+    fns = breaker_functions(pg_dsn, settings().model_copy(update={"breaker_default": cfg}))
     key = BreakerKey(f"llm_parity_{seed}", "llm.completion", "platform")
     rng = random.Random(seed)  # noqa: S311 - deterministic test data
     pure = new_row(key, datetime.now(UTC))

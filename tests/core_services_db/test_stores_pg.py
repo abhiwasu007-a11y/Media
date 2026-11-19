@@ -45,6 +45,12 @@ def _idem_script(store: Any, tx: TenantTransaction, key: str, task: str | None) 
     out.append(
         store.begin(tx, key, "delivery.file", H1, task, T0 + timedelta(seconds=2), 1_000).action
     )  # RECONCILE
+    out.append(
+        store.begin(tx, key, "delivery.file", H1, task, T0 + timedelta(seconds=2), 1_000).action
+    )  # IN_FLIGHT: the reconciler's lock was renewed (PR #44 review m9)
+    out.append(
+        store.begin(tx, key, "delivery.file", H1, task, T0 + timedelta(seconds=4), 1_000).action
+    )  # RECONCILE again once the renewed lock has passed
     try:
         store.begin(tx, key, "delivery.file", H2, task, T0, 1_000)
     except IdempotencyConflictError:
@@ -82,7 +88,13 @@ def test_idempotency_decisions_equal_the_memory_fake(
     mem_tx = MemoryTransaction(TenantContext(tenant_a.org_id, ORCH))
     mem = _idem_script(MemoryIdempotencyStore(), mem_tx, key, work_a.task_id)
     assert pg == mem
-    assert pg[:3] == [BeginAction.PROCEED, BeginAction.IN_FLIGHT, BeginAction.RECONCILE]
+    assert pg[:5] == [
+        BeginAction.PROCEED,
+        BeginAction.IN_FLIGHT,
+        BeginAction.RECONCILE,
+        BeginAction.IN_FLIGHT,
+        BeginAction.RECONCILE,
+    ]
     assert pg[-1] is IdempotencyStatus.COMPLETED
 
 
@@ -125,6 +137,36 @@ def test_racing_attempts_never_both_proceed(tenancy: PgTenancy, tenant_a: Tenant
     for t in threads:
         t.join()
     assert sorted(actions) == sorted([BeginAction.PROCEED] + [BeginAction.IN_FLIGHT] * 3)
+
+
+def test_racing_reconcilers_never_both_reconcile(tenancy: PgTenancy, tenant_a: Tenant) -> None:
+    """PR #44 m9 / P4-06: an expired IN_PROGRESS key is handed to exactly one reconciler; the
+    renewed lock makes every concurrent caller IN_FLIGHT (the row lock serialises them)."""
+    key = make_idempotency_key(tenant_a.org_id, "delivery.file", ["reconcile-race"])
+    with tenancy.transaction(TenantContext(tenant_a.org_id, ORCH)) as tx:
+        first = PgIdempotencyStore().begin(tx, key, "delivery.file", H1, None, T0, 1_000)
+    assert first.action is BeginAction.PROCEED
+    later = T0 + timedelta(seconds=5)  # the first attempt's lock has expired
+    actions: list[BeginAction] = []
+    barrier = threading.Barrier(8)
+
+    def attempt() -> None:
+        with tenancy.transaction(TenantContext(tenant_a.org_id, ORCH)) as tx:
+            barrier.wait()
+            actions.append(
+                PgIdempotencyStore().begin(tx, key, "delivery.file", H1, None, later, 60_000).action
+            )
+
+    threads = [threading.Thread(target=attempt) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(actions) == sorted([BeginAction.RECONCILE] + [BeginAction.IN_FLIGHT] * 7)
+    with tenancy.transaction(TenantContext(tenant_a.org_id, ORCH)) as tx:
+        row = PgIdempotencyStore().get(tx, key)
+    assert row is not None
+    assert row.locked_until == later + timedelta(milliseconds=60_000)
 
 
 @pytest.mark.tenancy
