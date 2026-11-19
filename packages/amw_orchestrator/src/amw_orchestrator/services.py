@@ -323,7 +323,7 @@ def intake(
     explicit non-finance label or a documented non-finance category of the validated rule-pack
     config (``rule_packs`` = ``settings.rule_packs``; the packaged default when omitted; PASS6-N);
     a missing channel row, a NULL, an unreadable value, an unknown value or ``finance`` = FINANCE.
-    ``jobs`` has no category column (CCR-291 PROPOSED): the resolved category lives in the returned
+    ``jobs`` has no category column (CCR-292 PROPOSED): the resolved category lives in the returned
     ``JobFacts`` and the preflight report, and a job resumed through ``intake`` is re-resolved from
     the channel row."""
     if not project_id:
@@ -393,6 +393,6 @@ def run_job_preflight(
         org_id=job.org_id, job_id=job.job_id, finance_rules_apply=job.finance_rules_apply
     )
     report = run_preflight(config, confirmations, **kwargs)
-    # the resolved category goes into the run report (jobs has no category column, CCR-291)
+    # the resolved category goes into the run report (jobs has no category column, CCR-292)
     note = f"job channel category (from channels.category): {job.channel_category.value}"
     return replace(report, notes=(*report.notes, note))
