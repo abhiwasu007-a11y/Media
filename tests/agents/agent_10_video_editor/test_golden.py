@@ -75,8 +75,10 @@ def _cue_dicts(items: list[dict[str, Any]]) -> list[Cue]:
 
 def _eval(fn: str, i: dict[str, Any]) -> CheckResult | dict[str, Any]:
     match fn:
-        case "qc.video.bitrate.evaluate":
-            return C.qc_video_bitrate(**i)
+        case "qc.video.encoder_settings.evaluate":
+            return C.qc_video_encoder_settings(**i)
+        case "qc.video.quality_metric.evaluate":
+            return C.qc_video_quality_metric(**i)
         case "qc.audio.true_peak.evaluate":
             return C.qc_audio_true_peak(
                 true_peak_dbtp=i["true_peak_dbtp"], ceiling_dbtp=i["ceiling_dbtp"]

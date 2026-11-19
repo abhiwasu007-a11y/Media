@@ -56,6 +56,8 @@ class VideoStream:
     start_time: str | None
     duration: str | None
     colour: dict[str, str | None]
+    level: int | None = None
+    has_b_frames: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +136,8 @@ class ProbeParser:
                 "matrix": video_raw.get("color_space"),
                 "range": video_raw.get("color_range"),
             },
+            level=_int(video_raw.get("level")),
+            has_b_frames=_int(video_raw.get("has_b_frames")),
         )
         audio = None
         if audio_raw is not None:
@@ -368,3 +372,58 @@ def parse_stream_times(csv_text: str) -> dict[str, tuple[str, str]]:
     if "video" not in out or "audio" not in out:
         raise MeasurementUnavailable(["stream_times"])
     return out
+
+
+# ----------------------------------------------------------------------------- encoder settings
+
+_SSIM_ALL = re.compile(r"SSIM Y:[0-9.]+ .*?All:([0-9]+\.[0-9]+)")
+_X264_SEI = b"x264 - core "
+_X264_OPTIONS = re.compile(r"([a-z0-9_]+)=([^ ]+)")
+
+
+class SsimParser:
+    """The ``ssim`` filter summary ``SSIM Y:… U:… V:… All:<mean> (<dB>)`` (last line wins)."""
+
+    @staticmethod
+    def parse(stderr: str) -> str:
+        found = _SSIM_ALL.findall(stderr)
+        if not found:
+            raise MeasurementUnavailable(["ssim_all"])
+        return str(found[-1])
+
+
+class X264SeiParser:
+    """The x264 user-data SEI (``x264 - core … - options: k=v …``) that libx264 writes into the
+    first access unit of every encode; ``-map_metadata -1`` and ``+bitexact`` do not remove it
+    (measured on FFmpeg 6.1.1). Returns the option map, or ``None`` when no SEI is present."""
+
+    @staticmethod
+    def find(data: bytes) -> dict[str, str] | None:
+        at = data.find(_X264_SEI)
+        if at < 0:
+            return None
+        end = data.find(b"\x00", at)
+        text = data[at : end if end >= 0 else at + 4096].decode("ascii", errors="replace")
+        if " options: " not in text:
+            return None
+        options = text.split(" options: ", 1)[1]
+        parsed = dict(_X264_OPTIONS.findall(options))
+        core = text[len("x264 - core ") :].split(" - ", 1)[0]
+        parsed["_core"] = core
+        return parsed
+
+    @staticmethod
+    def scan_file(path: Any, chunk: int = 1 << 20) -> dict[str, str] | None:
+        """Scan a file in chunks (with overlap) for the first SEI; bounded by the file size."""
+        tail = b""
+        with open(path, "rb") as handle:
+            while True:
+                block = handle.read(chunk)
+                if not block:
+                    return None
+                data = tail + block
+                at = data.find(_X264_SEI)
+                if at >= 0:
+                    rest = data[at:] + handle.read(8192)
+                    return X264SeiParser.find(rest)
+                tail = data[-len(_X264_SEI) :]

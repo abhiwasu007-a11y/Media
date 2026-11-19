@@ -156,6 +156,9 @@ class SegmentRecord(BaseModel):
     sha256: str
     size_bytes: StrictInt
     frames: StrictInt
+    ssim_all: str | None = None
+    """SSIM ``All`` of this segment against its lossless reference (ADR-014); ``None`` for a
+    segment adopted from storage without a checkpoint (not measured)."""
 
 
 class RenderState(BaseModel):

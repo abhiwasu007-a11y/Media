@@ -34,10 +34,9 @@ pytestmark = [
 
 
 def _config() -> AgentTenConfig:
-    # test values: 4 s segments, 1 s closed GOP; "faster" keeps x264 at the High profile
-    return make_config(
-        render={"segment_target_ms": 4000, "gop_frames": 30, "x264_preset": "faster"}
-    )
+    # test values: 4 s segments; the closed GOP (15 frames, half of 30 fps) and the 8 Mbps
+    # target come from data/encode_targets.json (ADR-014); "faster" keeps x264 at High
+    return make_config(render={"segment_target_ms": 4000, "x264_preset": "faster"})
 
 
 @pytest.fixture(scope="module")
@@ -227,7 +226,9 @@ def test_r02_selftest_fixtures_yield_their_asserted_verdicts(tmp_path: Path) -> 
         "silent.silence",
         "offset.av_start",
         "srt.overlap",
-        "rate.bitrate",
+        "settings.encoder_settings",
+        "baseline.encoder_settings",
+        "settings.quality_metric",
     }
 
 

@@ -59,6 +59,7 @@ from agent_10_video_editor.probe import (
     ProbeResult,
     SceneParser,
     SilencedetectParser,
+    X264SeiParser,
     parse_stream_times,
 )
 from agent_10_video_editor.qc import checks as C  # noqa: N812
@@ -130,6 +131,7 @@ class _Measured:
     blacks: list[tuple[int, int]] = field(default_factory=list)
     freezes: list[tuple[int, int]] = field(default_factory=list)
     scenes: list[int] = field(default_factory=list)
+    sei: dict[str, str] | None = None
 
 
 def _spans_to_shots(
@@ -179,6 +181,7 @@ class _QcRun:
         self.argv = ArgvBuilder(deps.cfg.render, deps.ffmpeg_bin, deps.ffprobe_bin)
         self.started = deps.clock.monotonic_ms()
         self.log = LogContext(ti.org_id, ti.job_id, ti.task_id, attempt_id, ti.correlation_id)
+        self._render_out: dict[str, Any] = {}
         self.ckpt = CheckpointIO(
             scope=self.scope,
             tenancy=deps.tenancy,
@@ -247,6 +250,7 @@ class _QcRun:
             )  # not enabled before R-02 equality proof
         refs = one_ref_per_schema(ti, QC_SCHEMAS)
         render_out = _json(self.scope.read_bytes(*refs["agent_10.render.output"]))
+        self._render_out = render_out
         timeline = _timeline(self.scope.read_bytes(*refs["agent_10.timeline"]))
         plan = ShotPlan.model_validate_json(
             self.scope.read_bytes(*refs["agent_09.shot_plan.output"])
@@ -450,6 +454,7 @@ class _QcRun:
             m.packet_count = PacketParser.count(csv)
             m.moov_first = AtomOrderChecker.moov_first((work / "final.mp4").read_bytes()[: 1 << 20])
             m.stream_times = parse_stream_times(probe.stream_times_csv("final.mp4"))
+            m.sei = X264SeiParser.scan_file(work / "final.mp4")
         elif group == "qc.audio":
             m.ebur = Ebur128Parser.parse(self._run(self.argv.ebur128("final.mp4"), work).stderr)
             m.silences = SilencedetectParser.parse(
@@ -527,12 +532,34 @@ class _QcRun:
             )
         )
         add(C.qc_video_pix_fmt(pix_fmt=pr.video.pix_fmt))
+        enc = cfg.encode
         add(
-            C.qc_video_bitrate(
-                video_bitrate_bps=pr.video_bitrate_bps,
-                min_bps=qc.video_bitrate_min_bps,
-                max_bps=qc.video_bitrate_max_bps,
-                floor_bps=qc.video_bitrate_floor_bps,
+            C.qc_video_encoder_settings(
+                codec_name=pr.video.codec_name,
+                profile=pr.video.profile,
+                pix_fmt=pr.video.pix_fmt,
+                field_order=pr.video.field_order,
+                r_frame_rate=pr.video.r_frame_rate,
+                level=pr.video.level,
+                sei=m.sei,
+                fps_num=cfg.fps_num,
+                fps_den=cfg.fps_den,
+                gop_frames=enc.gop_frames,
+                bframes=enc.bframes,
+                cabac=enc.cabac,
+                target_bps=enc.target_bps,
+                maxrate_bps=enc.maxrate_bps,
+                bufsize_bps=enc.bufsize_bps,
+            )
+        )
+        quality = (self._render_out.get("encoder") or {}).get("quality_metric") or {}
+        add(
+            C.qc_video_quality_metric(
+                ssim_all=quality.get("ssim_all"),
+                frames_measured=int(quality.get("frames_measured") or 0),
+                frames_total=int(quality.get("frames_total") or timeline.total_frames),
+                min_ssim=qc.quality_min_ssim,
+                vmaf_status=str(quality.get("vmaf_status") or "LIBVMAF_NOT_IN_BUILD"),
             )
         )
         add(

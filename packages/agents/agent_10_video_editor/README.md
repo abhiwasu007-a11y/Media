@@ -52,7 +52,7 @@ RESEARCH_LOG entry; the production pin is REQUIRES REVIEW):
 | compiler | `gcc 13 (Ubuntu 13.2.0-23ubuntu3)` |
 | `ffprobe` | `6.1.1-3ubuntu5` |
 | encoder | `libx264` (the build is `--enable-gpl`), native `aac` |
-| filters used | `blackdetect`, `freezedetect`, `silencedetect`, `ebur128`, `select`, `showinfo`, `tile`, `drawtext`, `concat`, `overlay`, `scale`, `apad`, `tpad`, `fps`, `trim` |
+| filters used | `blackdetect`, `freezedetect`, `silencedetect`, `ebur128`, `select`, `showinfo`, `tile`, `drawtext`, `concat`, `overlay`, `scale`, `apad`, `tpad`, `fps`, `trim`, `split`, `ssim` (no `libvmaf` in this build) |
 
 Findings on this build (all recorded in tests):
 
@@ -61,7 +61,15 @@ Findings on this build (all recorded in tests):
   rejects garbage.
 * x264 reports **Constrained Baseline** instead of **High** when `-preset ultrafast` is used (no
   CABAC, B-frames or 8x8dct); `qc.video.codec_profile` caught it. Keep `agent_10.render.x264_preset`
-  at `faster` or slower. Integration tests use `faster`.
+  at `faster` or slower (the configuration now refuses other presets). Integration tests use
+  `faster`.
+* Encode targets (ADR-014, owner decision D10): x264 ABR at the YouTube target of
+  `data/encode_targets.json` (INF-12), never a measured floor and never filler. The x264 SEI
+  (`x264 - core … options: …`) survives `-map_metadata -1` and `+bitexact`, so
+  `qc.video.encoder_settings` reads `rc`, `bitrate`, `bframes`, `cabac`, `open_gop`, `keyint` and
+  VBV from the stream. `-maxrate` equal to `-b:v` makes x264 report `rc=cbr`: a configured cap must
+  be above the target. Each segment also writes the same frames as lossless FFV1 (scratch); the
+  SSIM against it is reported by `qc.video.quality_metric` (report only until 3B).
 * The native AAC encoder's average rate on synthetic signals is about 240 kbps at a configured
   nominal 384 kbps (CCR-055): the nominal rate is gated, the measured average is reported.
 * `sine` and `aevalsrc` mono sources lose 3 dB when up-mixed to stereo; the self-test's "hot"

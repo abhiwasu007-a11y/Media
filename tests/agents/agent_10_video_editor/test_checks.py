@@ -35,6 +35,22 @@ ROW = {
 }
 ASSET = {"a": {"status": "ACTIVE", "ai_item": False}}
 
+SEI = {
+    "cabac": "1",
+    "interlaced": "0",
+    "bframes": "2",
+    "open_gop": "0",
+    "keyint": "15",
+    "rc": "abr",
+    "bitrate": "8000",
+    "_core": "164",
+}
+SETTINGS: dict[str, Any] = {
+    "codec_name": "h264", "profile": "High", "pix_fmt": "yuv420p", "field_order": "progressive",
+    "r_frame_rate": R, "level": 40, "sei": SEI, "fps_num": 30, "fps_den": 1, "gop_frames": 15,
+    "bframes": 2, "cabac": True, "target_bps": 8_000_000, "maxrate_bps": None, "bufsize_bps": None,
+}  # fmt: skip
+
 # (check_id, pass result, fail result, expected fail verdict)
 ROWS: list[tuple[str, CheckResult, CheckResult]] = [
     ("qc.video.resolution", C.qc_video_resolution(width=1920, height=1080, min_width=1920, min_height=1080),
@@ -42,8 +58,8 @@ ROWS: list[tuple[str, CheckResult, CheckResult]] = [
     ("qc.video.codec_profile", C.qc_video_codec_profile(codec_name="h264", profile="High", field_order="progressive"),
      C.qc_video_codec_profile(codec_name="h264", profile="Main", field_order="progressive")),
     ("qc.video.pix_fmt", C.qc_video_pix_fmt(pix_fmt="yuv420p"), C.qc_video_pix_fmt(pix_fmt="yuv444p")),
-    ("qc.video.bitrate", C.qc_video_bitrate(video_bitrate_bps=20_000_000, min_bps=15_000_000, max_bps=25_000_000, floor_bps=8_000_000),
-     C.qc_video_bitrate(video_bitrate_bps=5_000_000, min_bps=15_000_000, max_bps=25_000_000, floor_bps=8_000_000)),
+    ("qc.video.encoder_settings", C.qc_video_encoder_settings(**{**SETTINGS}),
+     C.qc_video_encoder_settings(**{**SETTINGS, "profile": "Constrained Baseline"})),
     ("qc.video.cfr", C.CfrAnalyser.evaluate(interval_histogram_s={"0.033333": 10}, fps_num=30, fps_den=1, tolerance_s="0.00001", r_frame_rate=R, avg_frame_rate=R),
      C.CfrAnalyser.evaluate(interval_histogram_s={"0.033333": 10}, fps_num=30, fps_den=1, tolerance_s="0.00001", r_frame_rate=R, avg_frame_rate=Fraction(2997, 100))),
     ("qc.video.fps_matches_project", C.qc_video_fps_matches_project(r_frame_rate=R, fps_num=30, fps_den=1),
@@ -300,3 +316,84 @@ def test_atom_order_checker() -> None:
     assert not AtomOrderChecker.moov_first(box(b"ftyp", 16) + box(b"mdat", 32) + box(b"moov", 16))
     with pytest.raises(MeasurementUnavailable):
         AtomOrderChecker.moov_first(b"\0" * 4)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("change", "offending"),
+    [
+        ({"sei": None}, "x264_sei_missing"),
+        ({"sei": {**SEI, "rc": "cbr"}}, "sei.rc"),
+        ({"sei": {**SEI, "bitrate": "20000"}}, "sei.bitrate"),
+        ({"sei": {**SEI, "bframes": "0"}}, "sei.bframes"),
+        ({"sei": {**SEI, "cabac": "0"}}, "sei.cabac"),
+        ({"sei": {**SEI, "open_gop": "1"}}, "sei.open_gop"),
+        ({"sei": {**SEI, "keyint": "60"}}, "sei.keyint"),
+        (
+            {
+                "sei": {
+                    **SEI,
+                    "vbv_maxrate": "12000",
+                    "vbv_bufsize": "16000",
+                    "nal_hrd": "cbr",
+                    "filler": "1",
+                }
+            },
+            "sei.filler",
+        ),
+        ({"sei": {**SEI, "nal_hrd": "cbr"}}, "sei.nal_hrd"),
+        ({"sei": {**SEI, "vbv_maxrate": "12000"}}, "sei.vbv_maxrate"),
+        ({"r_frame_rate": Fraction(25)}, "fps"),
+        ({"pix_fmt": "yuv444p"}, "pix_fmt"),
+    ],
+)
+def test_encoder_settings_fails_on_every_wrong_setting(
+    change: dict[str, Any], offending: str
+) -> None:
+    result = C.qc_video_encoder_settings(**{**SETTINGS, **change})
+    assert result.verdict is CheckVerdict.FAIL
+    assert result.blocking
+    assert offending in result.offending
+    assert result.remedy_stage_id == "s10_render"
+
+
+@pytest.mark.unit
+def test_encoder_settings_with_a_vbv_cap_and_level_reported_only() -> None:
+    sei = {**SEI, "vbv_maxrate": "12000", "vbv_bufsize": "16000", "nal_hrd": "none", "filler": "0"}
+    result = C.qc_video_encoder_settings(
+        **{
+            **SETTINGS,
+            "sei": sei,
+            "maxrate_bps": 12_000_000,
+            "bufsize_bps": 16_000_000,
+            "level": 52,
+        }
+    )
+    assert result.verdict is CheckVerdict.PASS
+    assert result.details["level"] == 52
+    assert result.details["level_threshold"] is None
+
+
+@pytest.mark.unit
+def test_quality_metric_is_report_only_and_never_blocks() -> None:
+    kw: dict[str, Any] = {
+        "frames_measured": 30,
+        "frames_total": 30,
+        "vmaf_status": "LIBVMAF_NOT_IN_BUILD",
+    }
+    unset = C.qc_video_quality_metric(ssim_all="0.971708", min_ssim=None, **kw)
+    assert unset.verdict is CheckVerdict.WARN
+    assert not unset.blocking
+    assert unset.measured == 0.971708
+    assert unset.threshold is None
+    assert unset.remedy_stage_id is None
+    assert unset.details["report_only"] is True
+    assert unset.details["threshold_status"] == "UNSET_UNTIL_3B"
+    none = C.qc_video_quality_metric(ssim_all=None, min_ssim=None, **{**kw, "frames_measured": 0})
+    assert none.verdict is CheckVerdict.WARN
+    assert not none.blocking
+    assert none.measured is None
+    low = C.qc_video_quality_metric(ssim_all="0.900000", min_ssim="0.950000", **kw)
+    high = C.qc_video_quality_metric(ssim_all="0.990000", min_ssim="0.950000", **kw)
+    assert (low.verdict, low.blocking) == (CheckVerdict.WARN, False)
+    assert (high.verdict, high.blocking) == (CheckVerdict.PASS, False)

@@ -9,11 +9,12 @@ cannot finish before ``act_by``, its scratch ``.part`` is discarded.
 """
 
 import math
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -31,6 +32,8 @@ from agent_10_video_editor.contracts import (
     GuardsOut,
     ProbeOut,
     ProvenanceOut,
+    QualityMetricOut,
+    RateControlOut,
     RenderInput,
     RenderOutput,
     SegmentsOut,
@@ -60,7 +63,7 @@ from agent_10_video_editor.inputs import (
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
 from agent_10_video_editor.observability import LogContext, emit, labels
 from agent_10_video_editor.ports import RenderRow
-from agent_10_video_editor.probe import PacketParser, ProbeResult
+from agent_10_video_editor.probe import PacketParser, ProbeResult, SsimParser
 from agent_10_video_editor.qc.checks import a10_q_colour_tags, a10_q_gop_settings
 from agent_10_video_editor.qc.result import CheckResult, passed, skipped
 from agent_10_video_editor.scope import ScratchDir, TenantScope, one_ref_per_schema
@@ -192,6 +195,34 @@ def _tenant_context(task_input: TaskInput) -> TenantContext:
     )
 
 
+VmafStatus = Literal["LIBVMAF_NOT_IN_BUILD", "LIBVMAF_IN_BUILD_NOT_USED"]
+_SSIM_Q = Decimal("0.000001")
+
+
+def quality_metric(
+    records: Iterable[SegmentRecord], total_frames: int, vmaf_status: VmafStatus
+) -> QualityMetricOut:
+    """Frame-weighted mean of the per-segment SSIM ``All`` values (equal to the mean over all
+    frames, as the filter's ``All`` is a per-frame mean) and the lowest segment value."""
+    measured = [(Decimal(r.ssim_all), r.frames) for r in records if r.ssim_all is not None]
+    frames = sum(n for _, n in measured)
+    if frames == 0:
+        mean = low = None
+    else:
+        weighted = sum((v * n for v, n in measured), Decimal(0)) / frames
+        mean = str(weighted.quantize(_SSIM_Q, rounding=ROUND_HALF_UP))
+        low = str(min(v for v, _ in measured).quantize(_SSIM_Q, rounding=ROUND_HALF_UP))
+    return QualityMetricOut(
+        metric="SSIM",
+        reference="FFV1_LOSSLESS_SEGMENT",
+        ssim_all=mean,
+        ssim_min_segment=low,
+        frames_measured=frames,
+        frames_total=total_frames,
+        vmaf_status=vmaf_status,
+    )
+
+
 def _progress(done_frames: int, total_frames: int) -> Decimal:
     return (Decimal(done_frames) / Decimal(total_frames)).quantize(Decimal("0.001"))
 
@@ -257,6 +288,7 @@ class _RenderRun:
         self.reused = 0
         self.resumed = False
         self._audio_bps = 0
+        self._vmaf_status: VmafStatus = "LIBVMAF_NOT_IN_BUILD"
 
     def close(self) -> None:
         self.guard.disarm()
@@ -304,6 +336,12 @@ class _RenderRun:
         probe = ProbeService(d.runner, self.argv, work)
         version = d.runner.run(self.argv.version(), cwd=work, limits=RunLimits())
         build_id = ffmpeg_build_id(version.stdout)
+        listing = d.runner.run(self.argv.filters(), cwd=work, limits=RunLimits())
+        self._vmaf_status = (
+            "LIBVMAF_IN_BUILD_NOT_USED"
+            if re.search(r"^\s*\S+\s+libvmaf\s", listing.stdout, flags=re.M)
+            else "LIBVMAF_NOT_IN_BUILD"
+        )
 
         restored = self.ckpt.latest(RenderState, "render.")
         state = restored[0] if restored else None
@@ -640,11 +678,22 @@ class _RenderRun:
         except StopRequested:
             part.unlink(missing_ok=True)
             raise
+        reference = work / cmd.reference_name
         try:
             self._verify_segment(part, segment, probe)
+            ssim_all = SsimParser.parse(
+                run_checked(
+                    self.d.runner,
+                    self.argv.ssim(part.name, reference.name),
+                    cwd=work,
+                    limits=limits,
+                ).stderr
+            )
         except MeasurementUnavailable, RenderCrashError:
             part.unlink(missing_ok=True)
             raise
+        finally:
+            reference.unlink(missing_ok=True)  # scratch only: never stored (ADR-014)
         info = self.scope.put_file(self._free_uri(plan), part)
         part.unlink(missing_ok=True)
         for staged in cmd.inputs:
@@ -656,6 +705,7 @@ class _RenderRun:
             sha256=info.sha256,
             size_bytes=info.size_bytes,
             frames=segment.frames,
+            ssim_all=ssim_all,
         )
 
     def _check_sources_long_enough(self, cmd: SegmentCommand, probe: ProbeService) -> None:
@@ -909,7 +959,7 @@ class _RenderRun:
                 gate=False,
             ),
             a10_q_colour_tags(probed=probe.video.colour, configured=cfg.colour.model_dump()),
-            a10_q_gop_settings(recorded=gop, configured_gop_frames=cfg.gop_frames),
+            a10_q_gop_settings(recorded=gop, configured_gop_frames=cfg.effective_gop_frames),
         ]
         return results
 
@@ -954,12 +1004,16 @@ class _RenderRun:
                 args_sha256=args_sha,
                 preset_key=cfg.preset_key,
                 gop=GopOut(
-                    gop_frames=int(gop.get("gop_frames", cfg.gop_frames)),
+                    gop_frames=int(gop.get("gop_frames", cfg.effective_gop_frames)),
                     closed_gop=bool(gop.get("closed_gop", True)),
                     idr_at_segment_start=bool(gop.get("idr_at_segment_start", True)),
                 ),
                 colour=ColourOut(**cfg.colour.model_dump()),
                 audio_bitrate_nominal_bps=max(nominal, 1),
+                rate_control=RateControlOut(**cfg.encode.recorded()),
+                quality_metric=quality_metric(
+                    state.segments.values(), timeline.total_frames, self._vmaf_status
+                ),
             ),
             probe=ProbeOut(
                 width_px=probe.video.width,

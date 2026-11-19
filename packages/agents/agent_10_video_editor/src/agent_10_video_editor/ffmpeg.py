@@ -36,6 +36,7 @@ _EXTENSIONS = frozenset(
     {"png", "jpg", "jpeg", "webp", "mp4", "mov", "mkv", "wav", "ttf", "otf", "flac"}
 )
 _IMAGE_EXTENSIONS = IMAGE_EXTENSIONS
+REFERENCE_NAME = "segment_ref.part"
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +163,8 @@ class SegmentCommand:
     video_needs: tuple[tuple[str, str, int], ...] = ()
     """(staged input name, shot_id, source ms the shot consumes) of every moving-video input: the
     render probes each staged input against it, because ``tpad=clone`` would freeze a short one."""
+    reference_name: str = ""
+    """The lossless FFV1 reference of the same frames (scratch only; ADR-014 quality metric)."""
 
 
 def _ext_of(uri: str) -> str:
@@ -282,10 +285,20 @@ class ArgvBuilder:
                 f":enable='between(n,{start},{end})'[vc{n + 1}]"
             )
             current = f"vc{n + 1}"
+        enc = cfg.encode
+        # INF-13: closed GOP of half the frame rate, 2 consecutive B-frames, CABAC; INF-12 /
+        # ADR-014: average-bitrate (VBR) rate control at the target, no filler (nal-hrd unset)
         x264 = (
-            f"keyint={cfg.gop_frames}:min-keyint={cfg.gop_frames}:scenecut=0:open-gop=0"
-            f":threads={cfg.threads}"
+            f"keyint={enc.gop_frames}:min-keyint={enc.gop_frames}:scenecut=0:open-gop=0"
+            f":bframes={enc.bframes}:cabac={int(enc.cabac)}:threads={cfg.threads}"
         )
+        rate = ["-b:v", str(enc.target_bps)]
+        if enc.maxrate_bps is not None and enc.bufsize_bps is not None:
+            rate += ["-maxrate", str(enc.maxrate_bps), "-bufsize", str(enc.bufsize_bps)]
+        # the filtered frames go twice: to the delivery encode and to a lossless FFV1 reference
+        # (the intermediate the quality metric compares against, ADR-014)
+        graph.append(f"[{current}]split=2[venc][vref]")
+        frames = str(slice_.segment.frames)
         argv = [
             self.ffmpeg_bin,
             "-hide_banner",
@@ -297,9 +310,9 @@ class ArgvBuilder:
             "-filter_complex",
             ";".join(graph),
             "-map",
-            f"[{current}]",
+            "[venc]",
             "-frames:v",
-            str(slice_.segment.frames),
+            frames,
             "-fps_mode",
             "cfr",
             "-r",
@@ -307,23 +320,20 @@ class ArgvBuilder:
             "-c:v",
             cfg.video_encoder,
             "-preset",
-            cfg.x264_preset,
+            enc.x264_preset,
             "-profile:v",
             "high",
             "-pix_fmt",
             "yuv420p",
-            "-b:v",
-            str(cfg.video_bitrate_bps),
-            "-maxrate",
-            str(cfg.video_maxrate_bps),
-            "-bufsize",
-            str(cfg.video_maxrate_bps * 2),
+            *rate,
             "-g",
-            str(cfg.gop_frames),
+            str(enc.gop_frames),
             "-keyint_min",
-            str(cfg.gop_frames),
+            str(enc.gop_frames),
             "-sc_threshold",
             "0",
+            "-bf",
+            str(enc.bframes),
             "-x264-params",
             x264,
             "-color_primaries",
@@ -344,6 +354,32 @@ class ArgvBuilder:
             "-f",
             "mp4",
             "segment.part",
+            "-map",
+            "[vref]",
+            "-frames:v",
+            frames,
+            "-fps_mode",
+            "cfr",
+            "-r",
+            fps,
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-g",
+            "1",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            "-map_metadata",
+            "-1",
+            "-fflags",
+            "+bitexact",
+            "-flags:v",
+            "+bitexact",
+            "-f",
+            "matroska",
+            REFERENCE_NAME,
         ]
         return SegmentCommand(
             argv=tuple(argv),
@@ -352,12 +388,36 @@ class ArgvBuilder:
             args_sha256=canonical_sha256(argv),
             warnings=tuple(dict.fromkeys(warnings)),
             gop={
-                "gop_frames": cfg.gop_frames,
+                "gop_frames": enc.gop_frames,
                 "closed_gop": True,
                 "idr_at_segment_start": True,
             },
             video_needs=tuple(needs),
+            reference_name=REFERENCE_NAME,
         )
+
+    def ssim(self, encoded: str, reference: str) -> list[str]:
+        """SSIM of the delivery encode against its lossless reference (ffmpeg ``ssim`` filter;
+        the summary line ``SSIM Y:... All:<mean>`` goes to stderr)."""
+        return [
+            self.ffmpeg_bin,
+            "-hide_banner",
+            "-nostdin",
+            "-nostats",
+            "-protocol_whitelist",
+            "file",
+            "-i",
+            encoded,
+            "-protocol_whitelist",
+            "file",
+            "-i",
+            reference,
+            "-lavfi",
+            "[0:v][1:v]ssim",
+            "-f",
+            "null",
+            "-",
+        ]
 
     # -- mux -------------------------------------------------------------------------------
 
@@ -443,7 +503,8 @@ class ArgvBuilder:
 
     def probe_full(self, name: str) -> list[str]:
         entries = (
-            "stream=index,codec_type,codec_name,profile,pix_fmt,width,height,field_order,"
+            "stream=index,codec_type,codec_name,profile,level,has_b_frames,pix_fmt,width,height,"
+            "field_order,"
             "r_frame_rate,avg_frame_rate,bit_rate,sample_rate,channels,start_time,duration,"
             "color_range,color_space,color_transfer,color_primaries"
             ":format=duration,bit_rate,format_name,size"
@@ -623,6 +684,9 @@ class ArgvBuilder:
 
     def version(self) -> list[str]:
         return [self.ffmpeg_bin, "-hide_banner", "-version"]
+
+    def filters(self) -> list[str]:
+        return [self.ffmpeg_bin, "-hide_banner", "-filters"]
 
 
 def _warn_part(part: TimelineShot, warnings: list[str]) -> None:

@@ -4,7 +4,7 @@
 |---|---|
 | Status | Draft — documentation. Software: **Planned** |
 | Owner | Agent 10 (technical QC, render, subtitles), Agent 16 (quality score, compliance gate); content owners: Agents 05, 07, 08, 09, 11 |
-| Depends on | GLOSSARY_AND_IDS.md (§3, 6.17–6.19, 6.22, 6.27–6.29, 6.38, 6.45, 6.50), 03_COMMUNICATION_STANDARD.md (§5 `validation_results`), 04_DATABASE_ARCHITECTURE.md (§5.15 licences, §5.17 `quality_scores`/`qc_results`, §5.18 `renders`), 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md (§3.2, §4, §5), 27_ENGINEERING_STANDARDS.md (§6, §9), RESEARCH_LOG.md (INF-09, INF-10, YT-05, YT-06, YT-07, YT-08, YT-09, YT-14, PR-04, PR-06, IN-02, IN-03) |
+| Depends on | GLOSSARY_AND_IDS.md (§3, 6.17–6.19, 6.22, 6.27–6.29, 6.38, 6.45, 6.50), 03_COMMUNICATION_STANDARD.md (§5 `validation_results`), 04_DATABASE_ARCHITECTURE.md (§5.15 licences, §5.17 `quality_scores`/`qc_results`, §5.18 `renders`), 07_FAILURE_MANAGEMENT.md, 24_PRODUCTION_TYPES.md (§3.2, §4, §5), 27_ENGINEERING_STANDARDS.md (§6, §9), RESEARCH_LOG.md (INF-09, INF-10, INF-12, INF-13, YT-05, YT-06, YT-07, YT-08, YT-09, YT-14, PR-04, PR-06, IN-02, IN-03) |
 | Directive sections covered | §1A.1–1A.11 (as measurable specs); D1 and D2 of IMPLEMENTATION_PROGRESS.md |
 | Tier | Tier 0 (MVP). Everything marked 3A is built first; 3B is the pilot procedure; 3C items are specified here so that 3A does not block them. |
 
@@ -119,18 +119,18 @@ Mastering gain is solved from a measurement taken **through the master's channel
 | Parameter | `yt_master_1080p` (16:9) | Source / status |
 |---|---|---|
 | Resolution | ≥ 1920×1080 (`width_px ≥ 1920`, `height_px ≥ 1080`); 2560×1440 (`yt_master_1440p`) preferred where render budget allows | §1A.5 |
-| Codec/profile | H.264 **High** profile (`ffprobe profile = High`), `yuv420p`, progressive | §1A.5, INF-10 |
-| Bitrate | **target 15–25 Mbps** at 1080p (`15 000 000 ≤ video_bitrate_bps ≤ 25 000 000`); **floor 8 Mbps** = YouTube's SDR 1080p recommendation (12 Mbps at high frame rate), INF-10. Below 8 Mbps = FAIL; between 8 and 15 Mbps = WARN; above 25 Mbps = WARN (storage/upload cost only) | §1A.5 vs INF-10 (RESEARCH_LOG notes the directive value is above YouTube's recommendation; allowed) |
-| 1440p bitrate | floor 16 Mbps (INF-10); **target REQUIRES REVIEW (Phase 1): directive gives no 1440p figure** | INF-10 |
+| Codec/profile | H.264 **High** profile (`ffprobe profile = High`), `yuv420p`, progressive, CABAC, 2 consecutive B-frames | §1A.5, INF-10, INF-13 |
+| Bitrate | **ENCODER TARGET, not a measured floor** (owner decision D10, ADR-014, CCR-240): x264 average-bitrate rate control (`rc=abr`, variable bitrate) at YouTube's SDR recommendation: **8 Mbps** at 1920×1080 and 24/25/30 fps, **12 Mbps** at 48/50/60 fps (INF-12: "No bitrate limit is required"). Values are data (`agent_10` `data/encode_targets.json`), keyed by size and exact frame rate. The measured average is reported, never gated. **No filler padding** (no `nal-hrd=cbr`, no `filler`, no `-minrate`). Optional VBV cap (`maxrate` > target, with `bufsize`): **PROPOSAL, REQUIRES REVIEW (Phase 1)**, unset by default. Quality is measured by SSIM against a lossless intermediate (`qc.video.quality_metric`; threshold set in 3B) | INF-12, D10 (supersedes the directive §1A.5 15–25 Mbps band and the INF-10 floor; Q-D10-1) |
+| Other sizes / rates | 1440p, 2160p, 9:16 1080×1920 and fractional frame rates: **target REQUIRES REVIEW (Phase 1)** (INF-12 lists 1440p 16/24 Mbps and 2160p 35–45/53–68 Mbps; D10 adopts 1080p only); until set, such a render needs the operator value `agent_10.render.video_bitrate_bps` | INF-12, D10 |
 | Frame rate | **constant** (CFR) and equal to the source/project frame rate ("encoded and uploaded in the same frame rate it was recorded", INF-10). The project frame rate itself is **REQUIRES REVIEW (Phase 1): owner footage/screen-recording frame rate** | §1A.5, INF-10 |
-| GOP | closed GOP (INF-10); verified from the encoder settings recorded by Agent 10 (ffprobe does not prove closed GOP) — verification method **REQUIRES REVIEW (Phase 1)** | INF-10 |
+| GOP | closed GOP of **half the frame rate** (15 frames at 30 fps; INF-13); a fractional half (e.g. 25 fps) **REQUIRES REVIEW (Phase 1)**. Verified from the x264 SEI in the delivered stream (`open_gop=0`, `keyint`) by `qc.video.encoder_settings` and from the recorded settings by `a10.q.gop_settings` | INF-10, INF-13 |
 | Audio | §5 | |
-| Container | MP4, `faststart` (moov first) | INF-10 states the codecs; container/faststart is **REQUIRES REVIEW (Phase 1): confirm against the official upload page** |
+| Container | MP4, `faststart` (moov first), no edit lists | INF-13 ("moov atom at the front of the file (Fast Start)") |
 | Subtitles | one accurate SRT per language (`srt_per_language`), UTF-8; optional burned-in styled captions as a separate render variant (the clean master has no burned-in text unless the preset says so) | §1A.5 |
 | Colour | SDR; colour primaries/transfer tagged in the stream | **REQUIRES REVIEW (Phase 1): HDR is out of scope; tagging values to be fixed in Agent 10 blueprint** |
 | Metadata persisted | `renders` row: width/height, fps_num/fps_den, codecs, bitrates, sample rate, duration_ms, LUFS, dBTP, size_bytes, SHA-256 (04 §5.18) | |
 
-Checks: `qc.video.resolution`, `qc.video.codec_profile`, `qc.video.pix_fmt`, `qc.video.bitrate`, `qc.video.cfr`, `qc.video.fps_matches_project`, `qc.container.faststart` — all deterministic (§7.1), all blocking except the bitrate WARN bands and the items marked REQUIRES REVIEW (WARN until set).
+Checks: `qc.video.resolution`, `qc.video.codec_profile`, `qc.video.pix_fmt`, `qc.video.encoder_settings`, `qc.video.quality_metric`, `qc.video.cfr`, `qc.video.fps_matches_project`, `qc.container.faststart` — all deterministic (§7.1), all blocking except `qc.video.quality_metric` (report only until 3B) and the items marked REQUIRES REVIEW (WARN until set). `qc.video.bitrate` is withdrawn (CCR-240).
 
 ## 7. Automated technical QC — exact commands and thresholds (§1A.6; INF-09)
 
@@ -145,7 +145,7 @@ Checks: `qc.video.resolution`, `qc.video.codec_profile`, `qc.video.pix_fmt`, `qc
 ### 7.1 Container and stream metadata (ffprobe)
 ```bash
 ffprobe -v error -show_entries \
-  stream=index,codec_type,codec_name,profile,pix_fmt,width,height,field_order,r_frame_rate,avg_frame_rate,bit_rate,sample_rate,channels,start_time,duration:format=duration,bit_rate,format_name \
+  stream=index,codec_type,codec_name,profile,level,has_b_frames,pix_fmt,width,height,field_order,r_frame_rate,avg_frame_rate,bit_rate,sample_rate,channels,start_time,duration:format=duration,bit_rate,format_name \
   -of json "$F" > probe.json
 ```
 | check_id | Rule on `probe.json` | Verdict |
@@ -154,7 +154,8 @@ ffprobe -v error -show_entries \
 | `qc.video.codec_profile` | `codec_name = h264`, `profile = High`, `pix_fmt = yuv420p`, `field_order = progressive` | FAIL blocking |
 | `qc.video.cfr` | `r_frame_rate == avg_frame_rate` **and** the packet-timestamp test below finds one frame interval | FAIL blocking |
 | `qc.video.fps_matches_project` | `r_frame_rate` equals the project frame rate in `$T` | FAIL blocking |
-| `qc.video.bitrate` | `bit_rate` of the video stream (if absent in the stream, compute `size_bytes×8 / duration`): ≥ 15 000 000 and ≤ 25 000 000 → PASS; 8 000 000–15 000 000 or > 25 000 000 → WARN; < 8 000 000 → FAIL | as §6 |
+| `qc.video.encoder_settings` | (CCR-240, ADR-014; replaces `qc.video.bitrate`) `probe.json`: `codec_name = h264`, `profile = High`, `pix_fmt = yuv420p`, `field_order = progressive`, `r_frame_rate` = project rate; the x264 SEI of the stream (`x264 - core … options: …`, read from the file bytes): `cabac=1`, `bframes=2`, `open_gop=0`, `interlaced=0`, `keyint` = configured GOP, `rc=abr`, `bitrate` = target ÷ 1000, `vbv_maxrate` / `vbv_bufsize` = configuration (absent when unset), no `filler=1`, `nal_hrd` absent or `none`. No SEI = FAIL. `level` recorded only (REQUIRES REVIEW (Phase 1): no sourced level). The measured video `bit_rate` is reported in `measurements`, not gated | FAIL blocking |
+| `qc.video.quality_metric` | (CCR-240, ADR-014) SSIM of every delivery segment against the lossless FFV1 encode of the same filtered frames, computed by the render (`ffmpeg -i seg.mp4 -i seg_ref.mkv -lavfi "[0:v][1:v]ssim" -f null -`, summary `All:`), frame-weighted mean reported; VMAF only on a build with `libvmaf` (the development build has none). Threshold `qc.video.quality_min_ssim` **unset in 3A** → measured value, `threshold = null`, `WARN`, `blocking: false`, `details.report_only = true`; set in 3B | **REPORT ONLY** (never blocking in 3A) |
 | `qc.audio.codec` / `.sample_rate` / `.channels` / `.bitrate` | `codec_name = aac`, `profile = LC`, `sample_rate = 48000`, `channels = 2`; `.bitrate` (CCR-055): the **configured nominal** audio bitrate recorded for the render (`renders.audio_bitrate_bps`, from the encoder arguments of the preset) ≥ 384000; the measured stream average (`bit_rate`, or bytes × 8 / duration) is recorded in `measured` and reported, and is not the gate (the native AAC encoder's average falls below the nominal rate on simple signals). **REQUIRES REVIEW (Phase 1): confirm on the pinned build with speech material** | FAIL blocking (codec, rate, channels, nominal bitrate) |
 | `qc.container.faststart` | container tagged `mov,mp4,…`; moov before mdat (checked by Agent 10 from the mux log/atom order) | method **REQUIRES REVIEW (Phase 1)** |
 
@@ -296,7 +297,7 @@ Matching without a render (CCR-030): the join condition is `l.asset_id = e.asset
 Third-party logos or on-screen brands that are part of footage (not watermarks) are a licence/compliance matter, handled by Agent 16 (`COPYRIGHT_DOUBT` approval) — not here.
 
 ### 7.11 Self-test (build requirement)
-`agent_10.technical_qc` ships with synthetic fixtures (generated by `lavfi`, no stored media): a clean file that passes every sourced check; a file with true peak above −1 dBTP; one with a black segment; one with a frozen segment; one with a silence run; one with a 1-frame A/V start offset; one with an SRT overlap; one at 12 Mbps. Each fixture's expected verdict is asserted in CI (27 §8) with no paid call. The self-test re-runs when the FFmpeg version changes. Owner (A07-N8): lane 10 (Agent 10 self-test R-02, in the workspace CI job); Agent 07's FFmpeg measurements run on the same pinned build and rely on that job, they do not duplicate it.
+`agent_10.technical_qc` ships with synthetic fixtures (generated by `lavfi`, no stored media): a clean file that passes every sourced check; a file with true peak above −1 dBTP; one with a black segment; one with a frozen segment; one with a silence run; one with a 1-frame A/V start offset; one with an SRT overlap; an encode with the delivery settings (`qc.video.encoder_settings` PASS), a Constrained Baseline encode at the wrong frame rate (FAIL) and an SSIM measurement against a lossless reference (report-only WARN with a value) (CCR-240). Each fixture's expected verdict is asserted in CI (27 §8) with no paid call. The self-test re-runs when the FFmpeg version changes. Owner (A07-N8): lane 10 (Agent 10 self-test R-02, in the workspace CI job); Agent 07's FFmpeg measurements run on the same pinned build and rely on that job, they do not duplicate it.
 
 ### 7.12 Check-to-profile matrix
 | Group | check_ids | `qc.long_form` | `qc.shorts` |
@@ -405,14 +406,14 @@ A human reviewer may only record a compliance concern as a `NEEDS_HUMAN_REVIEW` 
 ## 12. Fill-in of the REQUIRES REVIEW items of 24 §4 and §5
 | 24 item | Status after this document |
 |---|---|
-| §4 `yt_master_1080p` | complete: §6 (resolution, High profile, 15–25 Mbps target with 8 Mbps floor per INF-10, CFR, closed GOP, AAC-LC 48 kHz ≥ 384 kbps) |
-| §4 `yt_master_1440p` bitrate target | **still open** — floor 16 Mbps is sourced (INF-10); the target needs an owner/benchmark decision |
+| §4 `yt_master_1080p` | complete: §6 (resolution, High profile, 8 / 12 Mbps encoder target per INF-12 and D10 (ADR-014), CFR, closed GOP of half the frame rate, AAC-LC 48 kHz ≥ 384 kbps) |
+| §4 `yt_master_1440p` bitrate target | **still open** — INF-12 lists 16 / 24 Mbps; D10 adopts 1080p only; adopting the 1440p row is an owner decision |
 | §4 `srt_per_language` | specified: §7.6 format and sync checks; readability limits open |
 | §4 `shorts_9x16` | **still open** — official specs not logged; PROPOSAL 1080×1920 in §10 |
 | §4 `thumbnail_set` | **still open** — only YT-05 50 MB maximum; dimensions/format not logged; up to 3 variants (YT-08) |
 | §4 `client_master_mezzanine` | **still open** — codec choice (T1) |
 | §4 `ad_master…`, `dub_audio_track_<lang>` | owned by 25 and S3; not changed here |
-| §5 `qc.long_form` thresholds | sourced: −14 LUFS, −1 dBTP, 15–20 dB music bed, 48 kHz, codec/bitrate, SRT format, licence completeness, tier-E share < 50 %; **tolerances and detector parameters remain REQUIRES REVIEW (calibrate in 3B pilot)** as stated in §7 |
+| §5 `qc.long_form` thresholds | sourced: −14 LUFS, −1 dBTP, 15–20 dB music bed, 48 kHz, codec/encoder settings, SRT format, licence completeness, tier-E share < 50 %; **tolerances and detector parameters remain REQUIRES REVIEW (calibrate in 3B pilot)** as stated in §7 |
 | §5 `qc.shorts` | structure here (§7.12); 9:16 values open |
 | §5 `qc.ad_spot`, `qc.dubbing` timing | open (25; S3) |
 | §5 `qc.corporate` | as `qc.long_form` |
@@ -428,7 +429,8 @@ Values marked "—" are not sourced and have no default.
 | `qc.music_bed.min_db`, `qc.music_bed.max_db` | music bed relative to narration | −20.0, −15.0 |
 | `qc.audio.sample_rate_hz`, `qc.audio.min_bitrate_bps` | | 48000, 384000 |
 | `qc.video.min_width_px`, `qc.video.min_height_px` | 16:9 master | 1920, 1080 |
-| `qc.video.bitrate_target_min_bps`, `…_max_bps`, `…_floor_bps` | 1080p | 15000000, 25000000, 8000000 (INF-10 floor) |
+| `qc.video.quality_min_ssim` | SSIM pass threshold of `qc.video.quality_metric` (CCR-240) | — (unset in 3A, report only; set in 3B) |
+| ~~`qc.video.bitrate_target_min_bps`, `…_max_bps`, `…_floor_bps`~~ | withdrawn (CCR-240, ADR-014): the encoder target is `agent_10` data (`encode_targets.json`, INF-12) | — |
 | `qc.visual.tier_e_max_share` | max share of `E_AI_STILL` screen time | 0.50 (limit; stricter target —) |
 | `qc.visual.max_change_gap_ms` | cadence limit in explanatory stretches | 5000 (target window 3000–5000) |
 | `qc.hook.window_ms` | hook window | 30000 |
@@ -441,7 +443,7 @@ Check IDs of §2.3, §3, §5–§7 are values of the existing `check_id` field (
 ## 14. Open items (summary of REQUIRES REVIEW)
 1. Unsourced detector and tolerance values (§7): calibrate in 3B pilot.
 2. Chapter, end-screen, thumbnail and Shorts official specs (§3, §10, §12): add to RESEARCH_LOG (official YouTube help pages), then fill.
-3. 1440p bitrate target; mezzanine codec; container/faststart confirmation; colour tagging; closed-GOP verification method (§6).
+3. Encode targets other than 1080p (1440p, 4K, 9:16, fractional rates), the optional VBV cap and the GOP at a fractional half frame rate; mezzanine codec; colour tagging (§6). Container/faststart and closed-GOP verification are now sourced / specified (INF-13, `qc.video.encoder_settings`). SSIM / VMAF threshold of `qc.video.quality_metric` (3B).
 4. AI B-roll per-video budget, pilot budget, provider limits (owner inputs, 09).
 5. Pinned FFmpeg version (§7.0); watermark detector method (§7.10); forced-alignment tool for human narration (§7.6); frame-sampling procedure for synthetic-presenter check (§2.3).
 6. 3A metadata share of the rubric (§9.1.7) — **3A-BLOCKING**; self-grant licence rows for owner/code material (§2.2); in 3A treat the destination as monetized YouTube for licence checks.

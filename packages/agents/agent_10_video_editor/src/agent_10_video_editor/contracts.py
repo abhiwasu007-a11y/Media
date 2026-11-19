@@ -102,6 +102,36 @@ class ColourOut(_Strict):
     range: str
 
 
+class RateControlOut(_Strict):
+    """The configured rate control of the delivery encode (ADR-014): a target, not a floor."""
+
+    mode: Literal["ABR"]
+    target_bps: Annotated[int, Field(ge=1, strict=True)]
+    target_source: Annotated[str, StringConstraints(max_length=200)]
+    maxrate_bps: Annotated[int, Field(ge=1, strict=True)] | None
+    bufsize_bps: Annotated[int, Field(ge=1, strict=True)] | None
+    bframes: Annotated[int, Field(ge=0, strict=True)]
+    cabac: StrictBool
+    x264_preset: Annotated[str, StringConstraints(max_length=16)]
+    filler: Literal[False]
+
+
+class QualityMetricOut(_Strict):
+    """SSIM of the delivery encode against the lossless FFV1 reference of the same frames,
+    per segment, combined frame-weighted (ADR-014). VMAF only when the build has libvmaf."""
+
+    metric: Literal["SSIM"]
+    reference: Literal["FFV1_LOSSLESS_SEGMENT"]
+    ssim_all: Annotated[str, StringConstraints(pattern=r"^[01]\.[0-9]{6}$")] | None
+    ssim_min_segment: Annotated[str, StringConstraints(pattern=r"^[01]\.[0-9]{6}$")] | None
+    frames_measured: Annotated[int, Field(ge=0, strict=True)]
+    frames_total: Annotated[int, Field(ge=0, strict=True)]
+    vmaf: None = None
+    vmaf_status: Literal["LIBVMAF_NOT_IN_BUILD", "LIBVMAF_IN_BUILD_NOT_USED"]
+    """VMAF is not computed in 3A: the development build has no ``libvmaf`` (only
+    ``vmafmotion``); wiring it on a build that has it is REQUIRES REVIEW (ADR-014)."""
+
+
 class EncoderOut(_Strict):
     ffmpeg_build_id: Annotated[str, StringConstraints(max_length=128)]
     video_encoder: Annotated[str, StringConstraints(max_length=64)]
@@ -110,6 +140,8 @@ class EncoderOut(_Strict):
     gop: GopOut
     colour: ColourOut
     audio_bitrate_nominal_bps: Annotated[int, Field(ge=1, strict=True)]
+    rate_control: RateControlOut
+    quality_metric: QualityMetricOut
 
 
 class ProbeOut(_Strict):

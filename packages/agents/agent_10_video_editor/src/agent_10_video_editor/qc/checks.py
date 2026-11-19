@@ -15,6 +15,7 @@ from fractions import Fraction
 from typing import Any
 
 from agent_10_video_editor.qc.result import (
+    REMEDY,
     CheckResult,
     failed,
     passed,
@@ -70,16 +71,130 @@ def qc_video_pix_fmt(*, pix_fmt: str | None) -> CheckResult:
     )
 
 
-def qc_video_bitrate(
-    *, video_bitrate_bps: int, min_bps: int, max_bps: int, floor_bps: int
+def qc_video_encoder_settings(
+    *,
+    codec_name: str,
+    profile: str | None,
+    pix_fmt: str | None,
+    field_order: str | None,
+    r_frame_rate: Fraction | str,
+    level: int | None,
+    sei: Mapping[str, str] | None,
+    fps_num: int,
+    fps_den: int,
+    gop_frames: int,
+    bframes: int,
+    cabac: bool,
+    target_bps: int,
+    maxrate_bps: int | None,
+    bufsize_bps: int | None,
 ) -> CheckResult:
-    """18 section 6: below the floor FAIL; floor..min or above max WARN; min..max PASS."""
-    kw: dict[str, Any] = {"measured": video_bitrate_bps, "unit": "bps"}
-    if video_bitrate_bps < floor_bps:
-        return failed("qc.video.bitrate", threshold=floor_bps, **kw)
-    if video_bitrate_bps < min_bps or video_bitrate_bps > max_bps:
-        return warned("qc.video.bitrate", threshold=None, **kw)
-    return passed("qc.video.bitrate", threshold=floor_bps, **kw)
+    """ADR-014 (replaces the measured-bitrate floor): the delivered stream carries the settings
+    it was encoded with. Stream facts from ffprobe; rate control, B-frames, CABAC, GOP and filler
+    from the x264 SEI written into the stream. Any difference, or no SEI, is a blocking FAIL.
+    The H.264 level is reported only (no sourced value; REQUIRES REVIEW)."""
+    fps = Fraction(r_frame_rate) if isinstance(r_frame_rate, str) else r_frame_rate
+    bad: list[str] = []
+    if codec_name != "h264":
+        bad.append("codec_name")
+    if profile != "High":
+        bad.append("profile")
+    if pix_fmt != "yuv420p":
+        bad.append("pix_fmt")
+    if field_order != "progressive":
+        bad.append("field_order")
+    if fps != Fraction(fps_num, fps_den):
+        bad.append("fps")
+    want: dict[str, str] = {
+        "cabac": str(int(cabac)),
+        "bframes": str(bframes),
+        "open_gop": "0",
+        "interlaced": "0",
+        "keyint": str(gop_frames),
+        "rc": "abr",
+        "bitrate": str(target_bps // 1000),
+    }
+    if maxrate_bps is not None and bufsize_bps is not None:
+        want["vbv_maxrate"] = str(maxrate_bps // 1000)
+        want["vbv_bufsize"] = str(bufsize_bps // 1000)
+    if sei is None:
+        bad.append("x264_sei_missing")
+    else:
+        bad.extend(f"sei.{k}" for k, v in want.items() if sei.get(k) != v)
+        if maxrate_bps is None and sei.get("vbv_maxrate", "0") != "0":
+            bad.append("sei.vbv_maxrate")
+        if sei.get("filler", "0") != "0":
+            bad.append("sei.filler")
+        if sei.get("nal_hrd", "none") != "none":
+            bad.append("sei.nal_hrd")
+    measured = f"{codec_name}/{profile}/{pix_fmt}/{fps.numerator}/{fps.denominator}" + (
+        f"/rc={sei.get('rc')}/bitrate={sei.get('bitrate')}" if sei else "/no_sei"
+    )
+    return CheckResult(
+        "qc.video.encoder_settings",
+        CheckVerdict.PASS if not bad else CheckVerdict.FAIL,
+        True,
+        measured=measured,
+        threshold=f"h264/High/yuv420p/{fps_num}/{fps_den}/rc=abr/bitrate={target_bps // 1000}",
+        offending=tuple(bad),
+        remedy_stage_id=REMEDY["qc.video.encoder_settings"] if bad else None,
+        details={
+            "level": level,
+            "level_threshold": None,
+            "sei_core": sei.get("_core") if sei else None,
+            "expected_sei": want,
+        },
+    )
+
+
+def qc_video_quality_metric(
+    *,
+    ssim_all: str | None,
+    frames_measured: int,
+    frames_total: int,
+    min_ssim: str | None,
+    vmaf_status: str,
+) -> CheckResult:
+    """ADR-014: SSIM of the delivery encode against its lossless reference. REPORT ONLY in 3A:
+    the pass threshold ``qc.video.quality_min_ssim`` is unset until 3B, so the verdict is a
+    non-blocking WARN carrying the measured value; it never blocks the gate."""
+    details: dict[str, Any] = {
+        "report_only": True,
+        "metric": "SSIM",
+        "ssim_all": ssim_all,
+        "frames_measured": frames_measured,
+        "frames_total": frames_total,
+        "vmaf": None,
+        "vmaf_status": vmaf_status,
+    }
+    if ssim_all is None or frames_measured == 0:
+        return warned(
+            "qc.video.quality_metric",
+            threshold=None,
+            remedy_stage_id=None,
+            message="NOT_MEASURED: no segment has an SSIM value (report only)",
+            details=details,
+        )
+    measured = float(ssim_all)
+    if min_ssim is None:
+        return warned(
+            "qc.video.quality_metric",
+            measured=measured,
+            threshold=None,
+            remedy_stage_id=None,
+            message=f"REPORT_ONLY: SSIM {ssim_all}; threshold unset until 3B (ADR-014)",
+            details={**details, "threshold_status": "UNSET_UNTIL_3B"},
+        )
+    ok = Decimal(ssim_all) >= Decimal(min_ssim)
+    return CheckResult(
+        "qc.video.quality_metric",
+        CheckVerdict.PASS if ok else CheckVerdict.WARN,
+        False,
+        measured=measured,
+        threshold=float(min_ssim),
+        message=f"SSIM {ssim_all} vs {min_ssim} (non-blocking until 3B decides)",
+        details={**details, "threshold_status": "SET_NON_BLOCKING"},
+    )
 
 
 class CfrAnalyser:
