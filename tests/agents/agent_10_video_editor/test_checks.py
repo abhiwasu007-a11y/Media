@@ -47,7 +47,10 @@ SEI = {
 }
 SETTINGS: dict[str, Any] = {
     "codec_name": "h264", "profile": "High", "pix_fmt": "yuv420p", "field_order": "progressive",
-    "r_frame_rate": R, "level": 40, "sei": SEI, "fps_num": 30, "fps_den": 1, "gop_frames": 15,
+    "r_frame_rate": R, "level": 40, "has_b_frames": 2, "edit_list": False, "seis": [SEI, SEI],
+    "expected_segments": 2, "keyframes": [0, 15, 30, 45], "segment_starts": [0, 30],
+    "total_frames": 60, "settings_sha256_recorded": "a" * 64, "settings_sha256_measured": "a" * 64,
+    "fps_num": 30, "fps_den": 1, "gop_frames": 15,
     "bframes": 2, "cabac": True, "target_bps": 8_000_000, "maxrate_bps": None, "bufsize_bps": None,
 }  # fmt: skip
 
@@ -345,11 +348,24 @@ def test_atom_order_checker() -> None:
         ({"sei": {**SEI, "vbv_maxrate": "12000"}}, "sei.vbv_maxrate"),
         ({"r_frame_rate": Fraction(25)}, "fps"),
         ({"pix_fmt": "yuv444p"}, "pix_fmt"),
+        ({"seis": [SEI]}, "sei.count"),
+        ({"settings_sha256_measured": "b" * 64}, "sei.binding"),
+        ({"settings_sha256_recorded": None}, "sei.binding"),
+        ({"edit_list": True}, "container.edit_list"),
+        ({"edit_list": None}, "container.edit_list_unknown"),
+        ({"has_b_frames": 0}, "has_b_frames"),
+        ({"keyframes": [0, 30]}, "gop.interval"),
+        ({"keyframes": [0, 15, 29, 44]}, "gop.segment_start_not_key"),
+        ({"keyframes": [1, 15, 30, 45]}, "gop.first_not_key"),
+        ({"keyframes": None}, "gop.keyframes_unknown"),
     ],
 )
 def test_encoder_settings_fails_on_every_wrong_setting(
     change: dict[str, Any], offending: str
 ) -> None:
+    change = dict(change)
+    if "sei" in change:  # the FIRST segment is right, the second one is wrong
+        change["seis"] = [SEI, change.pop("sei")]
     result = C.qc_video_encoder_settings(**{**SETTINGS, **change})
     assert result.verdict is CheckVerdict.FAIL
     assert result.blocking
@@ -363,7 +379,7 @@ def test_encoder_settings_with_a_vbv_cap_and_level_reported_only() -> None:
     result = C.qc_video_encoder_settings(
         **{
             **SETTINGS,
-            "sei": sei,
+            "seis": [sei, sei],
             "maxrate_bps": 12_000_000,
             "bufsize_bps": 16_000_000,
             "level": 52,

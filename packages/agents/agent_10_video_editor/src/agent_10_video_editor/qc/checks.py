@@ -71,40 +71,16 @@ def qc_video_pix_fmt(*, pix_fmt: str | None) -> CheckResult:
     )
 
 
-def qc_video_encoder_settings(
+def x264_expected(
     *,
-    codec_name: str,
-    profile: str | None,
-    pix_fmt: str | None,
-    field_order: str | None,
-    r_frame_rate: Fraction | str,
-    level: int | None,
-    sei: Mapping[str, str] | None,
-    fps_num: int,
-    fps_den: int,
     gop_frames: int,
     bframes: int,
     cabac: bool,
     target_bps: int,
     maxrate_bps: int | None,
     bufsize_bps: int | None,
-) -> CheckResult:
-    """ADR-014 (replaces the measured-bitrate floor): the delivered stream carries the settings
-    it was encoded with. Stream facts from ffprobe; rate control, B-frames, CABAC, GOP and filler
-    from the x264 SEI written into the stream. Any difference, or no SEI, is a blocking FAIL.
-    The H.264 level is reported only (no sourced value; REQUIRES REVIEW)."""
-    fps = Fraction(r_frame_rate) if isinstance(r_frame_rate, str) else r_frame_rate
-    bad: list[str] = []
-    if codec_name != "h264":
-        bad.append("codec_name")
-    if profile != "High":
-        bad.append("profile")
-    if pix_fmt != "yuv420p":
-        bad.append("pix_fmt")
-    if field_order != "progressive":
-        bad.append("field_order")
-    if fps != Fraction(fps_num, fps_den):
-        bad.append("fps")
+) -> dict[str, str]:
+    """The x264 SEI options a delivery encode must carry (ADR-014)."""
     want: dict[str, str] = {
         "cabac": str(int(cabac)),
         "bframes": str(bframes),
@@ -117,32 +93,128 @@ def qc_video_encoder_settings(
     if maxrate_bps is not None and bufsize_bps is not None:
         want["vbv_maxrate"] = str(maxrate_bps // 1000)
         want["vbv_bufsize"] = str(bufsize_bps // 1000)
+    return want
+
+
+def sei_mismatches(sei: Mapping[str, str] | None, want: Mapping[str, str]) -> list[str]:
+    """Option names of one segment's x264 SEI that differ from ``want`` (no SEI: missing)."""
     if sei is None:
-        bad.append("x264_sei_missing")
+        return ["x264_sei_missing"]
+    bad = [f"sei.{k}" for k, v in want.items() if sei.get(k) != v]
+    if "vbv_maxrate" not in want and sei.get("vbv_maxrate", "0") != "0":
+        bad.append("sei.vbv_maxrate")
+    if sei.get("filler", "0") != "0":
+        bad.append("sei.filler")
+    if sei.get("nal_hrd", "none") != "none":
+        bad.append("sei.nal_hrd")
+    return bad
+
+
+def qc_video_encoder_settings(
+    *,
+    codec_name: str,
+    profile: str | None,
+    pix_fmt: str | None,
+    field_order: str | None,
+    r_frame_rate: Fraction | str,
+    level: int | None,
+    has_b_frames: int | None,
+    edit_list: bool | None,
+    seis: Sequence[Mapping[str, str] | None],
+    expected_segments: int,
+    keyframes: Sequence[int] | None,
+    segment_starts: Sequence[int],
+    total_frames: int,
+    settings_sha256_recorded: str | None,
+    settings_sha256_measured: str | None,
+    fps_num: int,
+    fps_den: int,
+    gop_frames: int,
+    bframes: int,
+    cabac: bool,
+    target_bps: int,
+    maxrate_bps: int | None,
+    bufsize_bps: int | None,
+) -> CheckResult:
+    """ADR-014 (replaces the measured-bitrate floor): the delivered stream carries the settings
+    it was encoded with, in EVERY segment.
+
+    Measured facts of the final file (ffprobe): codec, profile, pix_fmt, scan, frame rate,
+    ``has_b_frames``, no MP4 edit list (INF-13), and the GOP structure from the packet keyframe
+    flags (frame 0 and every segment start are keyframes; no keyframe interval above the GOP).
+    Declared settings: one x264 SEI per segment (count = segments of the render), each with the
+    expected rate control, B-frames, CABAC, closed GOP, keyint, VBV and no filler, bound to the
+    render by the hash the render recorded of each segment's SEI before the concat. The SEI is
+    self-declared by the encoder: rate-control values cannot be measured from the stream, which
+    is why the measured facts are checked next to it. Any difference = blocking FAIL. The H.264
+    level is reported only (no sourced value; REQUIRES REVIEW)."""
+    fps = Fraction(r_frame_rate) if isinstance(r_frame_rate, str) else r_frame_rate
+    bad: list[str] = []
+    if codec_name != "h264":
+        bad.append("codec_name")
+    if profile != "High":
+        bad.append("profile")
+    if pix_fmt != "yuv420p":
+        bad.append("pix_fmt")
+    if field_order != "progressive":
+        bad.append("field_order")
+    if fps != Fraction(fps_num, fps_den):
+        bad.append("fps")
+    if bframes > 0 and (has_b_frames is None or has_b_frames < 1):
+        bad.append("has_b_frames")
+    if edit_list is None:
+        bad.append("container.edit_list_unknown")
+    elif edit_list:
+        bad.append("container.edit_list")
+    if keyframes is None:
+        bad.append("gop.keyframes_unknown")
     else:
-        bad.extend(f"sei.{k}" for k, v in want.items() if sei.get(k) != v)
-        if maxrate_bps is None and sei.get("vbv_maxrate", "0") != "0":
-            bad.append("sei.vbv_maxrate")
-        if sei.get("filler", "0") != "0":
-            bad.append("sei.filler")
-        if sei.get("nal_hrd", "none") != "none":
-            bad.append("sei.nal_hrd")
+        keys = sorted(set(keyframes))
+        if not keys or keys[0] != 0:
+            bad.append("gop.first_not_key")
+        if any(start not in set(keys) for start in segment_starts):
+            bad.append("gop.segment_start_not_key")
+        gaps = [b - a for a, b in itertools.pairwise([*keys, total_frames])]
+        if any(gap > gop_frames for gap in gaps):
+            bad.append("gop.interval")
+    want = x264_expected(
+        gop_frames=gop_frames,
+        bframes=bframes,
+        cabac=cabac,
+        target_bps=target_bps,
+        maxrate_bps=maxrate_bps,
+        bufsize_bps=bufsize_bps,
+    )
+    if len(seis) != expected_segments:
+        bad.append("sei.count")
+    per_segment = [sei_mismatches(sei, want) for sei in seis]
+    for item in dict.fromkeys(m for ms in per_segment for m in ms):
+        bad.append(item)
+    if settings_sha256_recorded is None or settings_sha256_measured != settings_sha256_recorded:
+        bad.append("sei.binding")
+    first = seis[0] if seis else None
     measured = f"{codec_name}/{profile}/{pix_fmt}/{fps.numerator}/{fps.denominator}" + (
-        f"/rc={sei.get('rc')}/bitrate={sei.get('bitrate')}" if sei else "/no_sei"
+        f"/rc={first.get('rc')}/bitrate={first.get('bitrate')}/segments={len(seis)}"
+        if first
+        else "/no_sei"
     )
     return CheckResult(
         "qc.video.encoder_settings",
         CheckVerdict.PASS if not bad else CheckVerdict.FAIL,
         True,
         measured=measured,
-        threshold=f"h264/High/yuv420p/{fps_num}/{fps_den}/rc=abr/bitrate={target_bps // 1000}",
+        threshold=f"h264/High/yuv420p/{fps_num}/{fps_den}/rc=abr/bitrate={target_bps // 1000}"
+        f"/segments={expected_segments}",
         offending=tuple(bad),
         remedy_stage_id=REMEDY["qc.video.encoder_settings"] if bad else None,
         details={
             "level": level,
             "level_threshold": None,
-            "sei_core": sei.get("_core") if sei else None,
+            "has_b_frames": has_b_frames,
+            "edit_list": edit_list,
+            "sei_core": first.get("_core") if first else None,
             "expected_sei": want,
+            "segments_failing": [i for i, ms in enumerate(per_segment) if ms],
         },
     )
 

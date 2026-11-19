@@ -446,6 +446,7 @@ class FakeFfmpegRunner:
         )  # fmt: skip
         self.unreadable_inputs: set[str] = set()
         self.ssim_all = "0.990000"
+        self.ssim_pair_offset = 0
         self.strip_sei = False
         self._encodes = 0
         self._lock = threading.Lock()
@@ -482,11 +483,16 @@ class FakeFfmpegRunner:
             return ProcessResult(0, stdout=self.filters_text)
         if "-filter_complex" in argv:
             return self._encode("segment", argv, cwd, stop)
-        if "[0:v][1:v]ssim" in argv:
+        if "ssim=stats_file=-" in joined:
             self.calls.append(FakeCall("ssim", tuple(argv)))
             v = self.ssim_all
+            frames = self._header((cwd / argv[argv.index("-i") + 1]).read_bytes())["frames"]
+            every = int(m.group(1)) if (m := re.search(r"mod\(n,(\d+)\)", joined)) else 1
+            pairs = -(-frames // every) + self.ssim_pair_offset
+            lines = "".join(f"n:{i + 1} Y:{v} U:{v} V:{v} All:{v} (20.0)\n" for i in range(pairs))
             return ProcessResult(
                 0,
+                stdout=lines,
                 stderr=f"[Parsed_ssim_0 @ 0x0] SSIM Y:{v} (20.0) U:{v} (20.0) V:{v} (20.0) "
                 f"All:{v} (20.000000)\n",
             )
@@ -542,6 +548,7 @@ class FakeFfmpegRunner:
                 ],
                 "profile": argv[argv.index("-profile:v") + 1],
                 "sei": "" if self.strip_sei else _fake_sei(argv),
+                "gop": int(argv[argv.index("-g") + 1]),
             }
             ref = argv[-1]
             if ref != out_name:  # the lossless reference output of the same frames
@@ -558,7 +565,8 @@ class FakeFfmpegRunner:
                 "height": parts[0]["height"],
                 "colour": parts[0]["colour"],
                 "profile": parts[0].get("profile", "high"),
-                "sei": parts[0].get("sei", ""),
+                "seis": [p.get("sei", "") for p in parts],
+                "parts": [[p["frames"], p.get("gop", p["frames"])] for p in parts],
                 "segments": [p["argv"] for p in parts],
                 "duration": argv[argv.index("-t") + 1],
                 "audio_sha": sha256_hex(master),
@@ -578,13 +586,15 @@ class FakeFfmpegRunner:
         moov_body = FAKE_MAGIC + canonical_json(header) + b"\n"
         ftyp = (24).to_bytes(4, "big") + b"ftypisom" + b"\0" * 12
         moov = (len(moov_body) + 8).to_bytes(4, "big") + b"moov" + moov_body
-        options = str(header.get("sei", ""))
-        sei = (
-            f"x264 - core 0 fake - H.264/MPEG-4 AVC codec - options: {options}".encode()
-            if options
-            else b""
+        seis = header.get("seis", [header.get("sei", "")])
+        body = (
+            b"".join(
+                f"x264 - core 0 fake - H.264/MPEG-4 AVC codec - options: {o}".encode() + b"\0" * 8
+                for o in seis
+                if o
+            )
+            + b"\0" * 64
         )
-        body = sei + b"\0" * 64
         mdat = (len(body) + 8).to_bytes(4, "big") + b"mdat" + body
         return ftyp + (moov + mdat if self.faststart else mdat + moov)
 
@@ -623,6 +633,18 @@ class FakeFfmpegRunner:
                 "pict_type": "P" if self.bad_idr else "I",
             }
             return ProcessResult(0, stdout=json.dumps({"frames": [first]}))
+        if "packet=pts_time,flags" in text:
+            parts = head.get("parts", [[head["frames"], head.get("gop", head["frames"])]])
+            keys: set[int] = set()
+            at = 0
+            for frames, gop in parts:
+                keys.update(range(at, at + frames, gop))
+                at += frames
+            rows = [
+                f"{Decimal(i * den) / Decimal(num):.6f},{'K__' if i in keys else '___'}"
+                for i in range(head["frames"])
+            ]
+            return ProcessResult(0, stdout="\n".join(rows) + "\n")
         if "packet=pts_time" in text:
             rows = [f"{Decimal(i * den) / Decimal(num):.6f}" for i in range(head["frames"])]
             return ProcessResult(0, stdout="\n".join(rows) + "\n")

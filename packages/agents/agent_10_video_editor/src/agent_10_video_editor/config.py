@@ -62,8 +62,8 @@ class RenderConfig(_Cfg):
     """Only for a size / frame rate without a row in ``data/encode_targets.json`` (REQUIRES
     REVIEW); where a row exists the row is the target and a different value is refused."""
     video_maxrate_bps: Annotated[int, Field(ge=1, strict=True)] | None = None
-    """Optional VBV cap (PROPOSAL, REQUIRES REVIEW: INF-12 says no bitrate limit is required);
-    must be above the target, else x264 runs CBR."""
+    """VBV cap override; unset = the row's measured PROPOSAL cap (REQUIRES REVIEW, ADR-014
+    section 3.4); must be above the target, else x264 runs CBR."""
     video_bufsize_bps: Annotated[int, Field(ge=1, strict=True)] | None = None
     gop_frames: Annotated[int, Field(ge=1, strict=True)] | None = None
     """Derived as half the frame rate (INF-13); a set value must equal it."""
@@ -72,6 +72,14 @@ class RenderConfig(_Cfg):
     eta_ms_per_output_s: int | None = None
     drain_finish_max_ms: Annotated[int, Field(ge=0, strict=True)]
     colour: ColourTags = ColourTags()
+    aac_priming_samples: Annotated[int, Field(ge=0, strict=True)] = 1024
+    """``agent_10.render.aac_priming_samples``: encoder delay of the native AAC encoder, dropped
+    from the master because the MP4 has no edit list (INF-13). 1024 = MEASURED on FFmpeg 6.1.1
+    (click test, ADR-014 section 3.5); REQUIRES REVIEW (Phase 1): re-measure on the pinned build."""
+    quality_sample_every: Annotated[int, Field(ge=1, strict=True)] = 1
+    """``agent_10.render.quality_sample_every``: the lossless reference (and the SSIM) keep every
+    n-th frame; 1 = every frame (default, exact). Raise it to bound the FFV1 scratch size of long
+    noisy segments (ADR-014 section 4; REQUIRES REVIEW: value from the 3B pilot)."""
     x264_preset: str = "medium"
     """One of ``encode.X264_PRESETS_ALLOWED`` (never ``ultrafast``: Constrained Baseline)."""
     effect_lock_ms: Annotated[int, Field(ge=1, strict=True)] = 900_000

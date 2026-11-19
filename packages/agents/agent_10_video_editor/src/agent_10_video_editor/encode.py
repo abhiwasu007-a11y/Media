@@ -27,6 +27,9 @@ class EncodeTarget:
     fps: tuple[Fraction, ...]
     target_bps: int
     source: str
+    vbv_maxrate_bps: int | None = None
+    vbv_bufsize_bps: int | None = None
+    """Default VBV cap of the row: a measured PROPOSAL (REQUIRES REVIEW), see the data file."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +81,8 @@ def parse_table(raw: dict[str, Any]) -> EncodeTable:
                 fps=tuple(_fraction(f) for f in row["fps"]),
                 target_bps=int(row["target_bps"]),
                 source=str(row["source"]),
+                vbv_maxrate_bps=int(row["vbv"]["maxrate_bps"]) if "vbv" in row else None,
+                vbv_bufsize_bps=int(row["vbv"]["bufsize_bps"]) if "vbv" in row else None,
             )
             for row in raw["targets"]
         ),
@@ -148,6 +153,8 @@ def resolve(
         target, source = video_bitrate_bps, "OPERATOR_CONFIG (REQUIRES REVIEW: no INF-12 row)"
     else:
         raise ValueError("ENCODE_TARGET_REQUIRES_REVIEW")
+    if row is not None and video_maxrate_bps is None and video_bufsize_bps is None:
+        video_maxrate_bps, video_bufsize_bps = row.vbv_maxrate_bps, row.vbv_bufsize_bps
     if video_bufsize_bps is not None and video_maxrate_bps is None:
         raise ValueError("VBV_BUFSIZE_WITHOUT_MAXRATE")
     if video_maxrate_bps is not None:

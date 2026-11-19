@@ -63,8 +63,13 @@ from agent_10_video_editor.inputs import (
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
 from agent_10_video_editor.observability import LogContext, emit, labels
 from agent_10_video_editor.ports import RenderRow
-from agent_10_video_editor.probe import PacketParser, ProbeResult, SsimParser
-from agent_10_video_editor.qc.checks import a10_q_colour_tags, a10_q_gop_settings
+from agent_10_video_editor.probe import PacketParser, ProbeResult, SsimParser, X264SeiParser
+from agent_10_video_editor.qc.checks import (
+    a10_q_colour_tags,
+    a10_q_gop_settings,
+    sei_mismatches,
+    x264_expected,
+)
 from agent_10_video_editor.qc.result import CheckResult, passed, skipped
 from agent_10_video_editor.scope import ScratchDir, TenantScope, one_ref_per_schema
 from agent_10_video_editor.segments import (
@@ -204,7 +209,7 @@ def quality_metric(
 ) -> QualityMetricOut:
     """Frame-weighted mean of the per-segment SSIM ``All`` values (the mean over all frames up
     to the filter's 6-decimal rounding, as ``All`` is a per-frame mean) and the lowest segment."""
-    measured = [(Decimal(r.ssim_all), r.frames) for r in records if r.ssim_all is not None]
+    measured = [(Decimal(r.ssim_all), r.ssim_frames) for r in records if r.ssim_all is not None]
     frames = sum(n for _, n in measured)
     if frames == 0:
         mean = low = None
@@ -289,6 +294,7 @@ class _RenderRun:
         self.resumed = False
         self._audio_bps = 0
         self._vmaf_status: VmafStatus = "LIBVMAF_NOT_IN_BUILD"
+        self._settings_sha256: str | None = None
 
     def close(self) -> None:
         self.guard.disarm()
@@ -673,32 +679,26 @@ class _RenderRun:
             )
 
         limits = RunLimits(threads=self.d.cfg.render.threads)
-        try:
-            run_checked(self.d.runner, list(cmd.argv), cwd=work, limits=limits, stop=stop)
-        except AmwError as exc:
-            part.unlink(missing_ok=True)
-            if isinstance(exc, RenderCrashError):
-                self._raise_unreadable_asset(cmd, probe)
-            raise
-        except StopRequested:
-            part.unlink(missing_ok=True)
-            raise
         reference = work / cmd.reference_name
-        try:
-            self._verify_segment(part, segment, probe)
-            ssim_all = SsimParser.parse(
-                run_checked(
-                    self.d.runner,
-                    self.argv.ssim(part.name, reference.name),
-                    cwd=work,
-                    limits=limits,
-                ).stderr
-            )
-        except MeasurementUnavailable, RenderCrashError:
-            part.unlink(missing_ok=True)
-            raise
+        try:  # the FFV1 reference is scratch only: deleted on every path (ADR-014)
+            try:
+                run_checked(self.d.runner, list(cmd.argv), cwd=work, limits=limits, stop=stop)
+            except AmwError as exc:
+                part.unlink(missing_ok=True)
+                if isinstance(exc, RenderCrashError):
+                    self._raise_unreadable_asset(cmd, probe)
+                raise
+            except StopRequested:
+                part.unlink(missing_ok=True)
+                raise
+            try:
+                self._verify_segment(part, segment, probe)
+                ssim_all, ssim_frames = self._ssim(part, reference, segment, limits)
+            except MeasurementUnavailable, RenderCrashError:
+                part.unlink(missing_ok=True)
+                raise
         finally:
-            reference.unlink(missing_ok=True)  # scratch only: never stored (ADR-014)
+            reference.unlink(missing_ok=True)
         info = self.scope.put_file(self._free_uri(plan), part)
         part.unlink(missing_ok=True)
         for staged in cmd.inputs:
@@ -711,7 +711,27 @@ class _RenderRun:
             size_bytes=info.size_bytes,
             frames=segment.frames,
             ssim_all=ssim_all,
+            ssim_frames=ssim_frames,
         )
+
+    def _ssim(
+        self, part: Path, reference: Path, segment: Segment, limits: RunLimits
+    ) -> tuple[str | None, int]:
+        """SSIM of one segment and the number of frame pairs it covers. A pair count that is
+        not the number of sampled frames is reported as not measured (never a wrong value)."""
+        every = self.d.cfg.render.quality_sample_every
+        result = run_checked(
+            self.d.runner,
+            self.argv.ssim(part.name, reference.name, every),
+            cwd=part.parent,
+            limits=limits,
+        )
+        pairs = sum(1 for line in result.stdout.splitlines() if line.startswith("n:"))
+        expected = -(-segment.frames // every)
+        if pairs != expected:
+            self.warnings.append(f"SSIM_PAIR_COUNT:{segment.ordinal}:{pairs}/{expected}")
+            return None, 0
+        return SsimParser.parse(result.stderr), pairs
 
     def _check_sources_long_enough(self, cmd: SegmentCommand, probe: ProbeService) -> None:
         """A moving source shorter than the shot would be frozen by ``tpad=clone``: refuse it."""
@@ -762,10 +782,28 @@ class _RenderRun:
         est_ms: int,
     ) -> tuple[Any, ProbeResult, int]:
         names: list[str] = []
+        sei_hashes: list[str] = []
+        enc = self.d.cfg.render.encode
+        want = x264_expected(
+            gop_frames=enc.gop_frames,
+            bframes=enc.bframes,
+            cabac=enc.cabac,
+            target_bps=enc.target_bps,
+            maxrate_bps=enc.maxrate_bps,
+            bufsize_bps=enc.bufsize_bps,
+        )
         for record in records:
             name = f"seg_{record.ordinal}.mp4"
             self.scope.read_to(record.uri, record.sha256, work / name)  # CorruptedOutput -> retry
             names.append(name)
+            # every segment (encoded now, reused or adopted) carries the configured settings
+            texts = X264SeiParser.texts_in_file(work / name)
+            if len(texts) != 1 or sei_mismatches(X264SeiParser.parse_text(texts[0]), want):
+                raise RenderCrashError(
+                    "segment encoder settings differ", details={"ordinal": record.ordinal}
+                )
+            sei_hashes.append(sha256_hex(texts[0].encode()))
+        self._settings_sha256 = sha256_hex(canonical_json(sei_hashes))
         self.scope.read_to(
             loaded.audio.master.master_uri, loaded.audio.master.sha256, work / "master.wav"
         )
@@ -1019,6 +1057,7 @@ class _RenderRun:
                 quality_metric=quality_metric(
                     state.segments.values(), timeline.total_frames, self._vmaf_status
                 ),
+                settings_sha256=self._settings_sha256,
             ),
             probe=ProbeOut(
                 width_px=probe.video.width,
@@ -1095,6 +1134,11 @@ class _RenderRun:
         self.scope.read_to(row.storage_ref, row.content_sha256, final)
         result = probe_service.full(final.name)
         count = probe_service.packet_count(final.name)
+        # the final blob is bound to the renders row by its SHA-256 (registered after the
+        # per-segment settings checks of the original render)
+        self._settings_sha256 = sha256_hex(
+            canonical_json([sha256_hex(t.encode()) for t in X264SeiParser.texts_in_file(final)])
+        )
         target = target_frames_of(
             self.d.cfg.render.segment_target_ms, timeline.fps.num, timeline.fps.den
         )

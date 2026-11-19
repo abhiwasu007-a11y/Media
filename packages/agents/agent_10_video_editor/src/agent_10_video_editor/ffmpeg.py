@@ -289,7 +289,8 @@ class ArgvBuilder:
         # INF-13: closed GOP of half the frame rate, 2 consecutive B-frames, CABAC; INF-12 /
         # ADR-014: average-bitrate (VBR) rate control at the target, no filler (nal-hrd unset)
         x264 = (
-            f"keyint={enc.gop_frames}:min-keyint={enc.gop_frames}:scenecut=0:open-gop=0"
+            # (no min-keyint: x264 clamps it to keyint/2+1 whatever is asked; measured)
+            f"keyint={enc.gop_frames}:scenecut=0:open-gop=0"
             f":bframes={enc.bframes}:cabac={int(enc.cabac)}:threads={cfg.threads}"
         )
         rate = ["-b:v", str(enc.target_bps)]
@@ -297,8 +298,12 @@ class ArgvBuilder:
             rate += ["-maxrate", str(enc.maxrate_bps), "-bufsize", str(enc.bufsize_bps)]
         # the filtered frames go twice: to the delivery encode and to a lossless FFV1 reference
         # (the intermediate the quality metric compares against, ADR-014)
-        graph.append(f"[{current}]split=2[venc][vref]")
+        every = cfg.quality_sample_every
+        sampled = "" if every == 1 else f",select='not(mod(n,{every}))',setpts=N/FRAME_RATE/TB"
+        graph.append(f"[{current}]split=2[venc][vraw]")
+        graph.append(f"[vraw]null{sampled}[vref]")
         frames = str(slice_.segment.frames)
+        ref_frames = str(-(-slice_.segment.frames // every))
         argv = [
             self.ffmpeg_bin,
             "-hide_banner",
@@ -328,8 +333,6 @@ class ArgvBuilder:
             *rate,
             "-g",
             str(enc.gop_frames),
-            "-keyint_min",
-            str(enc.gop_frames),
             "-sc_threshold",
             "0",
             "-bf",
@@ -357,7 +360,7 @@ class ArgvBuilder:
             "-map",
             "[vref]",
             "-frames:v",
-            frames,
+            ref_frames,
             "-fps_mode",
             "cfr",
             "-r",
@@ -396,9 +399,17 @@ class ArgvBuilder:
             reference_name=REFERENCE_NAME,
         )
 
-    def ssim(self, encoded: str, reference: str) -> list[str]:
-        """SSIM of the delivery encode against its lossless reference (ffmpeg ``ssim`` filter;
-        the summary line ``SSIM Y:... All:<mean>`` goes to stderr)."""
+    def ssim(self, encoded: str, reference: str, sample_every: int = 1) -> list[str]:
+        """SSIM of the delivery encode against its lossless reference (ffmpeg ``ssim`` filter).
+
+        Both inputs are re-timed by frame index (``setpts=N/FRAME_RATE/TB``): the Matroska
+        reference has a 1 ms timebase and the MP4 an exact one, and the filter pairs frames by
+        timestamp, so without this it pairs some frames wrongly (review of PR #79). Per-frame
+        lines go to stdout (``stats_file=-``) so the caller can count the pairs; the summary
+        ``SSIM Y:... All:<mean>`` goes to stderr. ``sample_every`` > 1 selects every n-th frame
+        of the encode, as the reference was written."""
+        pick = "" if sample_every == 1 else f"select='not(mod(n,{sample_every}))',"
+        retime = "settb=AVTB,setpts=N/FRAME_RATE/TB"
         return [
             self.ffmpeg_bin,
             "-hide_banner",
@@ -413,7 +424,7 @@ class ArgvBuilder:
             "-i",
             reference,
             "-lavfi",
-            "[0:v][1:v]ssim",
+            f"[0:v]{pick}{retime}[a];[1:v]{retime}[b];[a][b]ssim=stats_file=-",
             "-f",
             "null",
             "-",
@@ -438,6 +449,16 @@ class ArgvBuilder:
             raise input_invalid("CODEC_PROFILE_UNSUPPORTED")
         colour = self._cfg.colour
         listing = "".join(f"file '{name}'\n" for name in segment_names)
+        # No edit lists (INF-13): the encoder's priming samples are no longer hidden by an audio
+        # edit list, so the same number of samples is dropped from the start of the master and
+        # the stream is cut to the video length (measured: a click at 500 ms then decodes at
+        # 500.42 ms and the audio duration equals the video; ADR-014 section 3.5)
+        priming = self._cfg.aac_priming_samples
+        total = duration_ms * codec_profile.sample_rate_hz // 1000
+        audio_filter = (
+            f"atrim=start_sample={priming},asetpts=N/SR/TB,apad,"
+            f"atrim=end_sample={max(total - priming, 0)}"
+        )
         argv = [
             self.ffmpeg_bin,
             "-hide_banner",
@@ -474,7 +495,7 @@ class ArgvBuilder:
             "-ac",
             str(codec_profile.channels),
             "-af",
-            "apad",
+            audio_filter,
             "-t",
             ms_to_seconds_text(duration_ms),
             "-color_primaries",
@@ -491,8 +512,12 @@ class ArgvBuilder:
             "+bitexact",
             "-flags:a",
             "+bitexact",
+            # INF-13: "No Edit Lists"; negative CTS offsets keep the first video frame at 0
+            # despite the B-frame delay (measured: without them video starts 2 frames late)
+            "-use_editlist",
+            "0",
             "-movflags",
-            "+faststart",
+            "+faststart+negative_cts_offsets",
             "-f",
             "mp4",
             "final.part",
@@ -569,6 +594,23 @@ class ArgvBuilder:
             "v:0",
             "-show_entries",
             "packet=pts_time",
+            "-of",
+            "csv=p=0",
+            name,
+        ]
+
+    def probe_packet_flags(self, name: str) -> list[str]:
+        """``pts_time,flags`` of every video packet (keyframe flag ``K``; GOP structure)."""
+        return [
+            self.ffprobe_bin,
+            "-v",
+            "error",
+            "-protocol_whitelist",
+            "file",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "packet=pts_time,flags",
             "-of",
             "csv=p=0",
             name,

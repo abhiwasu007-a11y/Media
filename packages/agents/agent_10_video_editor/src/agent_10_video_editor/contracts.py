@@ -142,6 +142,9 @@ class EncoderOut(_Strict):
     audio_bitrate_nominal_bps: Annotated[int, Field(ge=1, strict=True)]
     rate_control: RateControlOut
     quality_metric: QualityMetricOut
+    settings_sha256: Sha256 | None
+    """SHA-256 of the list of SHA-256s of each segment's x264 SEI, taken from the segment files
+    before the concat (after each was checked); QC recomputes it from the final file."""
 
 
 class ProbeOut(_Strict):

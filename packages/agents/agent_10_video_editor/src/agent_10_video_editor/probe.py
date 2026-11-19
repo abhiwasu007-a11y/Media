@@ -336,6 +336,23 @@ class PacketParser:
         return sum(1 for line in csv_text.splitlines() if line.strip() and line.strip() != "N/A")
 
 
+def keyframe_indices(csv_text: str) -> list[int]:
+    """Frame indices (presentation order) of the packets flagged ``K`` (``pts_time,flags``)."""
+    rows: list[tuple[Decimal, bool]] = []
+    for line in csv_text.splitlines():
+        parts = line.strip().split(",")
+        if len(parts) < 2 or parts[0] in ("", "N/A"):
+            continue
+        try:
+            rows.append((Decimal(parts[0]), "K" in parts[1]))
+        except InvalidOperation as exc:
+            raise MeasurementUnavailable(["packet_flags"]) from exc
+    if not rows:
+        raise MeasurementUnavailable(["packet_flags"])
+    rows.sort(key=lambda r: r[0])
+    return [i for i, (_, key) in enumerate(rows) if key]
+
+
 class AtomOrderChecker:
     """F-24 faststart: ``moov`` precedes ``mdat`` among the top-level boxes of the file head."""
 
@@ -398,32 +415,103 @@ class X264SeiParser:
     (measured on FFmpeg 6.1.1). Returns the option map, or ``None`` when no SEI is present."""
 
     @staticmethod
-    def find(data: bytes) -> dict[str, str] | None:
-        at = data.find(_X264_SEI)
-        if at < 0:
-            return None
-        end = data.find(b"\x00", at)
-        text = data[at : end if end >= 0 else at + 4096].decode("ascii", errors="replace")
+    def parse_text(text: str) -> dict[str, str] | None:
         if " options: " not in text:
             return None
-        options = text.split(" options: ", 1)[1]
-        parsed = dict(_X264_OPTIONS.findall(options))
-        core = text[len("x264 - core ") :].split(" - ", 1)[0]
-        parsed["_core"] = core
+        parsed = dict(_X264_OPTIONS.findall(text.split(" options: ", 1)[1]))
+        parsed["_core"] = text[len("x264 - core ") :].split(" - ", 1)[0]
         return parsed
 
     @staticmethod
-    def scan_file(path: Any, chunk: int = 1 << 20) -> dict[str, str] | None:
-        """Scan a file in chunks (with overlap) for the first SEI; bounded by the file size."""
-        tail = b""
+    def _text_at(data: bytes, at: int) -> str:
+        end = data.find(b"\x00", at)
+        return data[at : end if end >= 0 else at + 4096].decode("ascii", errors="replace")
+
+    @staticmethod
+    def find(data: bytes) -> dict[str, str] | None:
+        at = data.find(_X264_SEI)
+        return None if at < 0 else X264SeiParser.parse_text(X264SeiParser._text_at(data, at))
+
+    @staticmethod
+    def texts_in_file(path: Any, chunk: int = 1 << 20) -> list[str]:
+        """Every x264 SEI text in the file, in file order (one per encoded segment: each
+        segment is a separate encode and ``-c copy`` keeps its SEI). Chunked, with overlap."""
+        texts: list[str] = []
+        keep = 8192
+        offset = 0  # file offset of data[0]
+        data = b""
+        seen: set[int] = set()
         with open(path, "rb") as handle:
             while True:
                 block = handle.read(chunk)
-                if not block:
-                    return None
-                data = tail + block
+                data += block
                 at = data.find(_X264_SEI)
-                if at >= 0:
-                    rest = data[at:] + handle.read(8192)
-                    return X264SeiParser.find(rest)
-                tail = data[-len(_X264_SEI) :]
+                while at >= 0:
+                    if not block or len(data) - at >= keep:
+                        if offset + at not in seen:
+                            seen.add(offset + at)
+                            texts.append(X264SeiParser._text_at(data, at))
+                    else:
+                        break  # the text may continue in the next block
+                    at = data.find(_X264_SEI, at + 1)
+                if not block:
+                    return texts
+                cut = max(len(data) - keep, 0)
+                offset += cut
+                data = data[cut:]
+
+    @staticmethod
+    def scan_file(path: Any) -> dict[str, str] | None:
+        """The first SEI of the file (used by the self-test fixtures)."""
+        texts = X264SeiParser.texts_in_file(path)
+        return X264SeiParser.parse_text(texts[0]) if texts else None
+
+
+class EditListChecker:
+    """INF-13 "No Edit Lists": is there an ``edts`` box in any ``trak`` of ``moov``?"""
+
+    @staticmethod
+    def _boxes(data: bytes, start: int, end: int) -> list[tuple[str, int, int]]:
+        out: list[tuple[str, int, int]] = []
+        pos = start
+        while pos + 8 <= end:
+            size = int.from_bytes(data[pos : pos + 4], "big")
+            kind = data[pos + 4 : pos + 8].decode("latin-1")
+            head = 8
+            if size == 1:
+                size, head = int.from_bytes(data[pos + 8 : pos + 16], "big"), 16
+            elif size == 0:
+                size = end - pos
+            if size < head:
+                break
+            out.append((kind, pos + head, min(pos + size, end)))
+            pos += size
+        return out
+
+    @staticmethod
+    def has_edit_list(path: Any) -> bool:
+        with open(path, "rb") as handle:
+            pos = 0
+            while True:
+                handle.seek(pos)
+                header = handle.read(16)
+                if len(header) < 8:
+                    raise MeasurementUnavailable(["moov"])
+                size = int.from_bytes(header[:4], "big")
+                kind = header[4:8]
+                head = 8
+                if size == 1:
+                    size, head = int.from_bytes(header[8:16], "big"), 16
+                if size < head:
+                    raise MeasurementUnavailable(["mp4_boxes"])
+                if kind == b"moov":
+                    handle.seek(pos)
+                    moov = handle.read(size)
+                    break
+                pos += size
+        for name, start, end in EditListChecker._boxes(moov, head, len(moov)):
+            if name == "trak" and any(
+                k == "edts" for k, _, _ in EditListChecker._boxes(moov, start, end)
+            ):
+                return True
+        return False

@@ -276,8 +276,8 @@ Every `FINAL_VIDEO` approval requires at least one `editorial_contributions` row
 ## 4. Export and delivery presets
 | Preset key | Spec | Source |
 |---|---|---|
-| `yt_master_1080p` | 1920×1080 minimum, H.264 High profile, video 15–25 Mbps (target; YouTube's 1080p SDR recommendation is 8 Mbps, used as floor), constant frame rate equal to the source, closed GOP; audio AAC-LC 48 kHz stereo ≥ 384 kbps | §1A.4, §1A.5, INF-10 |
-| `yt_master_1440p` | 2560×1440 where render budget allows; H.264 High; bitrate target **REQUIRES REVIEW (18)** (YouTube's 1440p SDR recommendation 16 Mbps as floor, INF-10); audio as above | §1A.5, INF-10 |
+| `yt_master_1080p` | 1920×1080 minimum, H.264 High profile, video encoder TARGET 8 Mbps at 24–30 fps / 12 Mbps at 48–60 fps (YouTube's SDR 1080p recommendation, INF-12; VBR, not a measured floor, no filler; owner decision D10, ADR-014, CCR-240/241), constant frame rate equal to the source, closed GOP of half the frame rate, 2 B-frames, CABAC, MP4 faststart without edit lists (INF-13); audio AAC-LC 48 kHz stereo ≥ 384 kbps | §1A.4, §1A.5, INF-10, INF-12, INF-13 |
+| `yt_master_1440p` | 2560×1440 where render budget allows; H.264 High; bitrate target **REQUIRES REVIEW (18)** (INF-12 lists 16 / 24 Mbps as YouTube's 1440p SDR recommendation; D10 adopts the 1080p rows only, ADR-014); audio as above | §1A.5, INF-10 |
 | `srt_per_language` | one accurate SRT per language; optional burned-in styled captions | §1A.5 |
 | `shorts_9x16` | 9:16 vertical; resolution, maximum duration and bitrate **REQUIRES REVIEW (Phase 1): official Shorts upload specs not yet in RESEARCH_LOG** | §1A.8 |
 | `thumbnail_set` | up to 3 variants for the Studio A/B test (YT-08); size/format limits **REQUIRES REVIEW (Phase 1): thumbnail spec (YT-05 records a 50 MB maximum; dimensions not yet logged)** | YT-05, YT-08 |

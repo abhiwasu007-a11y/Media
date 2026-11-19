@@ -11,16 +11,19 @@ whenever the FFmpeg build ID changes; the record is stored and read by readiness
 from dataclasses import dataclass
 from pathlib import Path
 
+from agent_10_video_editor.canonical import canonical_json, sha256_hex
 from agent_10_video_editor.ffmpeg import ArgvBuilder, FfmpegRunner, RunLimits
 from agent_10_video_editor.media import run_checked
 from agent_10_video_editor.probe import (
     BlackdetectParser,
     Ebur128Parser,
+    EditListChecker,
     FreezedetectParser,
     ProbeParser,
     SilencedetectParser,
     SsimParser,
     X264SeiParser,
+    keyframe_indices,
 )
 from agent_10_video_editor.qc.checks import (
     qc_audio_silence_mix,
@@ -161,11 +164,12 @@ class QcSelfTest:
         # 8. encoder settings (ADR-014): the delivery settings pass; a Baseline encode at the
         # wrong frame rate fails; the SSIM against a lossless reference is measured (report only)
         moving = "testsrc2=size=320x180:rate=30"
-        x264 = "keyint=15:min-keyint=15:scenecut=0:open-gop=0:bframes=2:cabac=1:threads=1"
+        x264 = "keyint=15:scenecut=0:open-gop=0:bframes=2:cabac=1:threads=1"
         good = make(
             "settings.mp4", moving, f"{tone},volume=-20dB",
             "-r", "30", "-preset", "faster", "-profile:v", "high", "-b:v", "8000000",
-            "-bf", "2", "-x264-params", x264,
+            "-bf", "2", "-x264-params", x264, "-use_editlist", "0",
+            "-movflags", "+faststart+negative_cts_offsets",
         )  # fmt: skip
         bad = make(
             "baseline.mp4", moving, f"{tone},volume=-20dB",
@@ -209,6 +213,9 @@ def _case(name: str, expected: str, result: object) -> SelfTestCase:
 def _settings(runner: FfmpegRunner, b: ArgvBuilder, work: Path, name: str) -> object:
     res = run_checked(runner, b.probe_full(name), cwd=work, limits=RunLimits())
     video = ProbeParser.parse(res.stdout).video
+    flags = run_checked(runner, b.probe_packet_flags(name), cwd=work, limits=RunLimits())
+    texts = X264SeiParser.texts_in_file(work / name)
+    binding = sha256_hex(canonical_json([sha256_hex(t.encode()) for t in texts]))
     return qc_video_encoder_settings(
         codec_name=video.codec_name,
         profile=video.profile,
@@ -216,7 +223,15 @@ def _settings(runner: FfmpegRunner, b: ArgvBuilder, work: Path, name: str) -> ob
         field_order=video.field_order,
         r_frame_rate=video.r_frame_rate,
         level=video.level,
-        sei=X264SeiParser.scan_file(work / name),
+        has_b_frames=video.has_b_frames,
+        edit_list=EditListChecker.has_edit_list(work / name),
+        seis=[X264SeiParser.parse_text(t) for t in texts],
+        expected_segments=1,
+        keyframes=keyframe_indices(flags.stdout),
+        segment_starts=[0],
+        total_frames=30 * _DURATION_S,
+        settings_sha256_recorded=binding,
+        settings_sha256_measured=binding,
         fps_num=30,
         fps_den=1,
         gop_frames=15,

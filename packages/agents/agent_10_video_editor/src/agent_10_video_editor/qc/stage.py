@@ -54,6 +54,7 @@ from agent_10_video_editor.probe import (
     AtomOrderChecker,
     BlackdetectParser,
     Ebur128Parser,
+    EditListChecker,
     FreezedetectParser,
     PacketParser,
     ProbeResult,
@@ -68,6 +69,7 @@ from agent_10_video_editor.qc.gate import SHORTS_SKIPPED, GateAggregator, QcPlan
 from agent_10_video_editor.qc.result import CheckResult, failed, passed, skipped
 from agent_10_video_editor.qc.selftest import SelfTestRecord
 from agent_10_video_editor.scope import ScratchDir, TenantScope, one_ref_per_schema
+from agent_10_video_editor.segments import plan_segments, target_frames_of
 from agent_10_video_editor.subtitles import SrtParser, SrtValidator
 from agent_10_video_editor.taskio import (
     ACTOR,
@@ -131,7 +133,9 @@ class _Measured:
     blacks: list[tuple[int, int]] = field(default_factory=list)
     freezes: list[tuple[int, int]] = field(default_factory=list)
     scenes: list[int] = field(default_factory=list)
-    sei: dict[str, str] | None = None
+    sei_texts: list[str] = field(default_factory=list)
+    keyframes: list[int] | None = None
+    edit_list: bool | None = None
 
 
 def _spans_to_shots(
@@ -454,7 +458,9 @@ class _QcRun:
             m.packet_count = PacketParser.count(csv)
             m.moov_first = AtomOrderChecker.moov_first((work / "final.mp4").read_bytes()[: 1 << 20])
             m.stream_times = parse_stream_times(probe.stream_times_csv("final.mp4"))
-            m.sei = X264SeiParser.scan_file(work / "final.mp4")
+            m.sei_texts = X264SeiParser.texts_in_file(work / "final.mp4")
+            m.keyframes = probe.keyframes("final.mp4")
+            m.edit_list = EditListChecker.has_edit_list(work / "final.mp4")
         elif group == "qc.audio":
             m.ebur = Ebur128Parser.parse(self._run(self.argv.ebur128("final.mp4"), work).stderr)
             m.silences = SilencedetectParser.parse(
@@ -533,6 +539,10 @@ class _QcRun:
         )
         add(C.qc_video_pix_fmt(pix_fmt=pr.video.pix_fmt))
         enc = cfg.encode
+        segments = plan_segments(
+            timeline, target_frames_of(cfg.segment_target_ms, cfg.fps_num, cfg.fps_den)
+        )
+        encoder_out = self._render_out.get("encoder") or {}
         add(
             C.qc_video_encoder_settings(
                 codec_name=pr.video.codec_name,
@@ -541,7 +551,17 @@ class _QcRun:
                 field_order=pr.video.field_order,
                 r_frame_rate=pr.video.r_frame_rate,
                 level=pr.video.level,
-                sei=m.sei,
+                has_b_frames=pr.video.has_b_frames,
+                edit_list=m.edit_list,
+                seis=[X264SeiParser.parse_text(t) for t in m.sei_texts],
+                expected_segments=len(segments),
+                keyframes=m.keyframes,
+                segment_starts=[seg.start_frame for seg in segments],
+                total_frames=timeline.total_frames,
+                settings_sha256_recorded=encoder_out.get("settings_sha256"),
+                settings_sha256_measured=sha256_hex(
+                    canonical_json([sha256_hex(t.encode()) for t in m.sei_texts])
+                ),
                 fps_num=cfg.fps_num,
                 fps_den=cfg.fps_den,
                 gop_frames=enc.gop_frames,
@@ -552,7 +572,7 @@ class _QcRun:
                 bufsize_bps=enc.bufsize_bps,
             )
         )
-        quality = (self._render_out.get("encoder") or {}).get("quality_metric") or {}
+        quality = encoder_out.get("quality_metric") or {}
         add(
             C.qc_video_quality_metric(
                 ssim_all=quality.get("ssim_all"),
