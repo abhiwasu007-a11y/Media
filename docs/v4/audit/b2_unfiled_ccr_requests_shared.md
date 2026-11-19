@@ -1,5 +1,7 @@
 # Unfiled contract requests from the Wave B-2 shared documents (integrator pass B2-2)
 
+Status: **filed and decided** in `CONTRACT_CHANGE_REQUESTS.md` §4.7 (integrator pass 5, 2026-11-18): requests 1–40 (S-1…S-40) and part B → CCR-135…167 (mapping table there); part C → ticket P5-05 (§9). Kept as the lane's input record.
+
 Scope: docs 01, 02, 05, 06, 10, 11, 12, 14, 15, 16, 20, 22, 25 as integrated on branch `claude/v4-b2-shared`. None of these is in `CONTRACT_CHANGE_REQUESTS.md` (this lane may not edit it or any Wave A contract). Each line: `file:line | what | proposed text`. The documents write against the proposed names and mark them `(pending CCR)`; the `CCR-A`/`CCR-20-nn`-style labels inside the documents are local labels, not register IDs. Line numbers are those of the branch head and may shift.
 
 Requests already applied elsewhere were removed from the documents (CCR-3A-1/2/3 = CCR-003/006/043/017; `PILOT_TOTAL`/`PROVIDER` = CCR-035; `agent_04.knowledge_ingest` = CCR-014; `presenter_kind` = CCR-027; `Clock` Protocol exists as built).

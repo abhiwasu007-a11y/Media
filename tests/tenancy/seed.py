@@ -378,6 +378,15 @@ def _core(conn: Conn, w: World) -> None:
     ins(
         conn,
         w,
+        "review_codes",
+        with_id=False,
+        code=job.hex[-6:].upper(),
+        owner_kind="APPROVAL",
+        owner_id=w["approval"],
+    )
+    ins(
+        conn,
+        w,
         "dead_letter",
         task_id=tasks[1],
         job_id=job,
@@ -429,6 +438,26 @@ def _core(conn: Conn, w: World) -> None:
         segment_count=1,
         word_count=1,
         created_by_task_id=tasks[0],
+    )
+    ins(
+        conn,
+        w,
+        "claims",
+        "claim",
+        script_id=w["script"],
+        job_id=job,
+        segment_id="seg_1",
+        char_start=0,
+        char_end=1,
+        quote="q",
+        normalized_claim="q",
+        claim_type="FACTUAL",
+        time_reference_kind="TIMELESS",
+        status="EXTRACTED",
+        rule_flags=Jsonb([]),
+        proposed_verdict="NEEDS_HUMAN_REVIEW",
+        requires_citation=True,
+        extracted_by_task_id=tasks[0],
     )
     ins(
         conn,

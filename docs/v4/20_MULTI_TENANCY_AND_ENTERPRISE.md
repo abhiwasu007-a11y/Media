@@ -13,7 +13,7 @@
 
 ## 1. Purpose, boundary and the one rule [3A / 3C · Tier 0-3]
 
-This document specifies, item by item, the enterprise multi-tenant layer of the platform (directive §1C): what each item is, which tier it belongs to, which service owns it and how it is accepted. It does **not** redefine any contract: tables and columns are in `04`, enums and IDs in `GLOSSARY_AND_IDS.md`, the permission matrix in `08 §5.2`, the failure taxonomy in `07`. Where this document needs something that does not exist, it names it "(pending CCR)" and lists it in §19.
+This document specifies, item by item, the enterprise multi-tenant layer of the platform (directive §1C): what each item is, which tier it belongs to, which service owns it and how it is accepted. It does **not** redefine any contract: tables and columns are in `04`, enums and IDs in `GLOSSARY_AND_IDS.md`, the permission matrix in `08 §5.2`, the failure taxonomy in `07`. Where this document needs something that does not exist, it names it with its CCR number and lists it in §19.
 
 **The one rule (directive §1C, first paragraph).** Design for enterprise from day one (data model, isolation, audit, permissions); **build** enterprise features in tiers, each tier only when a paying client needs it (§1C.15). Retrofitting tenancy later is expensive; shipping unused enterprise features early is waste. In practice:
 
@@ -159,7 +159,7 @@ Limit values and weights are configuration; **REQUIRES REVIEW (Phase 1): 21 and 
 | ID | Criterion | Blocking | Scope · Tier |
 |---|---|---|---|
 | MT-3.1 | No code path in 3A requests a Google OAuth token or calls `videos.insert` (D1); a CI search for the client library import and the scope strings finds none | Yes | 3A |
-| MT-3.2 | A channel whose org is `CLIENT`/`AGENCY` cannot reach `CONNECTED` unless its `gcp_projects` row has `oauth_verification_status = PASSED` and `api_audit_status = PASSED` (guard (pending CCR), §19 CCR-20-02) | Yes | 3C · **Tier 1 gate** |
+| MT-3.2 | A channel whose org is `CLIENT`/`AGENCY` cannot reach `CONNECTED` unless its `gcp_projects` row has `oauth_verification_status = PASSED` and `api_audit_status = PASSED` (guard CCR-153, Proposed, deferred to 3C, §19 CCR-20-02) | Yes | 3C · **Tier 1 gate** |
 | MT-3.3 | Disconnect revokes at Google, wipes ciphertext, cancels queued publishes, writes audit entries | Yes | 3C · Tier 1 |
 | MT-3.4 | `REFRESH_FAILED` moves the channel to `NEEDS_REAUTH` and routes an L3 notification; no publish is attempted | Yes | 3C · Tier 1 |
 | MT-3.5 | A decrypt attempt by `amw_app` of `*_ct` columns fails at the grant level; ciphertext copied to another org or column fails AEAD authentication (`08 §6.2`) | Yes | 3C · Tier 1 |
@@ -191,9 +191,9 @@ Limit values and weights are configuration; **REQUIRES REVIEW (Phase 1): 21 and 
 |---|---|---|
 | Role model, permission checks server-side, tenant context | **3A · T0** (only the owner is a human user; the matrix is enforced so 3C adds users without rewriting checks, `08 §5.2` rule 4) | 08 |
 | Email + password with MFA, Google sign-in, organisation invites | design T0; **live 3C · Tier 1** (mechanics: ADR-003, REQUIRES REVIEW) | §1C.4, 08 §5.5 |
-| Org MFA enforcement | Tier 1; storage of the org-level flag: (pending CCR) §19 CCR-20-03 (04 holds only `users.mfa_enrolled`) | |
+| Org MFA enforcement | Tier 1; storage of the org-level flag: CCR-154 (Proposed, deferred to 3C) §19 CCR-20-03 (04 holds only `users.mfa_enrolled`) | |
 | Client Guest tokens | Tier 1 | 08 §5.4 |
-| SAML 2.0 / OIDC SSO per organisation, SCIM, domain verification, session policies, IP allow-list | **Tier 3** (`org_sso_connections`, `org_domains`; allow-list storage pending CCR in 08 §14 item 8) | 08 §7 |
+| SAML 2.0 / OIDC SSO per organisation, SCIM, domain verification, session policies, IP allow-list | **Tier 3** (`org_sso_connections`, `org_domains`; allow-list storage exists: `org_controls.ip_allowlist`, 04 §5.1, CCR-154) | 08 §7 |
 
 Separation of duty (`08 §5.2` rule 3): the user who requests a spend increase or policy exception cannot be its only approver; an agent can never be an `approval.decide` actor.
 
@@ -205,7 +205,7 @@ Separation of duty (`08 §5.2` rule 3): the user who requests a spend increase o
 | MT-4.2 | A user of org A requesting org B's job/asset/audit by ID receives not-found (no existence oracle) and the attempt is logged | Yes | 3A · T0 |
 | MT-4.3 | Membership removal revokes sessions and guest tokens in the same transaction | Yes | 3C · Tier 1 |
 | MT-4.4 | A `CLIENT_GUEST` cannot read another channel's rows or an unassigned item (14 S11 criterion 3) | Yes | 3C · Tier 1 |
-| MT-4.5 | `PLATFORM_OWNER` cannot read client tenant content without an active, time-boxed, audited support grant; the grant and every access are in the **client's** audit chain | Yes | 3C · Tier 1 (table pending CCR §19 CCR-20-01) |
+| MT-4.5 | `PLATFORM_OWNER` cannot read client tenant content without an active, time-boxed, audited support grant; the grant and every access are in the **client's** audit chain | Yes | 3C · Tier 1 (table: CCR-151, needs owner Q-O18, §19 CCR-20-01) |
 | MT-4.6 | With enforced SSO, password login for that org's members is refused; break-glass path exists and is audited (policy ⚖) | Yes | 3C · Tier 3 |
 | MT-4.7 | SCIM deprovisioning suspends the membership, revokes sessions and API keys, writes audit entries (`08 §7.2`) | Yes | 3C · Tier 3 |
 
@@ -246,7 +246,7 @@ Limits stated honestly (`08 §9.3` item 3): a hash chain proves internal consist
 
 | Feature (directive §1C.6) | What it is | Tier | Data |
 |---|---|---|---|
-| Onboarding wizard | Steps: connect channel, brand kit (logo, colours, fonts, lower-thirds, intro/outro, voice, tone rules, banned words), niche/topics, compliance profile, approval workflow, budget | **Tier 2** (Tier 1: the owner onboards the first client by hand with the same records) | existing tables; wizard progress storage (pending CCR §19 CCR-20-04) |
+| Onboarding wizard | Steps: connect channel, brand kit (logo, colours, fonts, lower-thirds, intro/outro, voice, tone rules, banned words), niche/topics, compliance profile, approval workflow, budget | **Tier 2** (Tier 1: the owner onboards the first client by hand with the same records) | existing tables; wizard progress storage (CCR-155, Proposed, deferred to 3C, §19 CCR-20-04) |
 | Content calendar | Per-channel calendar of planned/approved/scheduled items | Tier 1 (read-only view) / Tier 2 | `projects`, `jobs`, `publications` |
 | Script and video review with time-coded comments | Reviewer comments tied to a version and a timecode | **Tier 2** (`review_comments`, 04 §5.23). At Tier 1 a reviewer's comment is the `comment` of the approval step | `review_comments` |
 | Multi-step approvals | Client reviewer → client final approver (`workflow_key = client_two_step`, S7) | **Tier 1** (managed service, `approvals.managed_service = true`) | `approvals`, `approval_steps` |
@@ -333,7 +333,7 @@ Rules (directive §1C.7): tenants may **add** rules and packs, never remove or w
 
 | Requirement (directive §1C.9) | Design |
 |---|---|
-| Metering from S4 | A scheduled system job rolls `cost_ledger` into `usage_events` (meters `VIDEOS`, `VIDEO_MINUTES`, `RENDER_MINUTES`, `AI_SPEND`, `STORAGE_BYTES`); rollup is idempotent; `CREDITS` meter is a gap (pending CCR in 21) |
+| Metering from S4 | A scheduled system job rolls `cost_ledger` into `usage_events` (meters `VIDEOS`, `VIDEO_MINUTES`, `RENDER_MINUTES`, `AI_SPEND`, `STORAGE_BYTES`); rollup is idempotent; `CREDITS` meter or derived credits: CCR-165, needs owner Q-O21 (21 §14) |
 | Plans and credits | `plans.limits` is the single source for admission checks (05 §7.1); plan families P1/P2/P3 are in 21 |
 | Invoices with Indian GST | `invoices.amount_minor` + `tax_minor`, unique number per org; GST registration, rates and invoice content: **REQUIRES REVIEW (Phase 1): chartered accountant / owner's lawyer ⚖** (17 §13.2 C4) |
 | Payment gateway adapter | ADR-010 (not written): Indian gateway first, international later; adapter behind an interface, no provider hard-coded |
@@ -533,9 +533,9 @@ The same table is kept in `17_BUSINESS_PLAN.md` §11 (directive §1C.15: "write 
 
 ---
 
-## 19. Contract requests (pending CCR; not edited into Wave A or B-1 here)
+## 19. Contract requests (filed in CONTRACT_CHANGE_REQUESTS.md §4.7, pass 5; not edited into Wave A or B-1 here)
 
-Proposed names are marked "(pending CCR)" wherever used above. They are listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md); final CCR numbers are assigned when the integrator files them. The IDs `CCR-20-nn` used in this document are local labels, not register IDs.
+Proposed names carry their CCR number wherever used above; all are filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5): CCR-20-01 → CCR-151 (needs owner, Q-O18), CCR-20-02 → CCR-153, CCR-20-03 → CCR-154, CCR-20-04 → CCR-155, CCR-20-05 → CCR-156 (deferred to 3C), CCR-20-06 and CCR-20-08 (`tier.gate_opened`) → CCR-150 (names registered by this document per 08 §9.2), CCR-20-07 → CCR-157 (deferred to 3C). The IDs `CCR-20-nn` used in this document are local labels, not register IDs.
 
 | Request | Needed | Reason | Proposed change | Target |
 |---|---|---|---|---|
