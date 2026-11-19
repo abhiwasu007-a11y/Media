@@ -242,7 +242,9 @@ def test_bad_subtitle_refused(tmp_path: Path) -> None:
     w = World(tmp_path)
     inputs = w.inputs()
     subs = (
-        inputs.subtitles[0].model_copy(update={"ref": w.put("renders/subs-bad.srt", b"no cues here")}),
+        inputs.subtitles[0].model_copy(
+            update={"ref": w.put("renders/subs-bad.srt", b"no cues here")}
+        ),
         inputs.subtitles[1],
     )
     _fails(tmp_path, w, InputInvalidError, subtitles=subs)

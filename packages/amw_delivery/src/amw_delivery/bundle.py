@@ -290,7 +290,12 @@ def _build(
     zip_path = out_dir / f"bundle_{inputs.job_id}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
         for name in [f.name for f in files] + ["manifest.json"]:
-            zf.write(out_dir / name, arcname=name)
+            # fixed timestamp and mode: the same inputs give the same zip bytes, so a retried
+            # delivery attempt finds identical bytes in the write-once store
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.external_attr = 0o644 << 16
+            with (out_dir / name).open("rb") as src, zf.open(info, "w", force_zip64=True) as dst:
+                shutil.copyfileobj(src, dst, _CHUNK)
     zbuf = hashlib.sha256()
     with zip_path.open("rb") as fh:
         while chunk := fh.read(_CHUNK):

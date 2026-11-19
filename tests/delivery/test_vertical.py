@@ -1,5 +1,6 @@
 """9:16 cut with REAL FFmpeg on tiny synthetic inputs (no network, no paid call)."""
 
+import itertools
 import json
 import subprocess
 from pathlib import Path
@@ -171,13 +172,15 @@ def test_derived_gop_needs_no_operator_value() -> None:
 def test_output_follows_the_encode_policy(tmp_path: Path) -> None:
     """x264 High, 2 B-frames, CABAC, GOP of half the rate (12 at 25 fps, operator value), VBV."""
     src = make_mp4(tmp_path / "in.mp4", seconds=3)
-    spec = SMALL.model_copy(update={"video_maxrate_bps": 12_000_000, "video_bufsize_bps": 16_000_000})
+    spec = SMALL.model_copy(
+        update={"video_maxrate_bps": 12_000_000, "video_bufsize_bps": 16_000_000}
+    )
     out = tmp_path / "o.mp4"
     make_9x16(src, out, spec)
     res = subprocess.run(  # noqa: S603
-        ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_frames",
-         "-select_streams", "v:0", "-show_entries",
-         "stream=profile,has_b_frames:frame=pict_type,key_frame", str(out)],  # noqa: S607
+        [vertical._tool("ffprobe"), "-v", "error", "-print_format", "json",
+         "-show_streams", "-show_frames", "-select_streams", "v:0", "-show_entries",
+         "stream=profile,has_b_frames:frame=pict_type,key_frame", str(out)],
         capture_output=True, text=True, check=True, timeout=60,
     )  # fmt: skip
     data = json.loads(res.stdout)
@@ -187,5 +190,5 @@ def test_output_follows_the_encode_policy(tmp_path: Path) -> None:
     assert "B" in types
     keys = [i for i, f in enumerate(data["frames"]) if f["key_frame"] == 1]
     assert len(keys) > 1
-    assert max(b - a for a, b in zip(keys, keys[1:], strict=False)) <= 12
+    assert max(b - a for a, b in itertools.pairwise(keys)) <= 12
     assert b"elst" not in out.read_bytes()  # no edit lists (INF-13)
