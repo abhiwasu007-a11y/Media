@@ -215,7 +215,7 @@ def tenant_facts(ctx: StepContext) -> TenantFacts:
 
 
 def disclaimer() -> DisclaimerTemplate:
-    d = get_disclaimer("v0")
+    d = get_disclaimer("v1")
     return DisclaimerTemplate("amw-blob://platform/tpl/disclaimer.json", d.version, d.text)
 
 
