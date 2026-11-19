@@ -15,6 +15,7 @@ members = [
     "agent-16-compliance-qa",
     "amw-adapters",
     "amw-core",
+    "amw-delivery",
     "amw-evals",
     "amw-media-factory",
     "amw-orchestrator",
@@ -173,6 +174,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "amw-delivery"
+version = "0.0.0"
+source = { editable = "packages/amw_delivery" }
+dependencies = [
+    { name = "amw-adapters" },
+    { name = "amw-core" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "amw-adapters", editable = "packages/amw_adapters" },
+    { name = "amw-core", editable = "packages/amw_core" },
+]
+
+[[package]]
 name = "amw-evals"
 version = "0.0.0"
 source = { editable = "packages/amw_evals" }
@@ -199,6 +215,7 @@ dependencies = [
     { name = "agent-16-compliance-qa" },
     { name = "amw-adapters" },
     { name = "amw-core" },
+    { name = "amw-delivery" },
     { name = "amw-evals" },
     { name = "amw-orchestrator" },
     { name = "amw-runtime" },
@@ -228,6 +245,7 @@ requires-dist = [
     { name = "agent-16-compliance-qa", editable = "packages/agents/agent_16_compliance_qa" },
     { name = "amw-adapters", editable = "packages/amw_adapters" },
     { name = "amw-core", editable = "packages/amw_core" },
+    { name = "amw-delivery", editable = "packages/amw_delivery" },
     { name = "amw-evals", editable = "packages/amw_evals" },
     { name = "amw-orchestrator", editable = "packages/amw_orchestrator" },
     { name = "amw-runtime", editable = "packages/amw_runtime" },
