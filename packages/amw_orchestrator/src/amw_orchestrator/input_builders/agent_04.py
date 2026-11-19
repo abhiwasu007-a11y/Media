@@ -3,16 +3,16 @@
 Facts come from the job only: the owner topic (copied unchanged), the channel category
 (``finance`` / ``non_finance``, CCR-273: unset or unknown = finance) and the rule packs that follow
 from it (24 ``rule_packs``: ``rp.youtube_general`` always, ``rp.finance_sebi_in`` only for finance).
-A revision iteration needs the prior pack reference and the gap list; until those are mapped
-(listed in the PR) it is refused with a typed error rather than guessed.
+A revision iteration needs the prior pack reference and the gap list. agent_04 section 7.1 leaves
+the mapping of Agent 06 reason codes to the four gap reasons to "the Agent 01 blueprint", which is
+not in the repository: the revision stays refused with a typed error (CCR-280, no mapping invented).
 """
 
 from amw_core.errors import InputInvalidError
 from amw_orchestrator.executor import BuildContext, BuiltInput
+from amw_orchestrator.input_builders import common as c
 
 PAYLOAD_SCHEMA = "agent_04.research_pack.input"
-YOUTUBE_GENERAL = "rp.youtube_general"
-FINANCE_SEBI_IN = "rp.finance_sebi_in"
 
 
 class ResearchPackBuilder:
@@ -23,7 +23,6 @@ class ResearchPackBuilder:
                 details={"stage_id": ctx.stage.stage_id},
             )
         topic = ctx.job.owner_topic
-        finance = ctx.job.finance_rules_apply
         data = {
             "topic": {
                 "title": topic.title,
@@ -36,7 +35,7 @@ class ResearchPackBuilder:
                 else None,
             },
             "channel_category": ctx.job.channel_category.value,
-            "active_rule_packs": [YOUTUBE_GENERAL, *([FINANCE_SEBI_IN] if finance else [])],
+            "active_rule_packs": c.active_rule_packs(ctx.job),
             "library_scope": {"collection_keys": None},
             "owner_references": [r.to_doc() for r in topic.owner_references],
             "revision": None,

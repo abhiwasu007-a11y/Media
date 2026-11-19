@@ -41,7 +41,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from amw_core.contracts import (
     ResourceBudget,
@@ -105,6 +105,8 @@ from amw_core.state_machine.machine import TaskView
 from amw_orchestrator.executor import (
     ApprovalDesk,
     BuildContext,
+    BuildServices,
+    DocRef,
     JobFacts,
     PreparedTask,
     TaskExecutor,
@@ -188,6 +190,32 @@ class RunReport:
     detail: str = ""
 
 
+class _RunServices:
+    """``BuildServices`` of one build: documents are read from the job's own storage through the
+    tenancy-scoped ``TaskIo``; the cost report and the delivery policy values come from the
+    runtime's services, and a build that needs them without any refuses (fail closed)."""
+
+    def __init__(self, io: TaskIo, ctx: TenantContext, extra: BuildServices | None) -> None:
+        self._io, self._ctx, self._extra = io, ctx, extra
+
+    def read_json(self, uri: str, sha256: str) -> Mapping[str, Any]:
+        return self._io.get_json(self._ctx, uri, sha256)
+
+    def payload_document(self, job: JobFacts, output: TaskOutput) -> DocRef:
+        stored = self._io.put_payload(self._ctx, job.job_id, output)
+        return DocRef(stored.uri, stored.sha256)
+
+    def cost_report(self, job: JobFacts) -> Mapping[str, Any]:
+        if self._extra is None:
+            raise MissingDependencyError("no cost report service is configured")
+        return self._extra.cost_report(job)
+
+    def delivery_facts(self, job: JobFacts) -> Mapping[str, Any]:
+        if self._extra is None:
+            raise MissingDependencyError("no delivery facts service is configured")
+        return self._extra.delivery_facts(job)
+
+
 class GraphRunner:
     def __init__(
         self,
@@ -203,6 +231,7 @@ class GraphRunner:
         config: RunnerConfig,
         task_io: TaskIo,
         spend: SpendReader | None = None,
+        build_services: BuildServices | None = None,
         require_per_video: Callable[[TenantTransaction, str, str], object] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -210,6 +239,7 @@ class GraphRunner:
         self._x, self._desk, self._budgets = executor, approvals, budgets
         self._cal, self._cfg, self._now = calendar, config, clock
         self._io, self._spend, self._per_video = task_io, spend, require_per_video
+        self._build_services = build_services
         self._feedback: dict[str, tuple[ValidationResult, ...]] = {}
         self._feedback_src: dict[str, str] = {}
         self._max_loops = 3
@@ -568,6 +598,7 @@ class GraphRunner:
             prior_output=prior.output if prior is not None else None,
             revision_feedback=tuple(self._feedback.get(stage.stage_id, ())),
             revision_source_stage_id=self._feedback_src.get(stage.stage_id),
+            services=_RunServices(self._io, self._ctx(job), self._build_services),
         )
 
     def _run_task(

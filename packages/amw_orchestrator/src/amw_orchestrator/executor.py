@@ -63,6 +63,41 @@ def resolve_channel_category(raw: str | None) -> ChannelCategory:
 
 
 @dataclass(frozen=True, slots=True)
+class DocRef:
+    """A stored document by reference: tenant-scoped URI and the SHA-256 of its bytes."""
+
+    uri: str
+    sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class RulePackDoc:
+    """One active rule pack at its version (24 ``rule_packs``): its row ID, version and document."""
+
+    rule_pack_id: str
+    version: int
+    doc: DocRef
+
+
+@dataclass(frozen=True, slots=True)
+class JobDocuments:
+    """Job-level documents and facts that are neither job columns nor stage outputs (CCR-278
+    PROPOSED): the brand kit, the compliance profile, the rule packs, the disclaimer template, the
+    voice and its pronunciation dictionary, the uniqueness template. Job intake fills them from
+    the channel, the brand kit and the voice rows; a builder that needs one that is absent refuses
+    with ``MISSING_DEPENDENCY`` (fail closed), it never invents a value."""
+
+    brand_kit: DocRef | None = None
+    compliance_profile: DocRef | None = None
+    rule_packs: Mapping[str, RulePackDoc] = field(default_factory=dict)
+    """Rule pack key (``rp.youtube_general``, ...) -> the pack."""
+    disclaimer_template: DocRef | None = None
+    voice_id: str | None = None
+    voice_dictionary: DocRef | None = None
+    uniqueness_template: DocRef | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class JobFacts:
     """What the builders may know about the job (IDs are wire IDs)."""
 
@@ -80,10 +115,33 @@ class JobFacts:
     currency: str
     channel_category: ChannelCategory = ChannelCategory.FINANCE
     """Fail-closed default: a job built without an explicit category is a finance job."""
+    documents: JobDocuments = field(default_factory=JobDocuments)
 
     @property
     def finance_rules_apply(self) -> bool:
         return self.channel_category is ChannelCategory.FINANCE
+
+
+@runtime_checkable
+class BuildServices(Protocol):
+    """What a builder may read besides the job facts and the upstream outputs (never a worker).
+
+    ``read_json`` is a hash-verified read of a stored document (a typed error when it is missing
+    or does not match); ``cost_report`` and ``delivery_facts`` are the S4 ledger report of the job
+    and the policy values of the delivery bundle (banner, disclaimer text, limits), which belong
+    to the runtime lane and are never decided here."""
+
+    def read_json(self, uri: str, sha256: str) -> Mapping[str, Any]: ...
+
+    def payload_document(self, job: JobFacts, output: TaskOutput) -> DocRef: ...
+
+    # ``payload_document``: the payload of an upstream output as a write-once document (verbatim,
+    # never rewritten) for a consumer whose contract reads a producer's payload by reference
+    # (agent_10 section 7.1, CCR-279 PROPOSED).
+
+    def cost_report(self, job: JobFacts) -> Mapping[str, Any]: ...
+
+    def delivery_facts(self, job: JobFacts) -> Mapping[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +162,7 @@ class BuildContext:
     """The previous iteration's output of this stage (24 section 3.3 rule 6, ``PRIOR_OUTPUT``)."""
     revision_feedback: tuple[ValidationResult, ...] = ()
     revision_source_stage_id: str | None = None
+    services: BuildServices | None = None
 
     def upstream_output(self, stage_id: str) -> TaskOutput:
         out = self.upstream.get(stage_id)

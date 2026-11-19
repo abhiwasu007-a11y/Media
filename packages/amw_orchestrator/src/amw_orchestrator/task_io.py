@@ -16,7 +16,7 @@ from amw_core.errors import MissingDependencyError
 from amw_core.ids import AttemptId, JobId, OrgId, TaskId
 from amw_core.interfaces import BlobStorage, TenantContext
 from amw_core.interfaces.storage import BlobUri
-from amw_core.tenancy.storage_paths import task_io_uri
+from amw_core.tenancy.storage_paths import task_artifact_uri, task_io_uri
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +53,38 @@ class TaskIo:
             OrgId(ctx.org_id), JobId(job), TaskId(task), AttemptId(attempt), "output.json"
         )
         return self._put(ctx, uri, doc.to_doc())
+
+    def put_payload(self, ctx: TenantContext, job: str, output: TaskOutput) -> StoredDoc:
+        """Write-once verbatim copy of an output's payload next to its artifacts (path from the
+        core builder; task and attempt are those of the output's own artifact refs)."""
+        if output.payload is None or output.payload.data is None or not output.output_refs:
+            raise MissingDependencyError("output has no payload document to reference")
+        parts = output.output_refs[0].uri.split("/tasks/", 1)[1].split("/")
+        task, attempt = parts[0], parts[2]
+        uri = task_artifact_uri(
+            OrgId(ctx.org_id), JobId(job), TaskId(task), AttemptId(attempt), "payload.json"
+        )
+        doc = dict(output.payload.data)
+        head = self._s.head(ctx, BlobUri(uri))
+        if head.exists and head.sha256 == hashlib.sha256(_bytes(doc)).hexdigest():
+            return StoredDoc(uri, head.sha256)  # replay: the same verbatim copy already exists
+        return self._put(ctx, uri, doc)
+
+    def get_json(self, ctx: TenantContext, uri: str, sha256: str) -> dict[str, object]:
+        """Hash-verified read of one stored JSON document (an input builder's read, CCR-203);
+        a missing, mismatching or non-object blob is ``MISSING_DEPENDENCY``."""
+        if not uri or not sha256:
+            raise MissingDependencyError("a referenced document has no uri or hash")
+        raw = b"".join(self._s.get(ctx, BlobUri(uri), sha256))
+        if hashlib.sha256(raw).hexdigest() != sha256:
+            raise MissingDependencyError("a referenced document does not match its hash")
+        try:
+            doc = json.loads(raw)
+        except ValueError:
+            raise MissingDependencyError("a referenced document is not JSON") from None
+        if not isinstance(doc, dict):
+            raise MissingDependencyError("a referenced document is not a JSON object")
+        return doc
 
     def get_output(self, ctx: TenantContext, uri: str, sha256: str) -> TaskOutput:
         """Verified read (SHA-256 checked while streaming); a missing ref is a typed error."""
