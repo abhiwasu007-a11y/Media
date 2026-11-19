@@ -15,8 +15,8 @@ is verified, ``<family>.owner_confirmed`` when the owner's second message confir
 ========================================================  =====================
 
 ``REVISION_NOTE`` is not named by 03 rule 6; it is written under ``editorial_contribution`` (what
-to change after ``CHANGES_REQUESTED`` is an editorial contribution): REQUIRES REVIEW (CCR-191; owner /
-integrator: confirm or name another family). The audit details carry identifiers, the state and
+to change after ``CHANGES_REQUESTED`` is an editorial contribution): REQUIRES REVIEW (CCR-191;
+owner or integrator: confirm or name another family). The audit details carry identifiers, the state and
 the names of failed checks only: never the owner's quote.
 
 Not audited (nothing was recorded): an event that cannot be fetched (the evidence stays pending).
