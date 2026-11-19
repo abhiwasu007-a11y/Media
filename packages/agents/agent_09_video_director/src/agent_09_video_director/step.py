@@ -63,9 +63,27 @@ from agent_09_video_director.timeline.timemap import TimeMap, build_time_map
 from amw_adapters.llm.protocol import LlmAdapter
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import CheckVerdict
-from amw_core.errors import BudgetExhaustedError, ConfigInvalidError, QualityRepeatedFailureError
+from amw_core.errors import (
+    BudgetExhaustedError,
+    ConfigInvalidError,
+    CrossTenantRefError,
+    QualityRepeatedFailureError,
+)
 
 log = logging.getLogger("agent_09")
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineRef:
+    """``previous_timeline_ref`` (CCR-115): a ``PRIOR_OUTPUT`` context ref, hash verified."""
+
+    uri: str
+    sha256: str
+
+
+TimelineReader = Callable[[TimelineRef], NarrationTimeline]
+"""Resolves a ref to the document; the worker passes ``persistence.timeline_reader`` (the storage
+verifies the SHA-256 while streaming and checks the tenant)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,8 +115,9 @@ class ShotPlanRequest:
     limits: Limits = field(default_factory=Limits)
     rule_packs: Mapping[str, str] = field(default_factory=dict)
     rule_pack_versions: Mapping[str, str] = field(default_factory=dict)
-    previous_timeline: NarrationTimeline | None = None
-    """The timeline ``previous_plan`` was made on; required when the timeline hash changed."""
+    previous_timeline_ref: TimelineRef | None = None
+    """Ref of the timeline ``previous_plan`` was made on; required when the timeline hash changed
+    (CCR-115). Its hash must equal ``previous_plan.narration_timeline_sha256``."""
     iteration: int = 0
     previous_plan: ShotPlan | None = None
     feedback: Sequence[RevisionFeedback] = ()
@@ -135,7 +154,13 @@ class ShotPlanStep:
 
     # ------------------------------------------------------------------ preconditions (P1-P4)
     def _preconditions(self, req: ShotPlanRequest) -> tuple[TimeMap, HookInfo]:
-        assert_tenant_consistent(req.org_id, declared_orgs=req.declared_orgs, uris=req.uris)
+        ref_uris = (req.previous_timeline_ref.uri,) if req.previous_timeline_ref else ()
+        assert_tenant_consistent(
+            req.org_id, declared_orgs=req.declared_orgs, uris=(*req.uris, *ref_uris)
+        )
+        if any(not u.startswith(f"amw-blob://{req.org_id}/") for u in ref_uris):
+            # a previous dependency output is always tenant-owned: platform URIs are refused
+            raise CrossTenantRefError("previous_timeline_ref must be a tenant blob")
         pair_ok = (req.production_type_key, req.aspect_ratio) in {
             ("CHANNEL_LONG_FORM", AspectRatio.LANDSCAPE),
             ("SHORTS", AspectRatio.PORTRAIT),
@@ -163,18 +188,24 @@ class ShotPlanStep:
         return tm, hook
 
     # ------------------------------------------------------------------ rebase (FR-16)
-    def _previous_shots(self, req: ShotPlanRequest, tm: TimeMap) -> Sequence[Shot]:
+    def _previous_shots(
+        self, req: ShotPlanRequest, tm: TimeMap, read_timeline: TimelineReader | None
+    ) -> Sequence[Shot]:
         """Previous shots, rebased to the new measured timeline when its hash changed (F-24)."""
         prev = req.previous_plan
         if prev is None:
             return ()
         if prev.narration_timeline_sha256 == req.timeline_sha256:
             return prev.shots
-        if req.previous_timeline is None:
+        ref = req.previous_timeline_ref
+        if ref is None or ref.sha256 != prev.narration_timeline_sha256:
             raise input_invalid("PREVIOUS_TIMELINE_MISSING")
+        if read_timeline is None:  # a wiring defect of the worker, not an orchestrator input fault
+            raise ConfigInvalidError("previous timeline reader is not wired")
+        previous_timeline = read_timeline(ref)
         old = {
             s.segment_id: (s.start_ms, s.end_ms)
-            for s in req.previous_timeline.segments
+            for s in previous_timeline.segments
             if s.start_ms is not None and s.end_ms is not None
         }
         common = {k: v for k, v in old.items() if k in tm.spans}
@@ -232,11 +263,12 @@ class ShotPlanStep:
         *,
         resume: ResumeState | None = None,
         checkpoint: Callable[[ResumeState], None] | None = None,
+        read_timeline: TimelineReader | None = None,
     ) -> StepResult:
         cfg = self._cfg
         tm, hook = self._preconditions(req)
         slots = build_skeleton(req.script, tm, hook, cfg, req.limits)
-        prev_shots = self._previous_shots(req, tm)
+        prev_shots = self._previous_shots(req, tm, read_timeline)
         reused = self._reuse(req, slots, prev_shots)
         input_hash = self._input_hash(req, [x.slot_id for x in slots])
         dslots = [

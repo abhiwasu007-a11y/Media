@@ -320,6 +320,8 @@ If a blocking check cannot pass after the allowed repairs: input-caused (hook af
     "iteration": { "type": "integer", "minimum": 0 },
     "previous_plan_ref": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/hashed_ref" } ],
       "description": "PRIOR_OUTPUT of this stage's previous iteration (24 §3.3 rule 6); null exactly when iteration = 0" },
+    "previous_timeline_ref": { "oneOf": [ { "type": "null" }, { "$ref": "#/$defs/hashed_ref" } ],
+      "description": "PRIOR_OUTPUT (24 §3.3 rule 6, CCR-115): the narration timeline the previous plan was made on, hash verified; null at iteration 0; required at iteration >= 1 when the narration timeline hash differs from the previous plan's narration_timeline_sha256 (its hash must equal that value, its URI is tenant-owned, never platform); absent when required => PERMANENT.INPUT_INVALID, detail PREVIOUS_TIMELINE_MISSING" },
     "revision_feedback": { "type": "array", "maxItems": 64, "items": { "type": "object", "additionalProperties": false,
       "required": ["check_id", "severity", "shot_ids", "measured", "threshold"],
       "properties": { "check_id": { "type": "string", "pattern": "^[a-z0-9_.-]{3,96}$" }, "severity": { "enum": ["BLOCKING", "WARNING"] },
@@ -336,7 +338,7 @@ If a blocking check cannot pass after the allowed repairs: input-caused (hook af
       "then": { "properties": { "aspect_ratio": { "const": "9:16" } } },
       "else": { "properties": { "aspect_ratio": { "const": "16:9" }, "parent_plan_ref": { "type": "null" } } } },
     { "if": { "properties": { "iteration": { "const": 0 } } },
-      "then": { "properties": { "previous_plan_ref": { "type": "null" } } },
+      "then": { "properties": { "previous_plan_ref": { "type": "null" }, "previous_timeline_ref": { "type": "null" } } },
       "else": { "properties": { "previous_plan_ref": { "$ref": "#/$defs/hashed_ref" } } } }
   ]
 }
