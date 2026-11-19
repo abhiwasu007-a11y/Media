@@ -222,7 +222,7 @@ class GraphRunner:
         """03 section 9 ``task.<task_type>`` key. A task that replaces a cancelled one at the same
         iteration (CCR-211) would repeat the key and hit ``UNIQUE (org_id, idempotency_key)``;
         ``generation`` (the number of cancelled tasks of that stage and iteration) is appended
-        only then, so every first-generation key is exactly the contract key (CCR-275
+        only then, so every first-generation key is exactly the contract key (CCR-276
         provisional default, see the PR)."""
         parts: list[str | int] = [job.job_id, stage.stage_id, stage.task_type, iteration]
         if generation:
@@ -355,7 +355,7 @@ class GraphRunner:
     ) -> Mapping[str, TaskRecord]:
         """T01 for ``stage_ids`` (a whole graph or a revision batch). Edges inside the batch are
         written by ``create_tasks``; an edge to a stage outside the batch cannot be expressed by
-        the JobStore interface (CCR-274 provisional, see the PR): the runner's graph is the truth
+        the JobStore interface (CCR-275 provisional, see the PR): the runner's graph is the truth
         for readiness, the database edges are informational (T02 guard)."""
         by_id = {s.stage_id: s for s in graph}
         wanted = set(stage_ids)
@@ -1027,7 +1027,7 @@ class GraphRunner:
                             )
                         except MissingDependencyError:
                             report.notes.append(
-                                f"{sid}: no database edge to {dep} to re-point (CCR-274); "
+                                f"{sid}: no database edge to {dep} to re-point (CCR-275); "
                                 "the graph decides readiness"
                             )
         report.revisions.append(
