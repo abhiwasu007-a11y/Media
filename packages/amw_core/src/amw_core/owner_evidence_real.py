@@ -23,13 +23,15 @@ Flow (each step in its own process and database login):
      restates and a new row is recorded.
 
 ``EvidenceMode.REAL`` refuses a session source that is not marked ``production_grade``; the
-in-memory fake is reachable only through ``dry_run_verifier_service``, which also refuses any
-database but the in-memory model. Every ``verifier_result`` written through
-``build_verifier_service`` carries ``session_source_production`` (REAL) or
-``session_source_test_fixture`` (DRY_RUN) inside the MAC, and ``ConfirmedEvidenceLookup``
-reports ``CONFIRMED`` only for a production-marked row (a TEST row is ``TEST_FIXTURE``). These
-marks guard against wiring mistakes and TEST rows reaching a real run; they are not a security
-boundary against a holder of the verifier login (``docs/v4/runtime/EVIDENCE_PATH.md``).
+in-memory source is reachable only through the DRY_RUN path, which also refuses any database
+whose own profile row (``evidence_db_profile``, migration 0059) is not ``TEST``. Every
+``verifier_result`` written through ``build_verifier_service`` carries ``session_source_production``
+(REAL) or ``session_source_test_fixture`` (DRY_RUN) inside the MAC; 0059 keeps the stored mark
+through confirmation and refusal and refuses a mark the database profile does not allow.
+``ConfirmedEvidenceLookup`` returns the shared ``owner_evidence_status.EvidenceStatus``
+(``source_kind`` TEST_FIXTURE for any row without the production mark). These marks guard
+against wiring mistakes and TEST rows reaching a real run; they are not a security boundary
+against a holder of the verifier login (``docs/v4/runtime/EVIDENCE_PATH.md``).
 """
 
 import re
@@ -66,6 +68,12 @@ from amw_core.owner_evidence_fake import (
     MemorySessionEventSource,
 )
 from amw_core.owner_evidence_service import EvidenceVerifierService
+from amw_core.owner_evidence_status import (
+    OWNER_CHAT_OPERATOR,
+    EvidenceSourceKind,
+    EvidenceStatus,
+    subject_key,
+)
 from amw_core.owner_evidence_verifier import (
     QUESTION_OR_DEFERRED,
     SessionEventSource,
@@ -366,10 +374,6 @@ class VerifierWorker:
         return ConfirmationScan(ConfirmationOutcome.NO_REPLY_YET, row)
 
 
-OWNER_CHAT_OPERATOR: Final = "OWNER_CHAT_OPERATOR"
-MAC_INVALID: Final = "MAC_INVALID"
-TEST_FIXTURE: Final = "TEST_FIXTURE"
-BINDING_MISMATCH: Final = "BINDING_MISMATCH"
 PROVIDER_LIMIT: Final = "PROVIDER_LIMIT"
 FIN_R10: Final = "FIN_R10_NOT_SEBI_REGISTERED"
 DEFAULT_CURRENCY_WORDS: Final[Mapping[str, tuple[str, ...]]] = {
@@ -393,26 +397,6 @@ class ConfirmationBinding:
     """The org the confirmation is for; the evidence row must belong to it."""
 
 
-def runtime_subject(
-    kind: str, provider: str | None, amount_minor: int | None, currency: str | None, org: str | None
-) -> str:
-    """The binding key of ``amw_runtime.confirmations.ConfirmationRecord.subject`` (PR #70):
-    ``kind|provider|amount_minor|currency|org_id`` with ``-`` for an absent part."""
-    amount = "-" if amount_minor is None else str(amount_minor)
-    return f"{kind}|{provider or '-'}|{amount}|{currency or '-'}|{org or '-'}"
-
-
-@dataclass(frozen=True, slots=True)
-class EvidenceStatus:
-    """What a run preflight needs of one evidence row (``amw_runtime`` ``EvidenceView``).
-    ``subject`` is set only when the row is bound to its confirmation (see the lookup)."""
-
-    evidence_state: str
-    recorded_from: str
-    org_id: str | None = None
-    subject: str | None = None
-
-
 _NUMBER = re.compile(r"[0-9][0-9,]*(?:\.[0-9]+)?")
 
 
@@ -430,13 +414,13 @@ def _states_amount(quote: str, amount_minor: int, exponent: int) -> bool:
 class ConfirmedEvidenceLookup:
     """Evidence status for a run preflight, read inside one tenant transaction.
 
-    ``CONFIRMED`` is reported only when every one of these holds: the MAC verifies (else
-    ``MAC_INVALID``); the row was verified through a production session source (else
-    ``TEST_FIXTURE``); the row's kind is in ``allowed_kinds`` and its quote states what the
-    binding claims: provider, amount and currency of a limit, or the FIN-R10 statement (else
-    ``BINDING_MISMATCH``). One evidence row backs exactly one binding (a second binding for the
-    same row is a configuration error). ``allowed_kinds`` defaults to none (fail closed): no
-    record kind exists yet for these owner statements (CCR-260)."""
+    ``EvidenceStatus.kind`` / ``subject`` are set only when every one of these holds: the MAC
+    verifies; the row was verified through a production session source; it belongs to the
+    binding's org; its kind is in ``allowed_kinds`` and its quote states what the binding claims
+    (provider, amount and currency of a limit, or the FIN-R10 statement). One evidence row backs
+    exactly one binding (a second binding for the same row is a configuration error).
+    ``allowed_kinds`` defaults to none (fail closed): no record kind exists yet for these owner
+    statements (CCR-260)."""
 
     def __init__(
         self,
@@ -510,6 +494,9 @@ class ConfirmedEvidenceLookup:
         )
 
     def get(self, evidence_id: str) -> EvidenceStatus | None:
+        """The row's status. ``kind`` and ``subject`` are set only when the row is MAC-valid,
+        production-marked and states what its confirmation claims, so a consumer that compares
+        ``subject`` can never accept a TEST, tampered or unbound row."""
         binding = self._bindings.get(evidence_id)
         if binding is None:
             return None
@@ -519,19 +506,33 @@ class ConfirmedEvidenceLookup:
             return None
         if row is None:
             return None
-        source = row.evidence.source_kind
+        e = row.evidence
         channel = (
-            OWNER_CHAT_OPERATOR if source is InstructionSourceKind.OWNER_CHAT_MESSAGE else source
+            OWNER_CHAT_OPERATOR
+            if e.source_kind is InstructionSourceKind.OWNER_CHAT_MESSAGE
+            else e.source_kind.value
         )
-        org = row.org_id
-        if not self._db.mac_valid(self._session, self._tx, row.id):
-            return EvidenceStatus(MAC_INVALID, channel, org)
+        mac_valid = self._db.mac_valid(self._session, self._tx, row.id)
         result = row.verifier_result
-        if result.get(PRODUCTION_MARK) is not True or result.get(TEST_MARK):
-            return EvidenceStatus(TEST_FIXTURE, channel, org)
-        if binding.org_id != org or not self._bound(row, binding):
-            return EvidenceStatus(BINDING_MISMATCH, channel, org)
-        subject = runtime_subject(
-            binding.kind, binding.provider, binding.amount_minor, binding.currency, org
+        real = result.get(PRODUCTION_MARK) is True and not result.get(TEST_MARK)
+        source = EvidenceSourceKind.REAL if real else EvidenceSourceKind.TEST_FIXTURE
+        bound = mac_valid and real and binding.org_id == row.org_id and self._bound(row, binding)
+        subject = (
+            subject_key(
+                binding.kind, binding.provider, binding.amount_minor, binding.currency, row.org_id
+            )
+            if bound
+            else None
         )
-        return EvidenceStatus(row.state.value, channel, org, subject)
+        return EvidenceStatus(
+            evidence_id=row.id,
+            evidence_state=row.state.value,
+            recorded_from=channel,
+            org_id=row.org_id,
+            kind=binding.kind if bound else None,
+            subject_kind=e.subject_kind,
+            subject_id=e.subject_id,
+            subject=subject,
+            source_kind=source,
+            mac_valid=mac_valid,
+        )

@@ -53,6 +53,7 @@ from amw_core.owner_evidence_real import (
     dry_run_verifier_service,
 )
 from amw_core.owner_evidence_service import EvidenceVerifierService
+from amw_core.owner_evidence_status import EvidenceSourceKind
 from amw_core.owner_evidence_verifier import SessionEvent, VerifierPolicy
 from amw_core.tenancy import PgTenancy
 from amw_core.tenancy.evidence_keys import install_evidence_mac_key
@@ -409,7 +410,8 @@ def test_test_mark_survives_a_real_confirmation(real: Real, admin: Conn) -> None
             )
             status = lookup.get(row.id)
         assert status is not None
-        assert status.evidence_state == "TEST_FIXTURE"
+        assert status.source_kind is EvidenceSourceKind.TEST_FIXTURE
+        assert (status.evidence_state, status.subject, status.usable) == ("CONFIRMED", None, False)
         _, draft2 = fabricated(real)
         known = memory.fetch(real.t.session_id, "fab-1")
         assert known is not None

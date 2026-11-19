@@ -33,6 +33,7 @@ from amw_core.interfaces import DbRole, EvidenceRecord, NewEvidence, TenantConte
 from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.owner_evidence_fake import (
     PRODUCTION_MARK,
+    TEST_MARK,
     FakeEvidenceDatabase,
     MemorySessionEventSource,
     merge_result,
@@ -43,18 +44,17 @@ from amw_core.owner_evidence_pg import PgEvidenceDatabase
 from amw_core.owner_evidence_real import (
     FIN_R10,
     PROVIDER_LIMIT,
-    TEST_MARK,
     ConfirmationBinding,
     ConfirmationOutcome,
     ConfirmedEvidenceLookup,
     EvidenceMode,
-    EvidenceStatus,
     VerifierWorker,
     build_verifier_service,
     dry_run_verifier_service,
     exact_confirmation,
     is_production_source,
 )
+from amw_core.owner_evidence_status import EvidenceSourceKind, EvidenceStatus, EvidenceStatusLookup
 from amw_core.owner_evidence_verifier import SessionEvent, VerifierPolicy, is_confirmation
 from amw_core.testing.memory import MemoryTransaction
 from tests.evidence_support import PASSWORDS, TEST_KEY
@@ -74,8 +74,17 @@ ANY_KIND = frozenset(EvidenceRecordKind)
 
 
 def state_of(lookup: ConfirmedEvidenceLookup, evidence_id: str) -> str | None:
+    """A one-word verdict over the shared ``EvidenceStatus`` fields (test readability)."""
     status = lookup.get(evidence_id)
-    return None if status is None else status.evidence_state
+    if status is None:
+        return None
+    if not status.mac_valid:
+        return "MAC_INVALID"
+    if status.source_kind is not EvidenceSourceKind.REAL:
+        return "TEST_FIXTURE"
+    if status.subject is None or status.kind is None:
+        return "BINDING_MISMATCH"
+    return status.evidence_state
 
 
 def requested(tx: TenantTransaction, row: EvidenceRecord) -> datetime | None:
@@ -472,14 +481,18 @@ def test_preflight_lookup_reports_only_mac_valid_owner_chat_confirmations(tmp_pa
     )
     status = lookup.get(row.id)
     assert status is not None
-    assert status.evidence_state == "MAC_INVALID"  # pending: no MAC yet, never CONFIRMED
+    assert state_of(lookup, row.id) == "MAC_INVALID"  # pending: no MAC yet, never CONFIRMED
+    assert (status.evidence_state, status.subject, status.usable) == (
+        "PENDING_VERIFICATION", None, False,
+    )  # fmt: skip
     w.verify(row)
     w.worker.confirm_from_chat(w.tx, row.id, minutes(30))
     assert state_of(lookup, row.id) == "BINDING_MISMATCH"
     w.db.superuser_tamper(w.tx, row.id, confirmation_quote="forged")
     tampered = lookup.get(row.id)
     assert tampered is not None
-    assert tampered.evidence_state == "MAC_INVALID"
+    assert state_of(lookup, row.id) == "MAC_INVALID"
+    assert (tampered.mac_valid, tampered.subject) == (False, None)
     assert lookup.get(ids.OWNER_EVIDENCE.new()) is None
     assert lookup.get("not-a-wire-id") is None
     tool = w.t.tool_result("approve R7K2", minutes(9))
@@ -545,7 +558,8 @@ def test_provider_limit_evidence_is_bound_to_provider_amount_and_currency(
     )  # fmt: skip
     got = lookup.get(row.id)
     assert got is not None
-    assert got.evidence_state == state
+    assert state_of(lookup, row.id) == state
+    assert got.usable is (state == "CONFIRMED")
 
 
 def test_dry_run_rows_are_marked_and_never_confirmed_for_a_real_run(tmp_path: Path) -> None:
@@ -609,9 +623,12 @@ def test_lookup_from_confirmation_records(tmp_path: Path) -> None:
         allowed_kinds=frozenset({EvidenceRecordKind.CONTRIBUTION}),
     )  # fmt: skip
     assert lookup.get(row.id) == EvidenceStatus(
-        "CONFIRMED", "OWNER_CHAT_OPERATOR", row.org_id,
-        f"PROVIDER_LIMIT|anthropic|1000|USD|{row.org_id}",
+        evidence_id=row.id, evidence_state="CONFIRMED", recorded_from="OWNER_CHAT_OPERATOR",
+        org_id=row.org_id, kind=PROVIDER_LIMIT, subject_kind="render", subject_id=SUBJECT,
+        subject=f"PROVIDER_LIMIT|anthropic|1000|USD|{row.org_id}",
+        source_kind=EvidenceSourceKind.REAL, mac_valid=True,
     )  # fmt: skip
+    assert isinstance(lookup, EvidenceStatusLookup)
     with pytest.raises(ConfigInvalidError):
         ConfirmedEvidenceLookup.for_confirmations(w.db, app, w.tx, [rec, rec])
     sebi = ConfirmedEvidenceLookup(

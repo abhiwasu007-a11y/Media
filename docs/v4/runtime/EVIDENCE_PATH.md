@@ -14,26 +14,30 @@ Contract sources (not edited here): 08 `sys_operator` paragraph (CCR-100, CCR-11
 | 5. Confirm | verifier | `VerifierWorker.confirm_from_chat` | finds the owner's reply itself (step 5 rules below) |
 | 6. Apply | operator, `amw_operator` | `PgEvidenceDatabase.human_record_apply` | the database writes the one human row, only for `CONFIRMED` with a valid MAC |
 
-**Step 5 rules.** The verifier finds the echo first: the first assistant message of the same session, after the recorded message, that shows the row's code and the start of its quote. It then reads, in time order, the owner messages that name the code. It skips the row's own message, the recorded messages of other rows of the same subject, and messages stamped after "now".
+**Step 5 rules.**
+1. **Latest decision wins.** Before reading replies, the verifier looks at the other evidence rows of the same subject that carry the same code. For a decision row, a later live decision row on that code supersedes it: the older row is refused (`superseded_by_later_decision`) and never confirmed. Only the latest decision on a code can be confirmed (PROPOSED CCR-264). For a content or score row, a second open row on the same code makes a `confirm` ambiguous (`AMBIGUOUS`), and nothing is confirmed.
+2. **The echo comes first.** The verifier finds the first assistant message of the same session, after the recorded message, that shows the row's code and the start of its quote.
+3. **Replies in time order.** It then reads, in time order, the owner messages that name the code. It skips the row's own message, the recorded messages of the sibling rows, and messages stamped after "now".
 
 | Owner message | Before the echo | After the echo |
 |---|---|---|
-| `confirm R7K2` / `R7K2 पक्के` (confirmation whitelist, CCR-101) | ignored | `CONFIRMED` |
-| the decision form for the recorded decision: `approve R7K2` / `R7K2 मंजूर` for APPROVED, `reject R7K2` / `R7K2 नामंजूर` for REJECTED (full decision whitelist; PROPOSED CCR-264) | ignored | `CONFIRMED` |
+| exactly `confirm R7K2` or `R7K2 पक्के` (letters and digits only, one space, one optional final `.` / `!` / `।`) | ignored | `CONFIRMED` |
+| exactly `approve R7K2` or `R7K2 मंजूर`, for an APPROVED row only (PROPOSED CCR-264; these four forms and nothing else) | ignored | `CONFIRMED` |
 | a question or deferral naming the code | skipped; result `NEEDS_CLARIFICATION` if nothing confirms; the row stays `VERIFIED` | same |
-| anything else naming the code (a dispute, a correction, the other decision) | `amw_evidence_refuse`: the row becomes `REFUSED` (`owner_disputed`); the owner restates and a new row is recorded | same |
+| anything else naming the code (`yes R7K2`, `confirm R7K2_`, `approve R7K2 please`, a dispute, a correction, the other decision) | `amw_evidence_refuse`: the row becomes `REFUSED` (`owner_disputed`, earlier checks kept); the owner restates and a new row is recorded | same |
 
-The rules leave a row in one of three states:
-- A confirmation-shaped reply that fails the authenticity check (for example pasted text) is reported as `REFUSED_CHECK`, and the scan goes on to later replies.
+Possible outcomes:
+- A confirmation-shaped reply that fails the authenticity check (for example pasted text) is reported as `REFUSED_CHECK`, and the scan goes on.
 - With no echo there is no confirmation (`AWAITING_ECHO`).
 - The operator never passes a verification result, an anchor time or a confirmation event.
 
-**TEST rows.**
-- `EvidenceMode.REAL` refuses a session source that is not marked `production_grade`.
-- The in-memory source is reachable only through `dry_run_verifier_service`, which also refuses any database but the in-memory model.
-- Every `verifier_result` written through `build_verifier_service` carries `session_source_production` (REAL) or `session_source_test_fixture` (DRY_RUN). The marker is covered by the MAC.
-- `ConfirmedEvidenceLookup` reports a row without the production mark as `TEST_FIXTURE`, never `CONFIRMED`.
-- These marks catch wiring mistakes and keep TEST rows out of a real run. They do not stop a holder of the verifier login (section 5).
+**TEST rows (migration 0059, PROPOSED CCR-265).**
+- Every `verifier_result` written through `build_verifier_service` carries `session_source_production` (REAL) or `session_source_test_fixture` (DRY_RUN). The mark is covered by the MAC.
+- The database fixes the mark at verification. `amw_evidence_mark_confirmed` and `amw_evidence_refuse` merge the new result into the stored one, and the stored mark always wins, so a TEST row confirmed by a real worker stays TEST.
+- A one-row table `evidence_db_profile` (REAL by default; only the table owner can change it) decides which mark a database accepts: a TEST mark only in a TEST database, a production mark only in a REAL one.
+- The DRY_RUN path refuses any session source but the in-memory one, and any database whose profile is not TEST. For PostgreSQL it reads the profile row inside the transaction it is given; without one it refuses. A dry run can never write into the real database.
+- `ConfirmedEvidenceLookup` reports `source_kind = TEST_FIXTURE` for a row without the production mark.
+- These marks still do not stop a holder of the verifier login of a REAL database, who can write a production mark for fabricated events (section 5, item 2).
 
 ## 2. The session record: what is read, and how a message is accepted
 
@@ -70,11 +74,14 @@ The check reads structure, never text. A text test can only add a refusal: a mes
 - **Top level.** No record says whether a cloud session is a child session. A session counts as top level only if its ID is in `top_level_session_ids`, set by the owner.
 - **Authenticity of any line.** There is no signature, MAC or hash chain in the file. Fields the platform sets on every human record (`parentUuid`, `promptId`, `turnPosition`, …) can be copied, so requiring them would add nothing against a forger.
 - **Schema stability.** After a CLI upgrade, a new field refuses every message until the allow-lists are reviewed (fail closed).
+- **Messages the assistant schedules for itself** (send-later reminders, scheduled tasks): their record shape was never observed. REQUIRES REVIEW: whether they carry `origin: human` (part of residual trust item 1).
+- **Size.** A transcript over 256 MB (`max_file_bytes`) is not read at all, so nothing in it verifies. The live transcript observed was 15 MB.
 
 ## 3. Database part (`amw_core.owner_evidence_pg.PgEvidenceDatabase`)
 
 - Every call reads `session_user` of the tenant transaction's connection and refuses unless it is the role the caller names.
 - Every read filters `org_id = amw_current_org()` explicitly, on top of RLS.
+- `evidence_db_profile` (0059) is a GLOBAL one-row table. It is added to the global allow-list of the tenancy suite (CCR-265 asks for the 04 section 4 entry).
 - State changes and the MAC happen only in the `amw_verifier_fn` definer functions (migration 0009), which check `session_user` themselves.
 - The Python code computes no MAC and holds no key. The MAC key is loaded once by the migrator from the environment's secret mechanism.
 - Secret NAMES (proposed; REQUIRES REVIEW, owner):
@@ -88,7 +95,7 @@ The check reads structure, never text. A text test can only add a refusal: a mes
 1. **Text that is not an owner chat message becomes an approval or a confirmation.** This covers tool results, sub-agent hand-backs, peer messages, task notifications, system reminders, compact summaries, documents and the assistant's own messages, even when the text is exactly `approve R7K2` or `confirm R7K2`.
 2. **The operator login verifies, confirms or writes verification columns.** The database refuses it.
 3. **The operator names a confirmation.** The verifier finds the reply itself.
-4. **Rule failures.** Replay, wrong code, negation or condition, a message older than the request, another org's owner account, another tenant's row, and a TEST (dry-run) row presented to a real run are all refused.
+4. **Rule failures.** All of these are refused: replay, wrong code, negation or condition, a message older than the request, another org's owner account, another tenant's row, a superseded decision, and a TEST (dry-run) row presented to a real run.
 5. **A superuser edit of a verified row.** It is detected, not prevented (08 honest limit).
 
 These hold against a **confused or injected** assistant, meaning one that misreads where a text came from. They do not hold against a **malicious** assistant with a shell; section 5 lists what remains.
@@ -111,33 +118,44 @@ These hold against a **confused or injected** assistant, meaning one that misrea
    - Limit: a list the assistant posts can omit rows.
    - Proposed, not built: a periodic verifier-role audit post of all VERIFIED / CONFIRMED rows (code, quote, time), and a run preflight that requires such a post after the last confirmation.
 
-## 6. Dry-run TEST path and the run preflight
+## 6. The shared evidence contract and the run preflight
 
-**Dry-run isolation**
-- `dry_run_verifier_service(FakeEvidenceDatabase, …, MemorySessionEventSource, …)` is the only constructor that accepts the in-memory source, and it writes only to the in-memory model.
-- Its rows carry `session_source_test_fixture` inside the MAC.
+**The contract** (`amw_core.owner_evidence_status`; integrator decision for PR #77 + #70). One `EvidenceStatus` dataclass and one `EvidenceStatusLookup` Protocol, imported by `amw_runtime`; it defines no copy of its own.
 
-**Run preflight** (`amw_runtime`, PR #70)
-- It refuses a `test_fixture` provider-limit confirmation in real-run mode.
-- `ConfirmedEvidenceLookup.for_confirmations(...)` builds its bindings from the run's own confirmation records. One evidence row may back one confirmation only.
-- It reports `CONFIRMED` only when all of these hold:
-  - the MAC is valid;
-  - the row carries the production mark;
-  - the record kind is allowed;
-  - the quote states the provider, the amount (in major units, from the currency exponent) and the currency, or the FIN-R10 statement.
+| Field | Meaning |
+|---|---|
+| `evidence_id`, `org_id` | the row and its tenant |
+| `evidence_state` | the row's state |
+| `recorded_from` | `OWNER_CHAT_OPERATOR`, or the source kind |
+| `kind` | the bound confirmation kind, or `None` |
+| `subject_kind`, `subject_id` | the row's own subject |
+| `subject` | the bound key `kind\|provider\|amount_minor\|currency\|org`, or `None` |
+| `source_kind` | `REAL` or `TEST_FIXTURE` |
+| `mac_valid` | from the database function |
+
+`kind` and `subject` are set only when all of these hold:
+- the MAC is valid;
+- the row carries the production mark;
+- it belongs to the binding's org;
+- its record kind is allowed;
+- its quote states the provider, the amount (in major units) and the currency, or the FIN-R10 statement.
+
+So a consumer that compares `subject` can never accept a TEST, tampered or unbound row. `ConfirmedEvidenceLookup.for_confirmations(...)` builds the bindings from the run's own confirmation records, and one evidence row may back one confirmation only.
+
+**Run preflight** (PR #70 head `e42dbd1`): it checks state, channel, org and `subject`, refuses TEST fixtures, and now looks FIN-R10 evidence up as well.
+- Verified on a local merge of both PRs: the runtime suite and this lane's preflight tests pass (136 tests across `tests/runtime` and the two lane files).
 
 **Open gaps**
 - No record kind exists for these owner statements yet, so by default no kind is allowed (fail closed; CCR-260).
 - The CONTENT rules refuse negation, so "not SEBI-registered" cannot pass them today (CCR-260).
-- FIN-R10 is still cleared by a self-asserted record (CCR-261). A strict-xfail test documents it, and PR #70 must make it pass.
 
 ## 7. Tests
 
 | File | What it covers |
 |---|---|
 | `tests/adapters/test_session_record_jsonl.py` | every refused record kind (31 variants, including queued peer, task-notification, meta, other-mode, extra-key and mixed-case wrapper forms); queued owner messages accepted; paste and attachment markers; a cut multibyte last line; an invalid byte and a duplicate key (no exception; `corrupt_record`); duplicate UUID; session mismatch; bad timestamp; path traversal; symlinked file vs resolved root; size cap; top level |
-| `tests/adapters/test_session_record_flow.py` | the flow on the database model; non-owner sources refused; forged confirmations ignored; the decision-form confirmation (en, mr, reject); reply before the echo; echo without the quote; question then confirm; dispute refuses the row; time order, not file order; future messages; replay; other org; TEST marks; dry-run factory guards; preflight bindings (provider, amount, currency, kind, one row per confirmation) |
-| `tests/adapters/test_session_record_preflight.py` | the preflight against real-path evidence (skipped until `amw_runtime` is merged; verified locally on a merge with PR #70) |
-| `tests/core_services_db/test_owner_evidence_real_path_pg.py` | PostgreSQL with real logins: record, verify, confirm, apply; the operator login cannot verify; forged columns refused; replay; other tenant; a superuser tamper detected; a dispute refused through `amw_evidence_refuse`; own code round trip |
+| `tests/adapters/test_session_record_flow.py` | the flow on the database model; non-owner sources refused; forged confirmations ignored; exactly the four reply forms; latest decision wins (approve, reject, confirm and the reverse); content rows ambiguous on a shared code; reply before the echo; echo without the quote; question then confirm; dispute refuses the row; time order, not file order; future messages; replay; other org; TEST marks; dry-run factory guards; preflight bindings (provider, amount, currency, kind, one row per confirmation) |
+| `tests/adapters/test_session_record_preflight.py` | the preflight of PR #70 against real-path evidence: pass with bound evidence for both limits and FIN-R10; refused for pending rows, another org, reused rows, TEST fixtures and FIN-R10 without evidence (skipped until `amw_runtime` is merged; verified on a local merge with `e42dbd1`) |
+| `tests/core_services_db/test_owner_evidence_real_path_pg.py` | PostgreSQL with real logins: record, verify, confirm, apply; the operator login cannot verify; forged columns refused; replay; other tenant; a superuser tamper detected; a dispute refused through `amw_evidence_refuse`; own code round trip; fabricated events plus the REAL database refused (factory and database); a TEST row confirmed by a REAL service stays TEST and the lookup refuses it; a production mark refused in a TEST database |
 
 All transcripts in tests are synthetic. They copy the real structure and contain no real conversation.
