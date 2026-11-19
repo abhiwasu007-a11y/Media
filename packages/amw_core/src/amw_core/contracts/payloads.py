@@ -105,12 +105,25 @@ def register_payload_schema(name: SchemaName, version: Semver, model: type[BaseM
     PAYLOAD_SCHEMAS.register(name, version, model)
 
 
-PAYLOAD_PLUGIN_PACKAGES: Final[Mapping[str, str]] = MappingProxyType({})
+PAYLOAD_PLUGIN_PACKAGES: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "agent_04_research_knowledge": "agent_04",
+        "agent_05_scriptwriter": "agent_05",
+        "agent_06_fact_checker": "agent_06",
+        "agent_07_voice_production": "agent_07",
+        "agent_08_visual_assets": "agent_08",
+        "agent_09_video_director": "agent_09",
+        "agent_10_video_editor": "agent_10",
+        "agent_11_thumbnail_design": "agent_11",
+        "agent_16_compliance_qa": "agent_16",
+        "amw_delivery": "agent_13",
+    }
+)
 """The fixed allow-list of ``package -> schema namespace`` whose ``<package>.payloads.register
 (registrar)`` the loader runs, each bound to its own namespace (``agent_07_voice_production`` ->
-``agent_07``). Nothing outside this table is imported (no entry points, no configuration). It is
-empty in this PR: each agent lane adds its own line together with its ``payloads.py`` (this PR
-does not edit ``packages/agents/*``; the planned entries are listed in the PR text)."""
+``agent_07``). Nothing outside this table is imported (no entry points, no configuration). A new
+agent package adds its own line here together with its ``payloads.py``; each plugin registers
+only schemas for which its package holds a model."""
 
 
 class PayloadRegistrar:

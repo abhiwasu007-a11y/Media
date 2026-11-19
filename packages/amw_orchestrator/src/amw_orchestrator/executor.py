@@ -182,11 +182,15 @@ class TaskExecutor:
         *,
         schemas: PayloadSchemaRegistry = PAYLOAD_SCHEMAS,
         blob_reader: BlobReader | None = None,
+        load_plugins: Callable[[PayloadSchemaRegistry], tuple[str, ...]] | None = None,
     ) -> None:
         self._workers, self._schemas, self._blob = workers, schemas, blob_reader
         # start-up: the agents' payload models register through the allow-listed loader; any
-        # failure is a ConfigInvalidError, so validation is never silently disabled (27 sec 7.3)
-        self.plugins: tuple[str, ...] = load_payload_schema_plugins(schemas)
+        # failure is a ConfigInvalidError, so validation is never silently disabled (27 sec 7.3).
+        # ``load_plugins`` lets a test substitute stand-in models for ``schemas``; an empty
+        # registry still refuses every payload (fail closed), so it cannot weaken production.
+        loader = load_plugins if load_plugins is not None else load_payload_schema_plugins
+        self.plugins: tuple[str, ...] = loader(schemas)
 
     def _payload_data(self, payload: PayloadObject) -> Mapping[str, Any]:
         if payload.data is not None:

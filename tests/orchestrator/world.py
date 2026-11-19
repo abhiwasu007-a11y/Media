@@ -87,6 +87,12 @@ class Open(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+def no_plugins(_registry: PayloadSchemaRegistry) -> tuple[str, ...]:
+    """Skip the agents' real payload plugins: these tests use stand-in models (``Open``) for the
+    schema names of the graph; the real models are covered in ``test_agent_payloads.py``."""
+    return ()
+
+
 def schema_registry(graph: tuple[Stage, ...]) -> PayloadSchemaRegistry:
     reg = PayloadSchemaRegistry()
     for s in graph:
@@ -420,7 +426,9 @@ def build_rig(
             jobs=jobs,
             queue=queue,
             budget=guard,
-            executor=TaskExecutor(registry, schemas=schema_registry(graph)),
+            executor=TaskExecutor(
+                registry, schemas=schema_registry(graph), load_plugins=no_plugins
+            ),
             approvals=desk,
             budgets=budgets,
             calendar=_Cal(calendar_allows),

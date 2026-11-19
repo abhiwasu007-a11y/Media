@@ -22,7 +22,7 @@ from amw_orchestrator.executor import (
     resolve_channel_category,
 )
 from amw_orchestrator.registry import record
-from tests.orchestrator.world import LONG, Open, ok_output
+from tests.orchestrator.world import LONG, Open, no_plugins, ok_output
 
 pytestmark = pytest.mark.unit
 STAGE: Stage = record(LONG).stage("s05_script")
@@ -121,7 +121,7 @@ def _schemas(model: type = Open) -> PayloadSchemaRegistry:
 
 def test_worker_gets_task_input_and_exec_context_with_stage_and_iteration() -> None:
     worker = _Worker()
-    ex = TaskExecutor(_Registry(_Builder(), worker), schemas=_schemas())
+    ex = TaskExecutor(_Registry(_Builder(), worker), schemas=_schemas(), load_plugins=no_plugins)
     job = _job()
     bc = _bc(job, attempt_no=3, iteration=2)
     attempt = str(ATTEMPT.new())
@@ -137,20 +137,28 @@ def test_worker_gets_task_input_and_exec_context_with_stage_and_iteration() -> N
 
 def test_unregistered_schema_fails_closed_before_the_worker_runs() -> None:
     worker = _Worker()
-    ex = TaskExecutor(_Registry(_Builder(), worker), schemas=PayloadSchemaRegistry())
+    ex = TaskExecutor(
+        _Registry(_Builder(), worker), schemas=PayloadSchemaRegistry(), load_plugins=no_plugins
+    )
     with pytest.raises(SchemaInvalidError):
         ex.prepare(_bc(_job()), str(ATTEMPT.new()))
     assert worker.seen == []
 
 
-def test_default_registry_is_empty_so_agent_payloads_are_refused_until_registered() -> None:
-    ex = TaskExecutor(_Registry(_Builder(), _Worker()))
-    with pytest.raises(SchemaInvalidError):  # the allow-list is empty (separate ticket)
+def test_default_executor_validates_with_the_real_agent_models_and_refuses_a_mismatch() -> None:
+    """The allow-list now registers the agents' models (it was empty before): the stand-in data of
+    this file is no ``ScriptDraftInput``, so it is still refused, now by the agent's own model.
+    The accept path with real payloads is in ``test_agent_payloads.py``."""
+    ex = TaskExecutor(_Registry(_Builder(), _Worker()), schemas=PayloadSchemaRegistry())
+    assert "agent_05_scriptwriter" in ex.plugins
+    with pytest.raises(SchemaInvalidError):
         ex.prepare(_bc(_job()), str(ATTEMPT.new()))
 
 
 def test_unsupported_major_version_is_schema_version_unsupported() -> None:
-    ex = TaskExecutor(_Registry(_Builder(version="2.0.0"), _Worker()), schemas=_schemas())
+    ex = TaskExecutor(
+        _Registry(_Builder(version="2.0.0"), _Worker()), schemas=_schemas(), load_plugins=no_plugins
+    )
     with pytest.raises(SchemaVersionUnsupportedError):
         ex.prepare(_bc(_job()), str(ATTEMPT.new()))
 
@@ -158,7 +166,7 @@ def test_unsupported_major_version_is_schema_version_unsupported() -> None:
 def test_input_failing_its_model_names_locations_not_values() -> None:
     builder = _Builder("agent_05.script_draft.output")  # Strict: needs `stage`, forbids extras
     builder.data = {"unexpected": "SECRET-VALUE"}
-    ex = TaskExecutor(_Registry(builder, _Worker()), schemas=_schemas())
+    ex = TaskExecutor(_Registry(builder, _Worker()), schemas=_schemas(), load_plugins=no_plugins)
     with pytest.raises(SchemaInvalidError) as exc:
         ex.prepare(_bc(_job()), str(ATTEMPT.new()))
     assert "SECRET-VALUE" not in repr(exc.value.details)
@@ -173,7 +181,9 @@ def test_invalid_output_payload_becomes_a_failed_output_that_keeps_the_real_cost
             )
         }
     )
-    ex = TaskExecutor(_Registry(_Builder(), _Worker(spent)), schemas=_schemas())
+    ex = TaskExecutor(
+        _Registry(_Builder(), _Worker(spent)), schemas=_schemas(), load_plugins=no_plugins
+    )
     out = ex.run(ex.prepare(_bc(_job()), str(ATTEMPT.new())))
     assert out.status.value == "FAILED" and out.error is not None
     assert out.error.code == "PERMANENT.SCHEMA_INVALID" and not out.error.retryable
