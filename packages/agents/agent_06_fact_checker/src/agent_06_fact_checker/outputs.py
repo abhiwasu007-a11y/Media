@@ -125,6 +125,16 @@ def resource_usage(usage: UsageTotals) -> ResourceUsage:
     )
 
 
+def check_ctx(task: TaskInput, ctx: ExecContext) -> None:
+    """The context and the Task Input must name the same org, job and task (19.1 layer 1)."""
+    if (
+        str(ctx.org_id) != task.org_id
+        or str(ctx.job_id) != task.job_id
+        or str(ctx.task_id) != task.task_id
+    ):
+        raise TenantMismatchError("execution context does not match the Task Input")
+
+
 def write_blob(
     blobs: BlobStorage,
     tenant: TenantContext,

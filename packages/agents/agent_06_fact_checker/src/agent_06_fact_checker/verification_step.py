@@ -33,6 +33,7 @@ from agent_06_fact_checker.models import (
 from agent_06_fact_checker.numbers import missing_numerals, numerals
 from agent_06_fact_checker.outputs import (
     check,
+    check_ctx,
     error_output,
     next_action_for,
     success_output,
@@ -143,19 +144,19 @@ class ClaimVerificationStep:
             max_repairs=settings.max_repairs,
         )
 
-    def run(self, task: TaskInput, ctx: ExecContext) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
         started = self._clock.monotonic_ms()
         state = _State()
         try:
-            return self._run(task, ctx, state, started)
+            return self._run(task_input, ctx, state, started)
         except (PermanentError, AgentError, BudgetExhaustedError) as exc:
             return error_output(
                 exc,
-                task=task,
+                task=task_input,
                 clock=self._clock,
                 started_ms=started,
                 usage=state.usage,
-                attempt_no=task.retry_count,
+                attempt_no=task_input.retry_count,
                 validated=state.validated,
             )
 
@@ -246,6 +247,7 @@ class ClaimVerificationStep:
 
     # ------------------------------------------------------------------ the run
     def _run(self, task: TaskInput, ctx: ExecContext, state: _State, started: int) -> TaskOutput:
+        check_ctx(task, ctx)
         s = self._settings
         tenant = ctx.tenant
         inp, raw = self._parse(task)
