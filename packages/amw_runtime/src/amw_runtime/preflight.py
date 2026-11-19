@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from pydantic import ValidationError
 
+from amw_adapters.real.authorisation import ProviderAuthorisation, mint_provider_authorisation
 from amw_core.errors import ConfigInvalidError
 from amw_runtime.calendar import MarketCalendar, now_utc
 from amw_runtime.config import ENV_MODE, RunMode, RuntimeConfig, load_runtime_config
@@ -44,6 +45,10 @@ class PreflightReport:
     disclaimer_status: str
     open_owner_items: tuple[str, ...]
     notes: tuple[str, ...] = field(default=())
+    provider_authorisations: tuple[ProviderAuthorisation, ...] = field(default=())
+    """One per required provider, minted only by a passing REAL_RUN ``run_preflight`` (after its
+    ``PROVIDER_LIMIT:<provider>`` item passed with owner-chat evidence). Empty otherwise. A real
+    provider adapter cannot be built or called without its token (amw_adapters.real)."""
 
 
 def _truthy(value: str | None) -> bool:
@@ -324,6 +329,17 @@ def run_preflight(
 
     if unmet:
         raise PreflightRefused(tuple(unmet))
+    authorisations: tuple[ProviderAuthorisation, ...] = ()
+    if config.mode is RunMode.REAL_RUN and not test_used:  # real run: every item passed above
+        authorisations = tuple(
+            mint_provider_authorisation(
+                prov.name,
+                per_video_cap_micros=config.per_video_cap_micros,
+                currency=config.currency,
+            )
+            for prov in config.providers
+            if prov.required and f"PROVIDER_LIMIT:{prov.name}" in passed
+        )
     return PreflightReport(
         mode=config.mode,
         checks_passed=tuple(passed),
@@ -332,4 +348,5 @@ def run_preflight(
         disclaimer_status=disc.status if disc else "",
         open_owner_items=tuple(open_items),
         notes=tuple(notes),
+        provider_authorisations=authorisations,
     )

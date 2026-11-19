@@ -275,6 +275,7 @@ version = "0.0.0"
 source = { editable = "packages/amw_runtime" }
 dependencies = [
     { name = "agent-06-fact-checker" },
+    { name = "amw-adapters" },
     { name = "amw-core" },
     { name = "pydantic" },
 ]
@@ -282,6 +283,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "agent-06-fact-checker", editable = "packages/agents/agent_06_fact_checker" },
+    { name = "amw-adapters", editable = "packages/amw_adapters" },
     { name = "amw-core", editable = "packages/amw_core" },
     { name = "pydantic", specifier = ">=2" },
 ]

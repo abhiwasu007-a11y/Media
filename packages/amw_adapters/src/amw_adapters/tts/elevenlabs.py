@@ -6,10 +6,14 @@
   ``model_id`` is always sent, because the provider default is Multilingual v2 (PR-11).
 * Request language: the primary subtag must be in the model's verified languages; it is sent as
   ``language_code`` (the provider would silently ignore an unsupported one, PR-11).
-* Style controls (``TtsCapabilities``): pace is ``NONE`` (no documented speed control for v4,
-  undocumented for v3, PR-11); emotion is ``NATIVE`` only when the catalogue maps every
-  ``TtsEmotion`` to an audio tag (owner / 3B listening test), else ``NONE``. A control the adapter
-  does not declare is refused (``INPUT_INVALID``), never ignored.
+* Style controls (``TtsCapabilities``): pace is ``NATIVE`` only for a model whose catalogue entry
+  has ``speed_control`` (then ``TtsRequest.pace`` is sent as ``voice_settings.speed`` from the
+  catalogue ``pace_speed`` map; v4 has no speed slider, v3 is undocumented, PR-11); emotion is
+  ``NATIVE`` only when the catalogue maps every ``TtsEmotion`` to an audio tag (owner / 3B
+  listening test), else ``NONE``. A control the adapter
+  does not declare (pace, emotion, pronunciation dictionary) is refused (``INPUT_INVALID``),
+  never ignored. ``markup_delimiters`` come from the catalogue (audio tags, PR-12).
+* Every paid request goes through the injected ``CallGuard`` (worst case before, real cost after).
 * Pronunciation dictionary: ``pronunciation_dictionary_ref`` = ``<dictionary id>`` or
   ``<dictionary id>@<version id>`` -> one ``pronunciation_dictionary_locators`` entry.
 * Output: ``wav_<sample_rate_hz>`` (18 section 5: 48 kHz); the bytes are checked to be a 16-bit
@@ -30,6 +34,7 @@ import httpx
 
 from amw_adapters.common import CallUsage
 from amw_adapters.real.catalogue import ElevenLabsCatalogue, ElevenLabsModel
+from amw_adapters.real.guard import CallGuard, PlannedCall, require_guard
 from amw_adapters.real.http import (
     DEFAULT_BACKOFF,
     ProviderHttp,
@@ -89,6 +94,7 @@ class ElevenLabsTtsAdapter:
         catalogue: ElevenLabsCatalogue,
         secret: SecretRef,
         *,
+        guard: CallGuard,
         transport: httpx.BaseTransport | None = None,
         backoff: RetryPolicySettings = DEFAULT_BACKOFF,
         sleep: Callable[[float], None] | None = None,
@@ -96,6 +102,7 @@ class ElevenLabsTtsAdapter:
     ) -> None:
         self._cat = catalogue
         self._secret = secret
+        self._guard = require_guard(guard, provider=PROVIDER, currency=catalogue.currency)
         extra: dict[str, Any] = {}
         if sleep is not None:
             extra["sleep"] = sleep
@@ -142,6 +149,7 @@ class ElevenLabsTtsAdapter:
             phoneme_support=all(m.ipa_inline for m in models),
             languages=tuple(sorted(languages)),
             max_chars_per_request=min(limits),
+            markup_delimiters=self._cat.markup_delimiters,
         )
 
     def _check(self, request: TtsRequest) -> tuple[ElevenLabsModel, str, str]:
@@ -153,8 +161,17 @@ class ElevenLabsTtsAdapter:
             )
         if not _VOICE_ID.match(request.voice_ref):
             raise InputInvalidError("voice_ref is not a provider voice id")
-        if request.pace is not None and not model.speed_control:
-            raise InputInvalidError("this adapter has no pace control")
+        if request.pace is not None and not (
+            model.speed_control and request.pace.value in self._cat.pace_speed
+        ):
+            raise InputInvalidError(
+                "this model declares no pace control", details={"model": request.model}
+            )
+        if request.pronunciation_dictionary_ref is not None and not model.pronunciation_dictionary:
+            raise InputInvalidError(
+                "this model declares no pronunciation dictionary support",
+                details={"model": request.model},
+            )
         text = request.text
         if request.emotion is not None:
             if self._emotion_support() is ControlSupport.NONE:
@@ -178,8 +195,11 @@ class ElevenLabsTtsAdapter:
             "model_id": request.model,
             "language_code": _primary(request.language),
         }
-        if self._cat.voice_settings is not None:
-            body["voice_settings"] = dict(self._cat.voice_settings)
+        settings: dict[str, float | bool] = dict(self._cat.voice_settings or {})
+        if request.pace is not None:  # _check: the model has speed_control and a mapped speed
+            settings["speed"] = self._cat.pace_speed[request.pace.value]
+        if settings:
+            body["voice_settings"] = settings
         if request.pronunciation_dictionary_ref is not None:
             match = _DICT_REF.match(request.pronunciation_dictionary_ref)
             if match is None:
@@ -207,6 +227,11 @@ class ElevenLabsTtsAdapter:
     def _synthesize(self, request: TtsRequest, key: str) -> TtsResult:
         model, text, output_format = self._check(request)
         body = self._body(request, text)
+        characters = len(text)
+        amount = -(-characters * model.price_micros_per_1k_chars // 1000)
+        self._guard.before(
+            PlannedCall(PROVIDER, OPERATION_SYNTHESIZE, amount, self._cat.currency, key)
+        )
         headers = {
             "xi-api-key": self._secret.reveal(),
             "content-type": "application/json",
@@ -218,11 +243,6 @@ class ElevenLabsTtsAdapter:
             json_body=body, params={"output_format": output_format},
         )  # fmt: skip
         audio = outcome.response.content
-        frames, rate = _wav_facts(audio)
-        if rate != request.sample_rate_hz:
-            raise CorruptedOutputError("provider WAV sample rate differs from the request")
-        characters = len(text)
-        amount = -(-characters * model.price_micros_per_1k_chars // 1000)
         request_id = outcome.response.headers.get("request-id")
         self._http.log.info(
             "provider.call",
@@ -252,6 +272,10 @@ class ElevenLabsTtsAdapter:
             idempotency_key=key,
             external_request_id=request_id,
         )
+        self._guard.after(usage)  # the audio was billed even if it turns out unusable
+        frames, rate = _wav_facts(audio)
+        if rate != request.sample_rate_hz:
+            raise CorruptedOutputError("provider WAV sample rate differs from the request")
         return TtsResult(
             audio=audio,
             media_type="audio/wav",
@@ -267,6 +291,9 @@ class ElevenLabsTtsAdapter:
         if stored is not None:
             return stored
         try:
+            self._guard.before(
+                PlannedCall(PROVIDER, OPERATION_LIST_VOICES, 0, self._cat.currency, idempotency_key)
+            )
             voices = self._list(request)
         except AmwError as exc:
             self.memory.failed(OPERATION_LIST_VOICES, idempotency_key, exc.code)

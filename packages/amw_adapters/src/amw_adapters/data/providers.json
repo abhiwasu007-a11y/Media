@@ -11,6 +11,8 @@
     "billed_refusal_categories": ["bio", "frontier_llm", "reasoning_extraction"],
     "billed_refusal_categories_source": "PR-10",
     "cache_ttl": "5m",
+    "worst_case_overhead_tokens": 256,
+    "worst_case_overhead_tokens_source": "ESTIMATE (design default, owner-tunable): framing allowance added to the UTF-8 byte count that bounds the prompt tokens of one call (a token covers at least one byte). REQUIRES REVIEW (Phase 1): compare with the free token count in the pilot",
     "connect_timeout_ms": 10000,
     "connect_timeout_source": "ESTIMATE (design default; owner-tunable)",
     "retry": {
@@ -73,6 +75,10 @@
       "eleven_turbo_v2_5": "no Marathi (PR-04, PR-11)",
       "eleven_turbo_v2": "English only (PR-11)"
     },
+    "markup_delimiters": ["[", "]"],
+    "markup_delimiters_source": "PR-11, PR-12 (audio tags such as [whispering] are square-bracketed and count as characters); the caller must escape these in script text",
+    "pace_speed": {},
+    "pace_speed_source": "empty until the owner's 3B listening test fixes one voice_settings.speed per TtsPace (PR-11 lists speed in voice_settings); required for every model with speed_control true",
     "emotion_audio_tags": {},
     "emotion_audio_tags_source": "empty until the owner's 3B listening test fixes one audio tag per TtsEmotion (ADR-008 REQUIRES REVIEW); empty means emotion_control NONE",
     "voice_settings": null,
@@ -85,6 +91,8 @@
         "max_chars_per_request": 10000,
         "price_micros_per_1k_chars": 80000,
         "speed_control": false,
+        "pronunciation_dictionary": true,
+        "pronunciation_dictionary_source": "PR-11 (pronunciation_dictionary_locators is a request parameter; no per-model restriction is stated). REQUIRES REVIEW (Phase 1): confirm for each model",
         "ipa_inline": true
       },
       "eleven_v3": {
@@ -94,6 +102,7 @@
         "max_chars_per_request": 5000,
         "price_micros_per_1k_chars": 80000,
         "speed_control": false,
+        "pronunciation_dictionary": true,
         "ipa_inline": false
       },
       "eleven_v4_turbo": {
@@ -103,6 +112,7 @@
         "max_chars_per_request": null,
         "price_micros_per_1k_chars": 40000,
         "speed_control": false,
+        "pronunciation_dictionary": false,
         "ipa_inline": false
       },
       "eleven_v3_conversational": {
@@ -112,6 +122,7 @@
         "max_chars_per_request": null,
         "price_micros_per_1k_chars": 40000,
         "speed_control": false,
+        "pronunciation_dictionary": false,
         "ipa_inline": false
       }
     }

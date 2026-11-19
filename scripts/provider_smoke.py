@@ -26,16 +26,17 @@ import httpx
 from amw_adapters.llm import LlmMessage, LlmRequest
 from amw_adapters.llm.anthropic import cost_micros
 from amw_adapters.real.catalogue import load_catalogue
-from amw_adapters.registry import build_providers
+from amw_adapters.real.guard import CapOnlyCallGuard
 from amw_adapters.tts import TtsRequest
 from amw_core.config import load_settings
 from amw_core.enums import RetryPolicy
 from amw_core.errors import AmwError
 from amw_core.ids import ORG, IdempotencyScope, make_idempotency_key
 from amw_runtime.config import RunMode, load_runtime_config
-from amw_runtime.confirmations import ConfirmationRecord, EvidenceLookup
+from amw_runtime.confirmations import ConfirmationRecord, EvidenceStatusLookup
 from amw_runtime.errors import PreflightRefused
 from amw_runtime.preflight import run_preflight
+from amw_runtime.providers import build_providers
 
 LLM_MAX_OUTPUT_TOKENS = 64
 LLM_PROMPT = "Reply with the single word: ok"
@@ -47,7 +48,8 @@ def run_smoke(
     env: Mapping[str, str],
     *,
     confirmations: Sequence[ConfirmationRecord],
-    evidence: EvidenceLookup | None,
+    evidence: EvidenceStatusLookup | None,
+    org_id: str,
     llm_model: str,
     tts_model: str,
     voice_id: str,
@@ -73,7 +75,12 @@ def run_smoke(
         return 2
     try:
         report = run_preflight(
-            config, confirmations, env=env, evidence=evidence, render_start=render_start
+            config,
+            confirmations,
+            env=env,
+            evidence=evidence,
+            render_start=render_start,
+            org_id=org_id,
         )
     except PreflightRefused as exc:
         out("preflight refused:")
@@ -91,6 +98,7 @@ def run_smoke(
             config,
             preflight=report,
             env=env,
+            guard_for=CapOnlyCallGuard,
             catalogue=catalogue,
             transports=transports,
             backoff=settings.retry_policy(RetryPolicy.TEMPORARY),
@@ -177,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="JSON list of owner confirmation records (amw_runtime)",
     )
+    parser.add_argument("--org-id", required=True, help="the run's org (evidence is bound to it)")
     parser.add_argument("--llm-model", required=True)
     parser.add_argument("--tts-model", required=True)
     parser.add_argument("--voice-id", required=True)
@@ -191,6 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         os.environ,
         confirmations=records,
         evidence=None,
+        org_id=args.org_id,
         llm_model=args.llm_model,
         tts_model=args.tts_model,
         voice_id=args.voice_id,

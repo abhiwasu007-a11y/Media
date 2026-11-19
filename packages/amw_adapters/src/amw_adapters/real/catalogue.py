@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from amw_adapters.tts.protocol import TtsPace
 from amw_core.errors import ConfigInvalidError
 
 DEFAULT_CATALOGUE = Path(__file__).resolve().parent.parent / "data" / "providers.json"
@@ -72,6 +73,7 @@ class AnthropicCatalogue(_Model):
     price_ref: str = Field(min_length=1)
     billed_refusal_categories: frozenset[str]
     cache_ttl: Literal["5m", "1h"]
+    worst_case_overhead_tokens: NonNegInt
     connect_timeout_ms: PosInt
     retry: InCallRetry
     models: dict[str, AnthropicModel] = Field(min_length=1)
@@ -93,6 +95,7 @@ class ElevenLabsModel(_Model):
     max_chars_per_request: PosInt | None
     price_micros_per_1k_chars: NonNegInt
     speed_control: bool
+    pronunciation_dictionary: bool
     ipa_inline: bool
 
     @model_validator(mode="after")
@@ -118,6 +121,8 @@ class ElevenLabsCatalogue(_Model):
     forbidden_models: dict[str, str]
     emotion_audio_tags: dict[str, str]
     voice_settings: dict[str, float | bool] | None
+    markup_delimiters: tuple[str, ...]
+    pace_speed: dict[str, Annotated[float, Field(gt=0, strict=True)]]
     models: dict[str, ElevenLabsModel] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -127,6 +132,14 @@ class ElevenLabsCatalogue(_Model):
             raise ValueError("a forbidden model is also listed as allowed")
         if not any(m.enabled for m in self.models.values()):
             raise ValueError("no enabled model")
+        if set(self.pace_speed) - {p.value for p in TtsPace}:
+            raise ValueError("pace_speed keys must be TtsPace values")
+        if any(m.enabled and m.speed_control for m in self.models.values()) and set(
+            self.pace_speed
+        ) != {p.value for p in TtsPace}:
+            raise ValueError("a model with speed_control needs a speed for every TtsPace")
+        if any(not d or len(d) > 8 for d in self.markup_delimiters):
+            raise ValueError("a markup delimiter is a short non-empty string")
         for tag in self.emotion_audio_tags.values():
             if not (tag.startswith("[") and tag.endswith("]") and 2 < len(tag) <= 64):
                 raise ValueError("an emotion audio tag must look like [tag]")

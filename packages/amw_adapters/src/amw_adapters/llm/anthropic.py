@@ -31,6 +31,7 @@ from amw_adapters.llm.protocol import (
     TokenCount,
 )
 from amw_adapters.real.catalogue import AnthropicCatalogue, AnthropicModel
+from amw_adapters.real.guard import CallGuard, PlannedCall, require_guard
 from amw_adapters.real.http import (
     DEFAULT_BACKOFF,
     ProviderHttp,
@@ -120,14 +121,41 @@ def cost_micros(
     return -(-per_mtok // 1_000_000)
 
 
+def worst_case_micros(model: AnthropicModel, request: LlmRequest, overhead_tokens: int) -> int:
+    """Upper bound of one ``complete`` call in integer micros, computed locally before the request.
+
+    Prompt tokens are bounded by the UTF-8 bytes of system + messages (a token covers at least one
+    byte) plus the catalogue framing allowance; every prompt token is priced at the dearest of the
+    input / cache-write rates (cache read is cheaper); the dearest price band up to that prompt
+    length is used; output is ``max_output_tokens`` at the output rate.
+    """
+    prompt = len(request.system.encode("utf-8")) + sum(
+        len(m.content.encode("utf-8")) for m in request.messages
+    )
+    prompt += overhead_tokens
+    worst = 0
+    for band in model.prices:
+        per_in = max(band.input, band.cache_write_5m, band.cache_write_1h)
+        total = prompt * per_in + request.max_output_tokens * band.output
+        worst = max(worst, -(-total // 1_000_000))
+        if band.max_prompt_tokens is None or prompt <= band.max_prompt_tokens:
+            break
+    return worst
+
+
 class AnthropicLlmAdapter:
-    """``LlmAdapter`` against the Anthropic Messages API."""
+    """``LlmAdapter`` against the Anthropic Messages API.
+
+    Needs a ``CallGuard`` bound to a passed REAL_RUN preflight for ``anthropic``: every request
+    is preceded by ``guard.before`` (worst case, refused before the request) and every response
+    that arrives is recorded through ``guard.after``."""
 
     def __init__(
         self,
         catalogue: AnthropicCatalogue,
         secret: SecretRef,
         *,
+        guard: CallGuard,
         transport: httpx.BaseTransport | None = None,
         backoff: RetryPolicySettings = DEFAULT_BACKOFF,
         sleep: Callable[[float], None] | None = None,
@@ -135,6 +163,7 @@ class AnthropicLlmAdapter:
     ) -> None:
         self._cat = catalogue
         self._secret = secret
+        self._guard = require_guard(guard, provider=PROVIDER, currency=catalogue.currency)
         extra: dict[str, Any] = {}
         if sleep is not None:
             extra["sleep"] = sleep
@@ -242,6 +271,15 @@ class AnthropicLlmAdapter:
         model = self._check(request)
         body = self._body(request, with_max_tokens=True)
         payload_sha = body_sha256(json.dumps(body, sort_keys=True).encode("utf-8"))
+        self._guard.before(
+            PlannedCall(
+                PROVIDER,
+                OPERATION_COMPLETION,
+                worst_case_micros(model, request, self._cat.worst_case_overhead_tokens),
+                self._cat.currency,
+                key,
+            )
+        )
         outcome = self._http.send(
             "POST", MESSAGES_PATH, operation=OPERATION_COMPLETION, headers=self._headers(),
             timeout_ms=request.timeout_ms, json_body=body,
@@ -280,6 +318,7 @@ class AnthropicLlmAdapter:
             usage = self._usage(
                 OPERATION_COMPLETION, request, key, usage_raw, amount if billed else 0, request_id
             )
+            self._guard.after(usage)
             raise ProviderRefusalError(
                 "provider refused the request",
                 provider=PROVIDER,
@@ -290,6 +329,8 @@ class AnthropicLlmAdapter:
                     "usage": usage.model_dump(mode="json"),
                 },
             )
+        usage = self._usage(OPERATION_COMPLETION, request, key, usage_raw, amount, request_id)
+        self._guard.after(usage)  # the response was billed whatever its content
         mapped = _STOP_MAP.get(stop) if isinstance(stop, str) else None
         if mapped is None:
             raise IncompleteOutputError(
@@ -302,7 +343,6 @@ class AnthropicLlmAdapter:
             for block in data.get("content") or ()
             if isinstance(block, Mapping) and block.get("type") == "text"
         )
-        usage = self._usage(OPERATION_COMPLETION, request, key, usage_raw, amount, request_id)
         return LlmResponse(text=text, stop_reason=mapped, usage=usage)
 
     def count_tokens(self, request: LlmRequest, *, idempotency_key: str) -> TokenCount:
@@ -313,6 +353,11 @@ class AnthropicLlmAdapter:
             return stored
         try:
             self._cat.model(request.model)
+            self._guard.before(
+                PlannedCall(
+                    PROVIDER, OPERATION_COUNT_TOKENS, 0, self._cat.currency, idempotency_key
+                )
+            )
             outcome = self._http.send(
                 "POST", COUNT_PATH, operation=OPERATION_COUNT_TOKENS, headers=self._headers(),
                 timeout_ms=min(request.timeout_ms, _COUNT_TIMEOUT_MS),

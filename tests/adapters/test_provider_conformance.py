@@ -37,6 +37,7 @@ from amw_core.errors import (
     Upstream5xxError,
 )
 from amw_core.ids import ORG, make_idempotency_key
+from tests.adapters.guards import cap_guard
 from tests.adapters.mock_providers import (
     ANTHROPIC_SECRET,
     ELEVENLABS_SECRET,
@@ -96,7 +97,10 @@ def _real_llm(failures: list[str]) -> AnthropicLlmAdapter:
         )  # fmt: skip
     cat = CAT.anthropic.model_copy(update={"retry": NO_RETRY})
     adapter = AnthropicLlmAdapter(
-        cat, SecretRef(ANTHROPIC_SECRET, TEST_ENV), transport=mock.transport()
+        cat,
+        SecretRef(ANTHROPIC_SECRET, TEST_ENV),
+        guard=cap_guard("anthropic"),
+        transport=mock.transport(),
     )
     adapter._mock = mock  # type: ignore[attr-defined]
     return adapter
@@ -229,7 +233,10 @@ def _real_tts(failures: list[str]) -> ElevenLabsTtsAdapter:
         update={"retry": NO_RETRY, "models": {"eleven_v3": CAT.elevenlabs.models["eleven_v3"]}}
     )
     adapter = ElevenLabsTtsAdapter(
-        cat, SecretRef(ELEVENLABS_SECRET, TEST_ENV), transport=mock.transport()
+        cat,
+        SecretRef(ELEVENLABS_SECRET, TEST_ENV),
+        guard=cap_guard("elevenlabs"),
+        transport=mock.transport(),
     )
     adapter._mock = mock  # type: ignore[attr-defined]
     return adapter

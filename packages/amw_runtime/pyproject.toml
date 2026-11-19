@@ -2,7 +2,7 @@
 name = "amw-runtime"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core", "agent-06-fact-checker", "pydantic>=2"]
+dependencies = ["amw-core", "amw-adapters", "agent-06-fact-checker", "pydantic>=2"]
 
 [build-system]
 requires = ["hatchling"]
@@ -13,4 +13,5 @@ packages = ["src/amw_runtime"]
 
 [tool.uv.sources]
 amw-core = { workspace = true }
+amw-adapters = { workspace = true }
 agent-06-fact-checker = { workspace = true }

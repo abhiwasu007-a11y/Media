@@ -27,6 +27,7 @@ from amw_core.errors import (
     Upstream5xxError,
 )
 from amw_core.ids import ORG, make_idempotency_key
+from tests.adapters.guards import cap_guard
 from tests.adapters.mock_providers import (
     ANTHROPIC_SECRET,
     TEST_ENV,
@@ -65,6 +66,7 @@ def make(
     adapter = AnthropicLlmAdapter(
         cat,
         SecretRef(ANTHROPIC_SECRET, TEST_ENV if env is None else env),
+        guard=cap_guard("anthropic"),
         transport=transport or mock.transport(),
         sleep=sleeps.append,
         uniform=lambda: 0.0,

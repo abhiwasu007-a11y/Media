@@ -20,6 +20,7 @@ from amw_core.errors import (
     RateLimitedError,
 )
 from amw_core.ids import ORG, make_idempotency_key
+from tests.adapters.guards import cap_guard
 from tests.adapters.mock_providers import (
     ELEVENLABS_SECRET,
     TEST_ENV,
@@ -56,6 +57,7 @@ def make(
     adapter = ElevenLabsTtsAdapter(
         cat,
         SecretRef(ELEVENLABS_SECRET, TEST_ENV),
+        guard=cap_guard("elevenlabs"),
         transport=transport or mock.transport(),
         sleep=sleeps.append,
         uniform=lambda: 0.0,
