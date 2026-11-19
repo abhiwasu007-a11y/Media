@@ -39,8 +39,10 @@ from amw_core.enums import (
     ApprovalState,
     ApprovalStepState,
     ComplianceVerdict,
+    OutputStatus,
 )
 from amw_core.errors import (
+    AmwError,
     CorruptedOutputError,
     CrossTenantRefError,
     InputInvalidError,
@@ -48,6 +50,7 @@ from amw_core.errors import (
     MissingDependencyError,
     SchemaInvalidError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import IdempotencyKey
 from amw_core.interfaces.storage import BlobHead, BlobInfo, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
@@ -184,7 +187,7 @@ class Extractor:
         self.seen: Mapping[str, bytes] = {}
 
     def extract(
-        self, request: Any, blobs: Mapping[str, bytes], evaluation_date: date
+        self, request: Any, blobs: Mapping[str, bytes], evaluation_date: date, tx: Any
     ) -> ExtractedGate:
         self.seen = blobs
         seg = R.MethodSegment(
@@ -259,6 +262,11 @@ class World:
     ti: TaskInput
 
 
+def _blob_of(name: str) -> bytes:
+    """frames_ref is read as the Agent 10 evidence manifest (every frame hash is verified)."""
+    return json.dumps({"frames": []} if name == "frames_ref" else {"n": name}).encode()
+
+
 def gate_world(*, release: str = "approved", items: Any = None, budget_calls: int = 8) -> World:
     h = R14()
     org = str(h.org)
@@ -329,7 +337,7 @@ def gate_world(*, release: str = "approved", items: Any = None, budget_calls: in
         pack_texts={},
         prompt_ids=("agent_16/compliance_gate.v1",),
     )
-    refs = {name: storage.add(org, name, json.dumps({"n": name}).encode()) for name in REFS}
+    refs = {name: storage.add(org, name, _blob_of(name)) for name in REFS}
     payload = {
         "subject": {
             "render_id": h.render,
@@ -355,6 +363,20 @@ def gate_world(*, release: str = "approved", items: Any = None, budget_calls: in
     return World(
         h, storage, store, approvals, audit, ledger, extractor, ComplianceGateStage(deps), ti
     )
+
+
+def ctx_of(ti: TaskInput) -> ExecContext:
+    """A fresh attempt context for the Task Input (03 section 1 rule 5, CCR-203)."""
+    return ExecContext.from_task_input(
+        ti, str(ids.ATTEMPT.new()), ti.agent_id, envelope_org_id=ti.org_id
+    )
+
+
+def assert_returned(out: Any, exc: type[AmwError]) -> None:
+    """Failures are returned as a Task Output, never raised out of ``run`` (CCR-203)."""
+    assert out.status in (OutputStatus.FAILED, OutputStatus.REJECTED), out.status
+    assert out.error is not None and out.error.code == exc.code, out.error
+    validate_task_output(out.model_dump(mode="json"))
 
 
 def h_channel() -> Any:
@@ -399,7 +421,7 @@ def task_input(
 
 def test_gate_stage_end_to_end_writes_rows_blob_audit_and_valid_output() -> None:
     w = gate_world()
-    out = w.stage.run(w.ti, str(ids.ATTEMPT.new()))
+    out = w.stage.run(w.ti, ctx_of(w.ti))
     validate_task_output(out.model_dump(mode="json"))
     data = data_of(out)
     validate_against_blueprint(data, "### 8.2 `agent_16.compliance_gate.output`")
@@ -420,14 +442,14 @@ def test_gate_stage_derives_release_state_and_ignores_the_blob_claim() -> None:
     """FIN-R12: the extractor says APPROVED; the release step has no evidence, so F-26 derives
     APPROVED_UNVERIFIED and the gate blocks (derive_approval_state on the gate path)."""
     w = gate_world(release="unverified")
-    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    data = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     assert data is not None
     r12 = next(r for r in data["rules"] if r["rule_id"] == "FIN-R12")
     assert r12["compliance_verdict"] == "BLOCKED" and data["verdict"] == "BLOCKED"
     assert data["gate_verdict"] == "FAILED"
     assert w.audit.actions()[-1] == "compliance_gate.blocked"
     w = gate_world(release="none")
-    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    data = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     assert data is not None and data["verdict"] == "BLOCKED"
 
 
@@ -436,7 +458,7 @@ def test_gate_stage_mac_invalid_release_evidence_is_a_security_audit_event() -> 
     rel = next(iter(w.approvals.steps_.values()))[0]
     assert rel.evidence_id is not None
     w.h.db.superuser_tamper(w.h.tx(), rel.evidence_id, evidence_mac=b"\x00" * 32)
-    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    data = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     assert data is not None and data["verdict"] == "BLOCKED"
     assert "security.evidence_mac_invalid" in w.audit.actions()
 
@@ -450,7 +472,7 @@ def test_gate_stage_claims_final_verdict_from_the_worst_rule_of_the_item() -> No
         )
     ]
     w = gate_world(items=items)
-    w.stage.run(w.ti, str(ids.ATTEMPT.new()))
+    w.stage.run(w.ti, ctx_of(w.ti))
     assert w.store.claims == {"clm_1": ComplianceVerdict.ALLOWED}
 
 
@@ -468,22 +490,18 @@ def test_gate_stage_refuses_foreign_refs_bad_hashes_and_wrong_render() -> None:
     w = gate_world()
     uri = next(u for u in w.storage.blobs if "script_ref" in u)
     w.storage.blobs[uri] = b"tampered"
-    with pytest.raises(CorruptedOutputError):
-        w.stage.run(w.ti, str(ids.ATTEMPT.new()))
+    assert_returned(w.stage.run(w.ti, ctx_of(w.ti)), CorruptedOutputError)
     assert w.audit.actions()[-1] == "compliance_gate.failed"
     w = gate_world()
     w.approvals.render_sha[w.h.render] = "f" * 64
-    with pytest.raises(InputInvalidError):
-        w.stage.run(w.ti, str(ids.ATTEMPT.new()))
+    assert_returned(w.stage.run(w.ti, ctx_of(w.ti)), InputInvalidError)
     w = gate_world()
     w.approvals.render_sha.clear()
-    with pytest.raises(MissingDependencyError):
-        w.stage.run(w.ti, str(ids.ATTEMPT.new()))
+    assert_returned(w.stage.run(w.ti, ctx_of(w.ti)), MissingDependencyError)
     bad = w.ti.model_copy(
         update={"payload": w.ti.payload.model_copy(update={"payload_schema": "x.input"})}
     )
-    with pytest.raises(SchemaInvalidError):
-        w.stage.run(bad, str(ids.ATTEMPT.new()))
+    assert_returned(w.stage.run(bad, ctx_of(bad)), SchemaInvalidError)
 
 
 def test_gate_stage_cross_tenant_ref_is_audited() -> None:
@@ -493,23 +511,21 @@ def test_gate_stage_cross_tenant_ref_is_audited() -> None:
         "voice_ref": {"uri": f"amw-blob://{ids.ORG.new()}/a/x.json", "sha256": "0" * 64}
     }
     ti = w.ti.model_copy(update={"payload": w.ti.payload.model_copy(update={"data": data})})
-    with pytest.raises(CrossTenantRefError):
-        w.stage.run(ti, str(ids.ATTEMPT.new()))
+    assert_returned(w.stage.run(ti, ctx_of(ti)), CrossTenantRefError)
     assert w.audit.actions() == ["security.cross_tenant_ref"]
 
 
 def test_gate_stage_envelope_call_budget_is_enforced() -> None:
     w = gate_world(budget_calls=0)
-    with pytest.raises(LoopCapExceededError):
-        w.stage.run(w.ti, str(ids.ATTEMPT.new()))
+    assert_returned(w.stage.run(w.ti, ctx_of(w.ti)), LoopCapExceededError)
     assert w.ledger.entries == {}
 
 
 def test_verdict_writer_is_idempotent_per_task() -> None:
     w = gate_world()
-    w.stage.run(w.ti, "att_1")
+    w.stage.run(w.ti, ctx_of(w.ti))
     first = dict(w.store.verdicts)
-    w.stage.run(w.ti, "att_2")  # a retried attempt: same rows, same blob
+    w.stage.run(w.ti, ctx_of(w.ti))  # a retried attempt: same rows, same blob
     assert w.store.verdicts == first
 
 
@@ -570,7 +586,7 @@ def uniq_world(identical: bool) -> tuple[UniquenessCheckStage, TaskInput, Store,
 @pytest.mark.parametrize("identical", [False, True])
 def test_uniqueness_stage_end_to_end(identical: bool) -> None:
     stage, ti, store, audit = uniq_world(identical)
-    out = stage.run(ti, "att_1")
+    out = stage.run(ti, ctx_of(ti))
     validate_task_output(out.model_dump(mode="json"))
     data = data_of(out)
     validate_against_blueprint(data, "### 8.3 `svc_s02.uniqueness_check.output`")
@@ -582,7 +598,7 @@ def test_uniqueness_stage_end_to_end(identical: bool) -> None:
 # --- report section ------------------------------------------------------------------------
 def test_report_section_lists_every_row_and_never_prints_zero_for_unknown() -> None:
     w = gate_world()
-    gate = data_of(w.stage.run(w.ti, "att_1"))
+    gate = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     rep = ReportSectionBuilder().build(gate, None, None)
     assert (
         len([r for r in rep.rows if r.section == "compliance"])
@@ -626,7 +642,7 @@ def test_release_approval_state_must_be_approved(state: ApprovalState) -> None:
     w = gate_world()
     rel = next(iter(w.approvals.approvals))
     w.approvals.approvals[rel] = replace(w.approvals.approvals[rel], state=state)
-    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    data = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     r12 = next(r for r in data["rules"] if r["rule_id"] == "FIN-R12")
     assert r12["compliance_verdict"] == "BLOCKED" and data["verdict"] == "BLOCKED"
 
@@ -635,7 +651,7 @@ def test_release_approval_for_another_subject_never_counts() -> None:
     """Re-review m3: the release must be for the hash of what is released."""
     w = gate_world()
     w.extractor.released = "e" * 64
-    data = data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))
+    data = data_of(w.stage.run(w.ti, ctx_of(w.ti)))
     assert data["verdict"] == "BLOCKED"
 
 
@@ -656,4 +672,4 @@ def test_quotation_approval_state_and_span_binding(state: ApprovalState) -> None
     assert verifier.derive(tx, rel, ApprovalKind.COPYRIGHT_DOUBT, "f" * 64) == "NONE"
     assert verifier.derive(tx, rel, ApprovalKind.COPYRIGHT_DOUBT, None) == "NONE"
     w.extractor.quotations = {span: rel}
-    data_of(w.stage.run(w.ti, str(ids.ATTEMPT.new())))  # the assembler path runs the same check
+    data_of(w.stage.run(w.ti, ctx_of(w.ti)))  # the assembler path runs the same check

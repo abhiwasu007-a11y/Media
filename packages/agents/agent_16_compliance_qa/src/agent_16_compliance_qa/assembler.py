@@ -22,6 +22,7 @@ Its implementation depends on the Agent 10 output schemas, which are not built i
 state, a hash verdict or a tenant decision through it.
 """
 
+import json
 from collections.abc import Mapping
 from datetime import date
 from typing import Literal, Protocol
@@ -123,9 +124,14 @@ class ExtractedGate(Model):
 
 class GateFactExtractor(Protocol):
     def extract(
-        self, request: ComplianceGateInput, blobs: Mapping[str, bytes], evaluation_date: date
+        self,
+        request: ComplianceGateInput,
+        blobs: Mapping[str, bytes],
+        evaluation_date: date,
+        tx: TenantTransaction,
     ) -> ExtractedGate:
-        """Parse the verified upstream blobs (keyed by ``*_ref`` name) into gate facts."""
+        """Parse the verified upstream blobs (keyed by ``*_ref`` name) into gate facts; the
+        database rows of 15.1a are read inside ``tx`` (the caller's tenant transaction)."""
         ...
 
 
@@ -133,6 +139,24 @@ class RenderHashReader(Protocol):
     def render_content_sha256(self, tx: TenantTransaction, render_id: str) -> str | None:
         """``renders.content_sha256`` under RLS (explicit ``org_id`` filter); None = not found."""
         ...
+
+
+def verify_frames(storage: BlobStorage, tx: TenantTransaction, raw: bytes | None) -> None:
+    """Every ``frames[].sha256`` of the evidence manifest must equal the stored blob
+    (``AGENT.CORRUPTED_OUTPUT`` from the storage; blueprint 7.4). A manifest that cannot be read
+    is ``PERMANENT.SCHEMA_INVALID``, never skipped; a frame of another tenant is refused."""
+    if raw is None:
+        raise MissingDependencyError("frames_ref document is absent")
+    try:
+        frames = json.loads(raw)["frames"]
+        pairs = [(str(f["uri"]), str(f["sha256"])) for f in frames]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise SchemaInvalidError("evidence manifest frames[] unreadable") from exc
+    for uri, sha in pairs:
+        if storage_uri_owner(uri) != tx.context.org_id:
+            raise CrossTenantRefError("frame belongs to another tenant")
+        for _ in storage.get(tx.context, BlobUri(uri), sha):
+            pass
 
 
 class GateInputAssembler:
@@ -187,7 +211,8 @@ class GateInputAssembler:
             if ref is not None:
                 chunks = self._storage.get(tx.context, BlobUri(ref.uri), ref.sha256)
                 blobs[name] = b"".join(chunks)
-        extracted = self._extractor.extract(req, blobs, evaluation_date)
+        verify_frames(self._storage, tx, blobs.get("frames_ref"))
+        extracted = self._extractor.extract(req, blobs, evaluation_date, tx)
         inputs = extracted.inputs
         segments = tuple(
             seg.model_copy(

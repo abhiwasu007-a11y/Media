@@ -137,10 +137,14 @@ version = "0.0.0"
 source = { editable = "packages/agents/agent_16_compliance_qa" }
 dependencies = [
     { name = "amw-core" },
+    { name = "amw-runtime" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+requires-dist = [
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "amw-runtime", editable = "packages/amw_runtime" },
+]
 
 [[package]]
 name = "amw-adapters"
