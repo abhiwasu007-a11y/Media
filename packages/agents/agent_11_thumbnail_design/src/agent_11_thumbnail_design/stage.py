@@ -401,8 +401,11 @@ class _Run:
         return b"".join(self.d.storage.get(self.tc, BlobUri(uri), sha))
 
     def _put(self, area: str, path: str, data: bytes) -> tuple[str, str, int]:
-        """Write-once blob; an identical existing blob is reused (repeat / DLQ replay)."""
-        uri = self.d.storage.blob_uri(self.tc, area, path)
+        """Write-once blob; an identical existing blob is reused (repeat / DLQ replay).
+
+        Stored under the 03 section 8 ``jobs`` area of the task's job (``checkpoints``,
+        ``llm`` and ``thumbnails`` are not storage areas; the real store refuses them)."""
+        uri = self.d.storage.blob_uri(self.tc, "jobs", f"{self.ti.job_id}/agent_11/{area}/{path}")
         head = self.d.storage.head(self.tc, uri)
         sha = _sha(data)
         if head.exists:
