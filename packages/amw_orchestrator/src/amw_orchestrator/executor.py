@@ -115,6 +115,10 @@ class JobFacts:
     currency: str
     channel_category: ChannelCategory = ChannelCategory.FINANCE
     """Fail-closed default: a job built without an explicit category is a finance job."""
+    channel_category_row: str | None = None
+    """``channels.category`` exactly as the channel row stores it (CCR-288 PROVISIONAL): the value
+    ``agent_16`` compares for equality with the row. It decides nothing: finance-ness is
+    ``channel_category`` alone (resolved fail closed). ``None`` = not read."""
     documents: JobDocuments = field(default_factory=JobDocuments)
 
     @property

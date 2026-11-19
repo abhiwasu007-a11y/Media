@@ -28,6 +28,9 @@ class CollectionView:
     collection_key: str
     title: str
     restricted: bool
+    languages: tuple[str, ...] = ()
+    """CCR-289 (PROVISIONAL): the distinct ``knowledge_sources.language`` values of the collection's
+    searchable (``INDEXED``) sources, sorted; ``()`` when the collection has none."""
 
 
 @dataclass(frozen=True, slots=True)

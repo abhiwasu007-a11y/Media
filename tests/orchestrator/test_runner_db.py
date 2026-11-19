@@ -113,3 +113,21 @@ def test_missing_per_video_budget_refuses_the_job(pg_dsn: str, tmp_path: Path) -
     with pytest.raises(ConfigInvalidError) as exc:
         rig.runner.start(job, job_graph(LONG))
     assert exc.value.details["violations"][0].keyword == "PER_VIDEO_BUDGET_MISSING"
+
+
+def test_intake_keeps_the_channel_row_value_beside_the_resolved_category(
+    pg_dsn: str, tmp_path: Path
+) -> None:
+    """CCR-288 PROVISIONAL: ``JobFacts.channel_category_row`` is the value as given (what the gate
+    compares with the row); the resolved category is fail closed and never taken from it."""
+    rig = build_rig(pg_dsn, tmp_path / "blobs")
+    named = rig.intake("philosophy", title="Row value kept")
+    assert named.channel_category_row == "philosophy"
+    assert named.finance_rules_apply is True  # unknown free text = finance (CCR-273 item 4)
+    explicit = rig.intake("non-finance", title="Explicit label")
+    assert explicit.channel_category_row == "non-finance"
+    assert explicit.finance_rules_apply is False
+    unset = rig.intake(None, title="No category")
+    assert unset.channel_category_row is None and unset.finance_rules_apply is True
+    blank = rig.intake("  ", title="Blank category")
+    assert blank.channel_category_row is None and blank.finance_rules_apply is True

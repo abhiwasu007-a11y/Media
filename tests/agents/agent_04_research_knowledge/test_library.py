@@ -418,3 +418,62 @@ def test_insert_chunks_typed_errors_in_memory() -> None:
         w.library.insert_chunks(scope, [row("kch_a", 2)])
     with pytest.raises(InputInvalid):  # a channel other than the scope's is never relabelled
         w.library.insert_chunks(scope, [row("kch_b", 3, channel="chn_other")])
+
+
+# --- CCR-289 PROVISIONAL: the languages of a collection reach the plan input (PL11) ----------------
+def test_collection_languages_are_the_distinct_languages_of_its_indexed_sources() -> None:
+    w = build_world()
+    run = make_run(w)
+    w.add_source("general_trading", language="mr")
+    w.add_source("general_trading", language="mr")  # a duplicate language counts once
+    w.add_source("general_trading", language="hi", status=KnowledgeSourceStatus.FAILED)
+    w.add_source("owner_method", language="sa", status=KnowledgeSourceStatus.REGISTERED)
+    by_key = {c.collection_key: c for c in w.library.collections_for_channel(run.scope)}
+    assert by_key["general_trading"].languages == ("en", "mr")  # the seeded en source + mr; no hi
+    assert by_key["owner_method"].languages == ()  # nothing searchable in it
+
+
+def test_the_languages_of_another_channel_are_not_visible() -> None:
+    w = build_world()
+    w.add_source("general_trading", language="mr")
+    other = TenantScope(w.org, "chn_" + "0" * 8 + "-0000-7000-8000-" + "0" * 12)
+    assert w.library.collections_for_channel(other) == []
+
+
+def test_the_plan_input_carries_the_library_languages_of_the_scoped_collections() -> None:
+    from agent_04_research_knowledge.models.pack_input import ResearchPackInput
+
+    w = build_world()
+    w.add_source("general_trading", language="mr")
+    w.add_source("owner_method", language="sa")
+    run = make_run(w)
+    cols = w.library.collections_for_channel(run.scope)
+    data = ResearchPackInput.model_validate(w.data())
+    plan_input = w.step()._plan_input(data, cols)
+    assert plan_input.library_languages == ("en", "mr")  # the restricted collection is not in scope
+    by_key = {c.collection_key: c.languages for c in plan_input.collections}
+    assert by_key == {"general_trading": ("en", "mr")}
+
+
+def test_pl11_admits_the_library_language_for_a_marathi_video_and_refuses_it_without() -> None:
+    """The plan input of ``_plan_input`` for an ``mr-IN`` video over an ``en`` library: an ``en``
+    query passes PL11; the same plan with the old ``library_languages=()`` fails it."""
+    import json
+
+    from agent_04_research_knowledge.models.pack_input import ResearchPackInput
+    from agent_04_research_knowledge.models.plan import ResearchPlan
+    from agent_04_research_knowledge.steps.plan import PlanValidator
+    from tests.agents.agent_04_research_knowledge.conftest import plan_json
+
+    w = build_world()
+    cols = w.library.collections_for_channel(make_run(w).scope)
+    doc = w.data()
+    doc["topic"] = {**doc["topic"], "language": "mr-IN"}
+    plan_input = w.step()._plan_input(ResearchPackInput.model_validate(doc), cols)
+    assert plan_input.video_language == "mr-IN" and plan_input.library_languages == ("en",)
+    raw = json.loads(plan_json(1))
+    raw["concepts"][0]["queries"] = [{"text": "stop loss", "language": "en", "purpose": "PRIMARY"}]
+    plan = ResearchPlan.model_validate(raw)
+    assert "PL11" not in {v.check for v in PlanValidator().validate(plan, plan_input)}
+    old = plan_input.model_copy(update={"library_languages": ()})
+    assert "PL11" in {v.check for v in PlanValidator().validate(plan, old)}
