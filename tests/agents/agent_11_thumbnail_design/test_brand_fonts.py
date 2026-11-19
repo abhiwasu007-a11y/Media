@@ -24,7 +24,7 @@ from agent_11_thumbnail_design.pinning import (
 )
 from agent_11_thumbnail_design.ports import RegisteredAsset
 from agent_11_thumbnail_design.templates import glyph_catalogue
-from tests.agents.agent_11_thumbnail_design.env import make_env
+from tests.agents.agent_11_thumbnail_design.env import Env, err_of, make_env, run_att
 from tests.agents.agent_11_thumbnail_design.fontgen import build_font
 from tests.agents.agent_11_thumbnail_design.test_composer import ORG, spec
 
@@ -142,13 +142,17 @@ def test_rendered_marathi_thumbnail_title_is_real_text_and_tofu_is_refused() -> 
         PillowComposer().render(spec(font_bytes=data, font_sha256=sha, lines=(NOTDEF_PROBE * 4,)))
 
 
-def test_the_boxes_of_the_dry_run_are_the_code_drawn_neutral_glyph_not_font_tofu() -> None:
-    """Break 14: the three outlined rectangles right of the title in ``thumb_v1.png`` are the
-    glyph-set picture ``g1_level_steps`` (three ``rect`` ops, outline only), drawn by code. The
-    subject area is therefore identical whatever the font is; the Marathi title was never tofu."""
-    g1 = next(g for g in glyph_catalogue() if g.key == "g1_level_steps")
-    assert [op["op"] for op in g1.ops] == ["rect"] * 3
-    assert all(op["fill"] is None for op in g1.ops)
+def test_the_subject_picture_is_a_code_drawn_chart_line_and_does_not_depend_on_the_font() -> None:
+    """Break 14 / Q-O30 (D11 item 4): the three outlined rectangles of the dry run were the glyph
+    ``g1_level_steps``, drawn by code, not font tofu. They are replaced by ``g1_rsi_line`` (axes,
+    two guide lines and one oscillating line; no outlined rectangle). The subject area is still
+    identical whatever the font is."""
+    keys = [g.key for g in glyph_catalogue()]
+    assert "g1_level_steps" not in keys
+    g1 = next(g for g in glyph_catalogue() if g.key == "g1_rsi_line")
+    assert not g1.neutral  # slopes: not on the finance neutral allow-list until Q-O31 is answered
+    assert sum(op["op"] == "polygon" for op in g1.ops) == 1  # the line
+    assert all(op["outline"] is None for op in g1.ops)  # nothing reads as an outlined box
     tpl_box = spec().template.subject_box
     w, h = 1920, 1080
     x, y, bw, bh = tpl_box
@@ -239,7 +243,7 @@ def _marathi() -> tuple[Promise, Brief]:
 
 def test_stage_with_mukta_records_primary_and_fallback_in_the_provenance() -> None:
     env = make_env(language="mr-IN", promise=_marathi(), font=pinned_font_bytes("mukta_bold"))
-    out = env.stage.run(env.ti, "att_1")
+    out = run_att(env, env.ti, "att_1")
     assert out.payload is not None
     assert out.payload.data is not None
     assert out.payload.data["verdict"] == "ALLOWED"
@@ -259,8 +263,8 @@ def _non_manifest_font() -> bytes:
     return data
 
 
-def _provenance(env: object) -> dict[str, object]:
-    out = env.stage.run(env.ti, "att_1")  # type: ignore[attr-defined]
+def _provenance(env: Env) -> dict[str, object]:
+    out = run_att(env, env.ti, "att_1")
     assert out.payload is not None
     assert out.payload.data is not None
     prov: dict[str, object] = out.payload.data["provenance"]
@@ -279,9 +283,8 @@ def test_manifest_only_policy_refuses_a_non_manifest_font_but_not_manifest_fonts
     from amw_core.errors import MissingDependencyError
 
     env = make_env(font=_non_manifest_font(), agent_11__fonts__policy="MANIFEST_ONLY")
-    with pytest.raises(MissingDependencyError) as info:
-        env.stage.run(env.ti, "att_1")
-    assert "font_manifest_only" in str(info.value.details)
+    info = err_of(run_att(env, env.ti, "att_1"), MissingDependencyError)
+    assert "font_manifest_only" in str(info.details.model_dump())
     ok = make_env(
         language="mr-IN",
         promise=_marathi(),
@@ -349,8 +352,7 @@ def test_unregistered_noto_refuses_when_it_would_draw_a_glyph_and_is_not_needed_
     need = make_env(
         language="mr-IN", promise=_with_fallback_glyph(), font=pinned_font_bytes("mukta_bold")
     )
-    with pytest.raises(MissingDependencyError):
-        need.stage.run(need.ti, "att_1")
+    err_of(run_att(need, need.ti, "att_1"), MissingDependencyError)
     plain = make_env(language="mr-IN", promise=_marathi(), font=pinned_font_bytes("mukta_bold"))
     prov = _provenance(plain)  # Mukta covers everything: Noto is not used, so not required
     assert prov["font_fallback_used"] is False
@@ -419,9 +421,8 @@ def test_the_owner_channel_default_is_manifest_only_and_refuses_a_non_manifest_f
     assert settings(agent_11__fonts__policy=None).fonts_policy == "MANIFEST_ONLY"
     assert Agent11Settings.model_fields["fonts_policy"].default == "MANIFEST_ONLY"
     env = make_env(font=_non_manifest_font(), agent_11__fonts__policy=None)
-    with pytest.raises(MissingDependencyError) as info:
-        env.stage.run(env.ti, "att_1")
-    assert "font_manifest_only" in str(info.value.details)
+    info = err_of(run_att(env, env.ti, "att_1"), MissingDependencyError)
+    assert "font_manifest_only" in str(info.details.model_dump())
     owner = make_env(
         language="mr-IN",
         promise=_marathi(),

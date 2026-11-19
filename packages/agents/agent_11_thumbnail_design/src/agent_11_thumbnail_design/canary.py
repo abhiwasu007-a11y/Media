@@ -5,7 +5,7 @@ Used by the canary tests and by ``scripts/probe_render_env.py``. Nothing here re
 
 from agent_11_thumbnail_design.composer import RenderSpec
 from agent_11_thumbnail_design.pinning import font_manifest, pinned_font_bytes
-from agent_11_thumbnail_design.templates import glyph_catalogue, load_templates, palette
+from agent_11_thumbnail_design.templates import GlyphSpec, load_templates, palette
 
 CANARY_ORG = "org_00000000-0000-7000-8000-000000000001"
 CANARY_FONTS = (
@@ -29,6 +29,19 @@ _LINES = {
     "mukta_bold_noto_fallback": (("ट्रेंड ॸ वाचा",), "PLAIN", ()),
 }
 
+# A fixed subject picture of the canary: the recorded hashes cover the whole raster, so the picture
+# is a fixture of its own and does not follow the package glyph data (three outlined rectangles,
+# the geometry the canaries were recorded with).
+_CANARY_GLYPH = GlyphSpec(
+    "canary_boxes",
+    "canary fixture",
+    True,
+    tuple(
+        {"op": "rect", "box": [x, 300, 280, 400], "fill": None, "outline": "primary"}
+        for x in (0, 360, 720)
+    ),
+)
+
 
 def canary_spec(font_key: str) -> RenderSpec:
     import hashlib
@@ -49,7 +62,7 @@ def canary_spec(font_key: str) -> RenderSpec:
         accent_role="PRIMARY",
         key_terms=terms,
         picture_kind="CODE_GLYPH",
-        glyph=glyph_catalogue()[0],
+        glyph=_CANARY_GLYPH,
         image_bytes=None,
         image_sha256=None,
         font_bytes=data,

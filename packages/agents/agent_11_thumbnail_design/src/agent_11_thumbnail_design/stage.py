@@ -104,6 +104,7 @@ from agent_11_thumbnail_design.text_options import (
 from agent_11_thumbnail_design.textutil import contains_sequence, fold, folded_words
 from amw_adapters.llm.protocol import LlmAdapter
 from amw_core.contracts.common import PayloadObject, storage_uri_owner
+from amw_core.contracts.error import error_object_from_exception, violation
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import (
     NextAction,
@@ -125,6 +126,7 @@ from amw_core.enums import (
 )
 from amw_core.errors import (
     AgentCrashError,
+    AmwError,
     BudgetExhaustedError,
     CircuitOpenError,
     ConfigInvalidError,
@@ -139,7 +141,9 @@ from amw_core.errors import (
     ProviderRefusalError,
     QualityRepeatedFailureError,
     SchemaInvalidError,
+    TenantMismatchError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     ActorRef,
     AttemptId,
@@ -147,7 +151,6 @@ from amw_core.ids import (
     CorrelationId,
     ExecutorId,
     JobId,
-    OrgId,
     TaskId,
     make_idempotency_key,
 )
@@ -159,6 +162,7 @@ from amw_core.interfaces.cost_ledger import CostLedger, NewCostEntry
 from amw_core.interfaces.idempotency_store import BeginAction, IdempotencyStore
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
+from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri
 
 AGENT_ID = "agent_11"
 INPUT_SCHEMA = "agent_11.thumbnail_variants.input"
@@ -176,7 +180,13 @@ class Lexicons:
     injection_markers: tuple[str, ...]
     instruction_phrases: tuple[str, ...]
     neutral_words: frozenset[str]
-    finance_categories: frozenset[str] = frozenset({"finance"})
+    non_finance_categories: frozenset[str] = frozenset()
+    """Explicitly known non-finance channel categories (exact match, injected from the rule
+    pack). Fail closed (owner D13, CCR-273): any other value (None, empty, unknown, wrong type,
+    other case) is treated as finance; the default (empty) makes every channel finance."""
+
+    def is_finance(self, category: object) -> bool:
+        return not (isinstance(category, str) and category in self.non_finance_categories)
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +238,32 @@ class _Pick:
     planned_by: str
 
 
+S0_ERRORS = frozenset(
+    {
+        "PERMANENT.SCHEMA_INVALID",
+        "PERMANENT.SCHEMA_VERSION_UNSUPPORTED",
+        "PERMANENT.INPUT_INVALID",
+        "PERMANENT.TENANT_MISMATCH",
+        "PERMANENT.CROSS_TENANT_REF",
+        "PERMANENT.TENANT_INACTIVE",
+        "PERMANENT.MISSING_DEPENDENCY",
+        "PERMANENT.UNSUPPORTED_TASK",
+    }
+)
+"""Failures of the 03 section 7.1 receiver checks: the task is rejected before any work."""
+
+
+def check_ctx(task_input: TaskInput, ctx: ExecContext) -> None:
+    """The context and the Task Input must name the same org, job and task (19.1 layer 1).
+    Anything else is ``TENANT_MISMATCH`` before any step runs."""
+    if (
+        str(ctx.org_id) != task_input.org_id
+        or str(ctx.job_id) != task_input.job_id
+        or str(ctx.task_id) != task_input.task_id
+    ):
+        raise TenantMismatchError("execution context does not match the Task Input")
+
+
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -237,34 +273,97 @@ class ThumbnailStage:
         self.d = deps
 
     # ------------------------------------------------------------------ entry point
-    def run(self, ti: TaskInput, attempt_id: str) -> TaskOutput:
-        d, s = self.d, self.d.settings
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned
+        as a Task Output carrying the cost really incurred so far, never raised."""
+        d = self.d
         started = d.clock.monotonic_ms()
-        tc = TenantContext(
-            org_id=OrgId(ti.org_id),
-            actor=ActorRef(AGENT_ID),
-            correlation_id=CorrelationId(ti.correlation_id),
-        )
+        run: _Run | None = None
+        pre_run = True
         try:
-            inp = self._parse_input(ti)
-        except CrossTenantRefError as exc:
-            # Blueprint 18 / 19.1 layer 1: a foreign reference is a security event, never a drop.
-            _append_audit(d, tc, ti, "security.cross_tenant_ref", dict(exc.details or {}))
-            raise
-        run = _Run(self, ti, inp, tc, AttemptId(attempt_id))
-        run.audit("thumbnail_set.started", {"iteration": inp.iteration})
-        try:
-            out = run.execute()
-        except Exception as exc:
-            run.audit("thumbnail_set.failed", {"code": getattr(exc, "code", type(exc).__name__)})
-            raise
-        run.audit(
-            "thumbnail_set.blocked"
-            if out.payload_verdict != "ALLOWED"
-            else "thumbnail_set.completed",
-            {"produced": out.produced, "verdict": out.payload_verdict},
+            check_ctx(task_input, ctx)
+            tc = ctx.tenant
+            try:
+                inp = self._parse_input(task_input)
+            except CrossTenantRefError as exc:
+                # Blueprint 18 / 19.1 layer 1: a foreign reference is a security event.
+                _append_audit(d, tc, task_input, "security.cross_tenant_ref", dict(exc.details))
+                raise
+            run = _Run(self, task_input, inp, tc, ctx.attempt_id)
+            pre_run = False
+            run.audit("thumbnail_set.started", {"iteration": inp.iteration})
+            try:
+                out = run.execute()
+            except Exception as exc:
+                run.audit(
+                    "thumbnail_set.failed", {"code": getattr(exc, "code", type(exc).__name__)}
+                )
+                raise
+            run.audit(
+                "thumbnail_set.blocked"
+                if out.payload_verdict != "ALLOWED"
+                else "thumbnail_set.completed",
+                {"produced": out.produced, "verdict": out.payload_verdict},
+            )
+            return out.task_output(d.clock.monotonic_ms() - started, d.clock.now(), d.settings)
+        except AmwError as exc:
+            return self._error_output(task_input, ctx, exc, started, run, pre_run)
+        except Exception as exc:  # a bug must still end as a typed Task Output (07 AGENT.CRASH)
+            crash = AgentCrashError(f"unexpected {type(exc).__name__} in agent_11")
+            return self._error_output(task_input, ctx, crash, started, run, pre_run)
+
+    def _error_output(
+        self,
+        ti: TaskInput,
+        ctx: ExecContext,
+        exc: AmwError,
+        started: int,
+        run: _Run | None,
+        pre_run: bool,
+    ) -> TaskOutput:
+        """``amw.task_output`` of a failure. A receiver-check failure before any work is
+        ``REJECTED`` with attempt 0; ``BudgetExhausted`` is ``SUSPENDED``; the rest ``FAILED``.
+        The usage is the real cost of the calls made so far (never a silent 0)."""
+        d, now = self.d, self.d.clock.now()
+        rejected = pre_run and exc.code in S0_ERRORS
+        error = error_object_from_exception(
+            exc,
+            actor=AGENT_ID,
+            attempt_no=0 if rejected else ctx.attempt_no,
+            occurred_at=now,
+            correlation_id=ti.correlation_id,
         )
-        return out.task_output(d.clock.monotonic_ms() - started, d.clock.now(), s)
+        if rejected:
+            status = OutputStatus.REJECTED
+        elif isinstance(exc, BudgetExhaustedError):
+            status = OutputStatus.SUSPENDED
+        else:
+            status = OutputStatus.FAILED
+        if status is OutputStatus.SUSPENDED:
+            action = NextAction(
+                type=NextActionType.WAIT,
+                wait_reason=exc.spec.wait_reason,
+                escalation_level=None,
+                reason=exc.code,
+            )
+        else:
+            kind = NextActionType.RETRY if exc.retryable else NextActionType.STOP
+            action = NextAction(type=kind, wait_reason=None, escalation_level=None, reason=exc.code)
+        calls = run.calls if run is not None else _Calls()
+        return TaskOutput(
+            status=status,
+            payload=None,
+            output_refs=(),
+            quality_score=None,
+            confidence=None,
+            validation_results=(),
+            duration=max(0, d.clock.monotonic_ms() - started),
+            resource_usage=_usage(calls, ti.resource_budget.currency),
+            error=error,
+            next_action=action,
+            downstream_agent=None,
+            timestamp=now,
+        )
 
     def _parse_input(self, ti: TaskInput) -> ThumbnailInput:
         if ti.agent_id != AGENT_ID or ti.payload.payload_schema != INPUT_SCHEMA:
@@ -275,12 +374,20 @@ class ThumbnailStage:
             raise SchemaInvalidError(
                 "agent_11 input payload invalid",
                 details={
-                    "violations": [{"path": ".".join(map(str, e["loc"]))} for e in exc.errors()]
+                    "violations": [
+                        violation(
+                            "FIELD_INVALID",
+                            "".join(f"/{part}" for part in e["loc"]),
+                            str(e["type"]),
+                        )
+                        for e in exc.errors()
+                    ]
                 },
             ) from exc
         if inp.variant_count > self.d.settings.max_variants:
             raise InputInvalidError(
-                "variant_count out of range", details={"violations": ["VARIANT_COUNT"]}
+                "variant_count out of range",
+                details={"violations": [violation("VARIANT_COUNT", "/variant_count")]},
             )
         refs = [inp.script_ref, inp.verification_ref, inp.shot_plan_ref, inp.brand_kit_ref]
         if inp.previous_set_ref:
@@ -303,6 +410,22 @@ class ThumbnailStage:
         return inp
 
 
+def _usage(calls: _Calls, currency: str) -> ResourceUsage:
+    """The resource usage of the calls made so far (a failure reports it too, never 0)."""
+    return ResourceUsage(
+        cpu_ms=0,
+        peak_rss_bytes=0,
+        tokens_in=calls.tokens_in,
+        tokens_out=calls.tokens_out,
+        tokens_cached_in=calls.tokens_cached,
+        llm_calls=calls.paid,
+        provider_calls=calls.paid,
+        cost_estimate_micros=calls.cost_micros,
+        currency=currency,
+        cost_entry_ids=tuple(calls.cost_entry_ids),
+    )
+
+
 @dataclass(slots=True)
 class _Result:
     verdict: str
@@ -318,18 +441,7 @@ class _Result:
         return self.verdict
 
     def task_output(self, duration_ms: int, now: datetime, s: Agent11Settings) -> TaskOutput:
-        usage = ResourceUsage(
-            cpu_ms=0,
-            peak_rss_bytes=0,
-            tokens_in=self.calls.tokens_in,
-            tokens_out=self.calls.tokens_out,
-            tokens_cached_in=self.calls.tokens_cached,
-            llm_calls=self.calls.paid,
-            provider_calls=self.calls.paid,
-            cost_estimate_micros=self.calls.cost_micros,
-            currency=self.currency,
-            cost_entry_ids=tuple(self.calls.cost_entry_ids),
-        )
+        usage = _usage(self.calls, self.currency)
         return TaskOutput(
             status=OutputStatus.SUCCEEDED,
             payload=PayloadObject(
@@ -413,22 +525,37 @@ class _Run:
     def _read_blob(self, uri: str, sha: str) -> bytes:
         return b"".join(self.d.storage.get(self.tc, BlobUri(uri), sha))
 
-    def _put(self, area: str, path: str, data: bytes) -> tuple[str, str, int]:
-        """Write-once blob; an identical existing blob is reused (repeat / DLQ replay)."""
-        uri = self.d.storage.blob_uri(self.tc, area, path)
-        head = self.d.storage.head(self.tc, uri)
+    def _put(self, uri: str, data: bytes) -> tuple[str, str, int]:
+        """Write-once blob at a core-built URI; an identical existing blob is reused."""
+        blob = BlobUri(uri)
+        head = self.d.storage.head(self.tc, blob)
         sha = _sha(data)
         if head.exists:
             if head.sha256 != sha:
                 raise InputInvalidError("a different blob already exists at this path")
-            return str(uri), sha, len(data)
-        info = self.d.storage.put(self.tc, uri, io.BytesIO(data))
+            return uri, sha, len(data)
+        info = self.d.storage.put(self.tc, blob, io.BytesIO(data))
         return str(info.uri), info.sha256, info.size_bytes
+
+    def _artifact(self, name: str, data: bytes) -> tuple[str, str, int]:
+        """A write-once task file of this attempt (``.../attempts/<att>/artifacts/<name>``)."""
+        ti = self.ti
+        uri = task_artifact_uri(
+            self.tc.org_id, JobId(ti.job_id), TaskId(ti.task_id), self.attempt, name
+        )
+        return self._put(uri, data)
 
     def _checkpoint(self, step_key: str, state: dict[str, Any]) -> None:
         raw = canonical_json(state)
+        ti = self.ti
         uri, sha, _ = self._put(
-            "checkpoints", f"{self.ti.task_id}/{step_key}-{_sha(raw)[:16]}.json", raw
+            checkpoint_uri(
+                self.tc.org_id,
+                JobId(ti.job_id),
+                TaskId(ti.task_id),
+                f"{step_key}-{_sha(raw)[:16]}.json",
+            ),
+            raw,
         )
         with self.tx() as t:
             self.d.checkpoints.write(
@@ -473,7 +600,7 @@ class _Run:
                 )
                 if prev_manifest is None:
                     raise MissingDependencyError("previous thumbnail set manifest is unreadable")
-        finance = category in self.d.lexicons.finance_categories
+        finance = self.d.lexicons.is_finance(category)
         self._preflight(finance)  # a11.pre.config: fail closed before any model call
         font_bytes = self._read_blob(font.uri, font.sha256)
         try:
@@ -634,7 +761,10 @@ class _Run:
         if bad:
             raise ConfigInvalidError(
                 "required list, rule pack or prompt is absent, empty or altered",
-                details={"check_id": "a11.pre.config", "violations": sorted(bad)},
+                details={
+                    "check_id": "a11.pre.config",
+                    "violations": [violation(key, "/config") for key in sorted(bad)],
+                },
             )
         if not d.composer.raqm_available():
             raise MissingDependencyError(
@@ -648,11 +778,12 @@ class _Run:
         ):
             raise InputInvalidError(
                 "script hash differs from the verified hash",
-                details={"violations": ["SCRIPT_HASH_MISMATCH"]},
+                details={"violations": [violation("SCRIPT_HASH_MISMATCH", "/script_ref/sha256")]},
             )
         if script.verdict != ComplianceVerdict.ALLOWED.value or script.open_blocked_claims:
             raise InputInvalidError(
-                "script verdict is not ALLOWED", details={"violations": ["VERDICT_NOT_ALLOWED"]}
+                "script verdict is not ALLOWED",
+                details={"violations": [violation("VERDICT_NOT_ALLOWED", "/script_ref")]},
             )
         if script.promise is None or script.brief is None:
             raise InsufficientInputError("title_promise or thumbnail_brief is missing")
@@ -967,9 +1098,7 @@ class _Run:
             )
             d.budget.after_call(t, entry)
             raw = response.text.encode("utf-8")
-            uri, _sha_hex, _ = self._put(
-                "llm", f"{self.ti.task_id}/concepts-{call_seq}-{_sha(raw)[:16]}.json", raw
-            )
+            uri, _sha_hex, _ = self._artifact(f"llm/concepts-{call_seq}-{_sha(raw)[:16]}.json", raw)
             d.idem.complete(t, key, uri, d.clock.now())
         self.calls.cost_entry_ids.append(str(entry.id))
         self.calls.cost_micros += u.amount_micros
@@ -1249,8 +1378,8 @@ class _Run:
                     "blocking checks failed", details={"check_ids": failed}
                 )
             for _pick, facts, rr, _spec in built:
-                name = f"{job}/{facts.variant_id}-{_sha(rr.png)[:16]}.png"
-                uri, sha, size = self._put("thumbnails", name, rr.png)
+                name = f"thumbnails/{facts.variant_id}-{_sha(rr.png)[:16]}.png"
+                uri, sha, size = self._artifact(name, rr.png)
                 tier = "A_OWNER_REAL" if facts.picture.kind == "OWNER_IMAGE" else "C_CODE_MOTION"
                 asset_id = self.d.repo.insert_image_asset(
                     t,
@@ -1371,7 +1500,17 @@ class _Run:
             },
             "variants": manifest_variants,
         }
-        set_hash = set_sha256(base)
+        # The URI is a location, which changes with the attempt (03 section 8 rule 5, CCR-208);
+        # the file hash stays in the hashed manifest, so a replay keeps the same set hash.
+        set_hash = set_sha256(
+            {
+                **base,
+                "variants": [
+                    {**v, "file": {k: x for k, x in v["file"].items() if k != "uri"}}
+                    for v in manifest_variants
+                ],
+            }
+        )
         manifest = Manifest.model_validate({**base, "set_sha256": set_hash})
         manifest_bytes = canonical_json(manifest.model_dump(mode="json"))
         fallback_ids = tuple(
@@ -1404,8 +1543,8 @@ class _Run:
             refusal=None,
             provenance=self._provenance(font),
         )
-        m_uri, m_sha, m_size = self._put(
-            "thumbnails", f"{job}/manifest-{set_hash[:16]}.json", manifest_bytes
+        m_uri, m_sha, m_size = self._artifact(
+            f"thumbnails/manifest-{set_hash[:16]}.json", manifest_bytes
         )
         refs = [
             OutputRef(

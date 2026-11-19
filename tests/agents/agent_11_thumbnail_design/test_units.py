@@ -41,13 +41,107 @@ def test_catalogue_rejects_a_missing_or_duplicate_default() -> None:
         load_templates(doc)
 
 
+def _is_directional(ops: Any) -> bool:
+    """The neutrality guard: a neutral glyph may hold only level rectangles. Any polygon (an arrow,
+    a trend line, an oscillating line: every line has slopes) makes a glyph directional, whatever
+    its symmetry. Deliberately no symmetry or net-slope exception."""
+    return any(op["op"] != "rect" for op in ops)
+
+
 def test_glyph_neutrality_follows_the_allow_list_and_the_arrow_is_not_neutral() -> None:
     by_key = {g.key: g.neutral for g in glyph_catalogue()}
     assert by_key["g2_arrow"] is False
-    assert all(v for k, v in by_key.items() if k != "g2_arrow")
+    # the RSI line has up and down slopes: not neutral until the owner confirms (Q-O31)
+    assert by_key["g1_rsi_line"] is False
+    assert {k for k, v in by_key.items() if v} == {"g3_two_frames", "g4_blocks"}
     for g in glyph_catalogue():
         if g.neutral:
-            assert all(op["op"] != "polygon" for op in g.ops)
+            assert not _is_directional(g.ops), g.key
+        else:
+            assert _is_directional(g.ops), g.key
+
+
+def test_neutrality_guard_rejects_an_arrow_and_any_rising_polyline() -> None:
+    arrow = next(g for g in glyph_catalogue() if g.key == "g2_arrow")
+    pts = {tuple(p) for p in arrow.ops[0]["points"]}
+    assert pts == {(1000 - x, y) for x, y in pts}  # the arrow is mirror-symmetric, yet directional
+    assert _is_directional(arrow.ops)
+    rising = [
+        {
+            "op": "polygon",
+            "points": [[0, 900], [500, 500], [1000, 100], [1000, 160], [500, 560], [0, 960]],
+            "fill": "primary",
+            "outline": None,
+        }
+    ]
+    assert _is_directional(rising)
+    mirrored = [
+        {
+            "op": "polygon",
+            "points": [[0, 500], [500, 100], [1000, 500], [500, 160]],
+            "fill": "primary",
+            "outline": None,
+        }
+    ]
+    assert _is_directional(mirrored)  # symmetric shapes do not pass either
+    assert not _is_directional(
+        [{"op": "rect", "box": [0, 0, 10, 10], "fill": "primary", "outline": None}]
+    )
+
+
+def test_finance_never_gets_a_directional_glyph_and_falls_back_to_text_only() -> None:
+    from agent_11_thumbnail_design.subject_options import PictureBuildConfig, build_picture_options
+
+    facts = [g.facts() for g in glyph_catalogue() if g.key in {"g1_rsi_line", "g2_arrow"}]
+    opts = build_picture_options(
+        assets=[],
+        glyphs=facts,
+        finance=True,
+        cfg=PictureBuildConfig(min_w=1, min_h=1, faces_allowed=False, chart_still_allowed=False),
+    )
+    assert [o.kind for o in opts.options] == ["NONE"]
+    assert {e.reason for e in opts.excluded} == {"FINANCE_DIRECTION"}
+
+
+def _finance_opts(keys: set[str], *, finance: bool, requested: frozenset[str] = frozenset()):  # type: ignore[no-untyped-def]
+    from agent_11_thumbnail_design.subject_options import PictureBuildConfig, build_picture_options
+
+    return build_picture_options(
+        assets=[],
+        glyphs=[g.facts() for g in glyph_catalogue() if g.key in keys],
+        finance=finance,
+        cfg=PictureBuildConfig(min_w=1, min_h=1, faces_allowed=False, chart_still_allowed=False),
+        requested_glyphs=requested,
+    )
+
+
+def test_finance_defaults_to_no_icon_even_for_neutral_glyphs() -> None:
+    opts = _finance_opts({"g3_two_frames", "g4_blocks"}, finance=True)
+    assert [o.kind for o in opts.options] == ["NONE"]
+    assert {e.reason for e in opts.excluded} == {"FINANCE_NO_ICON"}
+
+
+def test_finance_neutral_glyph_only_when_explicitly_requested() -> None:
+    opts = _finance_opts(
+        {"g3_two_frames", "g4_blocks"}, finance=True, requested=frozenset({"g3_two_frames"})
+    )
+    assert [o.key for o in opts.options] == ["g3_two_frames", "none"]
+
+
+def test_finance_refuses_rsi_arrow_and_slopes_even_when_requested() -> None:
+    every = {g.key for g in glyph_catalogue()}
+    opts = _finance_opts(every, finance=True, requested=frozenset(every))
+    offered = {o.key for o in opts.options if o.kind == "CODE_GLYPH"}
+    assert offered == {"g3_two_frames", "g4_blocks"}
+    refused = {e.glyph for e in opts.excluded if e.reason == "FINANCE_DIRECTION"}
+    assert {"g1_rsi_line", "g2_arrow"} <= refused
+    assert all(g.neutral is False for g in glyph_catalogue() if g.key in refused)
+
+
+def test_non_finance_may_use_any_glyph() -> None:
+    every = {g.key for g in glyph_catalogue()}
+    opts = _finance_opts(every, finance=False)
+    assert {o.key for o in opts.options if o.kind == "CODE_GLYPH"} == every
 
 
 def test_templates_are_offered_by_language_and_finance_neutrality() -> None:
@@ -212,3 +306,47 @@ def test_guard_g8_evidence_defaults() -> None:
 
 def test_fixture_step_is_json() -> None:
     assert json.dumps(fixture_step("FX-EDU", 1))
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        None,
+        "",
+        " ",
+        "unknown",
+        "YouTube_General",
+        "youtube_general ",
+        "education",
+        "philosophy",
+        7,
+        b"youtube_general",
+    ],
+)
+def test_unknown_or_malformed_channel_category_is_finance_fail_closed(category: object) -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    lex = Lexicons((), (), (), frozenset(), frozenset({"youtube_general"}))
+    assert lex.is_finance(category) is True
+
+
+def test_only_an_explicit_known_category_is_non_finance_and_default_is_all_finance() -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    assert (
+        Lexicons((), (), (), frozenset(), frozenset({"youtube_general"})).is_finance(
+            "youtube_general"
+        )
+        is False
+    )
+    assert Lexicons((), (), (), frozenset()).is_finance("youtube_general") is True
+    assert Lexicons((), (), (), frozenset()).is_finance("finance") is True
+
+
+def test_finance_and_undocumented_categories_stay_finance_when_a_documented_one_is_known() -> None:
+    from agent_11_thumbnail_design.stage import Lexicons
+
+    lex = Lexicons((), (), (), frozenset(), frozenset({"youtube_general"}))
+    for c in ("finance", "education", "philosophy"):
+        assert lex.is_finance(c)
+    assert not lex.is_finance("youtube_general")
