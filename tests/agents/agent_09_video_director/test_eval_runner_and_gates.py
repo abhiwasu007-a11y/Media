@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from agent_09_video_director.contracts import AspectRatio, Scene, ScriptDoc, Segment, SegmentKind
-from agent_09_video_director.step import Verification
 from amw_core.errors import AmwError
 from amw_evals.adapter import FakeAdapter, LlmResponse
 from amw_evals.runner import run_eval
@@ -17,9 +16,11 @@ from tests.agents.agent_09_video_director.support import (
     EVALS,
     REPO,
     SHA_A,
+    codes,
     make_request,
     make_step,
     sample_script,
+    verification,
 )
 from tests.agents.agent_09_video_director.test_shot_direction_eval import CASES, recorded
 
@@ -79,17 +80,15 @@ def test_te12_hook_outside_window_through_the_step() -> None:
     script = script_from([(s["id"], s["kind"]) for s in segs])
     durs = {s["id"]: s["end_ms"] - s["start_ms"] for s in segs}
     err, _ = run_gate(script=script, durs=durs)
-    assert err.code == "PERMANENT.INPUT_INVALID" and err.details["violations"] == [
-        "HOOK_WINDOW_EXCEEDED"
-    ]
+    assert err.code == "PERMANENT.INPUT_INVALID" and codes(err.details) == ["HOOK_WINDOW_EXCEEDED"]
 
 
 def test_te27_hash_mismatch_through_the_step() -> None:
     inp = TE["TE-27"]["input"]
     script, durs = sample_script()
     err, _ = run_gate(script=script, durs=durs, script_sha256=inp["script_sha256"], script_ref_sha256=inp["script_sha256"],
-                      verification=Verification(inp["verified_script_sha256"], inp["stage_verdict"]))  # fmt: skip
-    assert err.details["violations"] == TE["TE-27"]["expected"]["violations"]
+                      verification=verification(inp["verified_script_sha256"], inp["stage_verdict"]))  # fmt: skip
+    assert codes(err.details) == TE["TE-27"]["expected"]["violations"]
 
 
 def test_te28_te34_timelines_through_the_step() -> None:
@@ -100,14 +99,14 @@ def test_te28_te34_timelines_through_the_step() -> None:
     tl = NarrationTimeline.model_validate({"source": "PROVIDER_CLIPS", "segments": [
         {"segment_id": s, "start_ms": i * 1000, "end_ms": i * 1000 + 1000} for i, s in enumerate(inp["timeline_segment_ids"])]})  # fmt: skip
     err, _ = run_gate(script=script, timeline=tl)
-    assert err.details["violations"] == ["TIMELINE_INCOMPLETE"]
+    assert codes(err.details) == ["TIMELINE_INCOMPLETE"]
     inp34 = TE["TE-34"]["input"]
     script34 = script_from([(i, "BODY") for i in inp34["script_segment_ids"]])
     for var in inp34["variants"]:
         err, _ = run_gate(
             script=script34, timeline=NarrationTimeline.model_validate(var["timeline"])
         )
-        assert err.details["violations"] == ["TIMELINE_UNALIGNED"]
+        assert codes(err.details) == ["TIMELINE_UNALIGNED"]
 
 
 def test_t6_no_narration_or_on_screen_text_in_engine_outputs() -> None:
