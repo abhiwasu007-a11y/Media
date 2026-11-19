@@ -24,6 +24,7 @@ from amw_core.enums import (
     OutputStatus,
     WaitReason,
 )
+from amw_core.errors import AmwError, BudgetExhaustedError
 
 
 def build_task_output(
@@ -114,6 +115,88 @@ def build_task_output(
         quality_score=None,
         confidence=None,
         validation_results=tuple(r.to_validation_result() for r in outcome.validation_results),
+        duration=duration_ms,
+        resource_usage=usage,
+        error=error,
+        next_action=action,
+        downstream_agent=None,
+        timestamp=now,
+    )
+
+
+S0_ERRORS = frozenset(
+    {
+        "PERMANENT.SCHEMA_INVALID",
+        "PERMANENT.SCHEMA_VERSION_UNSUPPORTED",
+        "PERMANENT.INPUT_INVALID",
+        "PERMANENT.TENANT_MISMATCH",
+        "PERMANENT.CROSS_TENANT_REF",
+        "PERMANENT.TENANT_INACTIVE",
+        "PERMANENT.MISSING_DEPENDENCY",
+        "PERMANENT.UNSUPPORTED_TASK",
+    }
+)
+"""Failures of the 03 section 7.1 receiver checks: the task is rejected before any work."""
+
+
+def build_error_output(
+    exc: AmwError,
+    *,
+    actor: str,
+    correlation_id: str,
+    now: datetime,
+    duration_ms: int,
+    attempt_no: int,
+    currency: str = "USD",
+) -> TaskOutput:
+    """``amw.task_output`` for a failure before the step ran (entry-point checks, resolution).
+
+    A receiver-check failure (``S0_ERRORS``) is ``REJECTED`` with attempt 0 (nothing ran);
+    ``BudgetExhausted`` is ``SUSPENDED``; everything else is ``FAILED``.
+    """
+    rejected = exc.code in S0_ERRORS
+    error = error_object_from_exception(
+        exc,
+        actor=actor,
+        attempt_no=0 if rejected else attempt_no,
+        occurred_at=now,
+        correlation_id=correlation_id,
+    )
+    if rejected:
+        status = OutputStatus.REJECTED
+    elif isinstance(exc, BudgetExhaustedError):
+        status = OutputStatus.SUSPENDED
+    else:
+        status = OutputStatus.FAILED
+    if status is OutputStatus.SUSPENDED:
+        action = NextAction(
+            type=NextActionType.WAIT,
+            wait_reason=exc.spec.wait_reason,
+            escalation_level=None,
+            reason=exc.code,
+        )
+    else:
+        kind = NextActionType.RETRY if exc.retryable else NextActionType.STOP
+        action = NextAction(type=kind, wait_reason=None, escalation_level=None, reason=exc.code)
+    usage = ResourceUsage(
+        cpu_ms=0,
+        peak_rss_bytes=0,
+        tokens_in=0,
+        tokens_out=0,
+        tokens_cached_in=0,
+        llm_calls=0,
+        provider_calls=0,
+        cost_estimate_micros=0,
+        currency=currency,
+        cost_entry_ids=(),
+    )
+    return TaskOutput(
+        status=status,
+        payload=None,
+        output_refs=(),
+        quality_score=None,
+        confidence=None,
+        validation_results=(),
         duration=duration_ms,
         resource_usage=usage,
         error=error,
