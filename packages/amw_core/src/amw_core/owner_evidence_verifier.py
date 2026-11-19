@@ -68,6 +68,7 @@ from amw_core.enums import (
     QualityDimension,
 )
 from amw_core.ids import ActorRef, ApprovalId, JobId, UserId, WireId
+from amw_core.text_normalise import normalise_for_matching
 
 VerificationKind = EvidenceVerificationKind
 USER_ROLE: Final = "user"
@@ -393,15 +394,37 @@ def whitelist_tokens(text: str) -> list[str]:
     return kept.split()
 
 
-_EMBED_LINE = re.compile(
-    r"^\s*(>|-{2,}\s*(original|forwarded)\s+message|on\s.{1,120}\swrote:\s*$)",
-    re.IGNORECASE | re.MULTILINE,
+_EMBED_START = re.compile(
+    r"^(?:[>\u203a\u00bb\u2265|]|-{2,}\s*(?:original|forwarded)\s+message|-\s*original\s+message"
+    r"\s*-|_{5,}|={5,}|begin forwarded message|on\s.{1,200}\swrote:?$)",
 )
+_EMBED_END = re.compile(
+    r"(?:wrote|writes|said|\u092e\u094d\u0939\u0923\u093e\u0932\u0947|"
+    r"\u092e\u094d\u0939\u0923\u093e\u0932\u093e|\u0932\u093f\u0916\u093e|"
+    r"\u0915\u0939\u093e)\s*:$"
+)
+_HEADER_FROM = re.compile(r"^(?:from|de|von)\s*:\s*\S")
+_HEADER_OTHER = re.compile(r"^(?:sent|date|to|cc|subject|\u0935\u093f\u0937\u092f)\s*:\s*\S")
+
+
+def _lines_for_embed_check(content: str) -> list[str]:
+    """Each line normalised on its own (``amw_core.text_normalise``: NFKC, casefold, invisible and
+    format characters such as U+200B / U+2060 / U+200E / U+FEFF removed, look-alikes folded), so a
+    quote marker hidden behind an invisible prefix is still at the start of its line."""
+    lines = re.split(r"[\r\n\u2028\u2029\u0085]+", content)
+    return [normalise_for_matching(line).text for line in lines if line.strip()]
 
 
 def _looks_embedded(content: str) -> bool:
-    """Quote-prefix lines, an "original message" rule or an "On ... wrote:" header."""
-    return _EMBED_LINE.search(unicodedata.normalize("NFKC", content)) is not None
+    """Quote-prefix lines (greater-than, single / double angle quotes, pipe), a forwarded or
+    original-message rule, an "On ... wrote:" header, a line ending "... wrote:", or an
+    Outlook-style ``From:`` header block (``From:`` plus ``Sent:`` / ``To:`` / ``Subject:``)."""
+    lines = _lines_for_embed_check(content)
+    if any(_EMBED_START.match(line) or _EMBED_END.search(line) for line in lines):
+        return True
+    return any(_HEADER_FROM.match(line) for line in lines) and any(
+        _HEADER_OTHER.match(line) for line in lines
+    )
 
 
 def owner_part(event: SessionEvent) -> tuple[str | None, str]:
@@ -415,6 +438,8 @@ def owner_part(event: SessionEvent) -> tuple[str | None, str]:
         return None, event.content
     if not marked.strip() or marked not in event.content:
         return OWNER_PART_MISMATCH, ""
+    if _looks_embedded(marked):
+        return EMBEDDED_PART_UNMARKED, ""  # the marked part itself carries embedded text
     return None, marked
 
 

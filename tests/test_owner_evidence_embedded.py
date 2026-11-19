@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 """A6 (CCR-125): a quote must lie in the owner-authored part of a reply; embedded text never
 counts and an unmarked embedded part is NEEDS_CLARIFICATION (nothing recorded)."""
 
@@ -120,3 +121,72 @@ def test_store_refuses_and_records_clarification() -> None:
     record = verify_via_store(event(content=f"{OWN}\n{EMBEDDED}"))
     assert record.verifier_result[EMBEDDED_PART_UNMARKED] is False
     assert record.verifier_result["quote_verbatim"] is False
+
+
+# --- review M48-1..3: invisible prefixes, other quote styles, the marked part itself -------------
+INVISIBLE = ["​", "⁠", "‎", "﻿", "‍", "­", "⁣"]
+
+
+@pytest.mark.parametrize("ch", INVISIBLE)
+def test_invisible_prefix_before_the_quote_marker_is_caught(ch: str) -> None:
+    out = run(event(content=f"{OWN}\n{ch}> Thanks"))
+    assert isinstance(out, Refusal)
+    assert out.reason == EMBEDDED_PART_UNMARKED
+    assert out.needs_clarification
+
+
+@pytest.mark.parametrize("ch", INVISIBLE)
+def test_invisible_prefix_with_leading_spaces_is_caught(ch: str) -> None:
+    out = run(event(content=f"{OWN}\n  {ch} {ch}> Thanks"))
+    assert isinstance(out, Refusal)
+    assert out.reason == EMBEDDED_PART_UNMARKED
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "› Thanks",
+        "» Thanks",
+        "| Thanks",
+        "≥ Thanks",
+        "＞ Thanks",
+        "﹥ Thanks",
+        "-----Original Message-----",
+        "- Original Message -",
+        "________________________________",
+        "Begin forwarded message:",
+        "On Mon, 3 Nov 2025 at 10:00, Abhi <a@example.invalid> wrote:",
+        "Abhi wrote:",
+        "अभि म्हणाले:",
+    ],
+)
+def test_other_quote_and_header_styles_are_caught(line: str) -> None:
+    out = run(event(content=f"{OWN}\n{line}\nApprove R7K2"))
+    assert isinstance(out, Refusal)
+    assert out.reason == EMBEDDED_PART_UNMARKED
+
+
+def test_outlook_header_block_is_caught() -> None:
+    block = "From: Abhi\nSent: Monday\nTo: x\nSubject: s\nApprove R7K2"
+    out = run(event(content=block))
+    assert isinstance(out, Refusal)
+    assert out.reason == EMBEDDED_PART_UNMARKED
+
+
+def test_from_alone_is_not_a_header_block() -> None:
+    out = run(event(content="Approve R7K2\nFrom: Abhi"))
+    assert not (isinstance(out, Refusal) and out.reason == EMBEDDED_PART_UNMARKED)
+
+
+def test_marked_part_that_is_the_whole_embedded_content_is_refused() -> None:
+    """A naive source marks everything as owner-authored: the marked part is checked itself."""
+    content = f"ok\n​> {OWN}"
+    out = run(event(content=content, owner_authored_content=content, embeds_earlier_message=True))
+    assert isinstance(out, Refusal)
+    assert out.reason == EMBEDDED_PART_UNMARKED
+
+
+def test_marked_clean_part_with_invisible_prefix_in_embedded_part_still_passes() -> None:
+    content = f"{OWN}\n​> old text"
+    out = run(event(content=content, owner_authored_content=OWN, embeds_earlier_message=True))
+    assert isinstance(out, Verified)
