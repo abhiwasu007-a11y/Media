@@ -3,8 +3,8 @@ annotations, spec, deterministic render, chart facts. Pure with respect to stora
 supplies the case documents and the dataset bytes (already hash-verified by the loaders).
 """
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
@@ -68,6 +68,8 @@ class BuiltChart:
     bars_count: int
     start_date: date | None
     end_date: date | None
+    extra_attributes: Mapping[str, object] = field(default_factory=dict)
+    """Additional ``assets.attributes`` of the chart asset (data_pack provenance, CCR-256)."""
 
 
 @dataclass(frozen=True, slots=True)

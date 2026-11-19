@@ -7,12 +7,12 @@ no date, time or session (owner rule C.4; U-07 asserts the signature).
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agent_08_visual_assets.charts.annotations import Annotation
+from agent_08_visual_assets.charts.annotations import Annotation, Connector
 from amw_core.enums import ChartDataKind
 
 OUTCOMES = ("WORKED", "FAILED", "BOTH", "NOT_APPLICABLE")
@@ -29,6 +29,22 @@ class Window(BaseModel):
     def _ordered(self) -> Self:
         if self.last_bar_index < self.first_bar_index:
             raise ValueError("window last bar precedes the first bar")
+        return self
+
+
+class DateWindow(BaseModel):
+    """A data_pack window by calendar dates (proposed in CCR-259); the bars are those of the
+    registered dataset dated inside ``[start_date, end_date]``. Not part of the matching key."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if self.end_date < self.start_date:
+            raise ValueError("window end date precedes the start date")
         return self
 
 
@@ -49,14 +65,25 @@ class ChartCase(BaseModel):
     release_approval_id: str | None = None
     template_id: str
     schematic_points: tuple[str, ...] | None = None
+    window_dates: DateWindow | None = None
+    """data_pack case (CCR-259): set instead of ``window``; annotation bar numbers and connector
+    offsets are then window-relative."""
+    connectors: tuple[Connector, ...] = ()
+    rsi_guides: tuple[Annotated[float, Field(gt=0, lt=100)], ...] = ()
 
     @model_validator(mode="after")
     def _shape(self) -> Self:
         real = self.data_kind is ChartDataKind.REAL_HISTORICAL
         if real and (
-            self.instrument is None or self.dataset_asset_id is None or self.window is None
+            self.instrument is None
+            or self.dataset_asset_id is None
+            or (self.window is None) == (self.window_dates is None)
         ):
-            raise ValueError("a real historical case needs instrument, dataset and window")
+            raise ValueError(
+                "a real historical case needs instrument, dataset and exactly one window"
+            )
+        if (self.connectors or self.rsi_guides) and self.window_dates is None:
+            raise ValueError("connectors and RSI guides belong to data_pack cases only")
         if not real and (self.instrument is not None or self.dataset_asset_id is not None):
             raise ValueError("a schematic case has no instrument and no dataset")
         if not real and not self.schematic_points:
