@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
 
+from pydantic import ValidationError
+
 from amw_core.contracts import (
     ResourceBudget,
     Stage,
@@ -251,7 +253,7 @@ class GraphRunner:
             )
             check_job(change)
             rec = self._jobs.transition_job(tx, change)
-            self._create(tx, job, graph, [s.stage_id for s in graph], 0, report)
+            self._create(tx, job, graph, [s.stage_id for s in graph], {}, report)
             change = JobTransition(
                 job_id=rec.id,
                 transition_id=TransitionId.J03,
@@ -270,7 +272,7 @@ class GraphRunner:
         job: JobFacts,
         graph: tuple[Stage, ...],
         stage_ids: Sequence[str],
-        iteration: int,
+        iterations: Mapping[str, int],
         report: RunReport,
     ) -> None:
         by_id = {s.stage_id: s for s in graph}
@@ -283,12 +285,12 @@ class GraphRunner:
                 NewTask(
                     task_type=st.task_type,
                     agent_id=ExecutorId(st.task_type.split(".", 1)[0]),
-                    iteration=iteration,
+                    iteration=iterations.get(sid, 0),
                     is_required=st.required,
                     priority=Priority.NORMAL,
                     resource_class=st.resource_class,
                     required_capabilities=st.capabilities,
-                    idempotency_key=self._task_key(job, st, iteration),  # type: ignore[arg-type]
+                    idempotency_key=self._task_key(job, st, iterations.get(sid, 0)),  # type: ignore[arg-type]
                     payload_schema=f"{st.task_type}.input",
                     payload_schema_version="1.0.0",
                     resource_budget=self._budgets.budget_for(st),
@@ -299,7 +301,7 @@ class GraphRunner:
             )
         records = self._jobs.create_tasks(tx, JobId(job.job_id), new)
         for sid, rec in zip(order, records, strict=True):
-            report.stages[sid] = StageRun(sid, str(rec.id), iteration, rec.state)
+            report.stages[sid] = StageRun(sid, str(rec.id), iterations.get(sid, 0), rec.state)
             report.task_stage[str(rec.id)] = sid
 
     def run(
@@ -706,17 +708,24 @@ class GraphRunner:
             report.status = "BLOCKED_COMPLIANCE"
             report.detail = f"{stage.stage_id}: max_revision_loops reached"
             return report
-        affected = _dependants(graph, target)
-        iteration = report.stages[target].iteration + 1
+        # Rule 1 of 24 section 3.3: the target and every dependant that already ran get a new
+        # iteration; a dependant still PENDING has read nothing stale and simply waits for the
+        # new upstream task (an iteration >= 1 without a previous output would be refused by
+        # Agent 09, PREVIOUS_PLAN_REF).
+        affected = {
+            sid
+            for sid in _dependants(graph, target)
+            if sid == target or report.stages[sid].state is TaskState.COMPLETED
+        }
+        iterations = {sid: report.stages[sid].iteration + 1 for sid in affected}
         report.revisions.append(
             {
                 "gate": stage.stage_id,
                 "target": target,
-                "iteration": iteration,
+                "iteration": iterations[target],
                 "stages": sorted(affected),
             }
         )
-        self._cancel_pending(job, report, f"superseded by revision of {target}")
         for sid in affected:
             old = report.stages[sid]
             if old.output is not None:
@@ -724,7 +733,7 @@ class GraphRunner:
         self._feedback = {target: tuple(failing)}
         self._feedback_src = {target: stage.stage_id}
         with self._t.transaction(self._ctx(job)) as tx:
-            self._create(tx, job, graph, sorted(affected), iteration, report)
+            self._create(tx, job, graph, sorted(affected), iterations, report)
         return None
 
     def _limits(self, graph: tuple[Stage, ...]) -> int:
@@ -785,13 +794,24 @@ def _usage(currency: str = "USD") -> dict[str, object]:
 
 
 def _failed(exc: AmwError, call: StageCall, agent: str) -> TaskOutput:
-    err = error_object_from_exception(
-        exc,
-        actor=agent,
-        attempt_no=call.attempt_no,
-        occurred_at=datetime.now(UTC),
-        correlation_id=call.job.correlation_id,
-    )
+    try:
+        err = error_object_from_exception(
+            exc,
+            actor=agent,
+            attempt_no=call.attempt_no,
+            occurred_at=datetime.now(UTC),
+            correlation_id=call.job.correlation_id,
+        )
+    except ValidationError:  # details of a non-contract shape: keep the code, drop details
+        exc.details = {}
+        err = error_object_from_exception(
+            exc,
+            actor=agent,
+            attempt_no=call.attempt_no,
+            occurred_at=datetime.now(UTC),
+            correlation_id=call.job.correlation_id,
+            extra_details={"checks": [str(exc)[:200]]},
+        )
     return TaskOutput.model_validate(
         {
             "status": "FAILED",

@@ -123,7 +123,8 @@ def test_bundle_files_labels_and_cost_rows(happy: DryRunResult) -> None:
     report = json.loads((b / "qc_report.json").read_text(encoding="utf-8"))
     assert PLUMBING in json.dumps(report)
     cost = json.loads((b / "cost_per_stage.json").read_text(encoding="utf-8"))
-    stages = {r["stage"] for r in cost["rows"]}
+    assert cost["banner"] == PLUMBING
+    stages = {r["stage"] for r in cost["report"]["rows"]}
     assert {"s04_research", "s05_script", "s07_voice"} <= stages
     assert happy.zip_path is not None and Path(happy.zip_path).is_file()
 
