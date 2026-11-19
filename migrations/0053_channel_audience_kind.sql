@@ -10,7 +10,85 @@
 -- other change of the column (current_user must be amw_verifier_fn).
 -- amw_verifier_fn owns amw_human_record_apply; this file re-grants SET on it to amw_owner for its
 -- own transaction only and revokes it at the end (the L1a hardening of 0010 stays in force).
+-- Review fixes (PR #58, B1/B2/M1; PROPOSED CCR-190): what the decision is about must not be
+-- changeable after the approval is created, because amw_app holds UPDATE on approvals and
+-- approval_steps. Triggers (every role, the table owner and superuser included; DISABLE TRIGGER
+-- stays a DDL power of the owner) freeze the approval identity and the step identity, keep a
+-- decided step's decision columns as written, refuse DELETE, and refuse a new step once a step of
+-- the approval is decided or the approval is no longer PENDING, so the final step (the highest
+-- step_no) is fixed before the first decision. amw_human_record_apply checks the evidence subject
+-- and review code against the approval and, on the final step, that every other step was
+-- APPROVED with evidence.
 SET LOCAL ROLE amw_owner;
+
+CREATE FUNCTION amw_approval_identity_frozen() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp
+  AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'approvals are never deleted (PROPOSED CCR-190)' USING ERRCODE = 'AMW02';
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.org_id IS DISTINCT FROM OLD.org_id
+     OR NEW.job_id IS DISTINCT FROM OLD.job_id OR NEW.kind IS DISTINCT FROM OLD.kind
+     OR NEW.subject_kind IS DISTINCT FROM OLD.subject_kind
+     OR NEW.subject_id IS DISTINCT FROM OLD.subject_id
+     OR NEW.subject_sha256 IS DISTINCT FROM OLD.subject_sha256
+     OR NEW.review_code IS DISTINCT FROM OLD.review_code
+     OR NEW.requested_by IS DISTINCT FROM OLD.requested_by
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'the identity of an approval is fixed at creation (PROPOSED CCR-190)'
+      USING ERRCODE = 'AMW02';
+  END IF;
+  RETURN NEW;
+END
+$$;
+REVOKE ALL ON FUNCTION amw_approval_identity_frozen() FROM PUBLIC;
+CREATE TRIGGER approval_identity_frozen BEFORE UPDATE OR DELETE ON approvals
+  FOR EACH ROW EXECUTE FUNCTION amw_approval_identity_frozen();
+
+CREATE FUNCTION amw_approval_step_frozen() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp
+  AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'approval steps are never deleted (PROPOSED CCR-190)' USING ERRCODE = 'AMW02';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    -- Serialises with amw_human_record_apply, which takes the same lock before it reads the steps.
+    PERFORM pg_advisory_xact_lock(hashtextextended(NEW.approval_id::text, 190));
+    IF EXISTS (SELECT 1 FROM approvals a
+                WHERE a.org_id = NEW.org_id AND a.id = NEW.approval_id AND a.state <> 'PENDING')
+       OR EXISTS (SELECT 1 FROM approval_steps s
+                   WHERE s.org_id = NEW.org_id AND s.approval_id = NEW.approval_id
+                     AND (s.decided_by IS NOT NULL OR s.evidence_id IS NOT NULL
+                          OR s.decided_at IS NOT NULL)) THEN
+      RAISE EXCEPTION 'the steps of an approval are fixed once a step is decided (PROPOSED CCR-190)'
+        USING ERRCODE = 'AMW02';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.org_id IS DISTINCT FROM OLD.org_id
+     OR NEW.approval_id IS DISTINCT FROM OLD.approval_id OR NEW.step_no IS DISTINCT FROM OLD.step_no
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'the identity of an approval step is fixed at creation (PROPOSED CCR-190)'
+      USING ERRCODE = 'AMW02';
+  END IF;
+  IF (OLD.decided_by IS NOT NULL OR OLD.evidence_id IS NOT NULL OR OLD.decided_at IS NOT NULL)
+     AND (NEW.state IS DISTINCT FROM OLD.state OR NEW.decided_by IS DISTINCT FROM OLD.decided_by
+          OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
+          OR NEW.approval_channel IS DISTINCT FROM OLD.approval_channel
+          OR NEW.recorded_by IS DISTINCT FROM OLD.recorded_by
+          OR NEW.evidence_id IS DISTINCT FROM OLD.evidence_id
+          OR NEW.required_role IS DISTINCT FROM OLD.required_role) THEN
+    RAISE EXCEPTION 'a decided approval step is never changed (PROPOSED CCR-190)'
+      USING ERRCODE = 'AMW02';
+  END IF;
+  RETURN NEW;
+END
+$$;
+REVOKE ALL ON FUNCTION amw_approval_step_frozen() FROM PUBLIC;
+CREATE TRIGGER approval_step_frozen BEFORE INSERT OR UPDATE OR DELETE ON approval_steps
+  FOR EACH ROW EXECUTE FUNCTION amw_approval_step_frozen();
 
 CREATE FUNCTION amw_channel_audience_guard() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp
@@ -68,6 +146,8 @@ BEGIN
     RAISE EXCEPTION 'evidence is not CONFIRMED with a valid MAC' USING ERRCODE = 'AMW02';
   END IF;
   IF ev.approval_id IS NOT NULL THEN
+    -- Same lock as the approval_steps insert trigger: no step can be added while this runs.
+    PERFORM pg_advisory_xact_lock(hashtextextended(ev.approval_id::text, 190));
     SELECT * INTO ap FROM approvals WHERE id = ev.approval_id AND org_id = ev.org_id;
   END IF;
 
@@ -77,6 +157,15 @@ BEGIN
     END IF;
     IF ap.state <> 'PENDING' THEN
       RAISE EXCEPTION 'the approval is no longer PENDING' USING ERRCODE = 'AMW02';
+    END IF;
+    -- 04 section 5.16: the evidence subject matches the approval's (review fix B1); the review
+    -- code the owner's message carried (MAC-bound) is the approval's, whose identity is frozen.
+    IF ap.kind = 'NEW_CHANNEL'
+       AND (ap.subject_kind <> 'channel' OR ev.subject_kind IS DISTINCT FROM 'channel'
+            OR ev.subject_id IS DISTINCT FROM ap.subject_id OR ev.review_code IS NULL
+            OR upper(ev.review_code) <> upper(ap.review_code)) THEN
+      RAISE EXCEPTION 'the evidence does not name this approval''s channel and review code'
+        USING ERRCODE = 'AMW02';
     END IF;
     UPDATE approval_steps
        SET state = ev.parsed_decision, decided_by = ev.on_behalf_of, decided_at = now(),
@@ -103,6 +192,16 @@ BEGIN
       IF ev.step_no = final_step THEN
         IF ap.subject_kind <> 'channel' OR ap.subject_sha256 IS NULL THEN
           RAISE EXCEPTION 'a NEW_CHANNEL approval needs a channel subject document'
+            USING ERRCODE = 'AMW02';
+        END IF;
+        -- Review fix M1: current_step is app-writable, so the final step applies only when every
+        -- other step of the approval was decided APPROVED from owner evidence.
+        IF EXISTS (SELECT 1 FROM approval_steps s
+                    WHERE s.org_id = ev.org_id AND s.approval_id = ap.id
+                      AND s.step_no <> ev.step_no
+                      AND NOT (s.state = 'APPROVED' AND s.decided_by IS NOT NULL
+                               AND s.evidence_id IS NOT NULL)) THEN
+          RAISE EXCEPTION 'an earlier step of this NEW_CHANNEL approval is not APPROVED'
             USING ERRCODE = 'AMW02';
         END IF;
         SELECT k INTO audience FROM unnest(ARRAY['GENERAL', 'KIDS']) AS k
