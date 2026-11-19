@@ -35,7 +35,7 @@ def test_render_completes_and_registers(tmp_path: Path) -> None:
     assert data["duration_ms"] == 16000
     assert data["encoder"]["audio_bitrate_nominal_bps"] == 384000
     assert data["encoder"]["gop"] == {
-        "gop_frames": 60,
+        "gop_frames": 15,
         "closed_gop": True,
         "idr_at_segment_start": True,
     }

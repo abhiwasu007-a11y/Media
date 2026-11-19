@@ -238,7 +238,8 @@ def test_canonical_json_rejects_floats_and_sorts_keys() -> None:
 def test_config_validation_and_defaults() -> None:
     cfg = make_config()
     assert cfg.render.geometry == (1920, 1080)
-    assert make_config(render={"preset_key": "shorts_9x16"}).render.geometry == (1080, 1920)
+    shorts = {"preset_key": "shorts_9x16", "video_bitrate_bps": 8_000_000}  # no INF-12 row
+    assert make_config(render=shorts).render.geometry == (1080, 1920)
     assert target_frames_of(60_000, 30, 1) == 1800
     assert target_frames_of(1001, 30000, 1001) == 30
     with pytest.raises(ConfigInvalidError) as info:

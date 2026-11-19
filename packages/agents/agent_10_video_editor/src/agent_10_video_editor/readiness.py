@@ -18,7 +18,7 @@ from agent_10_video_editor.qc.stage import SelfTestProvider
 
 REQUIRED_FILTERS = (
     "blackdetect", "freezedetect", "silencedetect", "ebur128", "select", "showinfo", "tile",
-    "drawtext", "concat", "overlay", "scale", "apad",
+    "drawtext", "concat", "overlay", "scale", "apad", "split", "ssim",
 )  # fmt: skip
 
 

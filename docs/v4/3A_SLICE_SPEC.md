@@ -185,7 +185,7 @@ Rules on the flow:
 
 | # | File | Produced by | Preset / record | Spec source |
 |---|---|---|---|---|
-| 1 | Final MP4, 16:9 | `agent_10.render`, `qc_results` PASS | `yt_master_1080p` (1440p optional) | 24 §4; 18 §6; INF-10 (YouTube's 1080p SDR figure, 8 Mbps, is the floor; the directive target is 15–25 Mbps) |
+| 1 | Final MP4, 16:9 | `agent_10.render`, `qc_results` PASS | `yt_master_1080p` (1440p optional) | 24 §4; 18 §6; INF-12, INF-13 (YouTube's 1080p SDR figure, 8 Mbps at 24–30 fps, is the encoder target, not a floor; owner decision D10, ADR-014) |
 | 2 | Final MP4, 9:16 (where applicable) | child `SHORTS` job | `shorts_9x16`; 1080×1920 is a PROPOSAL (18 §10) | official Shorts spec: R11 in §12 |
 | 3 | Thumbnail options (3 variants) | `agent_11.thumbnail_variants` | `thumbnail_set` | YT-08 (up to 3 for the Studio A/B test), YT-05 (50 MB maximum); dimensions: R12 |
 | 4 | SRT (one language in the MVP) | `agent_10.subtitles` | `srt_per_language` | 24 §4; 18 §7.6 |
