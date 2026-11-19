@@ -290,14 +290,9 @@ def test_devanagari_conjunct_is_shaped_by_raqm_not_by_a_naive_layout() -> None:
     assert not r.missing_glyphs
 
 
-def test_system_devanagari_font_when_present() -> None:
-    """Real-font evidence when a Devanagari OFL/GPL font exists on the machine (not committed)."""
-    import pathlib
-
-    path = pathlib.Path("/usr/share/fonts/truetype/freefont/FreeSerif.ttf")
-    if not path.is_file():
-        pytest.skip("OPEN ITEM: no system Devanagari font; real-font shaping evidence not run")
-    data = path.read_bytes()
+def test_pinned_brand_font_shapes_conjuncts_with_raqm() -> None:
+    """Real-font shaping evidence with the pinned Mukta (no system font is read)."""
+    data = pinned_font_bytes("mukta_regular")
     raqm = ImageFont.truetype(io.BytesIO(data), 100, layout_engine=ImageFont.Layout.RAQM)
     basic = ImageFont.truetype(io.BytesIO(data), 100, layout_engine=ImageFont.Layout.BASIC)
     assert raqm.getlength("क्ष") < basic.getlength("क्ष")
