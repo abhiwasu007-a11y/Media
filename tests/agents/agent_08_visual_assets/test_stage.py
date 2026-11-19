@@ -326,6 +326,21 @@ def test_input_hash_mismatch_is_input_invalid() -> None:
 
 
 @pytest.mark.integration
+def test_source_without_a_job_destination_fails_closed() -> None:
+    env = Env()
+    original = env.stage.source
+
+    def no_dest(**kw: Any) -> Any:
+        return original(**{**kw, "job_destination": None})
+
+    env.stage.source = no_dest
+    for dest in ("MONETIZED_YOUTUBE", "NON_MONETIZED"):
+        with pytest.raises(MissingDependencyError):
+            env.run(plan(), OVERLAYS, destination=dest)
+    assert not list(env.w.ledger.for_job(env.w.tx, "job_x"))
+
+
+@pytest.mark.integration
 def test_destination_must_match_job() -> None:
     env = Env()
     with pytest.raises(InputInvalidError):

@@ -487,6 +487,44 @@ def test_an_unreadable_job_destination_fails_closed() -> None:
         assert out.payload is None
 
 
+@pytest.mark.parametrize("weird", ["", 0, 1, "false", "true", "NON_MONETIZED", [], None])
+def test_a_non_bool_job_destination_value_fails_closed(weird: Any) -> None:
+    rig = Rig(monetized=weird)
+    out = rig.stage.run(rig.task_input(destination="NON_MONETIZED"), rig.ctx)
+    assert out.status is not OutputStatus.SUCCEEDED
+    assert out.error.code == "PERMANENT.MISSING_DEPENDENCY"
+    assert out.payload is None and not out.output_refs
+    assert not list(rig.env.w.ledger.for_job(rig.env.w.tx, rig.job))
+
+
+def test_a_raising_job_destination_reader_returns_an_output_and_writes_no_rows() -> None:
+    rig = Rig()
+
+    def boom(tx: Any, job_id: str) -> bool:
+        raise RuntimeError("db down")
+
+    rig.jobs.monetized_destination = boom  # type: ignore[method-assign]
+    out = rig.stage.run(rig.task_input(destination="MONETIZED_YOUTUBE"), rig.ctx)
+    assert out.status is not OutputStatus.SUCCEEDED
+    assert out.error.code == "PERMANENT.MISSING_DEPENDENCY"
+    assert out.payload is None and not out.output_refs
+    assert not list(rig.env.w.ledger.for_job(rig.env.w.tx, rig.job))
+
+
+def test_a_raising_brand_kit_reader_returns_an_output_and_writes_no_rows() -> None:
+    rig = Rig()
+
+    def boom(tx: Any, uri: str, sha256: Any) -> Any:
+        raise RuntimeError("db down")
+
+    rig.brands.brand_kit = boom  # type: ignore[method-assign]
+    out = rig.stage.run(rig.task_input(destination="MONETIZED_YOUTUBE"), rig.ctx)
+    assert out.status is not OutputStatus.SUCCEEDED
+    assert out.error.code == "PERMANENT.MISSING_DEPENDENCY"
+    assert out.payload is None and not out.output_refs
+    assert not list(rig.env.w.ledger.for_job(rig.env.w.tx, rig.job))
+
+
 def test_no_job_destination_reader_fails_closed() -> None:
     rig = Rig(with_jobs=False)
     out = rig.stage.run(rig.task_input(destination="NON_MONETIZED"), rig.ctx)

@@ -379,9 +379,16 @@ class AssetSourcingStage:
             raise MissingDependencyError(
                 "the task needs exactly one BRAND_KIT context ref", details={"class": "brand_kit"}
             )
-        with self._tenancy.transaction(tenant) as tx:
-            kit = self._brand_kits.brand_kit(tx, refs[0].uri, refs[0].sha256)
-        if kit is None:
+        try:
+            with self._tenancy.transaction(tenant) as tx:
+                kit = self._brand_kits.brand_kit(tx, refs[0].uri, refs[0].sha256)
+        except AmwError:
+            raise
+        except Exception:  # a failing port is a missing dependency, never an escaping exception
+            raise MissingDependencyError(
+                "brand kit reader failed", details={"class": "brand_kit"}
+            ) from None
+        if not isinstance(kit, BrandKit):
             raise MissingDependencyError("brand kit not found", details={"class": "brand_kit"})
         return kit
 
@@ -390,14 +397,22 @@ class AssetSourcingStage:
         unreadable destination refuses the task instead of falling back to the payload."""
         if self._job_destinations is None:
             raise ConfigInvalidError("no job destination reader is configured")
-        with self._tenancy.transaction(tenant) as tx:
-            monetized = self._job_destinations.monetized_destination(tx, task.job_id)
-        if monetized is None:
+        try:
+            with self._tenancy.transaction(tenant) as tx:
+                monetized = self._job_destinations.monetized_destination(tx, task.job_id)
+        except AmwError:
+            raise
+        except Exception:  # a failing port is a missing dependency, never an escaping exception
             raise MissingDependencyError(
-                "the job's monetized destination is not readable", details={"class": "job"}
-            )
-        return (
-            LicenceDestination.MONETIZED_YOUTUBE if monetized else LicenceDestination.NON_MONETIZED
+                "the job's monetized destination reader failed", details={"class": "job"}
+            ) from None
+        # the port is typed bool | None: only a real bool is a value ("", 0, "false" are not)
+        if monetized is True:
+            return LicenceDestination.MONETIZED_YOUTUBE
+        if monetized is False:
+            return LicenceDestination.NON_MONETIZED
+        raise MissingDependencyError(
+            "the job's monetized destination is not readable", details={"class": "job"}
         )
 
     def _task_output(
@@ -497,7 +512,12 @@ class AssetSourcingStage:
             raise InputInvalidError("shot plan hash does not match its reference")
         if hashlib.sha256(script_bytes).hexdigest() != inp.script_ref.sha256:
             raise InputInvalidError("script hash does not match its reference")
-        if job_destination is not None and job_destination is not inp.destination:
+        if not isinstance(job_destination, LicenceDestination):
+            # fail closed for direct callers too: the job's own destination is mandatory
+            raise MissingDependencyError(
+                "the job's destination is required", details={"class": "job"}
+            )
+        if job_destination is not inp.destination:
             raise InputInvalidError("destination disagrees with the job's monetized destination")
         self._pre["a08.pre.refs"] = True
         self._destination = inp.destination
