@@ -1,10 +1,13 @@
 """Print the rendering environment and the agent_11 canary hashes of THIS host (read-only).
 
-Run from a repo checkout: ``uv run python scripts/probe_render_env.py``, or with any Python that
-has Pillow and fontTools. Part 1 needs only the standard library and Pillow. Part 2 renders the
-canary fixtures of ``agent_11_thumbnail_design.canary`` and prints the decoded-raster hash (the
-cross-host identity), the PNG-bytes hash (depends on the zlib build) and the font hash. No network,
-no files written, no secrets. Send the whole output when comparing hosts.
+Run it from a repo checkout, exactly like this (needs uv; it fetches Python 3.14 itself):
+
+    uv sync --frozen --all-packages && uv run --frozen python scripts/probe_render_env.py
+
+Part 1 needs only Pillow. Part 2 renders the canary fixtures of ``agent_11_thumbnail_design.canary``
+and therefore needs the workspace environment (fontTools, pydantic, amw_core). The exit code is
+non-zero if either part fails. Output carries no secrets and no absolute paths (home and checkout
+are shown as ``~`` and ``<repo>``). No network, no files written. Send the whole output.
 """
 
 import hashlib
@@ -15,6 +18,12 @@ import platform
 import sys
 import zlib
 from pathlib import Path
+
+
+def _redact(text: str) -> str:
+    repo = str(Path(__file__).resolve().parents[1])
+    home = str(Path.home())
+    return text.replace(repo, "<repo>").replace(home, "~")
 
 
 def _os_release() -> str:
@@ -57,7 +66,7 @@ def part1() -> None:
         "LC_ALL",
         os.environ.get("LC_ALL"),
     )
-    print("pillow", PIL.__version__, "file", Path(PIL.__file__).parent)
+    print("pillow", PIL.__version__, "file", _redact(str(Path(PIL.__file__).parent)))
     for name in ("freetype2", "raqm", "harfbuzz", "fribidi", "zlib", "libjpeg_turbo", "littlecms2"):
         try:
             ok = features.check(name)
@@ -67,7 +76,7 @@ def part1() -> None:
     print("python zlib compile", zlib.ZLIB_VERSION, "runtime", zlib.ZLIB_RUNTIME_VERSION)
     print("zlib-ng in PIL.features.pilinfo:", "zlib-ng" in _pilinfo())
     for lib in _mapped_libs():
-        print("loaded", lib)
+        print("loaded", _redact(lib))
 
 
 def _pilinfo() -> str:
@@ -103,9 +112,29 @@ def part2() -> None:
         print("  matches_recorded  ", res.pixel_sha256 == recorded_canary(freetype, key))
 
 
-if __name__ == "__main__":
-    part1()
+def main() -> int:
+    print(
+        "probe: run via `uv run --frozen python scripts/probe_render_env.py` "
+        "after `uv sync --frozen --all-packages`"
+    )
+    failed = False
+    try:
+        part1()
+    except Exception as exc:
+        print("part1 FAILED:", type(exc).__name__, exc)
+        failed = True
     try:
         part2()
     except Exception as exc:
-        print("part2 failed:", type(exc).__name__, exc)
+        print(
+            "part2 FAILED:",
+            type(exc).__name__,
+            exc,
+            "(run it with the workspace environment, see the header)",
+        )
+        failed = True
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

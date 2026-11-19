@@ -82,6 +82,7 @@ jobs:
           path: docs-lint-report.md
 
   a11-render-determinism:
+    name: a11-render-determinism (${{ matrix.image }}, ${{ matrix.uv_arch }})
     # Proves agent_11 thumbnail rendering does not depend on the host (docs/v4 RV-08, package README
     # "Determinism"): clean Ubuntu images with only the package README's system library (libfribidi0),
     # Python and every dependency from uv.lock (--frozen, Pillow wheel only). Strict mode: the canary

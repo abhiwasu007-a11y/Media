@@ -47,7 +47,7 @@ What was measured to change the raster (full table in `data/environments.json`, 
 - **FreeType**: the Noto variable font renders differently with FreeType 2.13.3 (Pillow 11.3.0) than with 2.14.1 (Pillow 12.0.0, 12.1.0) and
   2.14.3 (Pillow 13.0.0); 2.14.1 and 2.14.3 are identical. This is the canary key.
 - **Not shown to matter**: HarfBuzz 12.1.0, 12.3.0, 14.5.0; libraqm 0.10.3, 0.11.0; libfribidi 1.0.8, 1.0.13, 1.0.16; Pillow 11.3.0 to 13.0.0
-  for the box font. CPU architecture: only x86_64 measured.
+  for the box font. CPU architecture and OS: x86_64 and aarch64 Ubuntu matched in CI for FreeType 2.14.3.
 
 What the code does:
 
@@ -64,10 +64,16 @@ What the code does:
   still requires a registered asset with a licence row. Fonts load from memory only, so a system font is never used.
 - **Lock**: `pillow==13.0.0` exactly in `pyproject.toml` and `uv.lock`; fontTools (test-font generator) is locked. FreeType, HarfBuzz and Raqm
   are inside the Pillow wheel; FriBiDi and zlib are system libraries.
-- **Probe**: `scripts/probe_render_env.py` prints the full fingerprint, loaded libraries, canary raster, PNG and font hashes of a host.
+- **Probe**: `scripts/probe_render_env.py` prints the full fingerprint, loaded libraries, canary raster, PNG and font hashes of a host
+  (exit code non-zero if it cannot run; no absolute paths printed). Ready to paste on the host to be compared:
 
-Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved); (2) aarch64 and macOS have no recorded
-canary (an arm64 leg of the clean-image job tests it); (3) the owner picks the default Devanagari font (Q-O6): the pinned OFL candidate is
+  ```
+  git clone --depth 1 --branch claude/v4-p4-agent11-determinism https://github.com/abhiwasu007-a11y/Media.git media-probe && cd media-probe && export UV_PYTHON=3.14 && uv sync --frozen --all-packages && uv run --frozen python scripts/probe_render_env.py 2>&1 | grep -v '^warning' | tee probe_out.txt
+  ```
+- **Known limits**: a missing font asset or licence row is detected only when the rows are written, after the paid model call (pre-existing order);
+  hinted tenant fonts are not covered by a canary; `pixel_sha256` is not stored in the manifest.
+
+Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved); (2) macOS and Windows have no recorded canary (CI run 44447278617 matched on x86_64 Ubuntu 24.04 with FriBiDi 1.0.13, x86_64 Ubuntu 26.04 with FriBiDi 1.0.16 and arm64 Ubuntu 24.04, all strict, FreeType 2.14.3 only; the 2.13.3 and 2.14.1 rows are local x86_64 measurements); (3) the owner picks the default Devanagari font (Q-O6): the pinned OFL candidate is
 verified, not chosen; (4) the verifier's `c58d42db` is unexplained until their probe output is compared.
 
 ## Fonts, templates, glyphs (licence rows)
