@@ -31,6 +31,7 @@ from amw_orchestrator.executor import (
     RulePackDoc,
 )
 from amw_orchestrator.registry import job_graph
+from tests.orchestrator.evidence_fake import FakeEvidenceStatuses
 from tests.orchestrator.world import LONG, approval_output, ok_output
 
 H = "a" * 64
@@ -145,6 +146,7 @@ class World:
     def __init__(self, jb: JobFacts | None = None) -> None:
         self.job = jb or job()
         self.svc = Services()
+        self.evidence = FakeEvidenceStatuses()
         self.up: dict[str, TaskOutput] = {}
         self.task_ids: dict[str, str] = {}
         self._build()
@@ -321,8 +323,10 @@ class World:
             {"dimensions": [{"dimension": "ACCURACY", "max_points": 20, "points": 18,
                              "scorer_kind": "DETERMINISTIC", "criteria": []}]},
         )  # fmt: skip
+        self.render_id = str(self.up["s10_render"].payload.data["render_id"])  # type: ignore[union-attr, index]
         self.add("a_final", "svc_s07.request_approval.output",
-                 approval_output(rnd.sha256))  # fmt: skip
+                 approval_output(rnd.sha256, evidence_ids=[
+                     self.evidence.record(self.job.org_id, "render", self.render_id)]))  # fmt: skip
         self.add(
             "s16_auth", "agent_16.publication_authorisation.output",
             {"verdict": "ALLOWED", "authorised_action": "DELIVERY", "authorisation_verdict_id": "vrd_x",
@@ -337,7 +341,8 @@ class World:
             job=self.job, stage=stage, task_id=str(TASK.new()), iteration=iteration, attempt_no=1,
             idempotency_key="idk_" + "a" * 64,
             resource_budget=ResourceBudget(max_cost_micros=0, currency="USD", max_wall_ms=1000, max_llm_calls=0),
-            upstream=upstream, upstream_task_ids=self.task_ids, services=self.svc, **kw,
+            upstream=upstream, upstream_task_ids=self.task_ids, services=self.svc,
+            evidence=self.evidence, **{"real_run": False, **kw},
         )  # fmt: skip
 
 

@@ -16,9 +16,11 @@ from typing import Any
 
 from amw_core.enums import ContextRefPurpose
 from amw_core.errors import InputInvalidError, MissingDependencyError
+from amw_orchestrator.approval_binding import ExpectedSubject, require_bound_approval
 from amw_orchestrator.executor import BuildContext, BuiltInput, ChannelCategory, DocRef, JobFacts
 from amw_orchestrator.input_builders import common as c
 from amw_orchestrator.input_builders.settings import BuilderSettings
+from amw_orchestrator.payloads import ApprovalOutput
 
 GATE_SCHEMA = "agent_16.compliance_gate.input"
 SCORE_SCHEMA = "agent_16.quality_score.input"
@@ -193,21 +195,46 @@ class QualityScoreBuilder:
         return BuiltInput(SCORE_SCHEMA, "1.0.0", data, ())
 
 
+def _bound_final_approval(ctx: BuildContext) -> ApprovalOutput:
+    """The final approval, accepted only for the CURRENT render (and, when the graph approves the
+    script, the CURRENT script): hash, subject, org and confirmed evidence (CCR-296 PROVISIONAL,
+    ``amw_orchestrator.approval_binding``)."""
+    sub = _subject(ctx)
+    org = ctx.job.org_id
+    if c.has_stage(ctx, "a_script"):  # a script approval relied on must still be of this script
+        require_bound_approval(
+            c.payload(ctx, "a_script"),
+            stage_id="a_script",
+            approval_kind="SCRIPT",
+            subject=ExpectedSubject("script", sub["script_id"], sub["script_sha256"]),
+            org_id=org,
+            evidence=ctx.evidence,
+            real_run=ctx.real_run,
+        )
+    return require_bound_approval(
+        c.payload(ctx, "a_final"),
+        stage_id="a_final",
+        approval_kind="FINAL_VIDEO",
+        subject=ExpectedSubject("render", sub["render_id"], sub["render_sha256"]),
+        org_id=org,
+        evidence=ctx.evidence,
+        real_run=ctx.real_run,
+    )
+
+
 class AuthorisationBuilder:
     def __init__(self, settings: BuilderSettings) -> None:
         self._s = settings
 
     def build(self, ctx: BuildContext) -> BuiltInput:
-        approval = c.payload(ctx, "a_final")
-        if approval.get("state") != "APPROVED" or not approval.get("approval_id"):
-            raise InputInvalidError("the final approval is not an APPROVED decision with an ID")
+        approval = _bound_final_approval(ctx)
         thumbs = c.payload(ctx, "s11_thumbs")["variants"]
         packs = ctx.job.documents.rule_packs
         subject = {**_subject(ctx), "thumbnail_set_sha256": [v["file"]["sha256"] for v in thumbs]}
         data = {
             "subject": subject,
             "iteration": ctx.iteration,
-            "approval_id": approval["approval_id"],
+            "approval_id": approval.approval_id,
             "gate_task_id": c.need(ctx.upstream_task_ids.get("s16_comp"), "the gate task ID"),
             "score_task_id": c.need(ctx.upstream_task_ids.get("s16_score"), "the score task ID"),
             "requested_action": self._s.requested_action,
