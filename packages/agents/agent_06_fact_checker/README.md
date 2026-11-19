@@ -25,6 +25,18 @@ caller (Agent 16 / orchestrator) must invoke it, nothing in this package does at
 The last bar date lookup (`ChartRanges`) is required; a measured chart without a known date is
 `UNKNOWN` (blocks).
 
+## Knowledge-library source rules (`library/`, owner decision D12)
+Read-only reader of the private library checkout (path + full 40-character commit SHA, never
+text; HEAD must equal the SHA and the bytes read must equal the commit's blob, so a dirty tree
+fails closed; needs the `git` binary), per-work copyright record with the computed 60-year public-domain flag (CCR-270
+PROPOSED, fail closed, clock / job date injected), exact quote verification with the fake-quote
+guard, and credit-line / further-reading checks. Exact matching is defined in `library/quotes.py`
+(not the fuzzy `amw_core.text_normalise`). A non-public-domain work is never read. Results carry
+offsets and hashes, never text. **Not done:** wiring into `ClaimVerificationStep` (needs the input
+fields of CCR-291 PROPOSED); the section-marker format of the library text is provisional; the
+minimum quote length and the earliest plausible death year are provisional (CCR-291). Death years
+are signed, negative = BCE. Tests use invented sentences only.
+
 ## What the tests prove, and what they do not
 - Extraction eval fixtures (`tests/.../recorded_extraction.py`) are **hand-authored**, not provider
   recordings. The verification responses are **derived from each case's `expected` block**, with
