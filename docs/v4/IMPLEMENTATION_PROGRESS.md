@@ -5,7 +5,7 @@ Resume from this file after any context reset (directive §6). Finished work is 
 | Track | Status |
 |---|---|
 | **Documentation** | Phase 0 complete. Phase 1 in progress (VPS audit and feasibility waiting on owner data). Architecture waves A/B/C started 2026-11-18 on the owner's instruction (in parallel with Phase 1). |
-| **Software** | **Planned.** Nothing implemented. Code starts only after written approval of the V4.0 baseline (rule 1). |
+| **Software** | **In progress (3A build lanes, per owner decisions D1/D2/D4).** Core, agent packages, orchestrator driver and runtime readiness are merged to `main` as lane PRs (for example #64, #70, #77, #79); the 3A skeleton is not yet run for real. See the task ledger and CONTRACT_CHANGE_REQUESTS §8–§10 for tickets. |
 
 ## Task ledger
 
@@ -94,7 +94,7 @@ Lanes: Step 0 (Opus: contracts package, core Protocols, fakes; the only gate bef
 Build facts: Python **3.14** (newest stable bugfix minor installable here; 3.15 only as a beta; `uuid.uuid7()` stdlib); local PostgreSQL 16 for the tenancy suite, CI uses PostgreSQL 18; GitHub Actions CI confirmed working (run on PR #10 succeeded).
 
 ### D10 (2026-11-19, dry-run break 8): video bitrate is an encoder target, not a floor
-YouTube's 8 Mbps (1080p, 24–30 fps; 12 Mbps at 48–60 fps) is the ENCODER TARGET: encode H.264 High VBR at that target. The measured-bitrate floor (18 §6, `qc.video.bitrate`) is replaced by an encoder-settings check plus a quality metric (SSIM, or VMAF where available) against the lossless intermediate; the threshold is set in 3B, not now. No filler padding. Recorded in ADR-014 and CCR-240; YouTube values re-verified on the official page (RESEARCH_LOG INF-12, INF-13, 2026-11-19: they match). Open: Q-D10-1 (provisional default: the directive's 15–25 Mbps band is withdrawn); Q-D10-2 (provisional default: kept): the operator value `agent_10.render.video_bitrate_bps` unlocks a size without a YouTube row (9:16, 1440p), a knob D10 did not state. Review follow-ups applied as CCR-241. Ticket **T-ADR014-1** (other lane): PR #71 `amw_delivery/vertical.py` `make_9x16` encodes with `-crf` and does not follow ADR-014 (no ABR target, B-frames, GOP, CABAC, VBV, no-edit-list mux); align it with `agent_10_video_editor.encode.resolve` once the 9:16 target is set.
+YouTube's 8 Mbps (1080p, 24–30 fps; 12 Mbps at 48–60 fps) is the ENCODER TARGET: encode H.264 High VBR at that target. The measured-bitrate floor (18 §6, `qc.video.bitrate`) is replaced by an encoder-settings check plus a quality metric (SSIM, or VMAF where available) against the lossless intermediate; the threshold is set in 3B, not now. No filler padding. Recorded in ADR-014 and CCR-240; YouTube values re-verified on the official page (RESEARCH_LOG INF-12, INF-13, 2026-11-19: they match). Q-D10-1 (the directive's 15–25 Mbps band is withdrawn): **closed by D11 item 5**; Q-D10-2 (provisional default: kept): the operator value `agent_10.render.video_bitrate_bps` unlocks a size without a YouTube row (9:16, 1440p), a knob D10 did not state. Review follow-ups applied as CCR-241. Ticket **T-ADR014-1** (other lane): PR #71 `amw_delivery/vertical.py` `make_9x16` encodes with `-crf` and does not follow ADR-014 (no ABR target, B-frames, GOP, CABAC, VBV, no-edit-list mux); align it with `agent_10_video_editor.encode.resolve` once the 9:16 target is set.
 
 ### Process rule R-SYNC (2026-11-18, after `main` went red when pass 3 changed the glossary)
 Contract documents drive generated code (enums, ids, schemas, graphs, error catalogue) and their parsing tests are blocking gates. **A PR that changes GLOSSARY_AND_IDS.md, 03, 07, 24 or any other contract document must regenerate the code in the same PR** (or the code sync must be merged first or together). Contract integrator passes therefore ship with a code-sync follow-up PR opened at the same time; until it merges, other PRs may see a red `main`. First occurrence: contract pass 3 (PR #30) → code sync PR #34.
@@ -129,6 +129,31 @@ Recorded from the owner's chat message (R14: operator's record, not production-v
 7. **Before the real skeleton run:** the 15 integration breaks become contract-level fixes (CCRs plus agent PRs), not dry-run wrappers. The real run must include data_pack chart scenes (Agent 08 tier C charts from historical data, SEBI lag enforced), which the dry run did not have.
 - Overseer note: dry-run bundle independently verified (1920x1080 H.264 High 30 fps, AAC-LC 48 kHz, -14.0 LUFS, manifest hashes match).
 
+### D11 (2026-11-19, owner chat message): answers to the six numbered questions
+Recorded from the owner's chat messages. This is the operator's record of a chat message (R14): it is **not production-verified owner evidence** until the real evidence path (ticket 3A-13) exists.
+
+Owner's reply, verbatim: "१ हो, २ हो — फक्त 3A साठी; YouTube publish आणि पहिल्या client आधी वेगळा verifier host सक्तीचा, ३ हो, ४ नाही — त्या तीन आयतांऐवजी स्पष्ट chart/RSI-रेषेचे चिन्ह वापरा, ५ हो, ६ हो — इतर tenants चा font त्यांच्या brand kit मधून, glyph-coverage तपासणीसह."
+English rendering: "1 yes, 2 yes, only for 3A; a separate verifier host is mandatory before YouTube publish and before the first client, 3 yes, 4 no, use a clear chart / RSI-line symbol instead of those three rectangles, 5 yes, 6 yes, other tenants' fonts from their brand kit, with the glyph-coverage check."
+
+1. **CCR-264 (R14 confirmation forms): APPROVED.** The question asked for one of four exact phrases (`approve R7K2` / `R7K2 मंजूर` / `confirm R7K2` / `R7K2 पक्के`). The owner first wrote only "हो", which is **not** one of the four exact phrases and was **not accepted** (R14 rule, not softened). The owner then typed, as a separate chat message, exactly: `R7K2 मंजूर`, one of the four exact phrases. CCR-264 is therefore APPROVED (owner, 2026-11-19, phrase `R7K2 मंजूर`) in CONTRACT_CHANGE_REQUESTS. The other requests CCR-260…265 are unchanged (PROPOSED).
+2. **R14 residual limitation accepted for 3A only.** In one container the assistant can edit owner chat lines in the local transcript; only a separate verifier host with its own platform-API credential closes this. **Hard gate: a separate verifier host is MANDATORY before any YouTube publish and before the first client** (blocking; recorded in 3A_SLICE_SPEC §9 and as owner input A8 below).
+3. **Recorded-approvals list:** yes. The assistant posts a periodic list of the recorded approvals in chat so the owner can compare it with the app history.
+4. **Q-O30: DECIDED, not (a).** The owner does not keep the three outlined rectangles: `g1_level_steps` is replaced by a clear chart / RSI-line symbol. Ticket **PASS6-L** (agent_11 thumbnail glyphs).
+5. **Q-D10-1: CLOSED.** The old 15–25 Mbps band is withdrawn (D10 / ADR-014 stand).
+6. **Q-O6 / D10 item 2 open point: DECIDED.** "Only Mukta / Noto Sans Devanagari" applies to the owner's own channel only. Other tenants' fonts come from their brand kit, with the glyph-coverage check (`amw_core.font_coverage`) enforced. The tenant brand-kit font path is not yet specified: ticket **PASS6-M**.
+
+### Follow-up tickets (filed with D11; title, origin, one line; no numbers invented)
+- **Public `register_payload_schema` bypasses the allow-list and namespace** (merged #64): the public function accepts schemas outside the allow-list and its namespace.
+- **`problems()` accepts `superseded_by` on insert** (merged #64): a new problem row can be inserted already marked as superseded.
+- **`MemoryRequester` is caller-built and spoofable** (merged #64): it needs a factory built from `ExecContext`.
+- **`job_id` is a bare `str`; `substantiation_ref` is not tied to SUBSTANTIATED** (merged #64): give `job_id` a type and enforce the link to the SUBSTANTIATED state.
+- **Agent payload registration** (merged #64): needs `packages/agents/*` `payloads.py` modules plus the 3-line orchestrator change.
+- **Race: a decision commits after the confirmation check** (merged #77): close the window between the check and the commit.
+- **Residual trust: the assistant can edit transcript lines in one container** (merged #77): closed only by the separate verifier host (gate in D11 item 2).
+- **VBV rate-cap ratios 1.5x / 2x are a measured PROPOSAL** (merged #79): need owner review before they are treated as settled.
+- **T-ADR014-1** (merged #79): the 9:16 encode in PR #71 uses CRF and does not follow ADR-014.
+- **Q-D10-2 operator bitrate** (merged #79): the operator value `agent_10.render.video_bitrate_bps` is a knob D10 did not state; still provisionally kept, owner to answer.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
@@ -140,6 +165,7 @@ Recorded from the owner's chat message (R14: operator's record, not production-v
 | A5 | Channel Google account / Brand Account decision | Waiting (same as A4) |
 | A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status, GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
 | A7 | API keys | Not needed in this phase |
+| A8 | **Separate verifier host with its own platform-API credential** (D11 item 2) | **Mandatory gate before any YouTube publish and before the first client.** Not needed for 3A. |
 
 ## Open questions (new since the plan; provisional default applies until the owner answers, per owner rule A.9)
 

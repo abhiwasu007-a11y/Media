@@ -252,6 +252,7 @@ Per ADR-012 (Proposed):
 | Localisation / dubbing, ads, corporate and e-commerce production types | 3C, Tier 1+ |
 | Outbound notifications (email and others) | 3C |
 | Any public video | never without the 3C publish path, approval and authorisation (rule 5) |
+| **Separate verifier host (D11 item 2)** | **MANDATORY, blocking: before any YouTube publish and before the first client.** Until then the R14 residual limitation is accepted for 3A only (owner-evidence record is the operator's record, not production-verified) |
 
 ## 10. 3B golden-sample procedure [3B · Tier 0]
 
