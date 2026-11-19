@@ -122,7 +122,9 @@ def test_unpinned_render_environment_is_permanent_and_precedes_the_paid_call() -
     assert env.llm.calls == 0
 
 
-def test_unpinned_font_asset_is_refused_before_the_paid_call(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unpinned_font_asset_is_refused_before_the_paid_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     env = make_env()
     monkeypatch.setattr(
         "agent_11_thumbnail_design.stage.verify_font",

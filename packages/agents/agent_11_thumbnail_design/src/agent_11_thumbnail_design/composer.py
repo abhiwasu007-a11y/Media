@@ -100,7 +100,7 @@ class TextRun:
 class RenderResult:
     png: bytes
     pixel_sha256: str
-    """Host-independent identity of the raster (decoded RGB). ``png`` bytes depend on the host zlib."""
+    """Host-independent identity of the raster (decoded RGB); ``png`` bytes depend on host zlib."""
     width: int
     height: int
     runs: tuple[TextRun, ...]

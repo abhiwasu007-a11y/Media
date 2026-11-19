@@ -60,6 +60,7 @@ from agent_11_thumbnail_design.payload import (
     PlannerInfo,
     ThumbnailInput,
 )
+from agent_11_thumbnail_design.pinning import verify_font
 from agent_11_thumbnail_design.ports import (
     BrandKitView,
     FontRef,
@@ -70,7 +71,6 @@ from agent_11_thumbnail_design.ports import (
     RegisteredAsset,
     ThumbnailRepository,
 )
-from agent_11_thumbnail_design.pinning import verify_font
 from agent_11_thumbnail_design.prompting import PromptBundle, parse_output, render_request
 from agent_11_thumbnail_design.revision import build_previous, canonical_json, set_sha256
 from agent_11_thumbnail_design.scanner import InjectionScanner

@@ -8,8 +8,8 @@ from dataclasses import replace
 import pytest
 from PIL import Image, ImageFont
 
-from agent_11_thumbnail_design.composer import PillowComposer, RenderSpec, hex_to_rgb, phash64
 from agent_11_thumbnail_design import pinning
+from agent_11_thumbnail_design.composer import PillowComposer, RenderSpec, hex_to_rgb, phash64
 from agent_11_thumbnail_design.errors import (
     FontIntegrityError,
     GlyphMissingError,
@@ -31,8 +31,8 @@ FONT = build_font()
 FONT_SHA = hashlib.sha256(FONT).hexdigest()
 ORG = "org_00000000-0000-7000-8000-000000000001"
 #: Canary (U-169): the fixed fixture below renders to a recorded raster hash per pinned rendering
-#: environment (``data/environments.json``, keyed by the Pillow / FreeType / Raqm / HarfBuzz / FriBiDi /
-#: CPU fingerprint). The PNG file bytes are not the cross-host identity (host zlib), the decoded raster is.
+#: environment (``data/environments.json``, keyed by the Pillow, FreeType, Raqm, HarfBuzz, FriBiDi
+#: and CPU fingerprint). The PNG bytes are not the cross-host identity (host zlib); the raster is.
 
 
 def spec(**over: object) -> RenderSpec:
@@ -112,7 +112,9 @@ def test_production_font_is_pinned_ofl_and_shapes_devanagari() -> None:
     pinned = font_manifest()[hashlib.sha256(data).hexdigest()]
     assert pinned.licence == "OFL-1.1"
     assert not PillowComposer().missing_glyphs(ORG, data, "ट्रेंड कसा वाचायचा")
-    r = PillowComposer().render(spec(font_bytes=data, font_sha256=pinned.sha256, lines=("ट्रेंड वाचा",)))
+    r = PillowComposer().render(
+        spec(font_bytes=data, font_sha256=pinned.sha256, lines=("ट्रेंड वाचा",))
+    )
     assert r.font_px >= 48
 
 
@@ -137,7 +139,8 @@ def test_system_font_is_never_used(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(ImageFont, "truetype", spy)
     PillowComposer().render(spec())
-    assert seen and all(isinstance(f, io.BytesIO) for f in seen)  # memory only: no name, no path
+    assert seen
+    assert all(isinstance(f, io.BytesIO) for f in seen)  # memory only: no name, no path
 
 
 def test_unpinned_environment_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:

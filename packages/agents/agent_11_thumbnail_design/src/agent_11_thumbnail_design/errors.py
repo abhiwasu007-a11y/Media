@@ -14,7 +14,7 @@ class ComposeFailedError(Exception):
 
 
 class FontIntegrityError(Exception):
-    """The font bytes do not match their hash or are not in the pinned font manifest (fail closed)."""
+    """Font bytes differ from their hash or are not in the pinned font manifest (fail closed)."""
 
 
 class RenderEnvironmentError(Exception):

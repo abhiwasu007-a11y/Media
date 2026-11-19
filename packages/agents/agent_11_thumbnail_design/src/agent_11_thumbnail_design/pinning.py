@@ -8,9 +8,9 @@ Two lists live in package data and are the only authority:
   system font can never be substituted.
 * ``data/environments.json``: the rendering environments the canary was recorded for. The key is the
   fingerprint of Pillow, FreeType, Raqm, HarfBuzz, FriBiDi and the CPU architecture. An environment
-  that is not listed is refused (``RenderEnvironmentError``) instead of rendering something different.
+  that is not listed is refused (``RenderEnvironmentError``), never rendered differently.
 
-The PNG file bytes are NOT part of the cross-host identity: Pillow's wheel links the host's zlib, and
+The PNG file bytes are NOT part of the cross-host identity: the wheel links the host zlib, and
 different zlib builds write different (equally valid) deflate streams for the same pixels. The
 cross-host identity is ``pixel_sha256`` of the decoded RGB raster.
 """
