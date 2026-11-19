@@ -23,9 +23,13 @@ from amw_delivery.vertical import (
     make_9x16,
     probe_media,
 )
-from tests.delivery.support import SRT, make_mp4
+from tests.delivery.support import HAS_FFMPEG, SRT, make_mp4
 
 pytestmark = pytest.mark.integration
+needs_ffmpeg = pytest.mark.skipif(
+    not HAS_FFMPEG,
+    reason="real FFmpeg and ffprobe are not installed (the CI gates job needs them)",
+)
 
 SMALL = PLUMBING_VERTICAL_SPEC.model_copy(
     update={
@@ -36,6 +40,7 @@ SMALL = PLUMBING_VERTICAL_SPEC.model_copy(
 )
 
 
+@needs_ffmpeg
 def test_blur_pad_with_subtitles_probes_correctly(tmp_path: Path) -> None:
     src = make_mp4(tmp_path / "in.mp4")
     srt = tmp_path / "s.srt"
@@ -58,6 +63,7 @@ def test_blur_pad_with_subtitles_probes_correctly(tmp_path: Path) -> None:
     assert not list((tmp_path / "o").glob("*.partial.mp4"))
 
 
+@needs_ffmpeg
 def test_crop_mode_without_subtitles(tmp_path: Path) -> None:
     src = make_mp4(tmp_path / "in.mp4")
     spec = SMALL.model_copy(update={"mode": "crop", "focus_x": 0.25})
@@ -78,6 +84,7 @@ def test_filter_string_uses_safe_area_for_subtitles() -> None:
         build_filter(spec, subtitles_name=None)
 
 
+@needs_ffmpeg
 def test_missing_input_and_missing_subtitles(tmp_path: Path) -> None:
     with pytest.raises(MissingDependencyError):
         make_9x16(tmp_path / "nope.mp4", tmp_path / "o.mp4", SMALL)
@@ -86,12 +93,14 @@ def test_missing_input_and_missing_subtitles(tmp_path: Path) -> None:
         make_9x16(src, tmp_path / "o.mp4", SMALL, subtitles_srt=tmp_path / "none.srt")
 
 
+@needs_ffmpeg
 def test_input_without_audio_is_refused(tmp_path: Path) -> None:
     src = make_mp4(tmp_path / "in.mp4", audio=False)
     with pytest.raises(InputInvalidError):
         make_9x16(src, tmp_path / "o.mp4", SMALL)
 
 
+@needs_ffmpeg
 def test_ffmpeg_failure_is_typed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bad = tmp_path / "garbage.mp4"
     bad.write_bytes(b"not a video")
@@ -109,6 +118,7 @@ def test_ffmpeg_failure_is_typed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert not (tmp_path / "o.mp4").exists()
 
 
+@needs_ffmpeg
 def test_verification_failure_removes_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -128,6 +138,7 @@ def test_verification_failure_removes_output(
     assert not list(tmp_path.glob("*.partial.mp4"))
 
 
+@needs_ffmpeg
 def test_probe_mismatch_is_reported(tmp_path: Path) -> None:
     src = make_mp4(tmp_path / "in.mp4")
     # output of the wrong size relative to the spec: use the source itself as the "output"
@@ -142,6 +153,7 @@ def test_spec_requires_every_policy_value() -> None:
         VerticalSpec.model_validate({"width_px": 1080})
 
 
+@needs_ffmpeg
 @pytest.mark.parametrize(
     ("update", "reason"),
     [
@@ -169,6 +181,7 @@ def test_derived_gop_needs_no_operator_value() -> None:
         vertical.resolve_encode(thirty.model_copy(update={"gop_frames": 10}))
 
 
+@needs_ffmpeg
 def test_output_follows_the_encode_policy(tmp_path: Path) -> None:
     """x264 High, 2 B-frames, CABAC, GOP of half the rate (12 at 25 fps, operator value), VBV."""
     src = make_mp4(tmp_path / "in.mp4", seconds=3)

@@ -1,5 +1,6 @@
 """Builders for the delivery tests: real FFmpeg on tiny synthetic media, in-memory storage."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -26,6 +27,11 @@ SRT = (
     "1\n00:00:00,000 --> 00:00:01,500\nHello world\n\n"
     "2\n00:00:01,500 --> 00:00:03,000\nSecond line\n"
 )
+
+
+OPAQUE_MP4 = bytes(range(256)) * 64
+"""16 KiB of fixed bytes standing in for a video file where nothing decodes it."""
+HAS_FFMPEG = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
 def make_mp4(path: Path, *, seconds: int = 2, size: str = "320x180", audio: bool = True) -> Path:
@@ -69,8 +75,11 @@ class World:
         self.storage = MemoryBlobStorage(chunk=4096)
         self.tmp = tmp
         self.shorts = shorts
-        self.video = make_mp4(tmp / "master.mp4").read_bytes()
-        self.vertical = make_mp4(tmp / "vert.mp4", size="180x320").read_bytes() if shorts else b""
+        # The bundle never decodes the videos (it copies bytes and checks SHA-256 and size), so
+        # opaque deterministic bytes keep these tests independent of an FFmpeg install; the real
+        # FFmpeg path is covered by test_vertical.
+        self.video = OPAQUE_MP4 + b"master"
+        self.vertical = OPAQUE_MP4 + b"vertical" if shorts else b""
 
     def put(self, name: str, data: bytes, owner: str | None = None) -> ArtefactRef:
         uri = f"amw-blob://{owner or self.org}/jobs/{self.job}/{name}"
