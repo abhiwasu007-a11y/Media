@@ -392,6 +392,7 @@ class QualityScoreStage:
         )
         checks = [
             *result.results,
+            # defence-in-depth restatement of the parse() check; cannot fail independently
             integrity(
                 "tenant",
                 all(

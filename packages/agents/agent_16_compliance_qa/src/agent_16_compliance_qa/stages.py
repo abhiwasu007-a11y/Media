@@ -344,6 +344,7 @@ class ComplianceGateStage:
         expected_rows = sum(1 for r in payload["rules"] if r["compliance_verdict"] is not None)
         checks = [
             *results,
+            # defence-in-depth restatement of the parse() check; cannot fail independently
             integrity(
                 "tenant",
                 all(

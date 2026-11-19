@@ -774,3 +774,18 @@ def test_a_price_claim_whose_chart_is_not_in_the_manifest_needs_a_human() -> Non
     i = gate(d=d).inputs
     res = R.price_lag(list(i.charts), list(i.text_prices), 30)
     assert res.compliance_verdict is ComplianceVerdict.NEEDS_HUMAN_REVIEW
+
+
+def test_duplicate_claim_rows_or_ids_fail_closed() -> None:
+    a, b = CLAIM_ROWS
+    with pytest.raises(MissingDependencyError):
+        score(full_rows(qc=(), claim_rows=(a, b, a)))  # A, B, A
+    d = docs()
+    d["verification_ref"]["claims"] = [{"claim_id": "clm_1", "local_id": "c1"}] * 2
+    d["claims_ref"]["claims"] = d["claims_ref"]["claims"][:1]
+    with pytest.raises(InputInvalidError):
+        score(full_rows(qc=(), claim_rows=(a, a)), d)  # A, A
+    assert [c.claim_id for c in score(full_rows(qc=(), claim_rows=(a, b))).claims] == [
+        "clm_1",
+        "clm_2",
+    ]

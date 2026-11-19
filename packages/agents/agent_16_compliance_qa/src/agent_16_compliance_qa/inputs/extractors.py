@@ -1075,8 +1075,11 @@ class DocumentScoreFactExtractor:
         if qc is None:
             raise MissingDependencyError("render not found in this tenant")
         wanted = [c.claim_id for c in verification.claims]
+        if len(set(wanted)) != len(wanted):
+            raise InputInvalidError("verification output lists a claim_id twice")
         crow = self._rows.claims(tx, wanted)
-        if {c.claim_id for c in crow} != set(wanted):
+        if len(crow) != len(wanted) or {c.claim_id for c in crow} != set(wanted):
+            # (counts too: a duplicated row or id would otherwise pass as a set)
             # a listed claim without its row would score as if it were verified (15.1b: no claim
             # at all is ``[]``, a claim the verification names but the database lacks is not)
             raise MissingDependencyError(
