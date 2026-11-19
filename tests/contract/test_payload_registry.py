@@ -192,16 +192,13 @@ REGISTERED = frozenset(
         "agent_10.technical_qc.input", "agent_10.technical_qc.output",
         "agent_11.thumbnail_variants.input", "agent_11.thumbnail_variants.output",
         "agent_13.file_delivery.input", "agent_13.file_delivery.output",
-        "agent_16.compliance_gate.input", "agent_16.quality_score.input",
-        "agent_16.publication_authorisation.input",
+        "agent_16.compliance_gate.input", "agent_16.compliance_gate.output",
+        "agent_16.quality_score.input", "agent_16.quality_score.output",
+        "agent_16.publication_authorisation.input", "agent_16.publication_authorisation.output",
+        "svc_s02.uniqueness_check.input", "svc_s02.uniqueness_check.output",
     }
 )  # fmt: skip
 NOT_REGISTERED = (  # no model pairs the name with a payload yet: the executor refuses them
-    "agent_16.compliance_gate.output",
-    "agent_16.quality_score.output",
-    "agent_16.publication_authorisation.output",
-    "svc_s02.uniqueness_check.input",
-    "svc_s02.uniqueness_check.output",
     "svc_s07.request_approval.input",
     "svc_s07.request_approval.output",
     "agent_12.metadata.input",
@@ -213,14 +210,17 @@ def test_default_allow_list_loads_every_agent_package_and_pins_the_schema_names(
     reg = PayloadSchemaRegistry()
     loaded = load_payload_schema_plugins(reg)
     assert loaded == tuple(sorted(PAYLOAD_PLUGIN_PACKAGES))
-    assert len(loaded) == 10
+    assert len(loaded) == 11
     assert reg.names() == REGISTERED
 
 
 def test_allow_list_namespaces_match_the_package_and_are_read_only() -> None:
     for package, namespace in PAYLOAD_PLUGIN_PACKAGES.items():
-        assert namespace.startswith("agent_") and not namespace.endswith(".")
-        assert package.startswith((namespace, "amw_delivery"))  # agent_13 is hosted by amw_delivery
+        assert namespace.startswith(("agent_", "svc_s")) and not namespace.endswith(".")
+        if namespace == "svc_s02":  # CCR-282 provisional default: S2 is hosted by Agent 16
+            assert package == "agent_16_compliance_qa.svc_s02"
+        else:
+            assert package.startswith((namespace, "amw_delivery"))  # agent_13: amw_delivery
     with pytest.raises(TypeError):
         PAYLOAD_PLUGIN_PACKAGES["evil_pkg"] = "agent_07"  # type: ignore[index]
 
@@ -267,3 +267,22 @@ def test_loading_twice_into_one_registry_is_idempotent() -> None:
     load_payload_schema_plugins(reg)
     load_payload_schema_plugins(reg)  # a second executor in the same process
     assert reg.names() == REGISTERED
+
+
+# --- the shared-service namespace (CCR-282 provisional default) -------------------------------
+def test_agent_16_cannot_register_into_the_svc_s02_namespace_nor_s02_into_agent_16() -> None:
+    reg = PayloadSchemaRegistry()
+    with pytest.raises(ConfigInvalidError):
+        load_payload_schema_plugins(reg, {"agent_16_compliance_qa": "svc_s02"})
+    with pytest.raises(ConfigInvalidError):
+        load_payload_schema_plugins(reg, {"agent_16_compliance_qa.svc_s02": "agent_16"})
+    with pytest.raises(ConfigInvalidError):  # another namespace of the shared services
+        load_payload_schema_plugins(reg, {"agent_16_compliance_qa.svc_s02": "svc_s07"})
+    assert reg.names() == frozenset()
+
+
+def test_svc_s07_has_no_owner_and_no_model_until_its_schema_is_defined() -> None:
+    assert "svc_s07" not in PAYLOAD_PLUGIN_PACKAGES.values()  # CCR-283: not defined, fail closed
+    reg = PayloadSchemaRegistry()
+    load_payload_schema_plugins(reg)
+    assert not any(n.startswith("svc_s07.") for n in reg.names())
