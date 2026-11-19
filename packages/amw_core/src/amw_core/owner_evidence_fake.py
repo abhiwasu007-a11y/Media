@@ -428,6 +428,8 @@ class FakeEvidenceDatabase:
             and o.evidence.subject_kind == e.subject_kind
             and o.evidence.subject_id == e.subject_id
             and (o.evidence.review_code or "").upper() == code
+            and o.evidence.approval_id == e.approval_id
+            and o.evidence.step_no == e.step_no
             and rules.get(o.evidence.record_kind) is EvidenceVerificationKind.DECISION
             and o.evidence.message_at >= e.message_at
             for (org, _), o in self._rows.items()
