@@ -31,7 +31,7 @@ import hmac
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Final
 
 from amw_core.enums import (
     EvidenceRecordKind,
@@ -64,6 +64,17 @@ from amw_core.owner_evidence_verifier import (
     evidence_sha256,
 )
 
+PRODUCTION_MARK: Final = "session_source_production"
+TEST_MARK: Final = "session_source_test_fixture"
+_MARKS: Final = (PRODUCTION_MARK, TEST_MARK)
+
+
+def merge_result(old: Mapping[str, bool], new: Mapping[str, bool]) -> dict[str, bool]:
+    """``amw_evidence_result_merge`` (0059): the new checks merged into the stored ones; the
+    stored source marks are kept exactly (never added, changed or removed later)."""
+    merged = {k: v for k, v in (dict(old) | dict(new)).items() if k not in _MARKS}
+    return merged | {k: old[k] for k in _MARKS if k in old}
+
 
 def needs_own_review_code(kind: EvidenceRecordKind) -> bool:
     """CONTENT / SCORE kinds (03 section 11.6 rule 7 table): without an approval they carry their
@@ -75,7 +86,8 @@ def needs_own_review_code(kind: EvidenceRecordKind) -> bool:
 
 
 class MemorySessionEventSource:
-    """In-memory stand-in for the platform session event store (the real one is ticket 3A-13)."""
+    """In-memory TEST stand-in for the session record (dry run only; the real source is
+    ``amw_adapters.session_record``, and real mode refuses this one)."""
 
     def __init__(self, events: Sequence[SessionEvent] = ()) -> None:
         self._events: dict[tuple[str, str], SessionEvent] = {}
@@ -127,7 +139,13 @@ class FakeEvidenceDatabase:
         keyring: MacKeyring,
         *,
         review_code_length: int = DEFAULT_LENGTH,
+        profile: str = "REAL",
     ) -> None:
+        if profile not in ("REAL", "TEST"):
+            raise ValueError("profile is REAL or TEST")
+        self.profile = profile
+        """``evidence_db_profile.profile`` (migration 0059): REAL refuses TEST-marked results,
+        TEST refuses production-marked ones."""
         self.__passwords = dict(passwords)
         self.__keyring = keyring
         self._review_code_length = review_code_length
@@ -344,6 +362,14 @@ class FakeEvidenceDatabase:
             raise InvalidTransitionError("only pending evidence can be verified")
         if row.evidence.source_kind is not InstructionSourceKind.OWNER_CHAT_MESSAGE:
             raise PermissionDeniedError("only an owner chat message can be verified")
+        test = verifier_result.get(TEST_MARK) is True
+        prod = verifier_result.get(PRODUCTION_MARK) is True
+        if (
+            (test and prod)
+            or (test and self.profile != "TEST")
+            or (prod and self.profile != "REAL")
+        ):
+            raise PermissionDeniedError("source mark not allowed in this database profile")
         row = self._stamp(
             replace(
                 row,
@@ -376,6 +402,8 @@ class FakeEvidenceDatabase:
             raise IdempotencyConflictError("a record's own event cannot confirm a record")
         if confirmation_message_at <= row.evidence.message_at:
             raise InvalidTransitionError("the confirmation must be later than the event")
+        if self._superseded(row):
+            raise PermissionDeniedError("a later decision on this code supersedes this record")
         row = self._stamp(
             replace(
                 row,
@@ -383,11 +411,33 @@ class FakeEvidenceDatabase:
                 confirmation_event_uuid=confirmation_event_uuid,
                 confirmation_quote=confirmation_quote,
                 confirmation_message_at=confirmation_message_at,
-                verifier_result=dict(row.verifier_result) | dict(verifier_result),
+                verifier_result=merge_result(row.verifier_result, verifier_result),
             )
         )
         self._rows[(org, row.id)] = row
         return row
+
+    def _superseded(self, row: EvidenceRecord) -> bool:
+        """0059: another decision record on the same subject and code, as late or later."""
+        rules = DEFAULT_RECORD_KIND_RULES
+        if rules.get(row.evidence.record_kind) is not EvidenceVerificationKind.DECISION:
+            return False
+        e, code = row.evidence, (row.evidence.review_code or "").upper()
+        return any(
+            o.id != row.id
+            and o.evidence.subject_kind == e.subject_kind
+            and o.evidence.subject_id == e.subject_id
+            and (o.evidence.review_code or "").upper() == code
+            and not (
+                o.evidence.approval_id is not None
+                and e.approval_id is not None
+                and o.evidence.approval_id != e.approval_id
+            )
+            and rules.get(o.evidence.record_kind) is EvidenceVerificationKind.DECISION
+            and o.evidence.message_at >= e.message_at
+            for (org, _), o in self._rows.items()
+            if org == row.org_id
+        )
 
     def refuse(
         self,
@@ -405,7 +455,7 @@ class FakeEvidenceDatabase:
             row,
             state=EvidenceState.REFUSED,
             refused_reason=reason,
-            verifier_result=dict(verifier_result),
+            verifier_result=merge_result(row.verifier_result, verifier_result),
             evidence_mac=None,
             mac_key_version=None,
         )

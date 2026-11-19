@@ -51,10 +51,10 @@ Every list (decision words, neutral words, negation, withholding, quote markers,
 interrogatives, review-code shape, owner accounts, top-level-session test, the rule table) is
 configuration (``approvals.owner_chat.*``) with defaults marked **owner to confirm**.
 
-**Limitation (honest status).** The real ``SessionEventSource`` that reads the platform's session
-record is ticket 3A-13. Until then only the in-memory fake
-(``amw_core.testing.memory.MemorySessionEventSource``) exists, so no 3A approval recorded through
-this path may be treated as production-verified.
+**Session record (3A-13 / WS-08):** the real source is
+``amw_adapters.session_record.ClaudeSessionJsonlSource`` (wired by
+``amw_core.owner_evidence_real``); approvals recorded through the in-memory fake are TEST
+fixtures (dry run only). Residual risks: ``docs/v4/runtime/EVIDENCE_PATH.md``.
 """
 
 import hashlib
@@ -241,8 +241,8 @@ class SessionEvent:
 class SessionEventSource(Protocol):
     """Read access to the platform's session event store (one event by ID), owned by the store.
 
-    Limitation: the real adapter is ticket 3A-13; until then only the in-memory fake exists and
-    3A approvals recorded with it are not production-verified (see the module docstring).
+    Real source: ``amw_adapters.session_record.ClaudeSessionJsonlSource`` (3A-13); the in-memory
+    fake is the dry-run TEST path only (see the module docstring).
     """
 
     def fetch(self, session_id: str, event_uuid: str) -> SessionEvent | None:
@@ -315,6 +315,8 @@ class VerifierPolicy:
     )
     neutral_tokens: frozenset[str] = DEFAULT_NEUTRAL_TOKENS
     confirm_words: frozenset[str] = DEFAULT_CONFIRM_WORDS
+    decision_confirm_words: frozenset[str] = frozenset({"approve", "मंजूर"})
+    """PROPOSED CCR-264: approval words that also confirm an APPROVED record after the echo."""
     stage_words: Mapping[str, tuple[str, ...]] = field(
         default_factory=lambda: dict(DEFAULT_STAGE_WORDS)
     )
@@ -525,10 +527,21 @@ def read_decision(
     return reading[0] if reading else None
 
 
-def is_confirmation(content: str, review_code: str | None, policy: VerifierPolicy) -> bool:
+def is_confirmation(
+    content: str,
+    review_code: str | None,
+    policy: VerifierPolicy,
+    *,
+    decision: ApprovalStepState | None = None,
+) -> bool:
     """Confirmation whitelist (CCR-101): exactly the record's own review code, exactly one confirm
     word, every other token neutral. A dispute, correction, new decision or second code is never a
-    confirmation."""
+    confirmation.
+
+    ``decision`` (PROPOSED CCR-264, used only by the verifier worker for a reply that comes after
+    the operator's echo): for an ``APPROVED`` record, the owner's established approval form also
+    confirms: exactly the code and exactly one word of ``policy.decision_confirm_words``
+    (``approve`` / ``मंजूर``), nothing else."""
     if not review_code:
         return False
     rest = _without_code(content, review_code)
@@ -537,7 +550,12 @@ def is_confirmation(content: str, review_code: str | None, policy: VerifierPolic
     confirm = {" ".join(whitelist_tokens(w)) for w in policy.confirm_words}
     neutral = {" ".join(whitelist_tokens(n)) for n in policy.neutral_tokens}
     hits = [w for w in rest if w in confirm]
-    return len(hits) == 1 and all(w in confirm or w in neutral for w in rest)
+    if len(hits) == 1 and all(w in confirm or w in neutral for w in rest):
+        return True
+    if decision is not ApprovalStepState.APPROVED:
+        return False
+    words = {" ".join(whitelist_tokens(w)) for w in policy.decision_confirm_words}
+    return len(rest) == 1 and rest[0] in words
 
 
 def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
@@ -630,6 +648,7 @@ def verify_owner_event(
     policy: VerifierPolicy,
     now: datetime,
     allowed_stages: frozenset[str] | None = None,
+    confirm_decision: ApprovalStepState | None = None,
 ) -> VerificationOutcome:
     """Pure check of one fetched event against the operator's claims (03 section 11.6 rule 7).
 
@@ -674,7 +693,9 @@ def verify_owner_event(
         or event.event_uuid != distinct_from_event_uuid,
     }
     if purpose == CONFIRMATION:
-        confirmed = is_confirmation(content, evidence.review_code, policy)
+        confirmed = is_confirmation(
+            content, evidence.review_code, policy, decision=confirm_decision
+        )
         checks["confirmation_grammar"] = confirmed
         checks["subject_reference"] = confirmed
         checks["clarity"] = confirmed
