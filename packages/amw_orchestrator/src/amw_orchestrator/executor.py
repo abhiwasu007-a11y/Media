@@ -50,6 +50,8 @@ class StageCall:
     revision_feedback: tuple[ValidationResult, ...] = field(default_factory=tuple)
     """Failing gate results that caused this iteration (24 section 3.3 rules 7 / 7b)."""
     revision_source_stage_id: str | None = None
+    upstream_task_ids: Mapping[str, str] = field(default_factory=dict)
+    """Task ID of each ``upstream`` output (a worker may cite a gate or score task)."""
 
 
 @runtime_checkable
