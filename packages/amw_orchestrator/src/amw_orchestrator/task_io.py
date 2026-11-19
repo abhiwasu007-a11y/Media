@@ -64,7 +64,11 @@ class TaskIo:
         uri = task_artifact_uri(
             OrgId(ctx.org_id), JobId(job), TaskId(task), AttemptId(attempt), "payload.json"
         )
-        return self._put(ctx, uri, dict(output.payload.data))
+        doc = dict(output.payload.data)
+        head = self._s.head(ctx, BlobUri(uri))
+        if head.exists and head.sha256 == hashlib.sha256(_bytes(doc)).hexdigest():
+            return StoredDoc(uri, head.sha256)  # replay: the same verbatim copy already exists
+        return self._put(ctx, uri, doc)
 
     def get_json(self, ctx: TenantContext, uri: str, sha256: str) -> dict[str, object]:
         """Hash-verified read of one stored JSON document (an input builder's read, CCR-203);

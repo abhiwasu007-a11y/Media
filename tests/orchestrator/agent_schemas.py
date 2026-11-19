@@ -87,12 +87,14 @@ OPEN_OUTPUTS = (
 )
 
 
-def agent_registry(*, outputs: bool = True) -> PayloadSchemaRegistry:
+def agent_registry(*, real_outputs: bool = True) -> PayloadSchemaRegistry:
+    """Inputs always through the agent's own model; outputs through the real model or, for a
+    run whose workers are stand-ins, through the permissive one."""
     reg = PayloadSchemaRegistry()
     for name, (version, model) in INPUTS.items():
         reg.register(name, version, model)
-    for name, (version, model) in OUTPUTS.items() if outputs else ():
-        reg.register(name, version, model)
+    for name, (version, model) in OUTPUTS.items():
+        reg.register(name, version, model if real_outputs else Open)
     for name in OPEN_OUTPUTS:
         reg.register(name, V, Open)
     return reg

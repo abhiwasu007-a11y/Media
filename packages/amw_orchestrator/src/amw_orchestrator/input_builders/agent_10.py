@@ -5,7 +5,7 @@ sections 7.1-7.4; CCR-205 a/b).
 context ref named by the schema the agent looks for (exactly one per schema). Documents that exist
 as blobs are referenced as they are (plan, sourcing manifest, narration timeline, render timeline,
 script); documents that exist only as an inline payload (audio master, render and subtitles
-outputs) are referenced through ``payload_doc_ref`` (CCR-278 PROPOSED). The budget of these
+outputs) are referenced through ``payload_doc_ref`` (CCR-279 PROPOSED). The budget of these
 stages is zero and written by the orchestrator (CCR-205 a), not by a builder.
 """
 

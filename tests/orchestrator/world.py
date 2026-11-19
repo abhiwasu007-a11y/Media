@@ -375,6 +375,10 @@ def build_rig(
     per_video_budget: bool = True,
     max_attempts: int = 2,
     calendar_allows: bool = True,
+    registry_factory: Callable[[ApprovalWorker, LocalDiskStorage], Any] | None = None,
+    schemas: PayloadSchemaRegistry | None = None,
+    build_services: Any | None = None,
+    desk: TestDesk | None = None,
 ) -> Rig:
     s = seed(dsn)
     with psycopg.connect(dsn, autocommit=True) as conn:
@@ -409,9 +413,14 @@ def build_rig(
     graph = graph or job_graph(LONG)
     world = FakeWorld()
     world.llm = MeteredLlm(FakeLlmAdapter(), meter, 1_000)
-    desk = TestDesk()
-    registry = FakeRegistry(world, ApprovalWorker(desk, now_z))
+    desk = desk or TestDesk()
     storage = LocalDiskStorage(root)
+    approval = ApprovalWorker(desk, now_z)
+    registry = (
+        registry_factory(approval, storage)
+        if registry_factory is not None
+        else FakeRegistry(world, approval)
+    )
     budgets = StageBudgets(dict(PAID if paid is None else paid), "USD", 3_600_000, 40)
 
     def make_runner() -> GraphRunner:
@@ -420,7 +429,7 @@ def build_rig(
             jobs=jobs,
             queue=queue,
             budget=guard,
-            executor=TaskExecutor(registry, schemas=schema_registry(graph)),
+            executor=TaskExecutor(registry, schemas=schemas or schema_registry(graph)),
             approvals=desk,
             budgets=budgets,
             calendar=_Cal(calendar_allows),
@@ -432,6 +441,7 @@ def build_rig(
             ),
             task_io=TaskIo(storage),
             spend=meter,
+            build_services=build_services,
             require_per_video=lambda tx, job_id, cur: require_per_video_budget(
                 guard, tx, job_id, cur
             ),

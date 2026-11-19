@@ -152,7 +152,7 @@ def test_agent_10_refs_one_per_schema_and_payload_documents_are_copied_verbatim(
     ti = _prepare(w.ctx("s10_qc"))
     schemas = [r.schema_ for r in ti.context_refs]
     assert len(schemas) == len(set(schemas)) == 8
-    assert w.svc.copies >= 3  # audio master, render output, subtitles output (CCR-278)
+    assert w.svc.copies >= 3  # audio master, render output, subtitles output (CCR-279)
 
 
 def test_authorisation_binds_gate_and_score_tasks_and_the_approval() -> None:

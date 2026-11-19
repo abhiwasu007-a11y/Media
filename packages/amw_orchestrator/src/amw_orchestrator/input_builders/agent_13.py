@@ -6,7 +6,7 @@ compliance verdict. The policy values the delivery package refuses to decide (ba
 wording and status label, disclosure note, config version, size limits) and the S4 cost report come
 from the runtime through ``BuildServices`` (never hard-coded here; a missing service is a typed
 refusal). A bundle of a Shorts job (a 9:16 file and no 16:9 file) and the 9:16 add-on of a
-long-form job are not mapped (CCR-277): the 3A bundle is the 16:9 long-form one.
+long-form job are not mapped (CCR-278): the 3A bundle is the 16:9 long-form one.
 """
 
 from typing import Any
@@ -30,7 +30,7 @@ class FileDeliveryBuilder:
     def build(self, ctx: BuildContext) -> BuiltInput:
         job = ctx.job
         if c.is_shorts(job):
-            raise InputInvalidError("the 3A bundle is the 16:9 long-form one (CCR-277)")
+            raise InputInvalidError("the 3A bundle is the 16:9 long-form one (CCR-278)")
         services = c.need(ctx.services, "the build services")
         facts = dict(services.delivery_facts(job))
         render = c.payload(ctx, "s10_render")

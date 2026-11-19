@@ -127,7 +127,7 @@ class ScriptDraftBuilder:
 class ShortsAdaptationBuilder:
     """The parent script is the ``s05_script`` output of the parent job. ``removed_segment_ids``
     is empty and ``short_target_duration_ms`` is the child topic's target (provisional defaults,
-    CCR-277: agent_05 7.2 names no record of removed segments, 24 section 4 no Shorts duration)."""
+    CCR-278: agent_05 7.2 names no record of removed segments, 24 section 4 no Shorts duration)."""
 
     def build(self, ctx: BuildContext) -> BuiltInput:
         parent_out = c.stage_output(ctx, "parent.s05_script")

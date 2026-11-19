@@ -81,7 +81,7 @@ class RulePackDoc:
 
 @dataclass(frozen=True, slots=True)
 class JobDocuments:
-    """Job-level documents and facts that are neither job columns nor stage outputs (CCR-277
+    """Job-level documents and facts that are neither job columns nor stage outputs (CCR-278
     PROPOSED): the brand kit, the compliance profile, the rule packs, the disclaimer template, the
     voice and its pronunciation dictionary, the uniqueness template. Job intake fills them from
     the channel, the brand kit and the voice rows; a builder that needs one that is absent refuses
@@ -137,7 +137,7 @@ class BuildServices(Protocol):
 
     # ``payload_document``: the payload of an upstream output as a write-once document (verbatim,
     # never rewritten) for a consumer whose contract reads a producer's payload by reference
-    # (agent_10 section 7.1, CCR-278 PROPOSED).
+    # (agent_10 section 7.1, CCR-279 PROPOSED).
 
     def cost_report(self, job: JobFacts) -> Mapping[str, Any]: ...
 

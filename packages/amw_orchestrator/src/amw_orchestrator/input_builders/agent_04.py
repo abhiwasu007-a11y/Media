@@ -3,8 +3,9 @@
 Facts come from the job only: the owner topic (copied unchanged), the channel category
 (``finance`` / ``non_finance``, CCR-273: unset or unknown = finance) and the rule packs that follow
 from it (24 ``rule_packs``: ``rp.youtube_general`` always, ``rp.finance_sebi_in`` only for finance).
-A revision iteration needs the prior pack reference and the gap list; until those are mapped
-(listed in the PR) it is refused with a typed error rather than guessed.
+A revision iteration needs the prior pack reference and the gap list. agent_04 section 7.1 leaves
+the mapping of Agent 06 reason codes to the four gap reasons to "the Agent 01 blueprint", which is
+not in the repository: the revision stays refused with a typed error (CCR-280, no mapping invented).
 """
 
 from amw_core.errors import InputInvalidError

@@ -3,7 +3,7 @@
 
 The ``routing`` objects are stage IDs of the production type's graph (CCR-047); a builder derives
 them from the stages that ran (``s11_thumbs`` only when it ran). Which upstream document fills each
-``*_ref`` is fixed here once (CCR-277 PROPOSED, 7.1 names only the document kinds): script =
+``*_ref`` is fixed here once (CCR-278 PROPOSED, 7.1 names only the document kinds): script =
 the script document; claims = ``claim_extraction_output.json``; verification =
 ``claim_verification_output.json`` of ``s06_verify``; asset manifest = ``sourcing_manifest.json``;
 shot plan = ``plan_ref``; voice = the narration timeline; render QC = the QC report and frames =
@@ -38,7 +38,7 @@ def _thumbs_ref(ctx: BuildContext) -> DocRef:
 
 def _metadata_guard(ctx: BuildContext) -> None:
     if c.has_stage(ctx, "s12_meta"):
-        raise InputInvalidError("metadata_ref mapping of Agent 12 is not defined (CCR-277)")
+        raise InputInvalidError("metadata_ref mapping of Agent 12 is not defined (CCR-278)")
 
 
 def _thumbs_id(ctx: BuildContext) -> str | None:

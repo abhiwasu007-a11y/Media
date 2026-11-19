@@ -1,5 +1,5 @@
 """``svc_s07.request_approval`` input. The schema is owned by the Agent 01 blueprint (14 section
-S7), which is not in the repository: the payload below is the provisional minimum (CCR-277
+S7), which is not in the repository: the payload below is the provisional minimum (CCR-278
 PROPOSED): what is approved (kind, workflow) and the subject by hash (03 section 11.6 rule 1: the
 approval row is bound to the subject's SHA-256). The decision payload the desk returns carries
 ``state`` and ``approval_id`` (``ApprovalDesk``)."""

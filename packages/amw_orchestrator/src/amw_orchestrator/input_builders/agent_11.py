@@ -3,7 +3,7 @@
 Refs by hash: script, verification, shot plan (``plan_ref``), brand kit, and from iteration 1 the
 previous set manifest. ``variant_count`` is configuration (``BuilderSettings``). The failing
 results that routed a thumbnail revision name no variant (``ValidationResult`` has no such field),
-so ``revision_feedback`` stays empty until CCR-277 defines the mapping (provisional default).
+so ``revision_feedback`` stays empty until CCR-278 defines the mapping (provisional default).
 """
 
 from typing import Any

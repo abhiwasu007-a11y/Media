@@ -9,7 +9,7 @@ from dataclasses import dataclass
 class BuilderSettings:
     licence_destination: str = "MONETIZED_YOUTUBE"
     """agent_08 / agent_10 ``destination``: the stricter of the two values until the job carries
-    its monetisation fact (CCR-277 provisional default)."""
+    its monetisation fact (CCR-278 provisional default)."""
     ai_video_allowed: bool = False
     stills_allowed: bool = False
     """agent_08 7.1: no AI media in 3A (3A_SLICE_SPEC; agent_09 ``limits`` default)."""
