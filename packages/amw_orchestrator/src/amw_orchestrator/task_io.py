@@ -16,7 +16,7 @@ from amw_core.errors import MissingDependencyError
 from amw_core.ids import AttemptId, JobId, OrgId, TaskId
 from amw_core.interfaces import BlobStorage, TenantContext
 from amw_core.interfaces.storage import BlobUri
-from amw_core.tenancy.storage_paths import task_artifact_uri, task_io_uri
+from amw_core.tenancy.storage_paths import job_cache_uri, task_artifact_uri, task_io_uri
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,16 +55,31 @@ class TaskIo:
         return self._put(ctx, uri, doc.to_doc())
 
     def put_payload(self, ctx: TenantContext, job: str, output: TaskOutput) -> StoredDoc:
-        """Write-once verbatim copy of an output's payload next to its artifacts (path from the
-        core builder; task and attempt are those of the output's own artifact refs)."""
-        if output.payload is None or output.payload.data is None or not output.output_refs:
+        """Write-once verbatim copy of an output's payload (path from the core builders).
+
+        Next to the artifacts when one of the output's refs is a task artifact (task and attempt
+        are those of that ref); an output whose files all live elsewhere (Agent 10 render: refs
+        under ``renders/``) gets the content-addressed copy ``cache/agent_01/payload-<sha>.json``
+        (CCR-286 PROPOSED; 03 section 8 rule 5 ``cache`` sub-path)."""
+        if output.payload is None or output.payload.data is None:
             raise MissingDependencyError("output has no payload document to reference")
-        parts = output.output_refs[0].uri.split("/tasks/", 1)[1].split("/")
-        task, attempt = parts[0], parts[2]
-        uri = task_artifact_uri(
-            OrgId(ctx.org_id), JobId(job), TaskId(task), AttemptId(attempt), "payload.json"
-        )
         doc = dict(output.payload.data)
+        located = next(
+            (
+                r.uri.split("/tasks/", 1)[1].split("/")
+                for r in output.output_refs
+                if "/tasks/" in r.uri and "/attempts/" in r.uri.split("/tasks/", 1)[1]
+            ),
+            None,
+        )
+        if located is not None:
+            uri = task_artifact_uri(
+                OrgId(ctx.org_id), JobId(job), TaskId(located[0]), AttemptId(located[2]),
+                "payload.json",
+            )  # fmt: skip
+        else:
+            digest = hashlib.sha256(_bytes(doc)).hexdigest()
+            uri = job_cache_uri(OrgId(ctx.org_id), JobId(job), "agent_01", f"payload-{digest}.json")
         head = self._s.head(ctx, BlobUri(uri))
         if head.exists and head.sha256 == hashlib.sha256(_bytes(doc)).hexdigest():
             return StoredDoc(uri, head.sha256)  # replay: the same verbatim copy already exists
