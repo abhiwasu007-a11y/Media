@@ -7,14 +7,17 @@ SHA-256, which makes the asset hash a valid idempotency and reuse key. A *reveal
 ``len(change_events_ms) + 1`` stills showing progressively more bars, left to right, never beyond
 the last bar of the window; Agent 10 realises the change events from the stills.
 
-Complex-script shaping (Devanagari conjuncts) is NOT available in this rasteriser; see the package
-README (open item). Text drawn here comes from the allowlists only (latin labels and numbers).
+Complex-script shaping: matplotlib 3.11 lays text out through libraqm
+(``ft2font.__libraqm_version__``), so Devanagari conjuncts and pre-base vowel signs are shaped when
+the font has the glyphs; the data_pack
+builder checks the font covers every character it draws (no notdef box) and that libraqm is present.
+Text drawn here comes from the allowlists and the fixed template labels only.
 """
 
 import hashlib
 import io
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 import matplotlib as mpl
@@ -61,6 +64,11 @@ class RenderedImage:
     png: bytes
     width_px: int
     height_px: int
+    text_boxes: tuple[tuple[str, tuple[float, float, float, float]], ...] = field(
+        default=(), compare=False
+    )
+    """(role, (x0, y0, x1, y1) in pixels, origin bottom-left) of the template texts; filled by the
+    renderer when a footer is drawn, for layout invariants."""
 
     @property
     def sha256(self) -> str:
@@ -99,7 +107,16 @@ def ema(values: Sequence[float], period: int) -> list[float | None]:
 
 
 def rsi(values: Sequence[float], period: int) -> list[float | None]:
-    """Wilder's RSI."""
+    """Relative Strength Index with Wilder's smoothing (the textbook definition: J. Welles Wilder
+    Jr.,
+    *New Concepts in Technical Trading Systems*, 1978; RESEARCH_LOG RV-10).
+
+    For closes ``c``: change ``d_i = c_i - c_(i-1)``; gain ``max(d_i, 0)``, loss ``max(-d_i, 0)``.
+    The first average gain/loss is the simple mean of the first ``period`` gains/losses and gives
+    the
+    RSI of bar ``period``; after that ``avg = (prev_avg * (period - 1) + current) / period``.
+    ``RS = avg_gain / avg_loss``; ``RSI = 100 - 100 / (1 + RS)``; ``avg_loss == 0`` gives 100.
+    Bars before index ``period`` have no value (``None``)."""
     out: list[float | None] = [None] * len(values)
     if len(values) <= period:
         return out
@@ -146,6 +163,26 @@ class ChartRenderInput:
     height_px: int
     palette: BrandPalette
     label_texts: Mapping[str, str] | None = None
+    footer_lines: tuple[str, ...] = ()
+    """Fixed template lines under the plot (source label, as-of range); empty = no footer."""
+    connectors: tuple[BarConnector, ...] = ()
+    """Segments between two bars inside the window (proposed kind ``CONNECT_BARS``, CCR-255)."""
+    rsi_guides: tuple[float, ...] = ()
+    rsi_caption: str | None = None
+    labels_below: frozenset[int] = frozenset()
+    """Dataset bar indexes whose LABEL sits under the bar (footer template only)."""
+
+
+@dataclass(frozen=True, slots=True)
+class BarConnector:
+    """A straight segment from bar ``from_bar`` to bar ``to_bar`` (dataset indexes, both inside the
+    window, never extended); ``panel`` PRICE joins the bars' ``anchor`` prices (HIGH or LOW), RSI
+    joins the RSI values of the first RSI indicator at the two bars."""
+
+    from_bar: int
+    to_bar: int
+    panel: str
+    anchor: str
 
 
 class ChartRenderer:
@@ -185,7 +222,7 @@ class ChartRenderer:
             left=0.10 if vertical else 0.07,
             right=0.97,
             top=0.90,
-            bottom=0.10,
+            bottom=0.17 if spec.footer_lines else 0.10,
             hspace=0.08,
         )
         ax = fig.add_subplot(grid[0])
@@ -230,6 +267,7 @@ class ChartRenderer:
                     label=name,
                 )
         ChartRenderer._annotations(ax, spec, window, shown, y_lo - pad, y_hi + pad, scale)
+        ChartRenderer._price_connectors(ax, spec, window, shown, scale)
         ticks = _tick_positions(n, 4 if vertical else 7)
         tick_font = font_props(palette, 20 * scale)
         ax.set_xticks([t for t in ticks if t < shown])
@@ -248,7 +286,7 @@ class ChartRenderer:
         if has_rsi:
             ChartRenderer._rsi_panel(fig, grid, spec, parsed, closes, shown, n, scale, ticks)
             ax.set_xticklabels([])
-        fig.text(
+        title = fig.text(
             0.5,
             0.95,
             spec.title,
@@ -257,7 +295,37 @@ class ChartRenderer:
             color=palette.foreground,
             fontproperties=font_props(palette, 30 * scale),
         )
-        return RenderedImage(figure_png(fig), spec.width_px, spec.height_px)
+        if not spec.footer_lines:
+            return RenderedImage(figure_png(fig), spec.width_px, spec.height_px)
+        texts = [("title", title)]
+        for k, footer_text in enumerate(spec.footer_lines):
+            texts.append(
+                (
+                    f"footer_{k}",
+                    fig.text(
+                        0.01,
+                        0.08 - k * 0.045,
+                        footer_text,
+                        ha="left",
+                        va="center",
+                        color=palette.foreground,
+                        fontproperties=font_props(palette, 20 * scale),
+                        bbox={
+                            "boxstyle": "round,pad=0.3",
+                            "facecolor": palette.background,
+                            "edgecolor": palette.accent,
+                            "linewidth": 1.0,
+                        },
+                    ),
+                )
+            )
+        png = figure_png(fig)
+        renderer = fig.canvas.get_renderer()  # type: ignore[attr-defined]
+        boxes = tuple(
+            (role, tuple(float(v) for v in t.get_window_extent(renderer).extents))
+            for role, t in texts
+        )
+        return RenderedImage(png, spec.width_px, spec.height_px, boxes)  # type: ignore[arg-type]
 
     @staticmethod
     def _annotations(
@@ -305,7 +373,27 @@ class ChartRenderer:
                     )
             elif kind is AnnotationKind.LABEL and a.bar is not None and a.text is not None:
                 i = a.bar - first
-                if i < shown:
+                if i < shown and spec.footer_lines:
+                    below = a.bar in spec.labels_below
+                    bar = window[i]
+                    ax.annotate(
+                        a.text,
+                        (i, float(bar.low if below else bar.high)),
+                        xytext=(i, 0.03 if below else 0.97),
+                        textcoords=("data", "axes fraction"),
+                        ha="center",
+                        va="bottom" if below else "top",
+                        color=palette.foreground,
+                        fontproperties=font_props(palette, 22 * scale),
+                        arrowprops={"arrowstyle": "-", "color": palette.accent, "linewidth": 1.2},
+                        bbox={
+                            "boxstyle": "round,pad=0.3",
+                            "facecolor": palette.background,
+                            "edgecolor": palette.accent,
+                            "linewidth": 1.0,
+                        },
+                    )
+                elif i < shown:
                     ax.annotate(
                         a.text,
                         (i, float(window[i].high)),
@@ -315,6 +403,26 @@ class ChartRenderer:
                         color=palette.foreground,
                         fontproperties=font_props(palette, 22 * scale),
                     )
+
+    @staticmethod
+    def _price_connectors(
+        ax: mpl.axes.Axes,
+        spec: ChartRenderInput,
+        window: Sequence[Bar],
+        shown: int,
+        scale: float,
+    ) -> None:
+        first = spec.first_bar_index
+        for c in spec.connectors:
+            if c.panel != "PRICE":
+                continue
+            i0, i1 = c.from_bar - first, c.to_bar - first
+            if i1 >= shown:
+                continue
+            attr = "high" if c.anchor == "HIGH" else "low"
+            y0, y1 = float(getattr(window[i0], attr)), float(getattr(window[i1], attr))
+            ax.plot([i0, i1], [y0, y1], color=spec.palette.shade, linewidth=3 * scale)
+            ax.plot([i0, i1], [y0, y1], "o", color=spec.palette.shade, markersize=9 * scale)
 
     @staticmethod
     def _rsi_panel(
@@ -348,6 +456,36 @@ class ChartRenderer:
                     color=palette.accent,
                     linewidth=2 * scale,
                 )
+        for level in spec.rsi_guides:
+            ax.axhline(
+                level,
+                color=palette.foreground,
+                alpha=0.45,
+                linewidth=1.2 * scale,
+                linestyle="dashed",
+            )
+        rsi_kind = next((p for k, p in parsed if k == "RSI"), None)
+        if rsi_kind is not None and spec.connectors:
+            values = rsi(closes, rsi_kind)
+            for c in spec.connectors:
+                if c.panel != "RSI":
+                    continue
+                i0, i1 = c.from_bar - spec.first_bar_index, c.to_bar - spec.first_bar_index
+                v0, v1 = values[c.from_bar], values[c.to_bar]
+                if i1 < shown and v0 is not None and v1 is not None:
+                    ax.plot([i0, i1], [v0, v1], color=palette.shade, linewidth=3 * scale)
+                    ax.plot([i0, i1], [v0, v1], "o", color=palette.shade, markersize=9 * scale)
+        if spec.rsi_caption:
+            ax.text(
+                0.005,
+                0.92,
+                spec.rsi_caption,
+                transform=ax.transAxes,
+                ha="left",
+                va="top",
+                color=palette.foreground,
+                fontproperties=font_props(palette, 18 * scale),
+            )
         window = spec.series[spec.first_bar_index : spec.last_bar_index + 1]
         font = font_props(palette, 20 * scale)
         ax.set_xticks([t for t in ticks if t < shown])

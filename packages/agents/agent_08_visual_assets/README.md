@@ -33,6 +33,21 @@ Test images are generated at test time from synthetic OHLC data, never from priv
   `remedy_stage_id`), `ChangedShotSelector`, `CheckpointManager.resume`, `AdapterErrorMapper`, `TenantGuard`.
 - Pydantic models equal to the blueprint JSON Schemas (validated against the schemas in the document).
 
+## data_pack chart scenes (owner decision: the real skeleton run includes them)
+
+`DataPackChartBuilder.build(request, as_of=..., dataset_asset_id=...)` draws one chart scene from the
+course `data_pack` through the `DataPackReader` port. The pack stays outside git: the runtime config
+gives `charts.data_pack_root` and `charts.data_pack_files` (`<INSTRUMENT>@<1D|1W>` to a file name in
+the root); no pack file name is written in this repository and the reader only opens configured names,
+read-only. Every bar of the window must satisfy `as_of - bar_end >= lag_days` (30, IN-02; weekly bars
+end at date + 6); a newer bar refuses the request (`PERMANENT.INPUT_INVALID`, `details.reason =
+DATA_WITHIN_LAG`) unless the request sets `clip_to_lag`. The arithmetic equals Agent 06
+`price_age.classify` (parity test); Agent 16 re-checks at publish with `recheck_lag_at`. Outputs: reveal
+stills, the `agent_08.chart_facts` 1.0.0 document (schema-validated in tests), a provenance record
+(lag proof, dataset SHA-256, pack manifest SHA-256; proposed in CCR-256) and the asset attributes.
+Tests use synthetic bars only. Divergence markers use the proposed annotation kind `CONNECT_BARS`
+(CCR-255).
+
 ## Open items (not done, not faked)
 
 - Stock (B), AI video (D) and AI still (E) acquisition through the adapters is not wired in the stage
@@ -41,8 +56,12 @@ Test images are generated at test time from synthetic OHLC data, never from priv
   are not built; the stage takes a `FootageSelector`. The `query_plan` / `candidate_rank` packs: the runner
   is exercised but their `expected` blocks are case summaries, not schema-valid outputs, so a recorded
   replay cannot pass the schema check; model-in-the-loop run listed.
-- Devanagari: matplotlib has no complex-script shaping (test U-13 not met); a shaping library and font
-  choice is needed before Marathi/Hindi text appears in charts or graphics.
+- Devanagari: matplotlib 3.11.2 shapes text through libraqm (measured: the pre-base vowel sign and
+  conjuncts render correctly with Noto Sans Devanagari); the data_pack chart builder checks libraqm and
+  glyph coverage. The brand-font default (Mukta vs Noto, Q-O6) is the owner's decision; the stage's
+  older chart path and the graphics templates still draw Latin allowlist text only.
+- data_pack chart builder: not yet called by `AssetSourcingStage` (the stage still takes owner chart
+  cases with bar-index windows over registered datasets); wiring waits for CCR-258/259.
 - Music bed sourcing (3B), checkpoint persistence through `CheckpointStore`, budget/cost-ledger calls,
   idempotency-store use for paid effects, observability, near-duplicate calibration (3B).
 - Persistence is behind Protocols with in-memory fakes only (`testing/memory.py`); no SQL yet.
@@ -72,7 +91,8 @@ Test images are generated at test time from synthetic OHLC data, never from priv
 | Checkpoint persistence, budget/cost-ledger calls | Planned |
 | SQL persistence (only in-memory fakes exist) | Planned |
 | Music bed (3B) | Planned |
-| Devanagari shaping (U-13) | Open: matplotlib has no complex-script shaping; needs a shaping library and font decision |
+| Devanagari shaping (U-13) | Implemented, Tested for data_pack charts (libraqm in matplotlib 3.11.2; glyph coverage and shaping asserted); font default is owner question Q-O6 |
+| data_pack chart scenes (`charts/datapack.py`, `charts/datapack_builder.py`): reader port (file-backed at `charts.data_pack_root`, unset = CONFIG_INVALID; in-memory double), per-bar SEBI lag (refuse, clip only on request), RSI (Wilder), 1920x1080 render with bilingual source label and as-of range, contract chart facts, provenance (lag proof, pack manifest hash), CHART asset registration (CODE_GENERATED self-grant) | Implemented, Tested (unit, synthetic bars); NOT called by the stage (CCR-255 to CCR-259) |
 
 Measured numbers (package-local config, `coveragerc` in this directory; the root config does not
 measure agent packages, listed under core_needs): see the final report of the PR; command:
