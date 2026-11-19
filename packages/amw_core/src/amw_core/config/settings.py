@@ -233,6 +233,47 @@ class WindowSettings(_Model):
     drain_grace_ms: int | None = Field(default=None, ge=0)
 
 
+DOCUMENTED_RULE_PACK_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {
+        "youtube_general",
+        "finance",
+        "health",
+        "kids",
+        "political_news",
+        "advertising",
+        "ad_sector",
+        "brand_safety",
+    }
+)
+"""The ``rule_packs.category`` values documented in 04 (``rule_packs`` table)."""
+
+DEFAULT_NON_FINANCE_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {"youtube_general", "health", "kids", "political_news"}
+)
+"""The documented CHANNEL categories that are not finance (PASS6-N, CCR-273 PROPOSED). Left out on
+purpose (fail closed): ``finance``; and the advertising / brand-safety pack categories, which are
+not channel content categories and may carry a finance subject (an ad sector can be finance)."""
+
+
+class RulePackSettings(_Model):
+    """``rule_packs.*`` (CCR-273 / PASS6-N): which channel categories get non-finance treatment
+    (no FIN-R10 owner item, no price-data lag, no finance icon rules). Exact, case-sensitive match;
+    every other value (unset, empty, unknown, ``finance``) is finance. The owner may narrow the
+    list; a value that is not a documented category, or ``finance`` itself, is refused."""
+
+    non_finance_categories: frozenset[str] = DEFAULT_NON_FINANCE_CATEGORIES
+
+    @model_validator(mode="after")
+    def _only_documented_non_finance(self) -> RulePackSettings:
+        bad = self.non_finance_categories - (DOCUMENTED_RULE_PACK_CATEGORIES - {"finance"})
+        if bad:
+            raise ValueError(
+                "non_finance_categories must be documented non-finance categories: "
+                + ", ".join(sorted(bad))
+            )
+        return self
+
+
 class AmwSettings(BaseSettings):
     """Root settings. Environment: ``AMW_<SECTION>__<FIELD>`` (``AMW_LIMITS__MAX_TASKS_PER_JOB``).
 
@@ -259,6 +300,7 @@ class AmwSettings(BaseSettings):
     wait: WaitSettings = Field(default_factory=WaitSettings)
     dlq: DlqSettings = Field(default_factory=DlqSettings)
     finance: FinanceSettings = Field(default_factory=FinanceSettings)
+    rule_packs: RulePackSettings = Field(default_factory=RulePackSettings)
     evals: EvalSettings = Field(default_factory=EvalSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)

@@ -16,11 +16,12 @@ adds is the orchestrator's side of the hand-off:
 An LLM never makes a control decision (directive section 2).
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
+from amw_core.config import DEFAULT_NON_FINANCE_CATEGORIES
 from amw_core.contracts import (
     ContextRef,
     OwnerTopic,
@@ -54,10 +55,17 @@ class ChannelCategory(StrEnum):
 _NON_FINANCE_LABELS = frozenset({"non_finance", "non-finance"})
 
 
-def resolve_channel_category(raw: str | None) -> ChannelCategory:
-    """Fail closed (CCR-273 item 4): only an explicit non-finance label skips the finance rules;
-    ``None``, an empty value, an unknown value or ``finance`` is FINANCE."""
-    if isinstance(raw, str) and raw.strip().lower() in _NON_FINANCE_LABELS:
+def resolve_channel_category(
+    raw: str | None,
+    non_finance_categories: Collection[str] = DEFAULT_NON_FINANCE_CATEGORIES,
+) -> ChannelCategory:
+    """Fail closed (CCR-273 item 4): only an explicit non-finance label, or a documented
+    non-finance channel category from the rule-pack config (``rule_packs.non_finance_categories``,
+    exact match: PASS6-N), skips the finance rules; ``None``, an empty value, an unknown value or
+    ``finance`` is FINANCE."""
+    if isinstance(raw, str) and (
+        raw.strip().lower() in _NON_FINANCE_LABELS or raw in non_finance_categories
+    ):
         return ChannelCategory.NON_FINANCE
     return ChannelCategory.FINANCE
 

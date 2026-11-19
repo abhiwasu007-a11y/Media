@@ -8,13 +8,14 @@ the call it appends one ``cost_ledger`` row (``ESTIMATE``) and runs E3, which su
 breached budget (``SUSPENDED_EXCEEDED``); the next E1 / E2 then refuses (hard stop).
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 from amw_adapters.common import CallUsage
+from amw_core.config import DEFAULT_NON_FINANCE_CATEGORIES
 from amw_core.contracts import OwnerTopic, ResourceBudget, Stage, violation
 from amw_core.enums import (
     BudgetPeriod,
@@ -53,9 +54,8 @@ from amw_core.interfaces import (
 from amw_core.interfaces.job_store import NewJob
 from amw_orchestrator.executor import JobFacts, resolve_channel_category
 from amw_orchestrator.metering import MeteredTask
-from amw_runtime.config import RunMode, RuntimeConfig
+from amw_runtime.config import RuntimeConfig
 from amw_runtime.confirmations import ConfirmationRecord
-from amw_runtime.errors import PreflightRefused
 from amw_runtime.preflight import PreflightReport, run_preflight
 
 
@@ -310,20 +310,22 @@ def intake(
     parent_job_id: str | None = None,
     currency: str = "USD",
     channel_category: str | None = None,
+    non_finance_categories: Collection[str] = DEFAULT_NON_FINANCE_CATEGORIES,
 ) -> JobFacts:
     """3A-03: J01 for one owner topic (``amw.owner_topic`` recorded by the operator, D5).
     Idempotent on ``job.create`` over (channel, topic title, production type, parent).
 
     A production job without ``project_id`` is refused before anything is written
     (``PERMANENT.INPUT_INVALID``, violation ``PROJECT_MISSING``; 03 section 3.1, CCR-214 (b)).
-    ``channel_category`` is the channel's explicit category (CCR-273); unset or unknown =
-    FINANCE."""
+    ``channel_category`` is the channel's explicit category (CCR-273); it is non-finance only for an
+    explicit non-finance label or a documented non-finance category of the rule-pack config
+    (``non_finance_categories``, PASS6-N); unset, unknown or ``finance`` = FINANCE."""
     if not project_id:
         raise InputInvalidError(
             "a production job needs its project",
             details={"violations": [violation("PROJECT_MISSING", "/project_id")]},
         )
-    category = resolve_channel_category(channel_category)
+    category = resolve_channel_category(channel_category, non_finance_categories)
     key = make_idempotency_key(
         org_id, "job.create", [channel_id, topic.title, production_type.value, parent_job_id or ""]
     )
@@ -370,32 +372,15 @@ def run_job_preflight(
     confirmations: Sequence[ConfirmationRecord],
     **kwargs: Any,
 ) -> PreflightReport:
-    """``amw_runtime`` preflight for one job. FIN-R10 (the SEBI owner confirmation) is a
-    finance-only gate (D13 item 2, CCR-273): for a job whose channel category is explicitly
-    non-finance an otherwise-clean refusal that lists only ``FIN_R10`` is waived and says so in
-    the report notes; every other unmet item (PROVIDER_LIMIT, secrets, caps, environment, market
-    hours) still refuses. A finance job, and any job with an unset or unknown category, gets the
-    refusal unchanged (fail closed). The report of a waived preflight carries NO provider
-    authorisation, so a REAL_RUN of a non-finance job cannot build real providers until
-    ``amw_runtime`` is category-aware (CAT-01; REQUIRES REVIEW, CCR-273)."""
+    """``amw_runtime`` preflight for one job. The finance-only items (FIN-R10, the price-data lag
+    config item) apply only when the job's channel category is finance (D13 item 2, CCR-273
+    PROPOSED); a non-finance job still needs PROVIDER_LIMIT evidence and every other item, and a
+    passing REAL_RUN mints its provider authorisations as for any job. The flag comes from the
+    job (``JobFacts.finance_rules_apply``: an unset or unknown category is finance, fail closed);
+    a caller cannot pass it through ``kwargs``."""
     # the provider authorisations are bound to this org and this job (a job-scoped call guard
     # refuses a token with another or no job); the caller may not pass another job's binding
     kwargs["org_id"] = job.org_id
     kwargs["job_id"] = job.job_id
-    try:
-        return run_preflight(config, confirmations, **kwargs)
-    except PreflightRefused as refusal:
-        if job.finance_rules_apply:
-            raise
-        rest = tuple(i for i in refusal.items if i.code != "FIN_R10")
-        if rest:
-            raise PreflightRefused(rest) from None
-        return PreflightReport(
-            mode=config.mode,
-            checks_passed=(),
-            secrets_checked=config.mode is RunMode.REAL_RUN,
-            test_confirmation_used=False,
-            disclaimer_status="",
-            open_owner_items=(),
-            notes=("FIN_R10 waived: non-finance channel category (CCR-273 PROPOSED)",),
-        )
+    kwargs["finance_rules_apply"] = job.finance_rules_apply
+    return run_preflight(config, confirmations, **kwargs)

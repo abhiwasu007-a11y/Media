@@ -261,8 +261,14 @@ def run_preflight(
     org_id: str | None = None,
     job_id: str | None = None,
     authorisation_ttl: timedelta = DEFAULT_AUTHORISATION_TTL,
+    finance_rules_apply: bool = True,
 ) -> PreflightReport:
     """Raise ``PreflightRefused`` listing every unmet item, else return the report.
+    ``finance_rules_apply`` (CAT-01, D13 item 2, CCR-273 PROPOSED) is decided by the caller from the
+    JOB's channel category (never from a confirmation, evidence row or config): the default True is
+    fail closed. When False ONLY the finance-only items are skipped (``FIN_R10`` and the price-data
+    ``LAG`` config item) and the report notes it; PROVIDER_LIMIT evidence, org binding, caps,
+    secrets, environment, config, calendar and render checks and the token minting are unchanged.
     ``env`` is read for NAMES/markers only (default: the process environment). ``org_id`` is the
     run's org; real-run evidence must be bound to it. ``job_id`` binds the provider
     authorisations to one job (a job-scoped call guard refuses a token with another or no job)."""
@@ -355,12 +361,13 @@ def run_preflight(
         cal_msg = "market calendar config missing or invalid"
     check("CALENDAR", cal_ok, cal_msg)
 
-    # lag config (30 days, calendar days)
-    check(
-        "LAG",
-        config.price_data_lag_days == 30 and config.price_data_lag_unit == SUPPORTED_LAG_UNIT,
-        "price-data lag config is not 30 CALENDAR_DAYS (IN-02)",
-    )
+    # lag config (30 days, calendar days): a price-data (finance-only) item
+    if finance_rules_apply:
+        check(
+            "LAG",
+            config.price_data_lag_days == 30 and config.price_data_lag_unit == SUPPORTED_LAG_UNIT,
+            "price-data lag config is not 30 CALENDAR_DAYS (IN-02)",
+        )
 
     # disclaimer template present; DRAFT status flagged, never hidden
     disc: Disclaimer | None = None
@@ -387,7 +394,9 @@ def run_preflight(
             r10_ok = True
             break
         r10_problems.append(problem)
-    if config.mode is RunMode.REAL_RUN:
+    if not finance_rules_apply:
+        notes.append("FIN_R10 and LAG not checked: non-finance channel category (CCR-273 PROPOSED)")
+    elif config.mode is RunMode.REAL_RUN:
         check(
             "FIN_R10",
             r10_ok,

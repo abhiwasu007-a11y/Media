@@ -350,3 +350,31 @@ def test_finance_and_undocumented_categories_stay_finance_when_a_documented_one_
     for c in ("finance", "education", "philosophy"):
         assert lex.is_finance(c)
     assert not lex.is_finance("youtube_general")
+
+
+def test_production_lexicons_builder_takes_non_finance_categories_from_rule_pack_config() -> None:
+    """PASS6-N: documented non-finance categories (04 rule_packs.category) are non-finance;
+    ``finance``, undocumented values and the advertising pack categories stay finance."""
+    from agent_11_thumbnail_design.stage import Lexicons
+    from amw_core.config import RulePackSettings, load_settings
+
+    lex = Lexicons.from_rule_pack_config(
+        load_settings(environ={}).rule_packs,
+        finance_markers=(),
+        injection_markers=(),
+        instruction_phrases=(),
+        neutral_words=frozenset(),
+    )
+    for documented in ("youtube_general", "health", "kids", "political_news"):
+        assert not lex.is_finance(documented)
+    for other in ("finance", "advertising", "ad_sector", "brand_safety", "philosophy", None, ""):
+        assert lex.is_finance(other)
+    narrowed = Lexicons.from_rule_pack_config(
+        RulePackSettings(non_finance_categories=frozenset({"kids"})),
+        finance_markers=(),
+        injection_markers=(),
+        instruction_phrases=(),
+        neutral_words=frozenset(),
+    )
+    assert not narrowed.is_finance("kids")
+    assert narrowed.is_finance("youtube_general")

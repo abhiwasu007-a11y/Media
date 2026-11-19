@@ -103,6 +103,7 @@ from agent_11_thumbnail_design.text_options import (
 )
 from agent_11_thumbnail_design.textutil import contains_sequence, fold, folded_words
 from amw_adapters.llm.protocol import LlmAdapter
+from amw_core.config import RulePackSettings
 from amw_core.contracts.common import PayloadObject, storage_uri_owner
 from amw_core.contracts.error import error_object_from_exception, violation
 from amw_core.contracts.task_input import TaskInput
@@ -184,6 +185,26 @@ class Lexicons:
     """Explicitly known non-finance channel categories (exact match, injected from the rule
     pack). Fail closed (owner D13, CCR-273): any other value (None, empty, unknown, wrong type,
     other case) is treated as finance; the default (empty) makes every channel finance."""
+
+    @classmethod
+    def from_rule_pack_config(
+        cls,
+        rule_packs: RulePackSettings,
+        *,
+        finance_markers: tuple[str, ...],
+        injection_markers: tuple[str, ...],
+        instruction_phrases: tuple[str, ...],
+        neutral_words: frozenset[str],
+    ) -> Lexicons:
+        """The production builder (PASS6-N): the non-finance categories come from the rule-pack
+        config (``rule_packs.non_finance_categories``, amw_core), never from a literal here."""
+        return cls(
+            finance_markers,
+            injection_markers,
+            instruction_phrases,
+            neutral_words,
+            frozenset(rule_packs.non_finance_categories),
+        )
 
     def is_finance(self, category: object) -> bool:
         return not (isinstance(category, str) and category in self.non_finance_categories)
