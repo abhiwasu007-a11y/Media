@@ -442,7 +442,9 @@ class ConfirmedEvidenceLookup:
         self._tx = tx
         self._bindings = {b.evidence_id: b for b in bindings}
         self._kinds = allowed_kinds
-        self._exponents = dict(currency_exponents or {"USD": 2, "INR": 2})
+        self._exponents = dict(currency_exponents or {})
+        """``finance.currency_minor_exponent`` from config (CCR-133: no code default; a currency
+        without an exponent never binds)."""
         self._currency_words = currency_words
         self._fin_words = fin_r10_words
 
@@ -455,6 +457,7 @@ class ConfirmedEvidenceLookup:
         confirmations: Iterable[Any],
         *,
         allowed_kinds: frozenset[EvidenceRecordKind] = frozenset(),
+        currency_exponents: Mapping[str, int] | None = None,
     ) -> ConfirmedEvidenceLookup:
         """Bindings built from the run's confirmation records themselves (``kind``,
         ``provider``, ``amount_minor``, ``currency``, ``evidence_id``), so two confirmations
@@ -472,7 +475,14 @@ class ConfirmedEvidenceLookup:
             for c in confirmations
             if getattr(c, "evidence_id", None)
         ]
-        return cls(database, session, tx, bindings, allowed_kinds=allowed_kinds)
+        return cls(
+            database,
+            session,
+            tx,
+            bindings,
+            allowed_kinds=allowed_kinds,
+            currency_exponents=currency_exponents,
+        )
 
     def _bound(self, row: EvidenceRecord, binding: ConfirmationBinding) -> bool:
         if row.evidence.record_kind not in self._kinds:

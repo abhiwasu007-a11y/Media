@@ -104,7 +104,7 @@ def evidence_world(tmp_path: Path, *, confirm: bool = True) -> tuple[Any, dict[s
     ids_ = {which: row.id for which, row in rows.items()}
     records = [record(org, which, ids_[which]) for which in rows]
     lookup = ConfirmedEvidenceLookup.for_confirmations(
-        w.db, app, w.tx, records, allowed_kinds=KINDS
+        w.db, app, w.tx, records, allowed_kinds=KINDS, currency_exponents={"USD": 2}
     )
     return lookup, ids_, org
 

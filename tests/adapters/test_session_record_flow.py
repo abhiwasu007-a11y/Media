@@ -71,6 +71,8 @@ APPROVAL = ids.new_id(ids.Prefix.APPROVAL)
 SUBJECT = ids.new_id(ids.Prefix.RENDER)
 OWNER = ids.USER.new()
 ANY_KIND = frozenset(EvidenceRecordKind)
+EXPONENTS = {"USD": 2, "INR": 2}
+"""Test config of ``finance.currency_minor_exponent`` (CCR-133: never a code default)."""
 
 
 def state_of(lookup: ConfirmedEvidenceLookup, evidence_id: str) -> str | None:
@@ -555,6 +557,7 @@ def test_provider_limit_evidence_is_bound_to_provider_amount_and_currency(
         w.db, app, w.tx,
         [ConfirmationBinding(row.id, PROVIDER_LIMIT, provider, amount, currency, row.org_id)],
         allowed_kinds=frozenset(kinds),
+        currency_exponents=EXPONENTS,
     )  # fmt: skip
     got = lookup.get(row.id)
     assert got is not None
@@ -621,6 +624,7 @@ def test_lookup_from_confirmation_records(tmp_path: Path) -> None:
     lookup = ConfirmedEvidenceLookup.for_confirmations(
         w.db, app, w.tx, [rec, no_evidence],
         allowed_kinds=frozenset({EvidenceRecordKind.CONTRIBUTION}),
+        currency_exponents=EXPONENTS,
     )  # fmt: skip
     assert lookup.get(row.id) == EvidenceStatus(
         evidence_id=row.id, evidence_state="CONFIRMED", recorded_from="OWNER_CHAT_OPERATOR",
