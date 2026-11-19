@@ -90,6 +90,8 @@ A VERIFIED row replaces its ESTIMATE in the sum through `estimate_entry_id`; bot
 
 If any applicable budget cannot cover the hold, no reservation is made on any of them (all-or-nothing), the task goes to T05. A task's `max_cost_micros` is set per task type (07 §9; 27 §3 key `llm.<task_type>.cost_budget_micros`); the values are **REQUIRES REVIEW (Phase 1): set from measured cost in the skeleton, then confirmed by the owner**.
 
+**Task types without a paid call (CCR-205).** A stage whose 24 record lists none of the paid capabilities (GLOSSARY §6.20: `llm`, `tts`, `image_gen`, `video_gen`, `stock_search`, `music_search`) gets `max_cost_micros = 0` and `max_llm_calls = 0` in its `resource_budget`, written by the orchestrator and never configured (in 3A: `agent_10.render`, `agent_10.subtitles`, `agent_10.technical_qc`, which refuse any other value, agent_10 §7.4); E1 then reserves nothing for it (§4 B4). A stage that lists a paid capability takes its cap from its task type's configured key; an unset key refuses the job at validation (J02, `PERMANENT.CONFIG_INVALID`), never a silent 0 or a default. Per-job caps (`PER_VIDEO`, `PER_JOB`, CCR-107) are read and reported per job: every status read of such a budget names the job.
+
 ## 4. Behaviour on breach
 
 | Rule | Behaviour |

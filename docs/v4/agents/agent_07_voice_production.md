@@ -798,7 +798,7 @@ Retrieval filters `org_id` and the narrowest scope chain of the task (04 §5.10 
 ### 15.1 Upstream
 | From | Receives | Mapping and guard |
 |---|---|---|
-| Agent 05 (script document `agent_05.script_document`, agent_05 §8.3; the Shorts child script has `scenes[]` and no `sections[]`, 24 §7.2a) | `segments[]` (`segment_id`, `text`, `pace`, `emotion`, `scene_id`), `scenes[]` (`deliberate_pause_ms`, `pronunciation_candidates`), language | one synthesis unit per segment; read by hash-verified URI, never copied into a payload |
+| Agent 05 (script document `agent_05.script_document`, agent_05 §8.3; the Shorts child script has `scenes[]` and no `sections[]`, 24 §7.2a) | `segments[]` (`segment_id`, `text`, `pace`, `emotion`, `scene_id`), `scenes[]` (`deliberate_pause_ms`, `pronunciation_candidates`), language; read through a slice model that ignores every other field of the document (03 §2.3 rule 2, CCR-200) | one synthesis unit per segment; read by hash-verified URI, never copied into a payload |
 | Agent 06 (`agent_06.claim_verification.output` of stage `s06_verify`, `overall.verification_verdict`, agent_06 §8.2) | stage verdict, script ID and version (the output has no script hash; the binding is `scripts.content_sha256`, FR-2) | FR-2; `ALLOWED`, or `NEEDS_HUMAN_REVIEW` plus an `APPROVED` `SENSITIVE_CLAIM` approval. The `s06_chart` result (CCR-004) is not an input of this agent |
 | Orchestrator | Task Input (§7), `resource_budget`, controls (`DRAIN`) | 03 §3, §4.3 |
 | Operator / owner | voice choice (3A_SLICE_SPEC O4: TTS voice, consented clone or own recording), owner recording asset, dictionary versions, licence rows, consent verification | human acts; Agent 07 only reads their records |

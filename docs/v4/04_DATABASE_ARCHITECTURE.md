@@ -396,7 +396,7 @@ Keys: `UNIQUE (org_id, profile_id, rule_pack_id)`. Trigger: a link with `is_mand
 | Column | Type | Null | Constraint / note |
 |---|---|---|---|
 | workspace_id | uuid | no | TFK → workspaces |
-| project_id | uuid | yes | TFK → projects |
+| project_id | uuid | yes | TFK → projects. Set at job creation (J01) for every production job (03 §3.1: production jobs always have a project); the job intake (3A: the operator tool) refuses a production job without one (`PERMANENT.INPUT_INVALID`, detail `PROJECT_MISSING`); NULL only for system jobs (CCR-214) |
 | channel_id | uuid | yes | TFK → channels |
 | parent_job_id | uuid | yes | TFK → jobs (e.g. Shorts from long-form) |
 | production_type_key | enum(production_type_key) | no | |
@@ -426,6 +426,7 @@ Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`. Indexes: `(org_
 |---|---|---|---|
 | job_id | uuid | no | TFK → jobs |
 | task_type | text | no | `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3]))\.[a-z0-9_]+$` |
+| stage_id | text | yes | CCR-214: the production-type record's stage (24 §2 `stage_id`, `^[a-z0-9_]{2,32}$`, CHECK); set for every task materialised from a production-type graph (every task in 3A), NULL only for a task created outside a graph. Two stages may share a task type (e.g. `s06_verify` and `s06_chart`), so the stage is not derivable from `task_type`; a resumed runner reads the job's stage map from this column |
 | agent_id | text | no | executor ID; must be the prefix of `task_type` (CHECK) |
 | iteration | int | no | default 0; revision loop number; ≤ `limits.max_revision_loops` (code) |
 | is_required | boolean | no | default true |
@@ -452,7 +453,7 @@ Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`. Indexes: `(org_
 | error_code / error_class | text / enum(failure_class) | yes | last error |
 | last_error | jsonb | yes | `amw.error` |
 | completed_at | timestamptz | yes | |
-Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`. Indexes: `(org_id, job_id)`, `(next_attempt_at) WHERE state = 'RETRY_WAIT'`, `(state_changed_at) WHERE state IN ('VALIDATING','FAILED','CHECKPOINTED')` (stuck detection). Trigger: transition check (§5.6).
+Keys: `UNIQUE (org_id, id)`, `UNIQUE (org_id, idempotency_key)`, partial `UNIQUE (org_id, job_id, stage_id, iteration) WHERE stage_id IS NOT NULL` (CCR-214). Indexes: `(org_id, job_id)`, `(next_attempt_at) WHERE state = 'RETRY_WAIT'`, `(state_changed_at) WHERE state IN ('VALIDATING','FAILED','CHECKPOINTED')` (stuck detection). Trigger: transition check (§5.6).
 
 **task_dependencies** — TENANT · T0 · (no `id`) `org_id`, `task_id` TFK → tasks, `depends_on_task_id` TFK → tasks, `created_at`. PK `(org_id, task_id, depends_on_task_id)`; CHECK `task_id <> depends_on_task_id`. Acyclicity is guaranteed by materialising only DAGs validated from the registry (24 §3).
 
@@ -746,7 +747,7 @@ CHECK exactly one of `knowledge_chunk_id`, `external_url` is not null. Key (CCR-
 | is_current | boolean | no | partial `UNIQUE (org_id, workspace_id) WHERE is_current` |
 | logo_asset_id | uuid | yes | TFK → assets |
 | colours / fonts | jsonb | no | CCR-034. `colours`: `{"primary": "#RRGGBB", "secondary": "#RRGGBB", "tertiary": "#RRGGBB" or null, "text": …, "background": …}`. `fonts`: array of `{"asset_id": ast wire ID (an `assets` row of kind `FONT` with an `ACTIVE` licence), "role": "HEADLINE"/"BODY"/"CAPTION", "scripts": [ISO 15924 codes covered, e.g. "Deva", "Latn"]}` |
-| lower_third_template_ref / intro_ref / outro_ref | text | yes | |
+| lower_third_template_ref / intro_ref / outro_ref | text | yes | template IDs (GLOSSARY §1 **Template ID**, CCR-204): each names the `attributes.template_id` of a tenant `TEMPLATE` asset (§5.15); NULL = the brand kit has none (Agent 09 then omits the sting, uses a caption card for a lower-third and the platform `end_screen` template) |
 | voice_id | uuid | yes | TFK → voices |
 | tone_rules | jsonb | no | documented keys (CCR-034): `latin_allow_list` (array of Latin-script terms allowed in a non-Latin script, Agent 05); other keys are added by CCR |
 | banned_words | text[] | no | |

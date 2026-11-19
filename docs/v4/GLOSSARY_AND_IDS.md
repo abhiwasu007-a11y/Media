@@ -20,6 +20,7 @@
 | **Workspace** | A brand or client-account area inside an organisation (directive "Workspaces/Brands"). An agency org has one workspace per end-client brand. A workspace owns brand kits, channels and projects. | `workspaces` |
 | **Brand** | The identity a workspace presents. Not a separate entity; the brand's look is its **brand kit**. | — |
 | **Brand kit** | Versioned brand identity: logo, colours, fonts, lower-thirds, intro/outro, voice, tone rules, banned words (§1C.6). | `brand_kits` |
+| **Template ID** | The stable name of a visual template (an overlay card, a sting, an end screen, a chart base), `^[a-z][a-z0-9_]{1,63}$`, e.g. `chapter_card`. It is the `attributes.template_id` of the tenant's `TEMPLATE` asset that holds the current version (04 §5.15, CCR-031/032); the brand kit's `intro_ref`, `outro_ref` and `lower_third_template_ref` and the shot plan's overlay `template_ref` hold template IDs, never URIs or asset IDs; only Agent 08 resolves a template ID to an asset (CCR-204). | `assets.attributes.template_id` |
 | **Channel** | A publishing destination account (YouTube channel first) owned by a workspace. | `channels` |
 | **Project** | A container of jobs with one purpose: a series, a campaign, a client order or an internal job group. | `projects` |
 | **Production type** | A registry entry that defines one product the platform makes: stages, inputs, approvals, templates, QC, rule packs, deliverables, cost model (§3.4). | `production_types`, 24_PRODUCTION_TYPES.md |
@@ -208,7 +209,7 @@ Regex: `^(agent_(0[1-9]|1[0-7])|svc_s(0[1-9]|1[0-3])|usr_<uuidv7>|sys_[a-z_]{3,3
 | Ratios / probabilities / confidence | Decimal 0.0–1.0 | `confidence numeric(4,3)` |
 | Quality score | 0–100 points (§1A.7) | `numeric(5,2)` |
 | YouTube quota | Units per bucket (YT-02) | `units bigint` |
-| Language | BCP 47 tag (e.g. `mr`, `mr-IN`, `hi`, `en-IN`) | `language text` |
+| Language | BCP 47 tag (e.g. `mr`, `mr-IN`, `hi`, `en-IN`). One tag per job (CCR-205): every payload, document and file of a job carries `jobs.language` byte-for-byte (the owner topic, the script, the plan, subtitles, QC); consumers compare by exact string equality and no stage rewrites, shortens or extends the tag | `language text` |
 | Country | ISO 3166-1 alpha-2 | `country char(2)` |
 | Aspect ratio | String `W:H` from §6.50 | — |
 

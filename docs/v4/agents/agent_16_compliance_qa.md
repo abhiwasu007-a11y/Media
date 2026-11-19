@@ -65,7 +65,7 @@ Doubt resolves to `NEEDS_HUMAN_REVIEW`, never to `ALLOWED` (13 §1.1.7). An LLM 
 | FR-08 | 100-point machine score: deterministic criteria, judge criteria (3 grouped calls), per-dimension rows | §1A.7; 18 §9 | `s16_score` after `s16_comp` | `qc_results`, claims, script, thumbnails, sampled frames, compliance verdict | `quality_scores` machine rows, total, gate result | orchestrator, a_final, report | 3A |
 | FR-09 | Verify (read-only) the human records at `s16_auth`: every HUMAN `quality_scores` row, step decision (of this approval and of every approval the gate relied on, CCR-102), contribution and human compliance row has its `approval_channel` and a `CONFIRMED` `owner_instruction_evidence` row whose MAC re-verifies (`amw_evidence_mac_valid`, CCR-100) and whose stored verifier result passed the whitelist grammars (§19.3 rules 4–5); HUMAN score rows bound to the current render hash only | §1A.7 human wins; 18 §9.3; R14, D5 | `s16_auth`; the rows are written only by `amw_human_record_apply` (04 §3.6a), which the operator tool runs as `amw_operator`; never by Agent 16 | evidence rows, human rows | guard results G3, G4, G9a | authorisation | 3A |
 | FR-10 | Publication authorisation: final deterministic guard; in 3A authorises **delivery** | 24 §7.1 `s16_auth`; Q5; 13 §1.2; 3A_SLICE_SPEC §2.4, §4 | `s16_auth` after `a_final` | approval, steps, contributions, evidence records, verdicts, scores, render, licences | final verdict (`is_final`), `authorised_action`, earliest compliant publish date | Agent 13 (`s13_deliver` in 3A) | 3A (delivery); 3C (publish-time re-check FIN-R9, YTG-R8) |
-| FR-11 | Report data: every check row, the score breakdown (machine, human, used points per dimension), disclosure statement, disclaimer status ("DRAFT, not lawyer-approved", 3A R5), earliest compliant publish date (FIN-R9) | 3A_SLICE_SPEC §4 row 5; 18 §9.3 | end of `s16_score` and `s16_auth` | verdict and score rows | report section blob for the `qc_report` preset (24 §4, CCR-043) | Agent 13 bundle | 3A |
+| FR-11 | Report data: every check row, the score breakdown (machine, human, used points per dimension), disclosure statement, disclaimer status ("DRAFT – not lawyer-approved", 3A R5, CCR-212; single source `amw_runtime.disclaimer`, imported once that package is on `main`, ticket PASS6-K), earliest compliant publish date (FIN-R9) | 3A_SLICE_SPEC §4 row 5; 18 §9.3 | end of `s16_score` and `s16_auth` | verdict and score rows | report section blob for the `qc_report` preset (24 §4, CCR-043) | Agent 13 bundle | 3A |
 | FR-12 | Raise human review items: every `NEEDS_HUMAN_REVIEW` verdict names the rule, the evidence and the approval kind to insert (`SENSITIVE_CLAIM` / `COPYRIGHT_DOUBT`) | 24 §3.3 rule 2 | end of `s16_comp`, `s02u_unique` | verdicts | `review_requests[]` in the payload | orchestrator → S7 | 3A |
 | FR-13 | Contribution quality guard: exact and near-duplicate of the channel's earlier contributions → WARNING shown to the approver | 13 §3.4 | `s16_auth` | contributions of the channel | `qc_results` `ytg.r4.contribution_repeat` (WARN) | owner | 3A (exact), 3B (near-duplicate threshold) |
 | FR-14 | Ad rule pack and sector packs (§1D.3): substantiation document per claim, releases for real persons/brands, sector packs by category, disclosure label by risk test, client final approval before delivery | §1D.3; 25_ADVERTISING_COMPLIANCE (planned) | `s16_comp` of `AD_SPOT`, `ECOMMERCE_PRODUCT` | claims with `substantiation_ref`, assets with `release_ref` | verdicts under `rp.advertising_asci_in`, `rp.ad_sector_<sector>` | client approval, delivery | 3C · Tier 1+ |
@@ -997,6 +997,9 @@ agent_16_compliance_qa/
   models/              Pydantic models: inputs (§7), outputs (§8), judge I/O (prompt schemas), Evidence types
   packs/loader.py      RulePackLoader            — union of packs, hash verification, DRAFT refusal
   inputs/assembler.py  GateInputAssembler        — RLS reads, ref/hash verification, item extraction (segments, overlays, thumbnail text)
+  inputs/extractors.py DocumentGateFactExtractor, DocumentUniquenessExtractor — the implementations of the two
+                       extractor ports, owned by this package (CCR-209): they read the upstream documents of §15.1
+                       through slice models (03 §2.3 rule 2) and the rows of §15.1a; no fact is a constant
   checks/
     licence.py         LicenceChecker            — YTG-R5, YTG-R6
     finance.py         FinanceDeterministic      — FIN-R4, R9, R10, R11, R12 (+ deterministic parts of R2, R8)
@@ -1024,7 +1027,10 @@ agent_16_compliance_qa/
     verdicts.py        VerdictWriter             — compliance_verdicts, claims.final_verdict, qc_results, audit
     scores.py          ScoreWriter               — quality_scores machine rows
   report/section.py    ReportSectionBuilder      — data for the `qc_report` preset (24 §4, CCR-043)
-  stages.py            the three stage classes wiring the above (constructor DI)
+  stages.py            the stage classes wiring the above (constructor DI); each task type has one entry point
+                       run(task_input, attempt) -> TaskOutput (03 §1 rule 5, CCR-203): ComplianceGateStage,
+                       QualityScoreStage (wraps QualityScorer for agent_16.quality_score, CCR-209),
+                       PublicationAuthorisationStage, and UniquenessCheckStage for svc_s02.uniqueness_check
 s02_uniqueness_auditor/
   stage.py             UniquenessCheckStage
   measures.py          MaskedStructure, TemplateShare, ShotSequenceIdentity, CrossVideoComparator (3C)
@@ -1156,6 +1162,29 @@ The orchestrator takes the earliest failing remedy in the graph (24 §3.3 rule 1
 | S2 | uniqueness report | YTG-R1 |
 | S7 / operator tool / evidence verifier | approval + steps (with `review_code`), contributions bound to the approval, HUMAN scores, human verdict rows (all written by `amw_human_record_apply`), `owner_instruction_evidence` rows (`CONFIRMED`, `evidence_mac` stamped by the verifier functions); the release, quotation and resolution approvals the gate relied on | authorisation G1–G5, G9, G9a; FIN-R12 and V12 at the gate (F-26) |
 
+### 15.1a Gate-fact sources (CCR-209; `DocumentGateFactExtractor`)
+Every field of the gate input is read from the named source; a source that is absent yields the stated missing-input result, never a constant. 3C-only sources are named but give the stated 3A value.
+
+| Gate-input field | Source | Absent or not applicable |
+|---|---|---|
+| `channel_category`, `sensitive_channel` | `channels.category` and the job's active rule packs (`rp.finance_sebi_in` ⇒ sensitive) | unknown category ⇒ treated as finance (as CCR-128 for Agent 10) |
+| `audience_kind` | `channels.audience_kind` (CCR-081) | NULL ⇒ V11a `NEEDS_HUMAN_REVIEW` |
+| `language`, `production_type_key` | `jobs.language`, `jobs.production_type_key` | — |
+| `live_format` | the production type record | `STANDARD` for every 3A type |
+| `items`, `text_prices`, `method_segments` | Agent 05 script document segments and scenes; Agent 06 extraction claims (`claim_ids` blob for IDs, agent_06 §8.1); Agent 11 manifest text | missing document ⇒ `MISSING_DEPENDENCY` |
+| `disclaimer_spoken`, `disclaimer_template_version` | Agent 05 `DISCLAIMER` segments and `disclaimer_slots[].template_version` | no slot ⇒ FIN-R10 `FAIL` |
+| `disclaimer_onscreen` | Agent 09 plan blob overlays of kind `DISCLAIMER_CARD` | none ⇒ FIN-R10 `FAIL` |
+| `method_label_overlay` | Agent 09 plan blob overlays | none ⇒ `false` |
+| `charts` | Agent 08 manifest chart shots (`data_end_date`, `agent_08.chart_facts`) | no chart ⇒ `[]` |
+| `licensed_assets`, `disclosure_assets`, `render_person_assets` | Agent 08 manifest joined with `assets`, `licences` (state, `covers_monetized_youtube`, `third_party_permission`) and `licence_ledger` rows | a missing ledger row or a dead licence state ⇒ YTG-R6 `FAIL`; an unknown state or coverage ⇒ `NEEDS_HUMAN_REVIEW` (F-04) |
+| `thumbnail_person_assets` | Agent 11 set manifest joined with `assets` | no thumbnail stage ⇒ `[]` |
+| `realism_shots` | Agent 09 plan blob `views.agent_16_realism[]` | — |
+| `presenter_kind`, `voice_kind`, `voice_known` | Agent 07 `voice` block and `voices.presenter_kind` (CCR-027) | no voice record ⇒ NHR (F-08) |
+| `frame_ids` | Agent 10 QC evidence manifest sample frames (CCR-112) | none ⇒ YTG-R2 `NEEDS_HUMAN_REVIEW` |
+| `uniqueness_verdict` | S2 `svc_s02.uniqueness_check` output | — |
+| `metadata_present`, `description_hash_matches`, `metadata_terms` | Agent 12 metadata bundle (3C) | 3A: `false`, `null`, `null` |
+| `evaluation_date` | the S4 clock at the gate (FIN-R9 lag arithmetic) | — |
+
 ### 15.2 Downstream
 | To | Receives | Rule |
 |---|---|---|
@@ -1274,7 +1303,7 @@ The operator is an AI assistant, so **its own text is never evidence**. Evidence
 | Q-10 | §1 disclosure of realistic synthetic content | decision recorded for 100 % of videos with rationale; never empty | `ytg.r3.disclosure_decision` | D | yes | 3A |
 | Q-11 | §1 SEBI: education only (FIN-R1…R13) | each active rule evaluated with evidence; eval false-ALLOWED = 0 | `fin.r1` … `fin.r13` | D / J | yes | 3A |
 | Q-12 | §1 / IN-02 price data older than the lag | age ≥ lag at evaluation; earliest compliant publish date in the report | `fin.r9.price_lag` | D | yes | 3A |
-| Q-13 | §1 every finance video carries the disclaimer | spoken + on-screen present, template version recorded, "DRAFT, not lawyer-approved" in 3A (R5) | `fin.r10.disclaimer` | D | yes | 3A |
+| Q-13 | §1 every finance video carries the disclaimer | spoken + on-screen present, template version recorded, "DRAFT – not lawyer-approved" in 3A (R5, CCR-212) | `fin.r10.disclaimer` | D | yes | 3A |
 | Q-14 | §1A.1 every shot has a licence record | 100 % of render assets have a ledger row with an `ACTIVE` licence or self-grant | `ytg.r6.licence_complete` | D | yes | 3A |
 | Q-15 | §1A.1 AI stills never the majority | reads `qc.visual.tier_share_e` (Agent 10) into VISUAL_QUALITY D | (Agent 10 check) | D | yes (Agent 10) | 3A |
 | Q-16 | §1A.2 script promise = title promise = thumbnail promise | judged 0–2 per element, a mismatch is a score deduction, never a compliance verdict by itself | `edit.promise_alignment` (18 §3) | J | no | 3A |
@@ -1473,7 +1502,7 @@ Prompts, rubric, lexicons, packs and thresholds are versioned; any change runs t
 | AC-06 | Answer-key A1–A4 and IN-03 cases S1–S7 produce the 13 §5.12/§5.13 verdicts | EV compliance_gate (100 %) |
 | AC-07 | A flagged named-instrument future statement is never ALLOWED on a judge verdict alone; a named security with a historical claim and no dated chart is NHR whatever the judge says (V9) | U-31, U-84, P-01, EV |
 | AC-08 | A chart within the 30-day lag at evaluation is BLOCKED; the report shows the earliest compliant publish date | U-10, U-11, RULE-03 |
-| AC-09 | Missing disclaimer on a finance video BLOCKS; present draft disclaimer passes and is labelled "DRAFT, not lawyer-approved" | U-14, U-15, RULE-09, RULE-10 |
+| AC-09 | Missing disclaimer on a finance video BLOCKS; present draft disclaimer passes and is labelled "DRAFT – not lawyer-approved" (CCR-212) | U-14, U-15, RULE-09, RULE-10 |
 | AC-10 | Disclosure decision recorded for every video; realistic AI B-roll ⇒ REQUIRED; code charts + owner voice ⇒ NOT_REQUIRED; missing flag ⇒ NHR | U-20…U-23 |
 | AC-11 | Asset without a licence row (not self-grant) ⇒ BLOCKED | U-06, RULE-34 |
 | AC-12 | Template-identical structure ⇒ BLOCKED by S2 | U-36, UQ-02 |

@@ -268,7 +268,7 @@ A rejected direction is re-asked once per batch with the guard messages (IDs onl
 Iteration ≥ 1: the previous plan (shot IDs, content keys, accepted directions) is read from `previous_plan_ref`, a `PRIOR_OUTPUT` context ref set by the orchestrator (24 §3.3 rule 6, CCR-008; hash verified, same org); no `TASK` memory is read. If the narration timeline hash differs from the previous plan's, FR-16 first rebases the previous plan. Shots not named in `revision_feedback[].shot_ids` keep ID, direction and timing (unless the timeline hash changed); named shots are re-directed with the feedback check IDs as hints (IDs and numbers only). `a09.q.revision_addressed` verifies that every feedback item is no longer violated by the new plan. A feedback item with no `shot_ids` (a whole-plan result) re-directs no shot by itself: it is checked against the new plan's measured values only.
 
 ### 6.8 Failure to plan
-If a blocking check cannot pass after the allowed repairs: input-caused (hook after the window, timeline gap) → `PERMANENT.INPUT_INVALID` with `details.violations[]` (orchestrator re-plans upstream, L2); agent-caused → `AGENT.QUALITY_REPEATED_FAILURE` (L3). A partial plan is never returned as success (03 §5.3).
+If a blocking check cannot pass after the allowed repairs: input-caused (hook after the window, timeline gap) → `PERMANENT.INPUT_INVALID` with `details.violations[]` (each item `{path, keyword: <reason code>, message}`, never a bare string, 03 §6 rule 6, CCR-210; orchestrator re-plans upstream, L2); agent-caused → `AGENT.QUALITY_REPEATED_FAILURE` (L3). A partial plan is never returned as success (03 §5.3).
 
 ---
 
@@ -370,7 +370,7 @@ Schema and `schema_version` → ID prefixes → org equality (envelope, input, c
 Top-level fields (the full plan lives in the blob; the payload carries the summary and the views, or the plan itself when below `contracts.inline_payload_max_bytes`, 03 §3.3):
 | Field | Type | Meaning |
 |---|---|---|
-| `plan_ref` | `{uri, sha256, schema: "agent_09.shot_plan.output", schema_version: "1.0.0"}` | write-once plan blob (`jobs/<job>/tasks/<task>/attempts/<att>/output.json` area, 03 §8); the same four fields are what Agent 08's `shot_plan_ref` requires, so the orchestrator copies it unchanged |
+| `plan_ref` | `{uri, sha256, schema: "agent_09.shot_plan.output", schema_version: "1.0.0"}` | write-once plan blob (`jobs/<job>/tasks/<task>/attempts/<att>/artifacts/shot_plan.json`, 03 §8 rule 5); the same four fields are what Agent 08's `shot_plan_ref` requires, so the orchestrator copies it unchanged. **Blob content (CCR-203):** the blob is this whole document **without `plan_ref`** (it cannot hold its own hash), every other field of this table included, `views` too; Agents 08, 10, 11 and 16 read the plan only from this blob, never from an orchestrator-made copy |
 | `script_id`, `script_version`, `script_sha256`, `language`, `aspect_ratio`, `iteration` | values | identity |
 | `timing_basis` | const `MEASURED` | Agent 10 requires it; there is no estimated mode (CCR-051) |
 | `narration_timeline_sha256` | hex | the timeline the plan was timed on |
@@ -468,7 +468,7 @@ Top-level fields (the full plan lives in the blob; the payload carries the summa
   }
 }
 ```
-`overlays[]` item: `{overlay_id (ov01…), kind: BRAND_STING / LOWER_THIRD / CAPTION_CARD / CHAPTER_CARD / DISCLAIMER_CARD / END_SCREEN, start_ms, end_ms, template_ref (or null), text_refs[], vertical_variant: bool}`; every `text_refs` entry points to a script string by `scene_id`, `index` and SHA-256, or to a disclaimer slot by `disclaimer_slot_id` and SHA-256 (no free text). `safe_area_class = DEFAULT` is a placeholder until the official Shorts overlay zones are logged (**REQUIRES REVIEW (Phase 1): official Shorts UI overlay zones, 18 §10**).
+`overlays[]` item: `{overlay_id (ov01…), kind: BRAND_STING / LOWER_THIRD / CAPTION_CARD / CHAPTER_CARD / DISCLAIMER_CARD / END_SCREEN, start_ms, end_ms, template_ref, text_refs[], vertical_variant: bool}`; `template_ref` is a **template ID** (GLOSSARY, CCR-204), never null, never a URI or asset ID: `BRAND_STING` = brand kit `intro_ref` (no sting when it is null), `LOWER_THIRD` = brand kit `lower_third_template_ref` (a `CAPTION_CARD` when it is null or the plan is 9:16), `END_SCREEN` = brand kit `outro_ref`, else `end_screen`; `CAPTION_CARD` = `caption_card`, `CHAPTER_CARD` = `chapter_card`, `DISCLAIMER_CARD` = `disclaimer_card` (platform package templates registered per tenant as `TEMPLATE` assets, CCR-031); Agent 08 alone resolves the ID to an asset; the `END_SCREEN` overlay spans `[content_end_ms, total_duration_ms]` (CCR-205); every `text_refs` entry points to a script string by `scene_id`, `index` and SHA-256, or to a disclaimer slot by `disclaimer_slot_id` and SHA-256 (no free text). `safe_area_class = DEFAULT` is a placeholder until the official Shorts overlay zones are logged (**REQUIRES REVIEW (Phase 1): official Shorts UI overlay zones, 18 §10**).
 
 Determinism hash: SHA-256 of the canonical JSON of the plan without `provenance` and without `plan_ref`.
 
@@ -494,7 +494,9 @@ Agent 09 is not a compliance gate: its payload carries no compliance verdict. It
 ```text
 agent_09_video_director/
   __init__.py            # exports VideoDirector (Protocol) and ShotPlanStep
-  protocol.py            # VideoDirector Protocol: run(task_input, ctx) -> TaskOutput
+  protocol.py            # VideoDirector Protocol: run(task_input, attempt) -> TaskOutput, the task type's entry point
+                         #   (03 §1 rule 5, CCR-203): reads the agent_05 script document from the script ref through a
+                         #   slice model (03 §2.3 rule 2, CCR-200) and the narration timeline ref, then runs ShotPlanStep
   contracts.py           # Pydantic models: ShotPlanInput, ShotPlanOutput, Shot, Overlay, Direction, DirectionBatchInput/Output
   config.py              # Agent09Config (pydantic-settings via amw_core.config), required-key check
   errors.py              # typed exceptions -> 07 §2 codes (ErrorMapper)
@@ -835,7 +837,7 @@ Further controls specific to this agent:
 | 9 | `a09.q.interrupt_mid` | §1A.2 interrupt around the midpoint | ≥ 1 interrupt within `0.5·content_end ± half_width_ms` when set; else ≥ 1 script-planned in the section holding the midpoint | `edit.interrupt.midpoint` | no (`WARN`, `blocking: false`) until set; yes once set | 3A |
 | 10 | `a09.q.jl` | §1A.2 J-cuts / L-cuts | applied J/L cuts ≥ `floor(eligible_boundaries / every_nth)`; each has `cut_offset_ms ≠ 0` and `jl_kind` consistent with its sign; skipped boundaries carry a reason | `edit.cuts.j_l` | no (`WARN`, `blocking: false`) until the rate is set; yes once set | 3A |
 | 11 | `a09.q.end_screen` | §1A.2 end screen; §1A.8 | the last overlay is `END_SCREEN` starting at `content_end_ms`, length = config, containing only template content (no shot, no new text); tail silence listed as `deliberate_pause` | `edit.end_screen` | no (`WARN`, `blocking: false`) until the length is set; yes once set | 3A |
-| 12 | `a09.q.chapters` | §1A.2 chapters | first chapter at 0 ms, strictly increasing, one per script section, each within ±1 000 ms of the section's measured start (exactly equal by construction); for 9:16 (no sections) `chapters = []` and the result is `SKIPPED`, `blocking: false` | `edit.chapters` (self-consistency part) | yes (long form) | 3A |
+| 12 | `a09.q.chapters` | §1A.2 chapters | first chapter at 0 ms, strictly increasing, one per script section, each within ±1 000 ms of the section's measured start (exactly equal by construction; the first section's start is 0 ms because the first chapter covers the lead-in scenes `hook.scN` / `disc.scN` before it, agent_05 §8.3, CCR-202); for 9:16 (no sections) `chapters = []` and the result is `SKIPPED`, `blocking: false` | `edit.chapters` (self-consistency part) | yes (long form) | 3A |
 | 13 | `a09.q.tier_plan` | §1A.1 hierarchy; §1A.1e; §1A.11 | `allowed_tiers` in hierarchy order, tier C always present; planned worst-case `E_AI_STILL` share < `qc.visual.tier_e_max_share` (0.50, directive "never the majority"); planned `D_AI_VIDEO` ms ≤ `limits.ai_video_allowed_ms`; D/E absent when disabled | `qc.visual.tier_share_e`, `qc.visual.ai_video_budget` (planning side) | yes | 3A |
 | 14 | `a09.q.charts` | §1A.1c charts by code from real data | every script `chart_request` has exactly one `CHART` shot whose span contains its `first_segment_id`; `chart_id` unique; no `CHART` shot without a request; `intent_text` empty (the model never describes data) | `qc.visual.chart_data_age` (data age is measured on the render by Agents 10/16) | yes | 3A |
 | 15 | `a09.q.text_provenance` | no invented words | 100 % of `text_refs` resolve to a script `on_screen_text` or disclaimer slot string with the same SHA-256; 0 overlay or shot text outside references | FIN rules on on-screen text (13) | yes | 3A |
