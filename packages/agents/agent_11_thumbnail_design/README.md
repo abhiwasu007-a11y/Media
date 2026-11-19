@@ -34,33 +34,41 @@ system Devanagari font exists (open item below). The generated test font is buil
 
 ## Determinism (host independence)
 
-Cause analysis of the verifier's failures (evidence in the PR description):
+Findings from the verifier report and the reviews (the first design, which refused to render on an unlisted host, was withdrawn: it
+failed the repo's own `gates` job on a runner with another FriBiDi patch version):
 
 | Symptom | Cause | Evidence |
 |---|---|---|
-| `test_same_inputs_give_byte_identical_files` flaked | the generated test font carried the wall-clock time in `head.created` / `head.modified`, so two builds a second apart had different font hashes, hence different `composition_sha256` | two builds 1.1 s apart differ; fixed stamps make them equal; regression test `test_test_font_bytes_do_not_depend_on_the_wall_clock` fails without the fix |
-| canary PNG hash differed on another host | the PNG file bytes depend on the host zlib: the Pillow wheel links the system `libz.so.1` (not bundled), and deflate output differs between zlib builds for identical pixels (a zlib-ng stream of the same canary rows is 8430 bytes against 8714 here) | `ldd` of Pillow's `_imaging` shows host `libz.so.1`; the pixel raster does not change with the encoder |
+| `test_same_inputs_give_byte_identical_files` flaked | the generated test font carried the wall-clock time in `head.created` / `head.modified`, so two builds a second apart had different font hashes, hence different `composition_sha256` | two builds 1.1 s apart differ; fixed stamps make them equal; `test_test_font_bytes_do_not_depend_on_the_wall_clock` fails without the fix |
+| canary PNG hash `c58d42db...` on the verifier's host instead of `3cbf11ec...` | **UNEXPLAINED.** Host zlib is a possible cause of PNG byte differences (the wheel links the system `libz.so.1`), but an emulation of Pillow's encoder with zlib 1.3 reproduces `3cbf11ec` exactly and 24 zlib variants never gave `c58d42db` | run `scripts/probe_render_env.py` on that host and compare |
 
-What is pinned and checked (fail closed, typed errors, `pinning.py`):
+What was measured to change the raster (full table in `data/environments.json`, `evidence`):
 
-- **Raster identity**: `RenderResult.pixel_sha256` (mode, size and the decoded RGB bytes). The canary and cross-host comparisons use it. The PNG
-  file hash (`file.sha256` in the manifest) stays the identity of the stored blob and is stable on one host only. A fixed PNG encoder was
-  rejected: stored (uncompressed) deflate blocks are host independent but make a 1920x1080 file about 6.2 MB instead of about 9 KB.
-- **Environment table** `data/environments.json`: one row per environment the canary was recorded for, keyed by Pillow, FreeType, Raqm,
-  HarfBuzz, FriBiDi and CPU architecture. Any other environment is refused (`RenderEnvironmentError`; stage: `a11.pre.config`,
-  `PERMANENT.MISSING_DEPENDENCY`) before any model call. There is no perceptual tolerance fallback: no cross-environment measurement
-  exists to derive a bound from, so none is claimed. To add an environment: run the canary there and add the row in a reviewed PR.
-- **Fonts** `data/fonts/manifest.json`: only listed fonts (SHA-256) are rasterised; bytes that differ from their claimed hash, or are
-  not listed, raise `FontIntegrityError` (stage: `PERMANENT.MISSING_DEPENDENCY`). Fonts are loaded from memory only, so a system font
-  can never be used.
-- **Lock**: `pillow==13.0.0` exactly in `pyproject.toml` and `uv.lock`; fontTools (the test-font generator) is locked in `uv.lock`.
-  FreeType, HarfBuzz and Raqm come inside the Pillow wheel, so the lock pins them; FriBiDi and zlib are system libraries.
-- **CI**: job `a11-render-determinism` (clean `ubuntu:24.04`, `libfribidi0` only, `uv sync --frozen`) runs the canary and determinism tests.
+- **FreeType**: the Noto variable font renders differently with FreeType 2.13.3 (Pillow 11.3.0) than with 2.14.1 (Pillow 12.0.0, 12.1.0) and
+  2.14.3 (Pillow 13.0.0); 2.14.1 and 2.14.3 are identical. This is the canary key.
+- **Not shown to matter**: HarfBuzz 12.1.0, 12.3.0, 14.5.0; libraqm 0.10.3, 0.11.0; libfribidi 1.0.8, 1.0.13, 1.0.16; Pillow 11.3.0 to 13.0.0
+  for the box font. CPU architecture: only x86_64 measured.
 
-Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved), so the FriBiDi apt pin for it
-is recorded here only (Ubuntu 24.04 `libfribidi0 1.0.13-3build1`); (2) other CPU architectures (aarch64, macOS arm64) and other FriBiDi
-versions have no recorded canary and are refused until measured; (3) the owner picks the default Devanagari font (Q-O6): the pinned
-OFL candidate below is verified, not chosen.
+What the code does:
+
+- **The renderer never refuses because the environment is unlisted.** The environment (`pillow`, `freetype2`, `harfbuzz`, `raqm`, `fribidi`,
+  `machine`, `font_manifest_sha256`, `canary_recorded`) and the font source are written to the manifest `provenance` (proposed as CCR-192).
+- **Raster identity**: `RenderResult.pixel_sha256` (mode, size, decoded RGB). The PNG file hash (`file.sha256`) identifies the stored blob and
+  is stable on one host. A fixed PNG encoder was rejected: stored (uncompressed) deflate blocks are host independent but make a 1920x1080 file
+  about 6.2 MB instead of about 9 KB.
+- **Canary** (`canary.py`, tests `test_canary_hash_is_recorded`): box test font and the real Noto font, recorded per FreeType version. A listed
+  FreeType must match exactly. An unlisted one is skipped with its hash in the normal `gates` job and fails in the clean-image job
+  `a11-render-determinism` (`A11_REQUIRE_RECORDED_ENV=1`). No perceptual tolerance exists: nothing measured needs one.
+- **Fonts**: bytes must hash to the recorded hash (registered asset `sha256`, or a manifest entry), else `FontIntegrityError` (stage:
+  `PERMANENT.MISSING_DEPENDENCY`, `font_hash_match`), also on the glyph-coverage path. Tenant brand-kit fonts (FR-09) stay allowed; the stage
+  still requires a registered asset with a licence row. Fonts load from memory only, so a system font is never used.
+- **Lock**: `pillow==13.0.0` exactly in `pyproject.toml` and `uv.lock`; fontTools (test-font generator) is locked. FreeType, HarfBuzz and Raqm
+  are inside the Pillow wheel; FriBiDi and zlib are system libraries.
+- **Probe**: `scripts/probe_render_env.py` prints the full fingerprint, loaded libraries, canary raster, PNG and font hashes of a host.
+
+Still open (`REQUIRES REVIEW`): (1) no runtime image exists in the repo (deployment is not approved); (2) aarch64 and macOS have no recorded
+canary (an arm64 leg of the clean-image job tests it); (3) the owner picks the default Devanagari font (Q-O6): the pinned OFL candidate is
+verified, not chosen; (4) the verifier's `c58d42db` is unexplained until their probe output is compared.
 
 ## Fonts, templates, glyphs (licence rows)
 
@@ -73,7 +81,7 @@ OFL candidate below is verified, not chosen.
 - Pinned fonts (`data/fonts/`, manifest with SHA-256, licence and source): Noto Sans Devanagari variable font, Version 2.007, SIL OFL 1.1,
   unmodified, 641,944 bytes, licence text `OFL-NotoSansDevanagari.txt` (research entry RV-08); and the generated box test font
   `a11_test_box.ttf` (5.6 KB, no third-party outlines; `test_committed_test_font_equals_generator_and_is_pinned`). The default Devanagari
-  font stays a tenant `FONT` asset chosen by the owner (question Q-O6); its bytes must hash to a manifest entry.
+  font stays a tenant `FONT` asset chosen by the owner (question Q-O6); its bytes must hash to the recorded `sha256` of the asset.
 
 ## Tenant isolation (blueprint 19.1)
 

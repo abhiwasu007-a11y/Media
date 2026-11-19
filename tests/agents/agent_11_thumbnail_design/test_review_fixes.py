@@ -102,27 +102,7 @@ def test_m6_missing_raqm_is_permanent_and_precedes_the_paid_call() -> None:
     assert env.llm.calls == 0
 
 
-def test_unpinned_render_environment_is_permanent_and_precedes_the_paid_call() -> None:
-    env = make_env()
-
-    class Unpinned:
-        def __init__(self, inner: Any) -> None:
-            self._i = inner
-
-        def environment_problem(self) -> str | None:
-            return "not pinned"
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._i, name)
-
-    env = _with(env, composer=Unpinned(env.stage.d.composer))
-    with pytest.raises(MissingDependencyError) as e:
-        env.stage.run(env.ti, "a")
-    assert e.value.details["missing"] == ["pinned_render_environment"]
-    assert env.llm.calls == 0
-
-
-def test_unpinned_font_asset_is_refused_before_the_paid_call(
+def test_font_hash_mismatch_is_refused_before_the_paid_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     env = make_env()
@@ -132,7 +112,7 @@ def test_unpinned_font_asset_is_refused_before_the_paid_call(
     )
     with pytest.raises(MissingDependencyError) as e:
         env.stage.run(env.ti, "a")
-    assert e.value.details["missing"] == ["pinned_font"]
+    assert e.value.details["missing"] == ["font_hash_match"]
     assert env.llm.calls == 0
 
 

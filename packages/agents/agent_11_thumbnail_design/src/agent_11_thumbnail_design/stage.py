@@ -60,7 +60,7 @@ from agent_11_thumbnail_design.payload import (
     PlannerInfo,
     ThumbnailInput,
 )
-from agent_11_thumbnail_design.pinning import verify_font
+from agent_11_thumbnail_design.pinning import render_environment, verify_font
 from agent_11_thumbnail_design.ports import (
     BrandKitView,
     FontRef,
@@ -386,6 +386,7 @@ class _Run:
         self.ti, self.inp, self.tc, self.attempt = ti, inp, tc, attempt
         self.calls = _Calls()
         self.banned_words: tuple[str, ...] = ()
+        self.font_source = "tenant_asset"
         self.scanner = InjectionScanner(
             stage.d.lexicons.injection_markers, stage.d.lexicons.instruction_phrases
         )
@@ -466,11 +467,12 @@ class _Run:
         self._preflight(finance)  # a11.pre.config: fail closed before any model call
         font_bytes = self._read_blob(font.uri, font.sha256)
         try:
-            verify_font(font_bytes, font.sha256)  # only pinned fonts are rasterised (fail closed)
+            # the registered asset's recorded hash must match the bytes (fail closed)
+            self.font_source = verify_font(font_bytes, font.sha256)
         except FontIntegrityError as exc:
             raise MissingDependencyError(
-                "the font is not in the pinned font manifest",
-                details={"check_id": "a11.pre.config", "missing": ["pinned_font"]},
+                "the font bytes do not match the recorded hash of the font asset",
+                details={"check_id": "a11.pre.config", "missing": ["font_hash_match"]},
             ) from exc
         colours = {**palette(), **(kit.colours if kit else {})}
         banned_words = kit.banned_words if kit else ()
@@ -478,7 +480,7 @@ class _Run:
         covered_text = " ".join(
             [promise.working_title_local, brief.text_idea_local, *promise.promise_key_terms]
         )
-        if self.d.composer.missing_glyphs(self.ti.org_id, font_bytes, covered_text):
+        if self.d.composer.missing_glyphs(self.ti.org_id, font_bytes, covered_text, font.sha256):
             raise MissingDependencyError("no font with glyph coverage for the language")
 
         # Promise material scan: instruction-like content means a human must look (8.4).
@@ -613,12 +615,6 @@ class _Run:
             raise MissingDependencyError(
                 "the Raqm layout engine (libraqm with system libfribidi) is not available",
                 details={"check_id": "a11.pre.config", "missing": ["raqm"]},
-            )
-        problem = d.composer.environment_problem()
-        if problem is not None:  # unpinned Pillow / FreeType / Raqm / HarfBuzz / FriBiDi / CPU
-            raise MissingDependencyError(
-                "the rendering environment is not pinned (no recorded canary)",
-                details={"check_id": "a11.pre.config", "missing": ["pinned_render_environment"]},
             )
 
     def _script_gate(self, script: Any) -> None:
@@ -1477,6 +1473,8 @@ class _Run:
             "composer_version": "pillow-raqm",
             "template_set_sha256": template_set_sha256(),
             "font_asset_ids": [font.asset_id],
+            "font_source": self.font_source,
+            "render_environment": render_environment(),
             "calls": self.calls.records,
         }
 

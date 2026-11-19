@@ -19,13 +19,10 @@ from agent_11_thumbnail_design.errors import (
     ComposeFailedError,
     FontIntegrityError,
     GlyphMissingError,
-    RenderEnvironmentError,
     TextDoesNotFitError,
 )
 from agent_11_thumbnail_design.measure import contrast_ratio, fit_text
 from agent_11_thumbnail_design.pinning import (
-    check_environment,
-    environment_problem,
     pixel_sha256,
     verify_font,
 )
@@ -114,9 +111,10 @@ class RenderResult:
 
 class ImageComposer(Protocol):
     def render(self, spec: RenderSpec) -> RenderResult: ...
-    def missing_glyphs(self, org_id: str, font_bytes: bytes, text: str) -> tuple[str, ...]: ...
+    def missing_glyphs(
+        self, org_id: str, font_bytes: bytes, text: str, font_sha256: str | None = None
+    ) -> tuple[str, ...]: ...
     def raqm_available(self) -> bool: ...
-    def environment_problem(self) -> str | None: ...
 
 
 class _Metrics:
@@ -165,7 +163,11 @@ class PillowComposer:
                 raise ComposeFailedError("font could not be loaded") from exc
         return self._fonts[key]
 
-    def missing_glyphs(self, org_id: str, font_bytes: bytes, text: str) -> tuple[str, ...]:
+    def missing_glyphs(
+        self, org_id: str, font_bytes: bytes, text: str, font_sha256: str | None = None
+    ) -> tuple[str, ...]:
+        if font_sha256 is not None:
+            verify_font(font_bytes, font_sha256)  # FontIntegrityError on a mismatch
         sha = hashlib.sha256(font_bytes).hexdigest()
         key = f"amw:{org_id}:a11cmap:{sha}"
         if key not in self._cmaps:
@@ -181,16 +183,11 @@ class PillowComposer:
 
         return bool(features.check("raqm"))
 
-    def environment_problem(self) -> str | None:
-        """Why this process may not render (not a pinned environment), or None."""
-        return environment_problem()
-
     # --- render --------------------------------------------------------------------------
     def render(self, spec: RenderSpec) -> RenderResult:
         if not self.raqm_available():
             raise ComposeFailedError("the Raqm layout engine is not available")
-        check_environment()  # fail closed: RenderEnvironmentError for an unpinned environment
-        verify_font(spec.font_bytes, spec.font_sha256)  # FontIntegrityError: tampered or unpinned
+        verify_font(spec.font_bytes, spec.font_sha256)  # FontIntegrityError: bytes != recorded hash
         text_all = " ".join(spec.lines)
         missing = self.missing_glyphs(spec.org_id, spec.font_bytes, text_all)
         if missing:
@@ -401,7 +398,6 @@ __all__ = [
     "FontIntegrityError",
     "ImageComposer",
     "PillowComposer",
-    "RenderEnvironmentError",
     "RenderResult",
     "RenderSpec",
     "contains_sequence",

@@ -15,7 +15,3 @@ class ComposeFailedError(Exception):
 
 class FontIntegrityError(Exception):
     """Font bytes differ from their hash or are not in the pinned font manifest (fail closed)."""
-
-
-class RenderEnvironmentError(Exception):
-    """The rendering libraries are not a pinned environment with a recorded canary (fail closed)."""

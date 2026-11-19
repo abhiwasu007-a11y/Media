@@ -1,18 +1,20 @@
-"""Pinned fonts and pinned rendering environments (determinism must not depend on the host).
+"""Pinned fonts and the rendering-environment record (determinism must not depend on the host).
 
-Two lists live in package data and are the only authority:
+* ``data/fonts/manifest.json``: the fonts shipped in the repo, with SHA-256, licence and source.
+* A font is rasterised only if its bytes hash to the hash that was claimed for it (the registered
+  asset's recorded ``sha256``, or a manifest entry): a mismatch is ``FontIntegrityError``. Tenant
+  brand-kit fonts (blueprint FR-09) are therefore allowed; the stage still requires the font to be
+  a registered asset with a licence row. Fonts are loaded from memory only, so a system font can
+  never be substituted.
+* ``data/environments.json``: the canary raster hashes (box test font and the real Noto font)
+  recorded per FreeType version. The renderer NEVER refuses to render because the environment is
+  not listed: the environment is recorded as provenance in the thumbnail manifest, and the canary
+  test compares against the table (a listed FreeType must match exactly; an unlisted one is
+  reported, and fails only in the strict clean-image CI job, ``A11_REQUIRE_RECORDED_ENV=1``).
 
-* ``data/fonts/manifest.json``: every font the composer may rasterise, with its SHA-256, licence and
-  source. A font whose bytes hash differently from the claimed hash, or whose hash is not listed, is
-  refused (``FontIntegrityError``). Fonts are always loaded from memory, never by name or path, so a
-  system font can never be substituted.
-* ``data/environments.json``: the rendering environments the canary was recorded for. The key is the
-  fingerprint of Pillow, FreeType, Raqm, HarfBuzz, FriBiDi and the CPU architecture. An environment
-  that is not listed is refused (``RenderEnvironmentError``), never rendered differently.
-
-The PNG file bytes are NOT part of the cross-host identity: the wheel links the host zlib, and
-different zlib builds write different (equally valid) deflate streams for the same pixels. The
-cross-host identity is ``pixel_sha256`` of the decoded RGB raster.
+The key is only what was measured to change pixels (see ``environments.json`` ``evidence``). The PNG
+file bytes are not the cross-host identity: the cross-host identity is ``pixel_sha256`` of the
+decoded RGB raster.
 """
 
 import hashlib
@@ -26,7 +28,7 @@ from typing import Any
 import PIL
 from PIL import features
 
-from agent_11_thumbnail_design.errors import FontIntegrityError, RenderEnvironmentError
+from agent_11_thumbnail_design.errors import FontIntegrityError
 
 _PKG = "agent_11_thumbnail_design"
 
@@ -65,31 +67,25 @@ def pinned_font_bytes(key: str) -> bytes:
     raise FontIntegrityError(f"font key {key!r} is not in the pinned font manifest")
 
 
-def verify_font(font_bytes: bytes, claimed_sha256: str) -> PinnedFont:
+def verify_font(font_bytes: bytes, claimed_sha256: str) -> str:
+    """Check the bytes against the claimed (recorded) hash; return the font source label."""
     actual = hashlib.sha256(font_bytes).hexdigest()
     if actual != claimed_sha256:
         raise FontIntegrityError("font bytes do not match their recorded hash")
     pinned = font_manifest().get(actual)
-    if pinned is None:
-        raise FontIntegrityError("font is not in the pinned font manifest")
-    return pinned
+    return f"repo_manifest:{pinned.key}" if pinned else "tenant_asset"
 
 
 @dataclass(frozen=True, slots=True)
 class Fingerprint:
+    """Everything recorded as provenance; only ``freetype2`` is the canary key (measured)."""
+
     pillow: str
     freetype2: str
     raqm: str
     harfbuzz: str
     fribidi: str
     machine: str
-
-    @property
-    def key(self) -> str:
-        return (
-            f"pillow-{self.pillow}-freetype-{self.freetype2}-raqm-{self.raqm}"
-            f"-harfbuzz-{self.harfbuzz}-fribidi-{self.fribidi}-{self.machine}"
-        )
 
 
 def current_fingerprint() -> Fingerprint:
@@ -107,33 +103,33 @@ def current_fingerprint() -> Fingerprint:
 
 
 @cache
-def recorded_environments() -> dict[str, str]:
-    """Environment fingerprint key -> canary pixel SHA-256 recorded for it."""
+def _environments() -> dict[str, Any]:
     raw: dict[str, Any] = json.loads(_data("environments.json"))
-    return {
-        Fingerprint(
-            e["pillow"], e["freetype2"], e["raqm"], e["harfbuzz"], e["fribidi"], e["machine"]
-        ).key: e["canary_pixel_sha256"]
-        for e in raw["environments"]
-    }
+    return raw
 
 
-def check_environment() -> Fingerprint:
-    """Fail closed unless this process runs in an environment the canary was recorded for."""
-    fp = current_fingerprint()
-    if fp.key not in recorded_environments():
-        raise RenderEnvironmentError(
-            "rendering environment is not pinned (no recorded canary): " + fp.key
-        )
-    return fp
-
-
-def environment_problem() -> str | None:
-    try:
-        check_environment()
-    except RenderEnvironmentError as exc:
-        return str(exc)
+def recorded_canary(freetype2: str, font_key: str) -> str | None:
+    """Canary pixel SHA-256 recorded for this FreeType version and canary font, or None."""
+    for e in _environments()["environments"]:
+        if e["freetype2"] == freetype2:
+            value = e["canary_pixel_sha256"].get(font_key)
+            return None if value is None else str(value)
     return None
+
+
+def render_environment() -> dict[str, Any]:
+    """Provenance record for the thumbnail manifest: versions and the font manifest hash."""
+    fp = current_fingerprint()
+    return {
+        "pillow": fp.pillow,
+        "freetype2": fp.freetype2,
+        "harfbuzz": fp.harfbuzz,
+        "raqm": fp.raqm,
+        "fribidi": fp.fribidi,
+        "machine": fp.machine,
+        "font_manifest_sha256": hashlib.sha256(_data("fonts/manifest.json")).hexdigest(),
+        "canary_recorded": recorded_canary(fp.freetype2, "a11_test_box") is not None,
+    }
 
 
 def pixel_sha256(mode: str, size: tuple[int, int], raw: bytes) -> str:

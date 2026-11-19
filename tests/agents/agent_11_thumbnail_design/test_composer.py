@@ -2,18 +2,20 @@
 
 import hashlib
 import io
+import os
 import time
 from dataclasses import replace
 
 import pytest
+from fontTools.ttLib import TTFont  # type: ignore[import-untyped]
 from PIL import Image, ImageFont
 
 from agent_11_thumbnail_design import pinning
+from agent_11_thumbnail_design.canary import CANARY_FONTS, canary_spec
 from agent_11_thumbnail_design.composer import PillowComposer, RenderSpec, hex_to_rgb, phash64
 from agent_11_thumbnail_design.errors import (
     FontIntegrityError,
     GlyphMissingError,
-    RenderEnvironmentError,
     TextDoesNotFitError,
 )
 from agent_11_thumbnail_design.pinning import (
@@ -21,7 +23,9 @@ from agent_11_thumbnail_design.pinning import (
     font_manifest,
     pinned_font_bytes,
     pixel_sha256,
-    recorded_environments,
+    recorded_canary,
+    render_environment,
+    verify_font,
 )
 from agent_11_thumbnail_design.templates import glyph_catalogue, load_templates, palette
 from tests.agents.agent_11_thumbnail_design.env import png_bytes
@@ -30,9 +34,9 @@ from tests.agents.agent_11_thumbnail_design.fontgen import build_font
 FONT = build_font()
 FONT_SHA = hashlib.sha256(FONT).hexdigest()
 ORG = "org_00000000-0000-7000-8000-000000000001"
-#: Canary (U-169): the fixed fixture below renders to a recorded raster hash per pinned rendering
-#: environment (``data/environments.json``, keyed by the Pillow, FreeType, Raqm, HarfBuzz, FriBiDi
-#: and CPU fingerprint). The PNG bytes are not the cross-host identity (host zlib); the raster is.
+#: Canary (U-169): the ``canary.py`` fixtures render to a recorded raster hash per FreeType
+#: version (``data/environments.json``; box test font, real Noto font). PNG bytes are not the
+#: cross-host identity (host zlib); the decoded raster is.
 
 
 def spec(**over: object) -> RenderSpec:
@@ -71,12 +75,37 @@ def test_byte_identical_across_runs_and_instances() -> None:
     assert Image.open(io.BytesIO(a.png)).size == (1920, 1080)
 
 
-def test_canary_hash_is_recorded() -> None:
+@pytest.mark.parametrize("font_key", CANARY_FONTS)
+def test_canary_hash_is_recorded(font_key: str) -> None:
+    """Listed FreeType: exact match. Unlisted: skip with the hash; strict in the clean-image job."""
     fp = current_fingerprint()
-    recorded = recorded_environments()
-    assert fp.key in recorded, f"unpinned environment, record its canary: {fp.key}"
-    got = PillowComposer().render(spec()).pixel_sha256
-    assert got == recorded[fp.key], f"re-record the canary for {fp.key}: {got}"
+    got = PillowComposer().render(canary_spec(font_key)).pixel_sha256
+    recorded = recorded_canary(fp.freetype2, font_key)
+    if recorded is None:
+        msg = f"environment not recorded: freetype {fp.freetype2} ({font_key}); pixel_sha256={got}"
+        if os.environ.get("A11_REQUIRE_RECORDED_ENV") == "1":
+            pytest.fail(msg)
+        pytest.skip(msg)
+    assert got == recorded, f"canary differs for FreeType {fp.freetype2} ({font_key}): {got}"
+
+
+def test_canary_fixture_is_the_documented_spec() -> None:
+    assert canary_spec("a11_test_box").font_sha256 == FONT_SHA
+    assert PillowComposer().render(canary_spec("a11_test_box")).png == (
+        PillowComposer().render(spec()).png
+    )
+
+
+def test_render_environment_is_recorded_as_provenance_and_never_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fp = current_fingerprint()
+    monkeypatch.setattr(pinning, "current_fingerprint", lambda: replace(fp, freetype2="0.0.0"))
+    rec = render_environment()
+    assert rec["freetype2"] == "0.0.0"
+    assert rec["canary_recorded"] is False
+    assert len(str(rec["font_manifest_sha256"])) == 64
+    assert PillowComposer().render(spec()).pixel_sha256  # an unlisted environment still renders
 
 
 def test_pixel_hash_is_the_decoded_raster_and_png_encoding_does_not_change_it() -> None:
@@ -121,12 +150,26 @@ def test_production_font_is_pinned_ofl_and_shapes_devanagari() -> None:
 def test_tampered_font_is_refused() -> None:
     bad = bytearray(FONT)
     bad[-1] ^= 1
-    with pytest.raises(FontIntegrityError):  # bytes do not match the claimed hash
+    with pytest.raises(FontIntegrityError):  # bytes do not match the claimed (recorded) hash
         PillowComposer().render(spec(font_bytes=bytes(bad)))
-    with pytest.raises(FontIntegrityError):  # consistent hash, but not in the manifest
-        PillowComposer().render(
-            spec(font_bytes=bytes(bad), font_sha256=hashlib.sha256(bytes(bad)).hexdigest())
-        )
+    with pytest.raises(FontIntegrityError):  # same check on the glyph-coverage path
+        PillowComposer().missing_glyphs(ORG, bytes(bad), "abc", FONT_SHA)
+
+
+def test_tenant_brand_font_with_a_recorded_hash_is_allowed() -> None:
+    """FR-09: a font outside the repo manifest renders when its bytes match the recorded hash."""
+    tt = TTFont(io.BytesIO(FONT))
+    tt["name"].setName("Brand Box", 1, 3, 1, 0x409)
+    out = io.BytesIO()
+    tt.save(out)
+    brand = out.getvalue()
+    sha = hashlib.sha256(brand).hexdigest()
+    assert sha not in font_manifest()
+    assert verify_font(brand, sha) == "tenant_asset"
+    assert PillowComposer().render(spec(font_bytes=brand, font_sha256=sha)).pixel_sha256 == (
+        PillowComposer().render(spec()).pixel_sha256
+    )
+    assert verify_font(FONT, FONT_SHA) == "repo_manifest:a11_test_box"
 
 
 def test_system_font_is_never_used(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,14 +184,6 @@ def test_system_font_is_never_used(monkeypatch: pytest.MonkeyPatch) -> None:
     PillowComposer().render(spec())
     assert seen
     assert all(isinstance(f, io.BytesIO) for f in seen)  # memory only: no name, no path
-
-
-def test_unpinned_environment_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    fp = current_fingerprint()
-    monkeypatch.setattr(pinning, "current_fingerprint", lambda: replace(fp, freetype2="0.0.0"))
-    assert PillowComposer().environment_problem() is not None
-    with pytest.raises(RenderEnvironmentError):
-        PillowComposer().render(spec())
 
 
 def test_changing_the_text_changes_the_pixels_and_hash() -> None:
