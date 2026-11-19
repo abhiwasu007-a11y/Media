@@ -3,6 +3,7 @@
 import threading
 import time
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -397,7 +398,15 @@ def test_due_retries_resumes_and_stuck(
         sysfn.due_retries(ActorRef("nobody"), 1)
 
 
-def test_breaker_open_half_open_close(sysfn: PgSystemFunctions) -> None:
+def test_breaker_open_half_open_close(pg_dsn: str) -> None:
+    # A wide open window: the "still OPEN right after tripping" assertion must not depend on the
+    # runner finishing a few statements within 50 ms (the shared CFG's open_ms), which flaked on CI.
+    wide = replace(CFG, open_ms=400, open_ms_max=4_000)
+    sysfn = PgSystemFunctions(
+        dsn_connection_factory(pg_dsn, role="amw_app"),
+        breaker_config=lambda _key: wide,
+        dwell=DwellLimits(validating_ms=1, failed_without_dlq_ms=1),
+    )
     key = BreakerKey(f"p{uuid.uuid4().hex[:6]}", "llm.completion", "platform")
     reaper = ActorRef("agent_05")
     assert sysfn.breaker_record(reaper, key, True, None).state is CircuitState.CLOSED
@@ -410,10 +419,10 @@ def test_breaker_open_half_open_close(sysfn: PgSystemFunctions) -> None:
     assert state.state is CircuitState.OPEN
     assert state.open_until is not None
     assert sysfn.breaker_record(reaper, key, True, None).state is CircuitState.OPEN
-    time.sleep(0.1)
+    time.sleep(0.5)  # > open_ms (400): the window has elapsed
     state = sysfn.breaker_record(reaper, key, False, "TEMPORARY.TIMEOUT")  # probe fails: reopen
     assert state.state is CircuitState.OPEN
-    time.sleep(0.2)
+    time.sleep(0.9)  # > the reopened 800 ms window
     assert sysfn.breaker_record(reaper, key, True, None).state is CircuitState.HALF_OPEN
     assert sysfn.breaker_record(reaper, key, True, None).state is CircuitState.CLOSED
     with pytest.raises(InputInvalidError):
