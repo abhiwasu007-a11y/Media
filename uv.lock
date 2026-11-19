@@ -279,11 +279,17 @@ name = "amw-orchestrator"
 version = "0.0.0"
 source = { editable = "packages/amw_orchestrator" }
 dependencies = [
+    { name = "amw-adapters" },
     { name = "amw-core" },
+    { name = "amw-runtime" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "amw-core", editable = "packages/amw_core" }]
+requires-dist = [
+    { name = "amw-adapters", editable = "packages/amw_adapters" },
+    { name = "amw-core", editable = "packages/amw_core" },
+    { name = "amw-runtime", editable = "packages/amw_runtime" },
+]
 
 [[package]]
 name = "amw-runtime"
