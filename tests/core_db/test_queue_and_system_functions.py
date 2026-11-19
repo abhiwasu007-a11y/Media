@@ -3,6 +3,7 @@
 import threading
 import time
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -21,6 +22,7 @@ from amw_core.enums import (
     WaitReason,
 )
 from amw_core.errors import (
+    ConfigInvalidError,
     InputInvalidError,
     MissingDependencyError,
     PermissionDeniedError,
@@ -44,7 +46,7 @@ from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.queue import PgTaskQueue
 from amw_core.system_functions import BreakerConfig, DwellLimits, PgSystemFunctions
 from amw_core.tenancy import PgTenancy, connection_of, dsn_connection_factory
-from tests.pg_fixtures import Tenant, insert_job, insert_task, make_tenant
+from tests.pg_fixtures import Tenant, allow_probe_lease, insert_job, insert_task, make_tenant
 
 pytestmark = pytest.mark.integration
 Conn = psycopg.Connection[tuple[Any, ...]]
@@ -431,6 +433,152 @@ def test_breaker_failure_ratio(sysfn: PgSystemFunctions) -> None:
             is CircuitState.CLOSED
         )
     assert sysfn.breaker_record(actor, key, False, "TEMPORARY.NETWORK").state is CircuitState.OPEN
+
+
+def _admitting(pg_dsn: str, cfg: BreakerConfig) -> PgSystemFunctions:
+    return PgSystemFunctions(
+        dsn_connection_factory(pg_dsn, role="amw_app"),
+        breaker_config=lambda _key: cfg,
+        dwell=DwellLimits(validating_ms=1, failed_without_dlq_ms=1),
+    )
+
+
+def _open(fns: PgSystemFunctions, key: BreakerKey, actor: ActorRef) -> None:
+    for _ in range(3):
+        state = fns.breaker_record(actor, key, False, "TEMPORARY.UPSTREAM_5XX")
+    assert state.state is CircuitState.OPEN
+
+
+@pytest.mark.parametrize(("max_probes", "timeout_ms"), [(1, None), (None, 60_000)])
+def test_breaker_admit_needs_probe_config(
+    pg_dsn: str, max_probes: int | None, timeout_ms: int | None
+) -> None:
+    """CCR-108: ``half_open_probe_timeout_ms`` has no default; unset fails closed."""
+    cfg = replace(CFG, half_open_max_probes=max_probes, half_open_probe_timeout_ms=timeout_ms)
+    key = BreakerKey(f"p{uuid.uuid4().hex[:6]}", "llm.completion", "platform")
+    with pytest.raises(ConfigInvalidError):
+        _admitting(pg_dsn, cfg).breaker_admit(ActorRef("agent_05"), key)
+
+
+def test_breaker_admit_probe_and_epoch_through_the_protocol(pg_dsn: str) -> None:
+    cfg = replace(CFG, half_open_max_probes=1, half_open_probe_timeout_ms=60_000)
+    fns: SystemFunctions = _admitting(pg_dsn, cfg)
+    key = BreakerKey(f"p{uuid.uuid4().hex[:6]}", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
+    actor = ActorRef("agent_05")
+    closed = fns.breaker_admit(actor, key)
+    assert closed.admitted
+    assert not closed.probe
+    _open(_admitting(pg_dsn, cfg), key, actor)
+    refused = fns.breaker_admit(actor, key)
+    assert not refused.admitted
+    assert refused.state.state is CircuitState.OPEN
+    time.sleep(0.1)
+    probe = fns.breaker_admit(actor, key)
+    assert probe.probe
+    assert probe.epoch > closed.epoch
+    assert not fns.breaker_admit(actor, key).admitted  # one probe in flight (max 1)
+    # a result of an older epoch, or of a call admitted while CLOSED, changes nothing
+    stale = fns.breaker_record(actor, key, True, None, probe=True, probe_epoch=probe.epoch - 1)
+    assert stale.state is CircuitState.HALF_OPEN
+    late = fns.breaker_record(actor, key, True, None, probe=False, probe_epoch=closed.epoch)
+    assert late.state is CircuitState.HALF_OPEN
+    assert not fns.breaker_admit(actor, key).admitted  # the slot is still held
+    done = fns.breaker_record(actor, key, True, None, probe=True, probe_epoch=probe.epoch)
+    assert done.state is CircuitState.HALF_OPEN  # 1 of 2 successes to close
+    second = fns.breaker_admit(actor, key)
+    assert second.probe
+    closed_again = fns.breaker_record(
+        actor, key, True, None, probe=second.probe, probe_epoch=second.epoch
+    )
+    assert closed_again.state is CircuitState.CLOSED
+
+
+def _breaker_row(admin: psycopg.Connection[tuple[Any, ...]], key: BreakerKey) -> Any:
+    return admin.execute(
+        "SELECT state, half_open_in_flight, half_open_epoch, row_version FROM circuit_breakers"
+        " WHERE provider = %s AND operation_class = %s",
+        (key.provider, key.operation_class),
+    ).fetchone()
+
+
+def test_breaker_admit_refuses_without_a_server_side_lease_bound(pg_dsn: str) -> None:
+    """P4-05 / 0055: no bound for the breaker key (the values are REQUIRES REVIEW) fails closed."""
+    cfg = replace(CFG, half_open_max_probes=1, half_open_probe_timeout_ms=1_000)
+    key = BreakerKey(f"p{uuid.uuid4().hex[:6]}", "llm.completion", "platform")
+    with pytest.raises(ConfigInvalidError, match="no server-side probe lease bound"):
+        _admitting(pg_dsn, cfg).breaker_admit(ActorRef("agent_05"), key)
+    other = BreakerKey(key.provider, "tts.synthesize", "platform")
+    allow_probe_lease(pg_dsn, other.provider, other.operation_class)
+    with pytest.raises(ConfigInvalidError):  # a bound of another operation class does not apply
+        _admitting(pg_dsn, cfg).breaker_admit(ActorRef("agent_05"), key)
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "1.5", '"60000"', "null", "[60000]"])
+def test_breaker_admit_refuses_a_malformed_lease_bound(
+    pg_dsn: str, admin: psycopg.Connection[tuple[Any, ...]], bad: str
+) -> None:
+    cfg = replace(CFG, half_open_max_probes=1, half_open_probe_timeout_ms=1)
+    key = BreakerKey(f"p{uuid.uuid4().hex[:6]}", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
+    admin.execute(
+        "UPDATE platform_controls SET value = jsonb_set(value, ARRAY[%s], %s::jsonb)"
+        " WHERE key = 'breaker_probe_timeout_max_ms'",
+        (f"{key.provider}.{key.operation_class}", bad),
+    )
+    with pytest.raises(ConfigInvalidError):
+        _admitting(pg_dsn, cfg).breaker_admit(ActorRef("agent_05"), key)
+
+
+def test_breaker_admit_refuses_a_lease_above_the_bound_and_changes_nothing(
+    pg_dsn: str, admin: psycopg.Connection[tuple[Any, ...]]
+) -> None:
+    """Re-check L1b m-1: a caller can no longer lease a probe for years."""
+    key = BreakerKey(f"p{uuid.uuid4().hex[:6]}", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class, max_ms=60_000)
+    at_bound = replace(CFG, half_open_max_probes=1, half_open_probe_timeout_ms=60_000)
+    actor = ActorRef("agent_05")
+    _open(_admitting(pg_dsn, at_bound), key, actor)
+    time.sleep(0.1)  # past open_until
+    before = _breaker_row(admin, key)
+    years = replace(at_bound, half_open_probe_timeout_ms=3 * 365 * 24 * 3_600_000)
+    for cfg in (years, replace(at_bound, half_open_probe_timeout_ms=60_001)):
+        with pytest.raises(ConfigInvalidError, match="above the server-side bound"):
+            _admitting(pg_dsn, cfg).breaker_admit(actor, key)
+    assert _breaker_row(admin, key) == before  # refused before the row lock: no transition
+    probe = _admitting(pg_dsn, at_bound).breaker_admit(actor, key)
+    assert probe.probe
+    lease = admin.execute(
+        "SELECT half_open_probe_until - now() FROM circuit_breakers"
+        " WHERE provider = %s AND operation_class = %s",
+        (key.provider, key.operation_class),
+    ).fetchone()
+    assert lease is not None
+    assert lease[0] <= timedelta(milliseconds=60_000)
+
+
+def test_the_application_role_cannot_widen_the_lease_bound(pg_dsn: str) -> None:
+    """The bound is server-side: ``amw_app`` reads ``platform_controls`` but cannot write it."""
+    with psycopg.connect(pg_dsn) as conn:
+        conn.execute("SET ROLE amw_app")
+        for stmt in (
+            "UPDATE platform_controls SET value = '{}'::jsonb",
+            "INSERT INTO platform_controls (id, key, value, updated_by) VALUES"
+            " (gen_random_uuid(), 'breaker_probe_timeout_max_ms', '{}'::jsonb, 'x')",
+        ):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                conn.execute(stmt)
+            conn.rollback()
+            conn.execute("SET ROLE amw_app")
+
+
+def test_the_lease_bound_must_be_an_object(admin: psycopg.Connection[tuple[Any, ...]]) -> None:
+    with admin.transaction(), pytest.raises(psycopg.errors.CheckViolation):
+        admin.execute(
+            "INSERT INTO platform_controls (id, key, value, updated_by) VALUES"
+            " (gen_random_uuid(), 'breaker_probe_timeout_max_ms', '60000'::jsonb, 'x')"
+            " ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
 
 
 def _write_breaker(tenancy: PgTenancy, tenant: Tenant) -> None:

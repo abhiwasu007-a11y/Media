@@ -21,7 +21,7 @@ from amw_core.retries.pg import PgBreakerFunctions, PgDeadLetterStore
 from amw_core.tenancy import PgTenancy, dsn_connection_factory
 from tests.core_services.support import T0, settings
 from tests.core_services_db.conftest import Work, make_user, run_sql
-from tests.pg_fixtures import Tenant
+from tests.pg_fixtures import Tenant, allow_probe_lease
 
 pytestmark = pytest.mark.integration
 ADAPTER = ActorRef("agent_05")
@@ -56,6 +56,7 @@ def test_breaker_function_matches_the_pure_state_machine(
     fns = _functions(pg_dsn)
     cfg = BreakerSettings(open_ms=300, open_ms_max=1200)
     key = BreakerKey("llm_provider_parity", "llm.completion", "platform")
+    allow_probe_lease(pg_dsn, key.provider, key.operation_class)
     pure = new_row(key, T0)
     outcomes = [
         (True, None),
