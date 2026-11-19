@@ -71,8 +71,9 @@ Findings on this build (all recorded in tests):
   be above the target. Each segment also writes the same frames as lossless FFV1 (scratch); the
   SSIM against it is reported by `qc.video.quality_metric` (report only until 3B).
 * Review of PR #79 (CCR-241): the `ssim` filter pairs frames by timestamp and the Matroska
-  reference has a 1 ms timebase, so both inputs are re-timed by frame index and the pair count
-  must equal the frame count. A plain MP4 mux writes an edit list (B-frame delay):
+  reference has a 1 ms timebase, so both inputs are re-timed by frame index; the reference's decoded frame
+  count and the filter's pair count must both equal the (sampled) frame count (the filter
+  repeats the last frame of a shorter input, so the pair count alone cannot see it). A plain MP4 mux writes an edit list (B-frame delay):
   `-use_editlist 0 -movflags +negative_cts_offsets` keeps the video at t = 0, and dropping the
   1024 AAC priming samples keeps the audio in sync (click at 500 ms decodes at 500.42 ms).
   One-pass ABR bursts then starves on noise at every segment start; the default VBV cap

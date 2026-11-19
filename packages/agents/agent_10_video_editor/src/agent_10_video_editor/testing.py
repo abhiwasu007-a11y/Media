@@ -447,6 +447,7 @@ class FakeFfmpegRunner:
         self.unreadable_inputs: set[str] = set()
         self.ssim_all = "0.990000"
         self.ssim_pair_offset = 0
+        self.reference_frame_offset = 0
         self.strip_sei = False
         self._encodes = 0
         self._lock = threading.Lock()
@@ -552,7 +553,10 @@ class FakeFfmpegRunner:
             }
             ref = argv[-1]
             if ref != out_name:  # the lossless reference output of the same frames
-                (cwd / ref).write_bytes(self._boxes({**header, "kind": "reference"}))
+                ref_frames = frames + self.reference_frame_offset
+                (cwd / ref).write_bytes(
+                    self._boxes({**header, "kind": "reference", "frames": ref_frames})
+                )
         else:
             names = re.findall(r"file '([^']+)'", (cwd / "concat.txt").read_text())
             parts = [self._header((cwd / n).read_bytes()) for n in names]

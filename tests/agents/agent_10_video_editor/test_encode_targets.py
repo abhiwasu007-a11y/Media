@@ -482,3 +482,39 @@ def test_mux_without_edit_lists_keeps_audio_in_sync(tmp_path: Path) -> None:
     samples = [int.from_bytes(pcm[i : i + 2], "little", signed=True) for i in range(0, len(pcm), 2)]
     peak = max(range(len(samples)), key=lambda k: abs(samples[k]))
     assert abs(peak - 24_000) <= 48  # the click decodes within 1 ms of 500 ms
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("offset", [-1, 1])
+def test_a_reference_with_a_wrong_frame_count_is_not_measured(tmp_path: Path, offset: int) -> None:
+    world = World(tmp_path, shots=2)
+    world.runner.reference_frame_offset = offset
+    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert out.status is OutputStatus.SUCCEEDED
+    quality = payload_data(out)["encoder"]["quality_metric"]
+    assert quality["ssim_all"] is None
+    assert quality["frames_measured"] == 0
+    assert "ssim" not in [c.kind for c in world.runner.calls]  # refused before the filter runs
+
+
+class _ShortReferenceRunner(ProcessFfmpegRunner):
+    """Real FFmpeg, but the lossless reference of every segment loses its last frame."""
+
+    def run(self, argv: Any, *, cwd: Path, limits: RunLimits, stop: Any = None) -> Any:
+        a = list(argv)
+        if "segment_ref.part" in a and "-filter_complex" in a:
+            at = len(a) - 1 - a[::-1].index("-frames:v")  # the reference output's -frames:v
+            a[at + 1] = str(int(a[at + 1]) - 1)
+        return super().run(a, cwd=cwd, limits=limits, stop=stop)
+
+
+@real
+@pytest.mark.integration
+def test_a_short_reference_is_caught_with_real_ffmpeg(tmp_path: Path, stills: _StillMedia) -> None:
+    world = World(tmp_path, shots=2, shot_ms=1000, config=_cfg(), media=stills)
+    world.runner = _ShortReferenceRunner()  # type: ignore[assignment]
+    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    assert out.status is OutputStatus.SUCCEEDED
+    quality = payload_data(out)["encoder"]["quality_metric"]
+    assert quality["ssim_all"] is None  # the filter alone would have reported a value
+    assert quality["frames_measured"] == 0

@@ -693,7 +693,7 @@ class _RenderRun:
                 raise
             try:
                 self._verify_segment(part, segment, probe)
-                ssim_all, ssim_frames = self._ssim(part, reference, segment, limits)
+                ssim_all, ssim_frames = self._ssim(part, reference, segment, limits, probe)
             except MeasurementUnavailable, RenderCrashError:
                 part.unlink(missing_ok=True)
                 raise
@@ -715,11 +715,28 @@ class _RenderRun:
         )
 
     def _ssim(
-        self, part: Path, reference: Path, segment: Segment, limits: RunLimits
+        self,
+        part: Path,
+        reference: Path,
+        segment: Segment,
+        limits: RunLimits,
+        probe: ProbeService,
     ) -> tuple[str | None, int]:
-        """SSIM of one segment and the number of frame pairs it covers. A pair count that is
-        not the number of sampled frames is reported as not measured (never a wrong value)."""
+        """SSIM of one segment and the number of frame pairs it covers.
+
+        Both sides are counted: the encode's frame count is verified by ``_verify_segment``,
+        the reference's decoded frame count must equal the sampled frame count, and the filter's
+        pair count must equal it too (the filter repeats the last frame of a shorter input, so
+        the pair count alone cannot see a short or long reference). Any mismatch is reported as
+        not measured (warning ``SSIM_*_COUNT``), never as a value."""
         every = self.d.cfg.render.quality_sample_every
+        expected = -(-segment.frames // every)
+        reference_frames = probe.frame_count(reference.name)
+        if reference_frames != expected:
+            self.warnings.append(
+                f"SSIM_REFERENCE_COUNT:{segment.ordinal}:{reference_frames}/{expected}"
+            )
+            return None, 0
         result = run_checked(
             self.d.runner,
             self.argv.ssim(part.name, reference.name, every),
@@ -727,7 +744,6 @@ class _RenderRun:
             limits=limits,
         )
         pairs = sum(1 for line in result.stdout.splitlines() if line.startswith("n:"))
-        expected = -(-segment.frames // every)
         if pairs != expected:
             self.warnings.append(f"SSIM_PAIR_COUNT:{segment.ordinal}:{pairs}/{expected}")
             return None, 0
