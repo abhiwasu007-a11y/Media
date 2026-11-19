@@ -124,7 +124,8 @@ def test_verify_and_confirm_write_verbs_in_order(kind: EvidenceRecordKind, famil
     assert w.actions() == []  # a pending insert is not yet a record
     assert w.flow.verify(w.tx, row.id, REQUESTED, NOW).state is EvidenceState.VERIFIED
     done = w.flow.confirm(w.tx, row.id, "ses-1", "ev-2", "confirmed", NOW)
-    assert done.state is EvidenceState.CONFIRMED
+    assert done.confirmed
+    assert done.require_confirmed().state is EvidenceState.CONFIRMED
     assert w.actions() == [f"{family}.recorded_from_owner_chat", f"{family}.owner_confirmed"]
     first = next(iter(w.log.export(w.tx)))
     assert first.entry.actor_ref == "sys_operator"
@@ -175,9 +176,13 @@ def test_failed_confirmation_is_audited_as_a_refused_attempt_and_the_row_stays_v
     with pytest.raises(MissingDependencyError):  # the confirmation event is not fetchable
         w.flow.confirm(w.tx, row.id, "ses-1", "ev-missing", "confirmed", NOW)
     assert w.actions() == ["owner_topic.recorded_from_owner_chat"]
+    # the same event as the evidence is not a distinct confirmation: RETURNED, not raised
+    refused = w.flow.confirm(w.tx, row.id, "ses-1", "ev-1", "confirmed", NOW)
+    assert not refused.confirmed
+    assert refused.refusal is not None
+    assert refused.record.state is EvidenceState.VERIFIED
     with pytest.raises(PermissionDeniedError):
-        # the same event as the evidence is not a distinct confirmation
-        w.flow.confirm(w.tx, row.id, "ses-1", "ev-1", "confirmed", NOW)
+        refused.require_confirmed()
     assert w.actions() == ["owner_topic.recorded_from_owner_chat", "owner_topic.record_refused"]
     entry = list(w.log.export(w.tx))[-1].entry
     assert entry.details["attempt"] == "confirmation"
@@ -212,3 +217,55 @@ def test_audit_is_tenant_scoped() -> None:
     w.flow.verify(w.tx, row.id, None, NOW)
     assert w.actions() != []
     assert w.actions(ids.ORG.new()) == []
+
+
+def test_replayed_confirmation_is_audited_and_returned() -> None:
+    w = World(event(TEXT, "ev-1"))
+    row = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
+    code = row.evidence.review_code
+    w.harness.source.add(event(f"{code} confirmed", "ev-2", SAID + timedelta(seconds=1)))
+    w.flow.verify(w.tx, row.id, None, NOW)
+    assert w.flow.confirm(w.tx, row.id, "ses-1", "ev-2", "confirmed", NOW).confirmed
+    again = w.flow.confirm(w.tx, row.id, "ses-1", "ev-2", "confirmed", NOW)
+    assert again.refusal is not None
+    assert again.refusal.reason == "not_verified"
+    assert w.actions()[-1] == "owner_topic.record_refused"
+    entry = list(w.log.export(w.tx))[-1].entry
+    assert entry.details["attempt"] == "confirmation"
+    assert entry.details["state"] == "CONFIRMED"
+
+
+def test_event_used_by_another_record_is_a_conflict_audited_and_returned() -> None:
+    w = World(event(TEXT, "ev-1"), event("x", "ev-9"))
+    first = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
+    other = w.flow.record(
+        w.tx,
+        replace(new_evidence(EvidenceRecordKind.OWNER_TOPIC), event_uuid="ev-9"),
+        NOW,
+    )
+    assert first.id != other.id
+    w.flow.verify(w.tx, first.id, None, NOW)
+    # ev-9 backs the other live row, so it cannot also confirm this one
+    out = w.flow.confirm(w.tx, first.id, "ses-1", "ev-9", "confirmed", NOW)
+    assert not out.confirmed
+    assert out.refusal is not None
+    assert w.actions()[-1] == "owner_topic.record_refused"
+
+
+@pytest.mark.parametrize("free_text", [TEXT, "owner said " + TEXT, "sk-live-0123456789abcdef"])
+def test_free_text_subject_kind_and_id_never_reach_the_audit(free_text: str) -> None:
+    w = World()
+    bad = replace(new_evidence(EvidenceRecordKind.DATASET_INTAKE), subject_kind=free_text)
+    w.flow.record(w.tx, bad, NOW, state=EvidenceState.REFUSED, refused_reason="x")
+    entry = next(iter(w.log.export(w.tx))).entry
+    assert entry.details["subject_kind"] == "other"
+    assert free_text not in str(entry.details)
+
+
+def test_known_subject_kind_is_kept() -> None:
+    w = World(event(TEXT, "ev-1"))
+    row = w.flow.record(w.tx, new_evidence(EvidenceRecordKind.OWNER_TOPIC), NOW)
+    w.flow.verify(w.tx, row.id, None, NOW)
+    entry = next(iter(w.log.export(w.tx))).entry
+    assert entry.details["subject_kind"] == "script"
+    assert entry.details["subject_id"] == row.evidence.subject_id
