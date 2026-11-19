@@ -9,6 +9,7 @@ beyond the timeline is ``INPUT_INVALID``; never a partial list (``OV-01`` to ``O
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from amw_core.contracts.error import violation
 from amw_core.enums import LicenceUsageKind
 from amw_core.errors import InputInvalidError, MissingDependencyError
 
@@ -20,6 +21,8 @@ class OverlayInput:
     start_ms: int
     end_ms: int
     template_asset: str | None
+    """The asset ``TemplateResolver`` found for ``template_id`` (``None`` = none registered)."""
+    template_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +50,18 @@ class TimelineLedgerPlanner:
             if ov.template_asset is None:
                 raise MissingDependencyError(
                     "overlay has no registered template asset",
-                    details={"class": "overlay_template", "overlay_id": ov.overlay_id},
+                    details={
+                        "class": "overlay_template",
+                        "overlay_id": ov.overlay_id,
+                        "violations": [
+                            violation(
+                                f"NO_TEMPLATE:{ov.template_id}"
+                                if ov.template_id
+                                else "NO_TEMPLATE_REF",
+                                f"/overlays/{ov.overlay_id}/template_ref",
+                            )
+                        ],
+                    },
                 )
             if ov.start_ms < 0 or ov.end_ms <= ov.start_ms or ov.end_ms > timeline_end_ms:
                 raise InputInvalidError(
