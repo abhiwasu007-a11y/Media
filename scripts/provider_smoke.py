@@ -26,7 +26,7 @@ import httpx
 from amw_adapters.llm import LlmMessage, LlmRequest
 from amw_adapters.llm.anthropic import cost_micros
 from amw_adapters.real.catalogue import load_catalogue
-from amw_adapters.real.guard import CapOnlyCallGuard
+from amw_adapters.real.guard import CapBook, CapOnlyCallGuard
 from amw_adapters.tts import TtsRequest
 from amw_core.config import load_settings
 from amw_core.enums import RetryPolicy
@@ -94,11 +94,12 @@ def run_smoke(
     try:
         llm_price = catalogue.anthropic.model(llm_model)
         tts_price = catalogue.elevenlabs.model(tts_model)
+        book = CapBook()  # one counter for both providers: the cap covers the run together
         providers = build_providers(
             config,
             preflight=report,
             env=env,
-            guard_for=CapOnlyCallGuard,
+            guard_for=lambda auth: CapOnlyCallGuard(auth, book=book),
             catalogue=catalogue,
             transports=transports,
             backoff=settings.retry_policy(RetryPolicy.TEMPORARY),

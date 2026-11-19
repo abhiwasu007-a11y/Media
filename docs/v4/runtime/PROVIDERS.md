@@ -16,8 +16,8 @@ No key, no paid call and no network are used by the tests. Nothing in this lane 
 | Retries | inside one call only when nothing can have been processed: connect failure, 429 with `retry-after` (Anthropic), 429 (ElevenLabs). 5xx, 529, read timeouts are raised as their 07 code with `retry_after_ms`; the 07 task policy decides (no provider idempotency key exists, PR-09 / PR-12) |
 | Idempotency | per adapter instance: same key + same request = stored result, no second paid call; same key + other request = `PERMANENT.IDEMPOTENCY_CONFLICT` |
 | Registry | `amw_runtime.providers.build_providers(runtime_config, preflight=..., env=..., guard_for=...)`: `DRY_RUN` -> fakes; `REAL_RUN` -> real adapters only with the real `PreflightReport` of a passed REAL_RUN `run_preflight` (type-checked) that carries a `ProviderAuthorisation` for each provider (minted only after its evidence-backed `PROVIDER_LIMIT` item passed) and both secrets present by name. A real adapter needs a `CallGuard` bound to its token, so it cannot be built or called any other way (CCR-274) |
-| Call guard | before each paid request: worst-case cost in integer micros against the per-video hard cap of the preflight (owner ceiling USD 5) and `BudgetGuard.check_call`; refused before the request. After each response: ESTIMATE ledger row + `after_call`. `BudgetCallGuard` (L1b services, job from `call_scope`), `CapOnlyCallGuard` (smoke script, no database) |
-| Authorisation and cost safety (CCR-277) | the token is sealed (key only inside `amw_runtime.preflight`), bound to provider, org and job, expires (default 4 h), caps clamped to the owner ceilings at every call; adapters accept only `BudgetCallGuard` / `CapOnlyCallGuard`. Each paid attempt of one key has its own ledger key; a timeout / 5xx / broken connection keeps the worst case on the ledger (ESTIMATE) until the owner reconciles it (VERIFIED row), only a connect failure or 4xx releases it. In-process Python cannot stop code that runs arbitrary code in the process (it can read closure cells or patch memory) |
+| Call guard | before each paid request: worst-case cost in integer micros against the per-video hard cap of the preflight (owner ceiling USD 5) and `BudgetGuard.check_call`; refused before the request. After each response: ESTIMATE ledger row + `after_call`. `BudgetCallGuard` (L1b services, job from `call_scope`), `CapOnlyCallGuard` (smoke script, no database) | In-flight holds are kept in one process-wide book shared by the LLM and TTS guards of a job (`CapOnlyCallGuard`: pass one `CapBook` to both). What is and is not guaranteed: section 5.4 |
+| Authorisation and cost safety (CCR-277) | the token is sealed (key only inside `amw_runtime.preflight`), bound to provider, org and job, expires (default 4 h), caps clamped to the owner ceilings at every call; adapters accept only `BudgetCallGuard` / `CapOnlyCallGuard`. Each paid attempt of one key has its own ledger key; a timeout / 5xx / broken connection keeps the worst case on the ledger (ESTIMATE) until the owner reconciles it (VERIFIED row, section 5), only a connect failure or 4xx releases it. In-process Python cannot stop code that runs arbitrary code in the process (it can read closure cells or patch memory) |
 | Logs | request id, token / character counts, cost, SHA-256 of the request body. Never the key, a header value, a prompt or a response text |
 
 ## 2. Owner steps before the first real call
@@ -61,3 +61,40 @@ Exit codes: 0 both OK; 2 refused by config (mode, cap, model, catalogue); 3 pref
 - REQUIRES REVIEW (owner, 3B): `pace_speed` (one `voice_settings.speed` per pace) and the per-model `pronunciation_dictionary` flags (PR-11 states no per-model restriction).
 - REQUIRES REVIEW: a REAL_RUN preflight cannot pass on the shipped runtime data yet (`render.max_duration_minutes` is unset) and still demands FIN-R10 for every job; D13 / CCR-273 narrows FIN-R10 to finance channels in a separate change.
 - CCR-274 (guard and record in the adapter), CCR-250 (temperature), CCR-251 (provider spend limit code), CCR-252 (refusal cost row in callers), CCR-253 (TTS config keys), CCR-254 (`tokens_in` meaning).
+
+## 5. Held calls: what the owner / operator does (runbook)
+
+### 5.1 What a held call is
+
+A paid request can end with an UNKNOWN outcome: a read timeout, a 5xx / 529, a broken connection or a 2xx whose body cannot be parsed. The provider may have processed and billed it. The guard cannot know, so it keeps the **worst case** of that call on the ledger as an ESTIMATE row (the "held call": a paid ESTIMATE row with no token, character or unit measurement and no VERIFIED partner). It counts against the per-video cap (owner ceiling USD 5, D10) like any spend. Until the owner reconciles it, the video stays blocked at the cap: the next call that would not fit is refused before the request with `RESOURCE.BUDGET_EXHAUSTED` (`details.spent_micros`, `details.held_micros`, `details.per_video_cap_micros`). Only a proven non-delivery (connect failure, 4xx) releases the hold by itself.
+
+### 5.2 See the held calls of a job
+
+Needs a connection string in an environment variable (default name `AMW_DATABASE_URL`; another name with `--dsn-env NAME`). The string is never given on the command line. Read-only:
+
+```
+uv run python scripts/list_held_calls.py --org-id <org_...> --job-id <job_...>
+```
+
+Output: one line per held call (`entry_id | provider | operation | model | amount_micros | currency | recorded_at | key`) and the total held. `no held calls` means nothing is unreconciled. Library: `amw_adapters.real.holds.list_held`. Optional `--operator <actor ref>` (default `sys_operator`) is the actor in the audit trail.
+
+### 5.3 Reconcile one held call
+
+1. Open the provider's own usage page for the period around `recorded_at` (Anthropic Console usage / cost; ElevenLabs usage). Find whether a request of that time and size was billed and read the amount. If nothing was billed the amount is 0.
+2. Convert it to integer micros of the ledger currency (USD x 1,000,000) and run the dry run (writes nothing):
+
+   ```
+   uv run python scripts/reconcile_held_call.py --org-id <org_...> --entry-id <entry_id from 5.2> \
+     --actual-micros <billed micros, 0 if none> --verification-ref "<where you read it, e.g. console usage page + date>"
+   ```
+
+3. Check the printed line (held amount -> verified amount; a warning appears if the figure is above the held worst case), then repeat the same command with `--apply`. This appends a VERIFIED ledger row that supersedes the estimate (09 section 6); nothing is updated or deleted. A second reconcile of the same call is refused. Run `list_held_calls.py` again: the call is gone from the list and the video can spend again up to the cap.
+
+Do this for every held call before a retry of a blocked video. Never guess the figure: if the provider's page does not show it yet, leave the hold in place (the video stays blocked, which is the safe state).
+
+### 5.4 What the guard guarantees, exactly
+
+- **Guaranteed:** a call whose request left and whose outcome was seen (response, error, timeout) is on the ledger (real cost, or the worst case if unknown), or was released only on proven non-delivery. A billed-but-unusable response and its retry are two charges.
+- **Not guaranteed (crash window):** the hold of a call that is IN FLIGHT lives in process memory. If the process dies between sending the request and recording its outcome, a billed call has NO ledger row. The `CostLedger` interface has no row a later write can retire except a VERIFIED one, so a durable hold row cannot be written before the request (CCR-281, PROPOSED). Operator action after any worker crash or restart during a paid job: compare the provider usage page with the ledger for that job; a billed amount with no row is recorded as a VERIFIED row without estimate (it counts on its own and shows as a leak flag, 09 section 6.3).
+- **Cap overshoot bound:** inside one process the LLM and TTS guards share the in-flight holds of the job, so the cap is not overshot. Several worker processes do not see each other's in-flight holds: the cap can be exceeded by at most the worst case of the calls in flight in the other processes at the moment of the check (one per worker running the same job); CCR-281 (PROPOSED) would remove it.
+- The seal (`install_verifier`) stops accidents and in-tree shortcuts, not code that runs arbitrary code in the process (it can assign the module attribute). Do not run untrusted code in a REAL_RUN process.

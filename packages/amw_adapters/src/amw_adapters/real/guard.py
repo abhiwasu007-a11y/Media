@@ -13,15 +13,27 @@ same idempotency key and figure kind as a no-op, so an agent that records the sa
 does not count it twice. The job comes from ``call_scope``; a call outside a scope is refused
 (fail closed; a ``ContextVar`` is not inherited by threads started elsewhere).
 
-Cost is never under-counted (ADR-007 2.8, D10). Every ``before`` registers a PENDING hold of the
-worst case. ``after`` settles it with the real cost. A failure is settled by ``failed``: a PROVEN
-non-delivery (connect failure, 4xx rejection) releases the hold; anything else (timeout, 5xx, broken
-connection, unparsable 2xx) is an UNKNOWN outcome and is kept fail-closed: the worst case is
-recorded as an ESTIMATE row (``BudgetCallGuard``) or counted (``CapOnlyCallGuard``) until the owner
-reconciles it against the provider's own usage (``reconcile``: a VERIFIED row that supersedes the
-estimate, 09 section 6). Each paid attempt of one idempotency key has its OWN ledger key (attempt 0
-is the key itself, attempt n a derived key), so a retry after a billed-but-unusable response is
-recorded as a second charge instead of replaying the first as a no-op.
+What is guaranteed (ADR-007 2.8, D10) and what is not. Every ``before`` registers a PENDING hold of
+the worst case in a process-wide hold book SHARED by every guard of the same org and job (the LLM
+and the TTS guard see each other's in-flight calls, so one process cannot overshoot the cap by one
+worst case per provider). ``after`` settles it with the real cost. A failure is settled by
+``failed``: a PROVEN non-delivery (connect failure, 4xx rejection) releases the hold; anything else
+(timeout, 5xx, broken connection, unparsable 2xx) is an UNKNOWN outcome, kept fail-closed: the
+worst case is written as an ESTIMATE ledger row (``BudgetCallGuard``) or counted
+(``CapOnlyCallGuard``) until the owner reconciles it against the provider's own usage
+(``reconcile`` / ``amw_adapters.real.holds``: a VERIFIED row that supersedes the estimate, 09
+section 6; runbook in docs/v4/runtime/PROVIDERS.md section 5). Each paid attempt of one
+idempotency key has its OWN ledger key (attempt 0 is the key itself, attempt n a derived key),
+so a retry after a billed-but-unusable response is recorded as a second charge instead of
+replaying the first as a no-op.
+
+NOT guaranteed: the pending hold of a call that is IN FLIGHT lives in process memory only (the
+``CostLedger`` Protocol has no row that a later write can retire except a VERIFIED one, CCR-281).
+If the process dies between ``before`` and ``after`` / ``failed``, a request that was already sent
+and billed has NO ledger row; the owner finds it by comparing the provider's usage export with the
+ledger (a VERIFIED row without an estimate is a leak flag, 09 section 6.3). Several worker
+processes do not see each other's in-flight holds: the overshoot is bounded by the worst case of
+the calls in flight in the OTHER processes at the moment of the check.
 
 ``CapOnlyCallGuard`` has no database: it enforces the same cap over an in-process counter for the
 live smoke script, which has no job.
@@ -43,6 +55,7 @@ from amw_adapters.real.authorisation import (
     VerifiedGrant,
     verify_authorisation,
 )
+from amw_adapters.real.holds import verified_row_for
 from amw_core.cost.ledger import amount_in, effective_rows
 from amw_core.enums import CostFigureKind, CostOperation
 from amw_core.errors import BudgetExhaustedError, ConfigInvalidError, InputInvalidError
@@ -168,7 +181,30 @@ class _Pending:
     ledger_key: str
 
 
-_UNKNOWN_OP_PREFIX: Final = "held"
+class _HoldBook:
+    """In-flight and unknown-outcome holds, shared by every guard of this process. The lock makes
+    "read the ledger, check the cap, register the hold" one step across guards of one job."""
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+        self.pending: dict[tuple[str, str, str, str], _Pending] = {}
+
+    def held_micros(self, org_id: str, job_id: str) -> int:
+        return sum(
+            p.call.worst_case_micros
+            for (org, job, _prov, _key), p in self.pending.items()
+            if org == org_id and job == job_id
+        )
+
+    def ledger_keys(self, org_id: str, job_id: str) -> set[str]:
+        return {
+            p.ledger_key
+            for (org, job, _p, _k), p in self.pending.items()
+            if (org, job) == (org_id, job_id)
+        }
+
+
+_HOLDS: Final = _HoldBook()
 
 
 @final
@@ -186,11 +222,15 @@ class BudgetCallGuard:
         self._auth = authorisation
         self._budget, self._ledger, self._tenancy, self._clock = budget, ledger, tenancy, clock
         self._now = now
-        self._lock = threading.Lock()
-        self._pending: dict[tuple[str, str], _Pending] = {}
+        self._provider = authorisation.provider
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         raise TypeError("BudgetCallGuard cannot be subclassed")
+
+    def in_flight_micros(self, org_id: str, job_id: str) -> int:
+        """Worst case held in this process for one job (all providers), for tests and logs."""
+        with _HOLDS.lock:
+            return _HOLDS.held_micros(org_id, job_id)
 
     @property
     def authorisation(self) -> ProviderAuthorisation:
@@ -219,14 +259,11 @@ class BudgetCallGuard:
         ctx = self._scope().ctx
         grant = self._grant(call.provider, call.currency, ctx)
         _check_planned(grant, call)
-        with self._tenancy.transaction(ctx.tenant) as tx, self._lock:
+        org = ctx.org_id
+        with self._tenancy.transaction(ctx.tenant) as tx, _HOLDS.lock:
             rows = list(self._ledger.for_job(tx, ctx.job_id))
             spent = sum(amount_in(row, grant.currency) for row in effective_rows(rows))
-            held = sum(
-                p.call.worst_case_micros
-                for (job, _k), p in self._pending.items()
-                if job == ctx.job_id
-            )
+            held = _HOLDS.held_micros(org, ctx.job_id)
             _refuse_cap(call, spent, held, grant.per_video_cap_micros, {"job_id": ctx.job_id})
             self._budget.check_call(
                 tx,
@@ -239,11 +276,11 @@ class BudgetCallGuard:
                 ),
             )
             taken = {str(r.entry.idempotency_key) for r in rows if r.entry.idempotency_key}
-            taken |= {p.ledger_key for p in self._pending.values()}
+            taken |= _HOLDS.ledger_keys(org, ctx.job_id)
             attempt = 0
             while attempt_key(call.idempotency_key, attempt) in taken:
                 attempt += 1
-            self._pending[(ctx.job_id, call.idempotency_key)] = _Pending(
+            _HOLDS.pending[(org, ctx.job_id, call.provider, call.idempotency_key)] = _Pending(
                 call, attempt_key(call.idempotency_key, attempt)
             )
 
@@ -251,8 +288,10 @@ class BudgetCallGuard:
         scope = self._scope()
         ctx = scope.ctx
         self._grant(usage.provider, usage.currency, ctx)
-        with self._lock:
-            pending = self._pending.pop((ctx.job_id, usage.idempotency_key), None)
+        with _HOLDS.lock:
+            pending = _HOLDS.pending.pop(
+                (ctx.org_id, ctx.job_id, usage.provider, usage.idempotency_key), None
+            )
         ledger_key = pending.ledger_key if pending else usage.idempotency_key
         with self._tenancy.transaction(ctx.tenant) as tx:
             entry = self._ledger.record(
@@ -288,8 +327,10 @@ class BudgetCallGuard:
     def failed(self, idempotency_key: str, *, delivered: bool | None) -> None:
         scope = self._scope()
         ctx = scope.ctx
-        with self._lock:
-            pending = self._pending.pop((ctx.job_id, idempotency_key), None)
+        with _HOLDS.lock:
+            pending = _HOLDS.pending.pop(
+                (ctx.org_id, ctx.job_id, self._provider, idempotency_key), None
+            )
         if pending is None or delivered is False:
             return  # nothing held, or PROVEN non-delivery: the hold is released
         call = pending.call
@@ -317,43 +358,51 @@ class BudgetCallGuard:
 
     def reconcile(self, held: CostEntry, *, actual_micros: int, verification_ref: str) -> CostEntry:
         """Owner reconciliation of an unknown-outcome hold with the provider's own usage: a
-        VERIFIED row pointing at the held ESTIMATE (amount 0 if the provider billed nothing)."""
+        VERIFIED row pointing at the held ESTIMATE (amount 0 if the provider billed nothing).
+        The operator path is ``amw_adapters.real.holds`` / ``scripts/reconcile_held_call.py``."""
         ctx = self._scope().ctx
-        e = held.entry
+        row = verified_row_for(
+            held, actual_micros=actual_micros, verification_ref=verification_ref,
+            occurred_at=self._clock.now(),
+        )  # fmt: skip
         with self._tenancy.transaction(ctx.tenant) as tx:
-            return self._ledger.record(
-                tx,
-                NewCostEntry(
-                    provider=e.provider, operation=e.operation, amount_micros=actual_micros,
-                    currency=e.currency, figure_kind=CostFigureKind.VERIFIED,
-                    occurred_at=self._clock.now(), job_id=e.job_id, task_id=e.task_id,
-                    attempt_id=e.attempt_id, channel_id=e.channel_id, model=e.model,
-                    price_ref=e.price_ref, estimate_entry_id=held.id,
-                    verification_ref=verification_ref,
-                    idempotency_key=e.idempotency_key,
-                ),
-            )  # fmt: skip
+            return self._ledger.record(tx, row)
+
+
+class CapBook:
+    """The counters of ``CapOnlyCallGuard``. Give ONE book to the LLM and the TTS guard of a run so
+    the per-video cap covers both providers together (a book per guard would let each provider
+    spend up to the cap)."""
+
+    def __init__(self, spent_micros: int = 0) -> None:
+        self.lock = threading.Lock()
+        self.spent = spent_micros
+        self.pending: dict[tuple[str, str], int] = {}
+        self.unknown: dict[tuple[str, str, int], int] = {}
+
+    def held(self) -> int:
+        return sum(self.pending.values()) + sum(self.unknown.values())
 
 
 @final
 class CapOnlyCallGuard:
     """The per-video hard stop over an in-process counter (no database, no job): for the live
     smoke script. Thread-safe; ``spent_micros`` is the sum of the recorded real costs and
-    ``held_micros`` the worst case of calls in flight or of unknown outcome (until reconciled)."""
+    ``held_micros`` the worst case of calls in flight or of unknown outcome (until reconciled).
+    Pass the same ``book`` to every guard of one run."""
 
     def __init__(
         self,
         authorisation: ProviderAuthorisation,
         *,
         spent_micros: int = 0,
+        book: CapBook | None = None,
         now: Callable[[], datetime] = _now,
     ) -> None:
         self._auth = authorisation
-        self._spent = spent_micros
+        self._book = book if book is not None else CapBook(spent_micros)
         self._now = now
-        self._lock = threading.Lock()
-        self._pending: dict[str, int] = {}
-        self._unknown: dict[str, int] = {}
+        self._provider = authorisation.provider
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         raise TypeError("CapOnlyCallGuard cannot be subclassed")
@@ -364,11 +413,12 @@ class CapOnlyCallGuard:
 
     @property
     def spent_micros(self) -> int:
-        return self._spent
+        return self._book.spent
 
     @property
     def held_micros(self) -> int:
-        return sum(self._pending.values()) + sum(self._unknown.values())
+        with self._book.lock:
+            return self._book.held()
 
     def check_authorisation(self, *, provider: str, currency: str) -> VerifiedGrant:
         return verify_authorisation(self._auth, self._now(), provider=provider, currency=currency)
@@ -376,26 +426,31 @@ class CapOnlyCallGuard:
     def before(self, call: PlannedCall) -> None:
         grant = self.check_authorisation(provider=call.provider, currency=call.currency)
         _check_planned(grant, call)
-        with self._lock:
-            _refuse_cap(call, self._spent, self.held_micros, grant.per_video_cap_micros, {})
-            self._pending[call.idempotency_key] = call.worst_case_micros
+        book = self._book
+        with book.lock:
+            _refuse_cap(call, book.spent, book.held(), grant.per_video_cap_micros, {})
+            book.pending[(call.provider, call.idempotency_key)] = call.worst_case_micros
 
     def after(self, usage: CallUsage) -> None:
         self.check_authorisation(provider=usage.provider, currency=usage.currency)
-        with self._lock:
-            self._pending.pop(usage.idempotency_key, None)
-            self._spent += usage.amount_micros
+        with self._book.lock:
+            self._book.pending.pop((usage.provider, usage.idempotency_key), None)
+            self._book.spent += usage.amount_micros
 
     def failed(self, idempotency_key: str, *, delivered: bool | None) -> None:
-        with self._lock:
-            held = self._pending.pop(idempotency_key, None)
+        book = self._book
+        with book.lock:
+            held = book.pending.pop((self._provider, idempotency_key), None)
             if held is not None and delivered is not False:
-                n = sum(1 for k in self._unknown if k.startswith(idempotency_key))
-                self._unknown[f"{idempotency_key}#{n}"] = held
+                n = sum(
+                    1 for (p, k, _n) in book.unknown if (p, k) == (self._provider, idempotency_key)
+                )
+                book.unknown[(self._provider, idempotency_key, n)] = held
 
     def reconcile(self, idempotency_key: str, *, actual_micros: int) -> None:
         """Owner reconciliation of every unknown-outcome hold of this key."""
-        with self._lock:
-            for k in [k for k in self._unknown if k.startswith(idempotency_key)]:
-                del self._unknown[k]
-            self._spent += actual_micros
+        book = self._book
+        with book.lock:
+            for k in [k for k in book.unknown if k[:2] == (self._provider, idempotency_key)]:
+                del book.unknown[k]
+            book.spent += actual_micros

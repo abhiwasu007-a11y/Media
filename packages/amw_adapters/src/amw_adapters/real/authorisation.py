@@ -4,10 +4,12 @@
 A ``ProviderAuthorisation`` is a SEALED capability. The seal is an HMAC over every field; the key
 is generated at import time inside ``amw_runtime.preflight``, is never exported and is held only
 in the closures of that module. This module holds no key: it holds a verifier function that
-``amw_runtime.preflight`` installs once (``install_verifier``; only that module may install it,
-and a second install is refused). Every real adapter call is checked again with
-``verify_authorisation``: seal, expiry, provider, currency, org and job binding, and the caps are
-CLAMPED to the packaged owner ceilings (USD 5 per video, USD 50 pilot) whatever the token says.
+``amw_runtime.preflight`` installs at import (``install_verifier`` refuses a second call and a
+caller outside that module; this stops an accidental or in-tree re-install, it is NOT a boundary
+against code that assigns the module attribute ``_verifier`` directly).
+Every real adapter call is checked again with ``verify_authorisation``: seal, expiry, provider,
+currency, org and job binding, and the caps are CLAMPED to the packaged owner ceilings (USD 5 per
+video, USD 50 pilot) whatever the token says.
 
 What this prevents in plain Python: constructing a token by hand (no key, so no valid seal),
 changing a field of a real token (seal breaks; the class is immutable and not copyable or
@@ -152,7 +154,9 @@ _verifier: Verifier | None = None
 
 
 def install_verifier(verifier: Verifier) -> None:
-    """Called once, at import, by ``amw_runtime.preflight`` (the holder of the seal key)."""
+    """Called at import by ``amw_runtime.preflight`` (the holder of the seal key). A later call, or
+    a call from another module, is refused: a guard against mistakes, not a security boundary
+    (code in the process can assign ``_verifier``; see the module docstring)."""
     global _verifier
     caller = sys._getframe(1).f_globals.get("__name__")
     if caller != _INSTALLER_MODULE or _verifier is not None:

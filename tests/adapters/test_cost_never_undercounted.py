@@ -159,7 +159,7 @@ def test_proven_non_delivery_releases_the_hold() -> None:
         with call_scope(world.ctx), pytest.raises(Exception):  # noqa: B017, PT011
             adapter.complete(llm_request(), idempotency_key=key())
         assert world.rows() == []
-        assert guard._pending == {}
+        assert guard.in_flight_micros(world.w.org, world.job) == 0
     cap = cap_guard("anthropic")
     adapter, mock = llm(cap)
     mock.script.append(Scripted(400, {"error": {"type": "invalid_request_error"}}))
