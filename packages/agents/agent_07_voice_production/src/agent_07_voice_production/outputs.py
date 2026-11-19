@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
-from agent_07_voice_production.context import AGENT_ID, ExecContext
+from agent_07_voice_production.context import AGENT_ID
 from amw_core.contracts.common import AmwModel, PayloadObject
 from amw_core.contracts.error import error_object_from_exception
 from amw_core.contracts.task_output import (
@@ -37,6 +37,7 @@ from amw_core.errors import (
     SchemaInvalidError,
     SchemaVersionUnsupportedError,
 )
+from amw_core.exec_context import ExecContext
 
 log = logging.getLogger("agent_07")
 

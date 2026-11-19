@@ -32,6 +32,7 @@ from tests.agents.agent_07_voice_production.support import (
     MemoryBlobs,
     MemoryTenancy,
     config,
+    exec_ctx,
 )
 from tests.agents.agent_07_voice_production.voice_world import make_task_input
 
@@ -117,7 +118,9 @@ def run_master(tmp: Path, stem_path: Path, **cfg: Any) -> tuple[TaskOutput, Memo
         scratch_root=tmp / "scratch",
     )
     task = make_task_input(ORG, CHANNEL.new(), payload, "agent_07.audio_master.input", "agent_07")
-    out = AudioMasterStage(deps).run(task, "att_01939e5a-7c3b-7d1e-8a4f-0123456789a1")
+    out = AudioMasterStage(deps).run(
+        task, exec_ctx(task, "att_01939e5a-7c3b-7d1e-8a4f-0123456789a1")
+    )
     return out, blobs, info.frames
 
 

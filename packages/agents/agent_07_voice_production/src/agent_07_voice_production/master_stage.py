@@ -16,7 +16,7 @@ from typing import Protocol, runtime_checkable
 from agent_07_voice_production import contracts as c
 from agent_07_voice_production.blobs import put_once, read_verified
 from agent_07_voice_production.config import AgentSevenConfig
-from agent_07_voice_production.context import ExecContext, scratch_dir
+from agent_07_voice_production.context import check_ctx, scratch_dir
 from agent_07_voice_production.ffmpeg import require_working_format
 from agent_07_voice_production.master import (
     CodecFacts,
@@ -56,10 +56,12 @@ from amw_core.errors import (
     SchemaInvalidError,
     SchemaVersionUnsupportedError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.interfaces.checkpoint_store import CheckpointStore, NewCheckpoint
 from amw_core.interfaces.clock import Clock
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext
+from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri
 
 PASS, FAIL, WARN, SKIPPED = (
     CheckVerdict.PASS,
@@ -348,15 +350,17 @@ class AudioMasterStage:
     def __init__(self, deps: MasterDeps) -> None:
         self._d = deps
 
-    def run(self, task_input: TaskInput, attempt_id: str) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
         d = self._d
         started = d.clock.monotonic_ms()
-        ctx: ExecContext | None = None
+        checked: ExecContext | None = None
         resource = usage(
             provider_calls=0, cost_micros=0, currency=d.config.currency, cost_entry_ids=()
         )
         try:
-            ctx = ExecContext.from_task_input(task_input, attempt_id)
+            check_ctx(task_input, ctx)
+            checked = ctx
             return self._run(ctx, task_input, started, resource)
         except _Drained:
             return suspended(
@@ -368,7 +372,7 @@ class AudioMasterStage:
         except Exception as raw:
             return failed(
                 classify(raw),
-                ctx=ctx,
+                ctx=checked,
                 correlation_id=task_input.correlation_id,
                 resource=resource,
                 duration_ms=d.clock.monotonic_ms() - started,
@@ -464,8 +468,9 @@ class AudioMasterStage:
                 details={"check_ids": [r.check_id for r in integrity]},
             )
         failing = [r for r in results if r.gate and r.blocking and r.verdict is FAIL]
-        base = f"{ctx.job_id}/s07_master/{ctx.task_id}"
-        master_uri = d.storage.blob_uri(ctx.tenant, "jobs", f"{base}/master.wav")
+        master_uri = BlobUri(
+            task_artifact_uri(ctx.org_id, ctx.job_id, ctx.task_id, ctx.attempt_id, "master.wav")
+        )
         info = put_once(d.storage, ctx.tenant, master_uri, master_bytes)
         report = {
             "gate": [r.check_id for r in failing],
@@ -482,7 +487,9 @@ class AudioMasterStage:
             },
             "master_clipping_samples": run.master_clipping_samples,
         }
-        report_uri = d.storage.blob_uri(ctx.tenant, "jobs", f"{base}/report.json")
+        report_uri = BlobUri(
+            task_artifact_uri(ctx.org_id, ctx.job_id, ctx.task_id, ctx.attempt_id, "report.json")
+        )
         report_info = put_once(
             d.storage, ctx.tenant, report_uri, json.dumps(report, sort_keys=True).encode()
         )
@@ -609,8 +616,8 @@ class AudioMasterStage:
             },
             sort_keys=True,
         ).encode()
-        uri = d.storage.blob_uri(
-            ctx.tenant, "jobs", f"{ctx.job_id}/s07_master/{ctx.task_id}/{step}.json"
+        uri = BlobUri(
+            checkpoint_uri(ctx.org_id, ctx.job_id, ctx.task_id, f"{ctx.attempt_id}/{step}.json")
         )
         info = put_once(d.storage, ctx.tenant, uri, doc)
         with d.tenancy.transaction(ctx.tenant) as tx:

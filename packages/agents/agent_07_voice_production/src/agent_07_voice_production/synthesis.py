@@ -9,6 +9,8 @@ performs no call (NFR-2). A call whose audio fails validation is not stored and 
 
 import hashlib
 import io
+import json
+import logging
 import tempfile
 import time
 import wave
@@ -18,8 +20,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+from agent_07_voice_production.blobs import put_once
 from agent_07_voice_production.config import AgentSevenConfig
-from agent_07_voice_production.context import AGENT_ID, ExecContext
+from agent_07_voice_production.context import AGENT_ID
 from agent_07_voice_production.pcm import decode_s16_bytes, trim_silence
 from agent_07_voice_production.ports import AudioTools, CircuitBreaker, TtsSynthesizer
 from agent_07_voice_production.text import PreparedSegment
@@ -32,6 +35,7 @@ from amw_core.errors import (
     LockConflictError,
     TemporaryError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import (
     CostEntryId,
     IdempotencyKey,
@@ -45,6 +49,7 @@ from amw_core.interfaces.cost_ledger import CostEntry, CostLedger, NewCostEntry
 from amw_core.interfaces.idempotency_store import BeginAction, IdempotencyStore
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext
+from amw_core.tenancy.storage_paths import job_cache_uri
 
 CLIP_MEDIA_TYPES = ("audio/wav", "audio/x-wav", "audio/wave")
 
@@ -78,6 +83,9 @@ def cost_key(
     )
 
 
+log = logging.getLogger("agent_07")
+
+
 @dataclass(frozen=True, slots=True)
 class ClipResult:
     segment_id: str
@@ -90,6 +98,8 @@ class ClipResult:
     characters: int
     cost_entry_id: CostEntryId | None
     amount_micros: int
+    reused: bool = False
+    """Taken from the job cache (an earlier task of the job), not from a call of this task."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +194,13 @@ class SegmentSynthesizer:
             return self._stored(ctx, prepared, settings, decision.record.result_ref)
         if decision.action is BeginAction.IN_FLIGHT:
             raise LockConflictError("another attempt holds the idempotency key")
+        cached = self._cached(ctx, prepared, request_hash, key)
+        if cached is not None:
+            # a clip of the same request already exists in the job cache (an earlier iteration or
+            # task): no guard, no provider call, no ledger row (03 section 8 rule 5, CCR-208)
+            with self._tenancy.transaction(ctx.tenant) as tx:
+                self._idem.complete(tx, key, cached.clip_uri, self._clock.now())
+            return cached
         try:
             self.guard(ctx, settings.provider, estimate)
             result = self._call(request, key, settings.provider)
@@ -200,7 +217,9 @@ class SegmentSynthesizer:
         self.unreturned = (entry.id, prepared.characters, estimate)
         try:
             samples = self._validate(result.audio, result.media_type, prepared)
-            clip_uri, clip_sha = self._store_clip(ctx, prepared, samples)
+            clip_uri, clip_sha, samples = self._store_clip(
+                ctx, prepared, samples, request_hash, key
+            )
         except BaseException:
             self._fail_key(ctx, key)
             raise
@@ -313,9 +332,109 @@ class SegmentSynthesizer:
             _, samples = decode_s16_bytes(dst.read_bytes())
         return samples
 
+    # -- job clip cache (CCR-269) --------------------------------------------------------
+    # A lookup before the provider call can only be addressed by the INPUT, so the clip name
+    # carries the SHA-256 of the canonical TTS request (text, voice_ref, model, language,
+    # sample_rate_hz, pronunciation_dictionary_ref, pace, emotion: every TtsRequest field, so any
+    # control that changes the audio is in the key). The audio SHA-256 is recorded in a write-once
+    # sidecar next to the clip; a read verifies the clip against that value before use.
+
+    def _cache_uri(self, ctx: ExecContext, prepared: PreparedSegment, request_hash: str) -> BlobUri:
+        """``jobs/<job>/cache/agent_07/<seg>-<request sha>.wav`` (CCR-269)."""
+        return BlobUri(
+            job_cache_uri(
+                ctx.org_id, ctx.job_id, AGENT_ID, f"{prepared.segment_id}-{request_hash}.wav"
+            )
+        )
+
+    def _sidecar_uri(
+        self, ctx: ExecContext, prepared: PreparedSegment, request_hash: str
+    ) -> BlobUri:
+        """``<seg>-<request sha>.audio.json``: the recorded audio SHA-256 of the clip (CCR-269)."""
+        return BlobUri(
+            job_cache_uri(
+                ctx.org_id, ctx.job_id, AGENT_ID, f"{prepared.segment_id}-{request_hash}.audio.json"
+            )
+        )
+
+    def _recorded_audio_sha(
+        self, ctx: ExecContext, prepared: PreparedSegment, request_hash: str
+    ) -> str | None:
+        """The audio hash recorded for this request, or ``None`` (no sidecar, or unreadable)."""
+        uri = self._sidecar_uri(ctx, prepared, request_hash)
+        head = self._storage.head(ctx.tenant, uri)
+        if not head.exists or head.sha256 is None:
+            return None
+        try:
+            body = json.loads(b"".join(self._storage.get(ctx.tenant, uri, head.sha256)))
+            recorded = body["audio_sha256"]
+            if body["request_sha256"] != request_hash or not isinstance(recorded, str):
+                return None
+        except ValueError, KeyError, TypeError:
+            return None
+        return recorded
+
+    def _load_verified(
+        self,
+        ctx: ExecContext,
+        prepared: PreparedSegment,
+        request_hash: str,
+        key: IdempotencyKey,
+    ) -> ClipResult | None:
+        """The cached clip when its actual hash equals the recorded audio hash; otherwise ``None``
+        (a miss plus a warning, never silently used)."""
+        uri = self._cache_uri(ctx, prepared, request_hash)
+        head = self._storage.head(ctx.tenant, uri)
+        if not head.exists or head.sha256 is None:
+            return None
+        recorded = self._recorded_audio_sha(ctx, prepared, request_hash)
+        if recorded is None or recorded != head.sha256:
+            log.warning(
+                "voice.cache_unverified",
+                extra={
+                    "segment_id": prepared.segment_id,
+                    "reason": "no_recorded_hash" if recorded is None else "hash_mismatch",
+                },
+            )
+            return None
+        data = b"".join(self._storage.get(ctx.tenant, uri, head.sha256))
+        info, samples = decode_s16_bytes(data)
+        if (
+            info.frames == 0
+            or info.sample_rate_hz != self._config.sample_rate_hz
+            or info.channels != 1
+        ):
+            raise CorruptedOutputError("the cached clip is not a working-format clip")
+        return ClipResult(
+            prepared.segment_id,
+            samples,
+            str(uri),
+            head.sha256,
+            prepared.spoken_text_sha256,
+            key,
+            False,
+            prepared.characters,
+            None,
+            0,
+            True,
+        )
+
+    def _cached(
+        self, ctx: ExecContext, prepared: PreparedSegment, request_hash: str, key: IdempotencyKey
+    ) -> ClipResult | None:
+        return self._load_verified(ctx, prepared, request_hash, key)
+
     def _store_clip(
-        self, ctx: ExecContext, prepared: PreparedSegment, samples: array[int]
-    ) -> tuple[str, str]:
+        self,
+        ctx: ExecContext,
+        prepared: PreparedSegment,
+        samples: array[int],
+        request_hash: str,
+        key: IdempotencyKey,
+    ) -> tuple[str, str, array[int]]:
+        """Write the clip, then record its audio hash. Two attempts that both missed may both
+        produce audio (a non-deterministic TTS): the first write wins, the loser reuses the
+        winner's clip after verifying it against the recorded hash (CCR-269)."""
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as handle:
             handle.setnchannels(1)
@@ -324,12 +443,21 @@ class SegmentSynthesizer:
             handle.writeframes(samples.tobytes())
         data = buffer.getvalue()
         sha = hashlib.sha256(data).hexdigest()
-        uri = self._storage.blob_uri(
-            ctx.tenant, "jobs", f"{ctx.job_id}/s07_voice/clips/{prepared.segment_id}-{sha[:16]}.wav"
-        )
-        if not self._storage.head(ctx.tenant, uri).exists:
-            self._storage.put(ctx.tenant, uri, io.BytesIO(data))
-        return uri, sha
+        uri = self._cache_uri(ctx, prepared, request_hash)
+        try:
+            put_once(self._storage, ctx.tenant, uri, data)
+        except CorruptedOutputError:
+            # a different clip is at the path: a lost race, never an overwrite
+            winner = self._load_verified(ctx, prepared, request_hash, key)
+            if winner is None:
+                raise
+            log.info("voice.cache_race_lost", extra={"segment_id": prepared.segment_id})
+            return winner.clip_uri, winner.clip_sha256, winner.samples
+        sidecar = json.dumps(
+            {"request_sha256": request_hash, "audio_sha256": sha}, sort_keys=True
+        ).encode()
+        put_once(self._storage, ctx.tenant, self._sidecar_uri(ctx, prepared, request_hash), sidecar)
+        return str(uri), sha, samples
 
     def _stored(
         self,

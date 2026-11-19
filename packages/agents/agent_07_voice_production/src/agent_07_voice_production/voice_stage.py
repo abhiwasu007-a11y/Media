@@ -18,7 +18,7 @@ from pathlib import Path
 from agent_07_voice_production import contracts as c
 from agent_07_voice_production.blobs import put_once, read_actual, read_verified
 from agent_07_voice_production.config import AgentSevenConfig
-from agent_07_voice_production.context import ExecContext, scratch_dir
+from agent_07_voice_production.context import check_ctx, scratch_dir
 from agent_07_voice_production.outputs import (
     classify,
     failed,
@@ -95,6 +95,7 @@ from amw_core.errors import (
     SchemaInvalidError,
     SchemaVersionUnsupportedError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import IdempotencyKey
 from amw_core.interfaces.budget_guard import BudgetGuard
 from amw_core.interfaces.checkpoint_store import CheckpointStore, NewCheckpoint
@@ -103,6 +104,7 @@ from amw_core.interfaces.cost_ledger import CostLedger
 from amw_core.interfaces.idempotency_store import IdempotencyStore
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenancyContext
+from amw_core.tenancy.storage_paths import checkpoint_uri, task_artifact_uri
 
 PASS, FAIL, WARN, SKIPPED = (
     CheckVerdict.PASS,
@@ -161,13 +163,15 @@ class VoiceSynthesisStage:
 
     # ---------------------------------------------------------------- entry point
 
-    def run(self, task_input: TaskInput, attempt_id: str) -> TaskOutput:
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
         d = self._d
         started = d.clock.monotonic_ms()
-        ctx: ExecContext | None = None
+        checked: ExecContext | None = None
         self._partial = None
         try:
-            ctx = ExecContext.from_task_input(task_input, attempt_id)
+            check_ctx(task_input, ctx)
+            checked = ctx
             return self._run(ctx, task_input, started)
         except _Drained as drained:
             return suspended(
@@ -193,20 +197,20 @@ class VoiceSynthesisStage:
                 currency=d.config.currency,
                 cost_entry_ids=partial.entries,
             )
-            if isinstance(exc, BudgetExhaustedError) and ctx is not None:
+            if isinstance(exc, BudgetExhaustedError) and checked is not None:
                 return suspended(
                     wait_reason=WaitReason.AWAITING_BUDGET,
                     resource=resource,
                     duration_ms=elapsed,
                     now=now,
                     exc=exc,
-                    ctx=ctx,
+                    ctx=checked,
                 )
-            if isinstance(exc, PermissionDeniedError) and ctx is not None:
-                log_event("voice.denied", ctx, reason=str(exc.details.get("reason")))
+            if isinstance(exc, PermissionDeniedError) and checked is not None:
+                log_event("voice.denied", checked, reason=str(exc.details.get("reason")))
             return failed(
                 exc,
-                ctx=ctx,
+                ctx=checked,
                 correlation_id=task_input.correlation_id,
                 resource=resource,
                 duration_ms=elapsed,
@@ -432,7 +436,7 @@ class VoiceSynthesisStage:
                     clip.samples,
                     prep.spoken_text_sha256,
                     str(clip.idempotency_key),
-                    False,
+                    clip.reused,
                 )
             )
             if index % cfg.checkpoint_every_n == 0 or d.control.drain_requested():
@@ -582,11 +586,14 @@ class VoiceSynthesisStage:
     ) -> TaskOutput:
         d, cfg, ctx, payload = self._d, self._d.config, run.ctx, run.payload
         production = payload.purpose is c.Purpose.PRODUCTION
-        base = f"{ctx.job_id}/s07_voice/{ctx.task_id}"
-        stem_uri = d.storage.blob_uri(ctx.tenant, "jobs", f"{base}/narration.wav")
+        stem_uri = BlobUri(
+            task_artifact_uri(ctx.org_id, ctx.job_id, ctx.task_id, ctx.attempt_id, "narration.wav")
+        )
         stem_info = put_once(d.storage, ctx.tenant, stem_uri, stem_bytes)
         timeline_doc = timeline.model_dump_json().encode("utf-8")
-        timeline_uri = d.storage.blob_uri(ctx.tenant, "jobs", f"{base}/timeline.json")
+        timeline_uri = BlobUri(
+            task_artifact_uri(ctx.org_id, ctx.job_id, ctx.task_id, ctx.attempt_id, "timeline.json")
+        )
         timeline_info = put_once(d.storage, ctx.tenant, timeline_uri, timeline_doc)
 
         if analysis is None:
@@ -948,7 +955,10 @@ class VoiceSynthesisStage:
 
     def _account(self, run: _Run, clip: ClipResult) -> None:
         """``calls`` counts the task's billed calls (also on a replay: the output of a replay equals
-        the first run's); the harness counts adapter invocations separately."""
+        the first run's); the harness counts adapter invocations separately. A clip taken from the
+        job cache is no call and no cost: it counts as ``reused_clips``."""
+        if clip.reused:
+            run.reused += 1
         if clip.cost_entry_id is not None:
             run.calls += 1
             run.characters += clip.characters
@@ -975,10 +985,8 @@ class VoiceSynthesisStage:
             },
             sort_keys=True,
         ).encode()
-        uri = d.storage.blob_uri(
-            ctx.tenant,
-            "jobs",
-            f"{ctx.job_id}/s07_voice/{ctx.task_id}/{ctx.attempt_id}/{step_key}.json",
+        uri = BlobUri(
+            checkpoint_uri(ctx.org_id, ctx.job_id, ctx.task_id, f"{ctx.attempt_id}/{step_key}.json")
         )
         info = put_once(d.storage, ctx.tenant, uri, state)
         with d.tenancy.transaction(ctx.tenant) as tx:

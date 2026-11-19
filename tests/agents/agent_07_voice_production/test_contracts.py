@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 
 from agent_07_voice_production import contracts as c
 from amw_core.contracts import registry
+from amw_core.contracts.common import AmwModel
 from amw_core.contracts.validation import validate_task_output
 from tests.agents.agent_07_voice_production.master_world import build as build_master
 from tests.agents.agent_07_voice_production.voice_world import build as build_voice
@@ -124,3 +125,75 @@ def test_output_models_forbid_extra_fields() -> None:
                 "remedy_stage_id": "s05_script",
             }
         )
+
+
+def _full_script_document(case: dict[str, Any]) -> dict[str, Any]:
+    """The case's script slice inside a document with the fields a real Agent 05 document adds."""
+    doc: dict[str, Any] = copy.deepcopy(case["input"]["fixtures"]["script"])
+    doc["schema_version"] = "1.0.0"
+    doc["sections"] = [{"section_id": "sec1", "title": "t", "first_scene_id": "x"}]
+    doc["hook"] = {"scene_ids": ["hook.sc1"]}
+    for seg in doc["segments"]:
+        seg["claim_ids"] = ["clm_x"]
+        seg["on_screen_text"] = None
+    for scene in doc["scenes"]:
+        scene["section_id"] = "hook"
+        scene["visual_intent"] = {"kind": "chart"}
+    return doc
+
+
+def test_a_full_agent_05_document_with_extra_fields_is_read() -> None:
+    """CCR-200 / 03 section 2.3 rule 2: a slice model of another component's document ignores the
+    fields it does not read."""
+    doc = _full_script_document(cases("voice_synthesis")[0])
+    script = c.ScriptDocument.model_validate(doc)
+    assert [s.segment_id for s in script.segments] == [s["segment_id"] for s in doc["segments"]]
+    assert len(script.scenes) == len(doc["scenes"])
+    verification = c.VerificationOutput.model_validate(
+        {
+            "script_id": "scr_01939e5a-7c3b-7d1e-8a4f-0123456789ab",
+            "script_version": 1,
+            "verification_verdict": "ALLOWED",
+            "claims": [{"claim_id": "clm_x"}],
+        }
+    )
+    assert verification.verification_verdict == "ALLOWED"
+
+
+def test_a_slice_still_requires_the_fields_it_reads() -> None:
+    doc = _full_script_document(cases("voice_synthesis")[0])
+    del doc["segments"][0]["text"]
+    with pytest.raises(ValueError, match=r"validation error"):
+        c.ScriptDocument.model_validate(doc)
+
+
+def test_the_stage_reads_a_full_agent_05_document_end_to_end(tmp_path: Path) -> None:
+    case = copy.deepcopy(next(x for x in cases("voice_synthesis") if x["case_id"] == "VS-01"))
+    case["input"]["fixtures"]["script"] = _full_script_document(case)
+    out = build_voice(case, tmp_path).run()
+    assert out.status.value == "SUCCEEDED"
+
+
+def test_agent_07_own_documents_and_input_still_forbid_unknown_fields() -> None:
+    payload = copy.deepcopy(cases("audio_master")[0]["input"]["payload"])
+    payload["unexpected"] = 1
+    with pytest.raises(ValueError, match=r"validation error"):
+        c.AudioMasterInput.model_validate(payload)
+    own = copy.deepcopy(cases("voice_synthesis")[0]["input"]["payload"])
+    own["unexpected"] = 1
+    with pytest.raises(ValueError, match=r"validation error"):
+        c.VoiceSynthesisInput.model_validate(own)
+    own_models: tuple[type[AmwModel], ...] = (
+        c.NarrationTimeline,
+        c.VoiceSynthesisOutput,
+        c.AudioMasterOutput,
+        c.GateReason,
+    )
+    other: tuple[type[AmwModel], ...] = (
+        c.ScriptDocument,
+        c.ScriptSegment,
+        c.ScriptScene,
+        c.VerificationOutput,
+    )
+    assert all(m.model_config["extra"] == "forbid" for m in own_models)
+    assert all(m.model_config["extra"] == "ignore" for m in other)
