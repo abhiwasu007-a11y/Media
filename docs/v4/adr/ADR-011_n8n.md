@@ -1,6 +1,6 @@
 # ADR-011 — n8n: not adopted; the factory's code-controlled orchestrator and Postgres queue cover every requirement
 
-> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines are marked `(unfiled CCR)` and listed in `audit/b2_unfiled_ccr_requests_adr_business.md`; this file changes no contract.
+> **Integrator status (lane B2-1, 2026-11-18).** B-2 draft aligned with main: no upload and no Google OAuth in 3A (D1); the owner works from chat and has no CLI (D5/R14; decisions are recorded by the operator as `OWNER_CHAT_OPERATOR` evidence with a review code, CCR-010/CCR-100); the licensed music source is an open owner decision (D6); the repository is becoming private (D7). Facts without a `RESEARCH_LOG.md` ID carry the label `UNLOGGED` and are **not citable**: each is `REQUIRES REVIEW (Phase 1): log entry (official URL + date)`. Names that no Wave A contract defines carry their CCR number and status (filed and decided in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5)); this file changes no contract.
 
 | Field | Value |
 |---|---|
@@ -42,7 +42,7 @@
 | Budget stop on breach, per-video and pilot budgets | S4 inline library at T03 (14; 09) | No |
 | Provider calls (LLM, TTS, image, stock) | Provider-independent adapters (§3.2a; ADR-007 to ADR-009). n8n's own integrations would bypass the adapters, the cost ledger and the secret mechanism | No |
 | Notifications (L1-L3, owner) | Part of the 07 §7 alerting design and S7; a channel adapter is code | No |
-| Outbound client webhooks (T3) | S12 `svc_s12.webhook_deliver` (unfiled CCR; S12 task types are not in 24 or GLOSSARY), tables `webhooks` / `webhook_deliveries` (04 §5.26), signed payloads and SSRF guard (08 §7) | No |
+| Outbound client webhooks (T3) | S12 `svc_s12.webhook_deliver` (CCR-136, Proposed, deferred to 3C; S12 task types are not in 24 or GLOSSARY), tables `webhooks` / `webhook_deliveries` (04 §5.26), signed payloads and SSRF guard (08 §7) | No |
 | Multi-tenant isolation | `org_id` + FORCE RLS on every tenant table (04). n8n has its own workflow/credential store that is not under factory RLS | Would add a gap |
 | Rendering, QC, media work | Workers with capabilities and resource classes (ADR-012); n8n is not a media engine | No |
 | Rapid editing of simple automations by a non-developer | Not a stated requirement in the directive or owner decisions D1/D2 | Not requested |

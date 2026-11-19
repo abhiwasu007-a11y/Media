@@ -8,14 +8,14 @@
 | Directive sections covered | §3.2 (S1–S13 and owners), §2 (services are modules, control flow in code, no new agents), §3.3 (learning loop, quality, memory), §1B.2 (finance rules for S13 replies), §1C.1 (tenancy), §1C.4 (identity), §1C.5 (audit), §1C.6 (client experience), §1C.9 (billing and metering), §1C.12 (integration API), §1C.15 (tiers), §1E.3 (dubbing), §0 rules 5, 8, 9, 10 |
 | Decisions applied | D1 (3A production line; no YouTube upload, no Google OAuth in 3A; paid calls only within owner-set provider limits; per-video + pilot budgets, stop on breach; keys only through the environment secret mechanism; render never in market hours), D2 |
 | Facts cited | RESEARCH_LOG: YT-09, YT-12, YT-14, YT-15, IN-03, IN-07, INF-07, INF-08, INF-11, PR-03 |
-| Marking | **3A / 3B / 3C** = the owner's build stages (D1). **Tier 0–3** = enterprise tiers (GLOSSARY §6.47). `(pending CCR)` = name not in Wave A, listed in section 14 and in `audit/b2_unfiled_ccr_requests_shared.md`. `REQUIRES REVIEW (Phase 1): <need>` = value unknown, none invented. Public repository: no private method, book titles, course content or server details |
+| Marking | **3A / 3B / 3C** = the owner's build stages (D1). **Tier 0–3** = enterprise tiers (GLOSSARY §6.47). `(CCR-NNN)` = name not in Wave A, listed in section 14 and filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5). `REQUIRES REVIEW (Phase 1): <need>` = value unknown, none invented. Public repository: no private method, book titles, course content or server details |
 
 ---
 
 ## 1. What a shared service is, and the rules that hold for all of them [3A / 3B / 3C · Tier 0–3]
 
 1. A shared service is **a module with a named owning agent, not an LLM agent** (directive §2, §3.2; GLOSSARY §1). Where a step needs an LLM, it is a named task type with one prompt file and one eval pack (27 §4, §6), and the decision split is stated per service below. No ADR currently justifies an autonomous LLM service, so none is one.
-2. Services never call agents. Hand-offs are task contracts executed by Agent 01 (02 §1.2). A service exposes (a) a **library interface** called in-process by the orchestrator or an agent, or (b) a **canonical task type** `svc_sNN.<task>` (24 §3.2), or (c) a **scheduled system job**. The Wave A contracts name task types only for S2, S3 and S7; every other task type here is `(pending CCR)`.
+2. Services never call agents. Hand-offs are task contracts executed by Agent 01 (02 §1.2). A service exposes (a) a **library interface** called in-process by the orchestrator or an agent, or (b) a **canonical task type** `svc_sNN.<task>` (24 §3.2), or (c) a **scheduled system job**. The Wave A contracts name task types only for S2, S3 and S7; every other task type here is reserved by CCR-136 (Proposed, deferred to 3C).
 3. Every service row, task, queue item, file path, cache key, log line and metric carries `org_id` (rule 9, directive §1C.1). Code filters by tenant explicitly; RLS (04 §3, INF-11) is the second line. A service that must read across tenants does so only through the `amw_sysfn` functions of 04 §3.6 (identifiers and aggregates only) and every such call is audited.
 4. Deterministic checks run first; an LLM score is never the only gate; an incomplete output is never marked successful (02 §1.6).
 5. A service never approves anything, never writes `editorial_contributions`, never raises a budget and never changes a control. Only a human with the right role does (08 §5.3; 04 §5.16 triggers).
@@ -42,7 +42,7 @@
 
 | S | Service | Owner | Mode | Build stage | Tier | Task type (24 §3.2) | LLM? |
 |---|---|---|---|---|---|---|---|
-| S1 | Audience Intelligence | 14 | scheduled job + library | 3C | T0 | `svc_s01.audience_rollup` (pending CCR) | narration only (optional) |
+| S1 | Audience Intelligence | 14 | scheduled job + library | 3C | T0 | `svc_s01.audience_rollup` (CCR-136) | narration only (optional) |
 | S2 | Uniqueness Auditor | 16 | task type | **3A** parts (b), (c); part (a) 3C | T0 | `svc_s02.uniqueness_check` | no |
 | S3 | Localisation, Translation & Dubbing | 05 | task types | 3C | **T1** | `svc_s03.translate_script`, `svc_s03.dub_timing_fit`, `svc_s03.native_speaker_qc` | translation only |
 | S4 | Financial Controller + Budget Guard | 15 | inline library + system job | **3A** | T0 | none (inline at T03) | no |
@@ -51,10 +51,10 @@
 | S7 | Human Approval & Governance | 01 | task type | **3A** | T0 (T1/T2 client workflows) | `svc_s07.request_approval` | no |
 | S8 | Executive Command Center | 01 | web app over the API | 3C | T0 owner view; T1+ tenant / platform views | none | no |
 | S9 | Tenant, Identity & Access | 01 | library + auth component | **3A** core; 3C UI | T0 → T1; T3 SSO | none | no |
-| S10 | Billing, Metering & Plans | 15 | library + scheduled job | 3C | **T2** | `svc_s10.usage_rollup` (pending CCR) | no |
+| S10 | Billing, Metering & Plans | 15 | library + scheduled job | 3C | **T2** | `svc_s10.usage_rollup` (CCR-136) | no |
 | S11 | Client Portal, Brand Kits & White-label | 13 | app + library | 3A minimal brand kit; 3C portal | T0 kit; T1 approvals; T2 white-label | none | no |
-| S12 | Integration API & Webhooks | 01 | API + task type | 3C | **T3** | `svc_s12.webhook_deliver` (pending CCR) | no |
-| S13 | Community & Comments | 14 | task types | 3C | T0+ | `svc_s13.comment_triage`, `svc_s13.reply_draft` (pending CCR) | triage + drafting |
+| S12 | Integration API & Webhooks | 01 | API + task type | 3C | **T3** | `svc_s12.webhook_deliver` (CCR-136) | no |
+| S13 | Community & Comments | 14 | task types | 3C | T0+ | `svc_s13.comment_triage`, `svc_s13.reply_draft` (CCR-136) | triage + drafting |
 
 Sources: directive §3.2; 02 §4; 01 §5. Where a row differs from 02 §4, 02 wins and a CCR is filed (section 14).
 
@@ -68,7 +68,7 @@ Sources: directive §3.2; 02 §4; 01 §5. Where a row differs from 02 §4, 02 wi
 |---|---|
 | Purpose | Turn aggregate, authorised audience data into insights for content strategy (Agents 03, 14, 05 through memory and experiments). **No claim about any individual viewer**; no profiling, no re-identification (directive §3.2) |
 | Owner / scope | Agent 14. 3C (needs published videos and the Agent 13 YouTube path; nothing in 3A, which has no upload). Tier 0 |
-| Contracts | Scheduled system job `svc_s01.audience_rollup` (pending CCR; same scheduled-job gap as 02 open item 3 and 05 §12). Input: `{channel_id, window, report_types}` and rows already fetched by `agent_14.analytics_ingest` (24 §3.2). Output envelope (03) with `status` and a payload that references the rollup as a tenant blob URI and the `memory_items` keys written. S1 does **not** call the YouTube API itself; ingestion stays with Agent 14 |
+| Contracts | Scheduled system job `svc_s01.audience_rollup` (CCR-136, CCR-135, Proposed, deferred to 3C; same scheduled-job gap as 02 open item 3 and 05 §12). Input: `{channel_id, window, report_types}` and rows already fetched by `agent_14.analytics_ingest` (24 §3.2). Output envelope (03) with `status` and a payload that references the rollup as a tenant blob URI and the `memory_items` keys written. S1 does **not** call the YouTube API itself; ingestion stays with Agent 14 |
 | Data available | YT-14: the Analytics API gives retention (`audienceWatchRatio`, `relativeRetentionPerformance`); impressions and CTR come from the Reporting API. Which **audience dimensions** (age, geography, device, traffic source) the API returns, their minimum cohort sizes and any usage limits: **REQUIRES REVIEW (Phase 1): official YouTube Analytics API dimension list and policy on aggregate audience data** |
 | Tables | Reads `analytics_snapshots` (04 §5.22; "only values returned by the API; never fabricated"), `publications`, `channels`. Writes `memory_items` with scope `CHANNEL` or `LONG_TERM` (04 §5.10: needs `provenance_ref`, `confidence`, `review_after`); proposes `experiments` rows only through Agent 14 and the `EXPERIMENT` approval. No new table |
 | Deterministic vs LLM | **Deterministic**: aggregation, cohort-size suppression (any cell below `s01.min_cohort` is dropped, never reported; value REQUIRES REVIEW), comparison against the channel baseline, confidence from sample size (no significance claim without enough data, directive §3.3). **LLM (optional, 3C, one task type to be added with Agent 14's blueprint)**: wording of an insight from the computed numbers only. The model receives numbers, never rows; its text is checked against the computed numbers (every number in the text must exist in the input) |
@@ -103,12 +103,12 @@ Sources: directive §3.2; 02 §4; 01 §5. Where a row differs from 02 §4, 02 wi
 | Tables | `scripts` (language, `parent_script_id`; 04 §5.11), `voices`, `voice_consents` (04 §5.12; a cloned voice needs a verified consent record, directive §1C.8), `claims`, `approvals`, `approval_steps`, `renders`. No new table: a language is a column value, not a new table |
 | Deterministic vs LLM | **LLM**: translation (one prompt, eval pack with Marathi / Hindi / English golden cases; the glossary is injected, never paraphrased from memory). **Deterministic**: timing fit (duration arithmetic, speed-change limits `s03.max_tempo_change`, value REQUIRES REVIEW), subtitle length and reading-speed limits (18), language-tag checks, banned-phrase checks. The meaning-must-not-change rule is enforced by re-running claim extraction and the finance pack on the translation, not by a model's self-assessment |
 | Tenant isolation | Translation memory, glossaries and cloned voices are per tenant (`org_id`); a voice or glossary of tenant A is never an input for tenant B. Provider calls carry no other tenant's text |
-| Human approvals | `svc_s03.native_speaker_qc` is a **mandatory** human step per language (24 §4). Approval kind for it does not exist in GLOSSARY §6.15: `NATIVE_SPEAKER_QC` (pending CCR; alternative: reuse `SCRIPT`). Workflow `owner_one_tap` at Tier 0/1; reviewer role `REVIEWER_APPROVER`. `FINAL_VIDEO` is also mandatory per language set |
+| Human approvals | `svc_s03.native_speaker_qc` is a **mandatory** human step per language (24 §4). Approval kind: `SCRIPT` on the translated script version of that language (`subject_kind = script`; CCR-144, no new kind). Workflow `owner_one_tap` at Tier 0/1; reviewer role `REVIEWER_APPROVER`. `FINAL_VIDEO` is also mandatory per language set |
 | Acceptance | (1) A translated script that introduces a finance-pack violation absent from the source is `BLOCKED` by the compliance gate (answer-key fixtures, 13 §5.12) (**blocking**). (2) No dubbed asset reaches `agent_13` without an `APPROVED` native-speaker approval for that language and SHA-256. (3) Timing fit never exceeds the configured tempo change; an over-limit segment returns to translation for shortening, bounded by `max_revision_loops`. (4) A voice without an `ACTIVE` consent record cannot be used (**blocking**). (5) Eval pack of at least 20 golden cases (27 §6) |
 
 ### 3.4 S4 Financial Controller + Budget Guard [3A · Tier 0] — specified in 09_COST_AND_BUDGET.md
 
-Not repeated here. Pointers: where S4 runs (09 §2), budget kinds and states (09 §3), reservation at T03 (09 §3.4; 03 §11.3), breach behaviour (09 §4), cost capture and estimate vs verified (09 §5–6), provider limits and start gate (09 §8), cost-per-stage report (09 §12), pending CCRs (09 §14).
+Not repeated here. Pointers: where S4 runs (09 §2), budget kinds and states (09 §3), reservation at T03 (09 §3.4; 03 §11.3), breach behaviour (09 §4), cost capture and estimate vs verified (09 §5–6), provider limits and start gate (09 §8), cost-per-stage report (09 §12), open contract items (09 §14).
 
 | Field | Specification |
 |---|---|
@@ -124,7 +124,7 @@ Signals, level scheme, actions by level, persistence and the monitoring-tool bou
 | Field | Specification |
 |---|---|
 | Owner / scope | Agent 01. **3C**, Tier 0. 3A only emits the signals S5 will read: ADR-012 render guards, the cgroup acceptance test RM-T1 (05 §5.3), JSON logs and a metrics endpoint (27 §7.3.6) |
-| Contracts | Scheduled system job; no task type exists. Sampling job and sample storage: `(pending CCR)` already requested in 05 §12 item 1. Outputs: threshold events to `audit_log` and `notifications`; recommendation records (never actions) |
+| Contracts | Scheduled system job; no task type exists. Sampling job and sample storage: CCR-135 and CCR-137 (Proposed, deferred to 3C), see 05 §12 item 1. Outputs: threshold events to `audit_log` and `notifications`; recommendation records (never actions) |
 | Tables | `workers` (GLOBAL, 04 §5.4), `task_queue`, `circuit_breakers` (read), `notifications`, `audit_log`. Reads through `amw_readonly` |
 | Deterministic vs LLM | **Fully deterministic**; no LLM. Scaling or migration is a **recommendation** only; any purchase is the owner's decision (rule 8) |
 | Tenant isolation | Host signals carry no tenant data; queue and usage signals are labelled by tenant and a tenant sees only its own; cross-tenant aggregates only through `amw_platform_ops_summary()` (04 §3.6; audited) |
@@ -189,7 +189,7 @@ Not repeated here. Pointers: scope by build phase (08 §2), secrets and the spen
 |---|---|
 | Purpose | Usage metering from S4 cost tracking, plans and credits, invoices with Indian GST, a payment-gateway adapter, dunning, plan limits enforced in the queue (directive §1C.9; §1B.7) |
 | Owner / scope | Agent 15. **3C, Tier 2** (09 lists it as a non-goal for 3A; no table of 04 §5.25 is created before then). The platform owner's own spending still follows rule 8 |
-| Contracts | Scheduled system job `svc_s10.usage_rollup` (pending CCR) turns `cost_ledger` entries into `usage_events`; library calls for plan-limit checks used by admission (05 §7.1: `plans.limits` is the single source). Gateway adapter and webhooks: ADR-010 (not written; Indian gateway first, international later). Detailed design: 20_MULTI_TENANCY_AND_ENTERPRISE.md and 21_PRICING_AND_PACKAGING.md (planned) |
+| Contracts | Scheduled system job `svc_s10.usage_rollup` (CCR-136, CCR-135, Proposed, deferred to 3C) turns `cost_ledger` entries into `usage_events`; library calls for plan-limit checks used by admission (05 §7.1: `plans.limits` is the single source). Gateway adapter and webhooks: ADR-010 (not written; Indian gateway first, international later). Detailed design: 20_MULTI_TENANCY_AND_ENTERPRISE.md and 21_PRICING_AND_PACKAGING.md (planned) |
 | Tables | `plans` (GLOBAL), `subscriptions`, `usage_events` (partitioned), `invoices` (04 §5.25); reads `cost_ledger`, `budgets` |
 | Deterministic vs LLM | Fully deterministic; **no LLM may compute, round or explain an amount**. Money in minor units, currency code per row (GLOSSARY §3 units). Prices, GST rates and invoice rules: **REQUIRES REVIEW (Phase 1): 21_PRICING_AND_PACKAGING (PROPOSAL until the owner approves) and a chartered accountant / owner's lawyer check ⚖** |
 | Tenant isolation | `subscriptions`, `usage_events`, `invoices` are TENANT; a tenant sees only its own. `plans` is a price catalogue without tenant data. Cross-tenant revenue totals only via the platform aggregate function |
@@ -215,7 +215,7 @@ Not repeated here. Pointers: scope by build phase (08 §2), secrets and the spen
 |---|---|
 | Purpose | Versioned REST API with per-tenant API keys / OAuth clients, scoped permissions, rate limits; webhooks for `job.finished`, `approval.needed`, `published`, `failed`, signed and retried (directive §1C.12) |
 | Owner / scope | Agent 01. **3C, Tier 3**, built only when a paying enterprise client needs it (§1C.15). The `JobIntake` model of Agent 01 §7.1 becomes a public wire contract only then, through a CCR (agent 01 §7) |
-| Contracts | `apps/api` endpoints call the same library paths as the operator tool and S8 (`job.create` is idempotent, 03 §9.2). Webhook delivery is a task type `svc_s12.webhook_deliver` (pending CCR; Agent 01 FR24 names the delivery task) with a bounded retry schedule from 07 (no infinite retries; maximum attempts: configuration, REQUIRES REVIEW) |
+| Contracts | `apps/api` endpoints call the same library paths as the operator tool and S8 (`job.create` is idempotent, 03 §9.2). Webhook delivery is a task type `svc_s12.webhook_deliver` (CCR-136, Proposed, deferred to 3C; Agent 01 FR24 names the delivery task) with a bounded retry schedule from 07 (no infinite retries; maximum attempts: configuration, REQUIRES REVIEW) |
 | Tables | `api_keys`, `webhooks`, `webhook_deliveries`, `tenant_data_keys` (04 §5.26, §5.19) |
 | Deterministic vs LLM | Fully deterministic; no LLM |
 | Tenant isolation | An API key is bound to one org and inherits no more than its creator's permissions (08 §7.3); the key resolves the tenant context before any query. Webhook secrets are encrypted with the tenant data key; payloads are built inside the tenant transaction and contain identifiers and states only, no media or personal data unless the client's scope allows it. Outbound URLs pass the SSRF guard (private and loopback targets rejected, 08 §7.3) |
@@ -228,8 +228,8 @@ Not repeated here. Pointers: scope by build phase (08 §2), secrets and the spen
 |---|---|
 | Purpose | Triage comments into question / spam / abuse / lead; **draft** replies for human approval only; never auto-post; the finance rule pack applies so no reply can become advice (directive §3.2; IN-03: no calls, levels or forward-looking statements on named securities, FIN-R1, R2, R3) |
 | Owner / scope | Agent 14. **3C**, needs Agent 13's YouTube path first (no upload and no OAuth in 3A). Tier 0+ |
-| Contracts | `svc_s13.comment_triage` and `svc_s13.reply_draft` (pending CCR). Fetching and posting go through Agent 13's adapter (the only holder of channel tokens); S13 never sees a token. The capability for comment read / write: reuse `publish_youtube` or add one (pending CCR). The OAuth scope and the quota cost of comment calls: **REQUIRES REVIEW (Phase 1): official YouTube Data API comments methods, scope and quota cost** (YT-12 confirms scope names only; YT-02 / YT-05 are the quota facts for other calls) |
-| Flow | fetch (deterministic) → dedupe by `external_comment_id` → deterministic pre-filter (blocklist, link patterns, length) → LLM triage into `comment_triage_class` with `triage_confidence` → below `s13.triage_min_confidence` the class is `UNCLASSIFIED` and goes to a human → for `QUESTION` / `LEAD` only, LLM reply draft (`reply_state = DRAFTED`) → `agent_16.compliance_gate` with the channel's packs on the **draft** (`reply_verdict_id`; subject kind `comment_reply`, pending CCR) → S7 `COMMENT_REPLY` approval → post by Agent 13 only when `reply_state = APPROVED`; then `POSTED` |
+| Contracts | `svc_s13.comment_triage` and `svc_s13.reply_draft` (CCR-136, Proposed, deferred to 3C). Fetching and posting go through Agent 13's adapter (the only holder of channel tokens); S13 never sees a token. The capability for comment read / write: reuse `publish_youtube` or add one (decided with S13, CCR-136). The OAuth scope and the quota cost of comment calls: **REQUIRES REVIEW (Phase 1): official YouTube Data API comments methods, scope and quota cost** (YT-12 confirms scope names only; YT-02 / YT-05 are the quota facts for other calls) |
+| Flow | fetch (deterministic) → dedupe by `external_comment_id` → deterministic pre-filter (blocklist, link patterns, length) → LLM triage into `comment_triage_class` with `triage_confidence` → below `s13.triage_min_confidence` the class is `UNCLASSIFIED` and goes to a human → for `QUESTION` / `LEAD` only, LLM reply draft (`reply_state = DRAFTED`) → `agent_16.compliance_gate` with the channel's packs on the **draft** (`reply_verdict_id`; subject kind `comment_reply`, exists in 04 §5.16, CCR-145) → S7 `COMMENT_REPLY` approval → post by Agent 13 only when `reply_state = APPROVED`; then `POSTED` |
 | Tables | `community_comments` (04 §5.23; `reply_state = POSTED` requires an `APPROVED` approval, enforced by trigger), `approvals`, `compliance_verdicts`, `publications`, `channels` |
 | Deterministic vs LLM | **Deterministic**: fetch, dedupe, blocklist, state machine, posting guard, rate limit on drafts. **LLM**: triage and draft only; the model's output is data, never an instruction. Comment text is untrusted input and may contain prompt injection (08 §5.3): it is passed as quoted data, no tool calls, and the injection cases are in the eval pack. Abuse is flagged to the human, never actioned (hide, report, ban are human actions). A `LEAD` is recorded and routed to the owner as a notification; no direct message is sent |
 | Tenant isolation | Comments, drafts and verdicts are TENANT rows; the triage prompt holds no other tenant's text; per-tenant draft rate limits so one channel cannot starve others (05 §7). Author display names are personal data (22; IN-07) with the retention of 22 |
@@ -293,7 +293,7 @@ Not repeated here. Pointers: scope by build phase (08 §2), secrets and the spen
 | `EXPERIMENT` | Agent 14 (from S1 insights) | `owner_one_tap` | 3C |
 | `SPEND` | S4 / S10 / S5 recommendations | `owner_sensitive` | 3A (budget), 3C |
 | `POLICY_CHANGE` | S10 plan change; rule or threshold change (13 §12) | `owner_sensitive` | 3C |
-| Native-speaker QC | S3 | `owner_one_tap` | 3C T1; kind `NATIVE_SPEAKER_QC` (pending CCR) |
+| Native-speaker QC | S3 | `owner_one_tap` | 3C T1; kind `SCRIPT` (CCR-144) |
 | `NEW_CHANNEL`, `NEW_CATEGORY`, `UNUSUAL_PUBLISH`, `DLQ_REPLAY`, `PUBLISH`, others | Agents 01, 03, 13 | per 24 §3.4 | 3C |
 
 S7 never invents a kind or a workflow; this table lists use only.
@@ -366,9 +366,9 @@ YT-09 (inauthentic content, S2 and YTG-R1), YT-12 (OAuth scope names, S13), YT-1
 
 ---
 
-## 14. Contract requests (pending CCR; not edited into Wave A or B-1 here)
+## 14. Contract requests (filed in pass 5; not edited into Wave A or B-1 here)
 
-The requests are listed in `audit/b2_unfiled_ccr_requests_shared.md` for the integrator to file (not yet in CONTRACT_CHANGE_REQUESTS.md). This document is written against the proposed names where marked "(pending CCR)".
+The requests are filed in CONTRACT_CHANGE_REQUESTS.md §4.7 (integrator pass 5): item 1 is CCR-135 / CCR-136, item 2 CCR-136, item 3 CCR-144 (`SCRIPT`, Applied), item 4 CCR-136, item 5 CCR-145 (Rejected: both subjects exist). This document is written against the proposed names where marked with their CCR.
 
 1. Scheduled system job mechanism and task types `svc_s01.audience_rollup`, `svc_s10.usage_rollup` (same gap as 02 open item 3 and 05 §12).
 2. Task types `svc_s13.comment_triage`, `svc_s13.reply_draft`; comment-fetch / post capability decision (reuse `publish_youtube` or add one).
