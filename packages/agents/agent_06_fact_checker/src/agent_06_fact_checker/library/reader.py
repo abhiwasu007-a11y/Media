@@ -1,24 +1,42 @@
 """Read-only reader of the private knowledge-library checkout (KNOWLEDGE-LIB, D12).
 
-A job input carries only the library path and a commit SHA, never text. The reader refuses to
-read unless the checkout's HEAD equals that SHA (fail closed), opens files only in binary read
-mode, accepts only relative paths of allowed text suffixes inside the checkout (never ``.git``,
-never a symlink that leaves it), and offers no write, copy or listing method. The text it returns
-is held by the caller in memory only; it must never reach a log, fixture, blob or PR.
+A job input carries only the library path and the FULL 40-character commit SHA, never text. The
+reader refuses to read unless the checkout's HEAD equals that SHA (fail closed), opens files only
+in binary read mode, accepts only relative paths of allowed text suffixes inside the checkout
+(never ``.git``, never a symlink), and offers no write, copy or listing method. The text it
+returns is held by the caller in memory only; it must never reach a log, fixture, blob or PR.
 
-Not verified: that the working tree is clean (HEAD identifies the commit, not the file bytes).
+The content read must equal the content of the pinned commit (PR 104 review, MAJOR): the git blob
+id of the bytes read is compared with the blob id the commit records for that path
+(``git ls-tree``, read-only). A modified, staged-and-modified, untracked or symlink-swapped file,
+or one changed by a text conversion, therefore never verifies a quote. Nothing is written.
 """
 
+import hashlib
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from amw_core.errors import InputInvalidError, MissingDependencyError
 
-_SHA = re.compile(r"^[0-9a-f]{7,40}$")
 _FULL = re.compile(r"^[0-9a-f]{40}$")
 _REF_PREFIX = "ref: "
+_REGULAR_MODES = frozenset({"100644", "100755"})
+_GIT_ENV = {
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "LC_ALL": "C",
+}
+
+
+def _blob_id(data: bytes) -> str:
+    """Git blob id (sha1 of ``blob <size>\\0`` + bytes); an identifier, not a security hash."""
+    head = f"blob {len(data)}\0".encode("ascii")
+    return hashlib.sha1(head + data, usedforsecurity=False).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,8 +47,8 @@ class LibraryRef:
     commit_sha: str
 
     def __post_init__(self) -> None:
-        if not _SHA.fullmatch(self.commit_sha):
-            raise InputInvalidError("library commit_sha must be 7-40 lowercase hex characters")
+        if not _FULL.fullmatch(self.commit_sha):
+            raise InputInvalidError("library commit_sha must be 40 lowercase hex characters")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +57,11 @@ class LibraryLimits:
 
     max_file_bytes: int
     allowed_suffixes: frozenset[str]
+    git_timeout_seconds: float = 30.0
+    """Timeout of the read-only ``git ls-tree`` call (provisional, CCR-291 note)."""
 
     def __post_init__(self) -> None:
-        if self.max_file_bytes < 1 or not self.allowed_suffixes:
+        if self.max_file_bytes < 1 or not self.allowed_suffixes or self.git_timeout_seconds <= 0:
             raise InputInvalidError("library limits need a positive size and a suffix list")
 
 
@@ -126,7 +146,7 @@ class CheckoutLibraryReader:
         return self._ref.commit_sha
 
     def _check_head(self) -> None:
-        if not head_commit(self._root).startswith(self._ref.commit_sha):
+        if head_commit(self._root) != self._ref.commit_sha:
             raise InputInvalidError("library checkout is not at the commit the job names")
 
     def _resolve(self, relative_path: str) -> Path:
@@ -140,12 +160,43 @@ class CheckoutLibraryReader:
             or rel.suffix.lower() not in self._limits.allowed_suffixes
         ):
             raise InputInvalidError("library path must be a relative path of an allowed text file")
+        if (self._root / rel).is_symlink():
+            raise InputInvalidError("library path must not be a symbolic link")
         target = (self._root / rel).resolve()
         if not target.is_relative_to(self._root) or ".git" in target.relative_to(self._root).parts:
             raise InputInvalidError("library path leaves the checkout")
         if not target.is_file():
             raise MissingDependencyError("library file does not exist")
         return target
+
+    def _committed_blob_id(self, relative_path: str) -> str:
+        """Blob id the pinned commit records for the path (a regular file only)."""
+        try:
+            done = subprocess.run(  # noqa: S603 - fixed argv, validated sha, path after "--"
+                [
+                    *("git", "-C", str(self._root), "ls-tree", "-z", self._ref.commit_sha),
+                    *("--", relative_path),
+                ],
+                capture_output=True,
+                check=False,
+                timeout=self._limits.git_timeout_seconds,
+                env=_GIT_ENV,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise MissingDependencyError("library commit could not be inspected") from exc
+        if done.returncode != 0:
+            raise MissingDependencyError("library commit could not be inspected")
+        entries = [e for e in done.stdout.split(b"\0") if e]
+        if len(entries) != 1:
+            raise InputInvalidError("library file is not part of the pinned commit")
+        meta, _, name = entries[0].partition(b"\t")
+        fields = meta.split(b" ")
+        if len(fields) != 3 or name.decode("utf-8", "replace") != relative_path:
+            raise InputInvalidError("library file is not part of the pinned commit")
+        mode, kind, oid = (f.decode("ascii", "replace") for f in fields)
+        if kind != "blob" or mode not in _REGULAR_MODES or not _FULL.fullmatch(oid):
+            raise InputInvalidError("library file is not a regular file of the pinned commit")
+        return oid
 
     def read_text(self, relative_path: str) -> str:
         self._check_head()  # HEAD may have moved since construction
@@ -154,6 +205,8 @@ class CheckoutLibraryReader:
             data = handle.read(self._limits.max_file_bytes + 1)
         if len(data) > self._limits.max_file_bytes:
             raise InputInvalidError("library file exceeds the size limit")
+        if _blob_id(data) != self._committed_blob_id(relative_path):
+            raise InputInvalidError("library file differs from the pinned commit")
         try:
             return data.decode("utf-8")
         except UnicodeDecodeError as exc:

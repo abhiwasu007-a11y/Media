@@ -3,7 +3,14 @@
 Owner rule (D12): a work is public domain only when its author, and for a translation also its
 translator, died MORE THAN 60 years before the START of the current calendar year, that is
 ``year - death_year > 60`` for the year of the job date (CCR-270: ``death_year < year - 60``).
-Any unknown or implausible field means ``False`` (fail closed). The flag is recomputed at every
+Any unknown or implausible field means ``False`` (fail closed).
+
+Year convention (PR 104 review, MAJOR): death years are SIGNED integers in the historical
+numbering, negative = BCE (Plato c. -347, Confucius -479), positive = CE (Seneca 65), and there is
+no year 0, so 0 is implausible. The rule needs only the difference ``year - death_year``; the
+missing year 0 shifts it by one for a BCE author, which cannot matter against a 60-year limit.
+
+The flag is recomputed at every
 use against an injected date and is never stored. Year granularity is the owner's rule, not a
 legal fact (REQUIRES REVIEW (Phase 1): legal confirmation per distribution jurisdiction).
 Instance data lives only in the private knowledge repository; this module carries the rule.
@@ -20,6 +27,10 @@ from amw_core.interfaces.clock import Clock
 
 PD_YEARS_AFTER_DEATH = 60
 """D12 / CCR-270: years that must have passed before the start of the current calendar year."""
+
+EARLIEST_DEATH_YEAR = -3500
+"""Provisional lower bound of a plausible death year (before any known writing); below it the
+record is implausible and fails closed (CCR-291 note; REQUIRES REVIEW (Phase 1): librarian)."""
 
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
 _WorkId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]{0,99}$")]
@@ -51,6 +62,7 @@ class WorkCopyrightRecord(AmwModel):
     title: _Text
     author: _Text
     author_death_year: int | None = None
+    """Signed year, negative = BCE, no year 0 (module docstring)."""
     work_kind: WorkKind
     translator: _Text | None = None
     translator_death_year: int | None = None
@@ -78,7 +90,7 @@ def clock_year(clock: Clock) -> int:
 
 
 def _plausible(year: int | None, evaluated_year: int) -> bool:
-    return year is not None and 1 <= year <= evaluated_year
+    return year is not None and year != 0 and EARLIEST_DEATH_YEAR <= year <= evaluated_year
 
 
 def evaluate_public_domain(

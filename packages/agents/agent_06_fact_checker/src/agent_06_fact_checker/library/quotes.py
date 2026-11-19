@@ -2,7 +2,7 @@
 
 Extends Agent 06 inside the existing contract: claim type ``QUOTED_THIRD_PARTY`` (GLOSSARY 6.39)
 with the existing statuses and reason code ``QUOTE_NOT_ATTRIBUTABLE`` and revision action
-``REMOVE_OR_REWORD`` (blueprint 6.4). The finer ``QuoteCode`` is package-internal until CCR-285
+``REMOVE_OR_REWORD`` (blueprint 6.4). The finer ``QuoteCode`` is package-internal until CCR-291
 (PROPOSED) is decided. Library text is read through the read-only reader, compared in memory and
 never returned: a result carries offsets, counts and hashes only (NFR-6).
 
@@ -14,8 +14,11 @@ it folds look-alike letters, which would let a changed quote pass):
 2. every run of Unicode whitespace (including NBSP and line breaks) becomes one space; ends trimmed;
 3. nothing else is normalised: case, punctuation, dashes, diacritics, zero-width characters and
    look-alike letters all count. An ellipsis is literal: quote the parts as separate quotes;
-4. the quote must be an exact substring of the (normalised) text of the cited section, and must
-   begin and end on a word boundary (``ort life`` never matches inside ``short life``).
+4. the quote must be an exact substring of the (normalised) text of ONE section (the cited one;
+   with no locator, any single section, never across a section boundary) and must begin and end
+   on a word boundary (``ort life`` never matches inside ``short life``);
+5. a quote shorter than ``QuoteSettings.min_quote_chars`` code points is not verifiable (a few
+   words match almost anywhere): ``QUOTE_TOO_SHORT``, remove or reword. Provisional, CCR-291.
 """
 
 import hashlib
@@ -36,6 +39,7 @@ from agent_06_fact_checker.library.reader import KnowledgeLibraryReader
 from agent_06_fact_checker.models import ReasonCode, RevisionAction
 from amw_core.contracts.common import AmwModel
 from amw_core.enums import ClaimStatus
+from amw_core.errors import InputInvalidError
 
 _QUOTE_MAP = {
     **dict.fromkeys((0x2018, 0x2019, 0x201A, 0x201B), "'"),
@@ -70,6 +74,7 @@ class QuoteCode(StrEnum):
     LOCATOR_NOT_FOUND = "LOCATOR_NOT_FOUND"
     LOCATOR_MISMATCH = "LOCATOR_MISMATCH"
     NOT_IN_SOURCE = "NOT_IN_SOURCE"
+    QUOTE_TOO_SHORT = "QUOTE_TOO_SHORT"
 
 
 class QuoteAction(StrEnum):
@@ -80,13 +85,14 @@ class QuoteAction(StrEnum):
     """A checked source contradicts or forbids the quote (fake quote, wrong place, not PD)."""
 
 
-# code -> (action, status); one table so the mapping is reviewable in one place (CCR-285)
+# code -> (action, status); one table so the mapping is reviewable in one place (CCR-291)
 _OUTCOME: Mapping[QuoteCode, tuple[QuoteAction, ClaimStatus]] = {
     QuoteCode.VERIFIED_EXACT: (QuoteAction.KEEP, ClaimStatus.VERIFIED),
     QuoteCode.EMPTY_QUOTE: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
     QuoteCode.NO_SOURCE: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
     QuoteCode.LOCATOR_MISSING: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
     QuoteCode.LOCATOR_UNVERIFIABLE: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
+    QuoteCode.QUOTE_TOO_SHORT: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
     QuoteCode.ATTRIBUTION_MISMATCH: (QuoteAction.BLOCK_CLAIM, ClaimStatus.CONTRADICTED),
     QuoteCode.NOT_PUBLIC_DOMAIN: (QuoteAction.BLOCK_CLAIM, ClaimStatus.CONTRADICTED),
     QuoteCode.LOCATOR_NOT_FOUND: (QuoteAction.BLOCK_CLAIM, ClaimStatus.CONTRADICTED),
@@ -110,12 +116,20 @@ class QuoteSubmission:
 
 @dataclass(frozen=True, slots=True)
 class QuoteSettings:
-    """Configuration; no defaults."""
+    """Configuration; the two required fields have no defaults."""
 
     require_locator: bool
     """``True``: a PD quote without a verifiable chapter / verse reference is not accepted."""
     guard_min_words: int
     """Quoted spans of at least this many words must be checked quotes (fake-quote guard)."""
+    min_quote_chars: int = 20
+    """Shortest quote (code points of the normalised text) that can be verified. PROVISIONAL
+    default, not derived from any source: CCR-291 PROPOSED, owner / librarian to set it.
+    Counts characters, not words, so scripts written without spaces are handled too."""
+
+    def __post_init__(self) -> None:
+        if self.min_quote_chars < 1 or self.guard_min_words < 1:
+            raise InputInvalidError("quote settings need positive thresholds")
 
 
 class QuoteCheckResult(AmwModel):
@@ -170,15 +184,17 @@ def _result(
 class _Sections:
     by_locator: Mapping[str, str]
     ambiguous: frozenset[str]
-    whole: str
-    """Normalised text of all sections, marker lines excluded."""
+    parts: tuple[str, ...]
+    """Normalised text of every section occurrence on its own (a repeated locator stays two
+    parts), so no match can span a section boundary."""
 
 
 def split_sections(raw_text: str) -> _Sections:
-    """Sections start at a marker line ``§ <locator>`` (CCR-285 PROPOSED); text before the first
+    """Sections start at a marker line ``§ <locator>`` (CCR-291 PROPOSED); text before the first
     marker belongs to no section. A repeated locator is ambiguous and never verifies."""
     buckets: dict[str, list[str]] = {}
     seen_twice: set[str] = set()
+    everything: list[list[str]] = []
     current: list[str] | None = None
     for line in raw_text.splitlines():
         marker = _SECTION_MARKER.match(line)
@@ -187,10 +203,13 @@ def split_sections(raw_text: str) -> _Sections:
             if loc in buckets:
                 seen_twice.add(loc)
             current = buckets.setdefault(loc, [])
+            everything.append([])
         elif current is not None:
             current.append(line)
+            everything[-1].append(line)
     by_loc = {loc: normalise_quote_text("\n".join(lines)) for loc, lines in buckets.items()}
-    return _Sections(by_loc, frozenset(seen_twice), " ".join(by_loc.values()))
+    parts = tuple(normalise_quote_text("\n".join(lines)) for lines in everything)
+    return _Sections(by_loc, frozenset(seen_twice), parts)
 
 
 def _boundary_ok(text: str, start: int, end: int) -> bool:
@@ -213,6 +232,19 @@ def find_exact(haystack: str, needle: str) -> tuple[int, int, int] | None:
     if not hits:
         return None
     return hits[0], hits[0] + len(needle), len(hits)
+
+
+def find_in_any_section(sections: Sequence[str], needle: str) -> tuple[int, int, int] | None:
+    """Exact match inside ONE section at a time (never across a join): first hit as
+    ``(start, end, total_count)``, offsets relative to the section that holds it."""
+    first: tuple[int, int] | None = None
+    total = 0
+    for body in sections:
+        hit = find_exact(body, needle)
+        if hit is not None:
+            first = first or (hit[0], hit[1])
+            total += hit[2]
+    return None if first is None else (first[0], first[1], total)
 
 
 class QuoteVerifier:
@@ -258,6 +290,8 @@ class QuoteVerifier:
         loc = normalise_quote_text(sub.locator) if sub.locator else ""
         if not loc and self._settings.require_locator:
             return _result(sub, QuoteCode.LOCATOR_MISSING, quote=quote, pd_reason=decision.reason)
+        if len(quote) < self._settings.min_quote_chars:
+            return _result(sub, QuoteCode.QUOTE_TOO_SHORT, quote=quote, pd_reason=decision.reason)
         return self._match(sub, record, quote, loc, decision.reason)
 
     def _match(
@@ -288,7 +322,7 @@ class QuoteVerifier:
             )
 
         if not loc:  # allowed only when require_locator is False
-            hit = find_exact(sections.whole, quote)
+            hit = find_in_any_section(sections.parts, quote)
             if hit is None:
                 return out(QuoteCode.NOT_IN_SOURCE)
             return out(QuoteCode.VERIFIED_EXACT, span=(hit[0], hit[1]), occurrences=hit[2])
@@ -305,7 +339,7 @@ class QuoteVerifier:
                 span=(hit[0], hit[1]),
                 occurrences=hit[2],
             )
-        elsewhere = find_exact(sections.whole, quote)
+        elsewhere = find_in_any_section(sections.parts, quote)
         return out(QuoteCode.NOT_IN_SOURCE if elsewhere is None else QuoteCode.LOCATOR_MISMATCH)
 
 

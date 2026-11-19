@@ -1,4 +1,4 @@
-"""Knowledge-library source rules (owner decision D12; CCR-270, CCR-285 PROPOSED).
+"""Knowledge-library source rules (owner decision D12; CCR-270, CCR-291 PROPOSED).
 
 Four parts, all pure or read-only: the per-work copyright record and the computed public-domain
 flag (``copyright``), the read-only reader of the private library checkout (``reader``), exact

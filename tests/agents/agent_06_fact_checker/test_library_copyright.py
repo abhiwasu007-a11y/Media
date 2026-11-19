@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from agent_06_fact_checker.library.copyright import (
+    EARLIEST_DEATH_YEAR,
     PdReason,
     WorkKind,
     clock_year,
@@ -135,3 +136,63 @@ def test_record_rejects_unknown_fields_and_bad_ids() -> None:
                 "public_domain": True,
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("death", "year", "expected"),
+    [
+        (-347, 2026, True),  # Plato, c. 347 BCE
+        (-479, 2026, True),  # Confucius
+        (65, 2026, True),  # Seneca, 65 CE
+        (1965, 2026, True),  # 61 years
+        (1966, 2026, False),  # 60 years: not more than 60
+        (1966, 2027, True),
+        (2000, 2026, False),  # modern author
+        (-1, 2026, True),
+        (1, 2026, True),
+    ],
+)
+def test_bce_and_ce_authors(death: int, year: int, expected: bool) -> None:
+    decision = evaluate_public_domain(record("w", "a.txt", author_death=death), year=year)
+    assert decision.public_domain is expected
+    assert (decision.reason is PdReason.PUBLIC_DOMAIN) is expected
+
+
+@pytest.mark.parametrize("death", [0, -3501, -100000, 2027])
+def test_year_zero_and_out_of_range_are_implausible(death: int) -> None:
+    decision = evaluate_public_domain(record("w", "a.txt", author_death=death), year=2026)
+    assert (decision.public_domain, decision.reason) == (False, PdReason.DEATH_YEAR_IMPLAUSIBLE)
+
+
+def test_earliest_plausible_year_is_the_documented_bound() -> None:
+    assert EARLIEST_DEATH_YEAR == -3500
+    ok = evaluate_public_domain(record("w", "a.txt", author_death=-3500), year=2026)
+    assert ok.public_domain is True
+
+
+def test_bce_translation_with_ce_translator() -> None:
+    rec = record(
+        "w",
+        "a.txt",
+        author_death=-347,
+        kind=WorkKind.TRANSLATION,
+        translator="Tr",
+        translator_death=1890,
+    )
+    assert evaluate_public_domain(rec, year=2026).public_domain is True
+    recent = record(
+        "w",
+        "a.txt",
+        author_death=-347,
+        kind=WorkKind.TRANSLATION,
+        translator="Tr",
+        translator_death=1990,
+    )
+    decision = evaluate_public_domain(recent, year=2026)
+    assert decision.reason is PdReason.TRANSLATOR_NOT_YET_PUBLIC_DOMAIN
+
+
+def test_bce_year_survives_json_round_trip() -> None:
+    rec = record("w", "a.txt", author_death=-347)
+    again = type(rec).model_validate_json(rec.model_dump_json())
+    assert again.author_death_year == -347

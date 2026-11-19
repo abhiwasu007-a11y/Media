@@ -1,10 +1,9 @@
 """Synthetic mini-library for the quote / copyright tests: invented sentences only.
 
-No text of the real private knowledge library is used or copied; the fake checkout is built in a
-test tmp directory and carries a hand-written git HEAD so no git process or network is needed."""
+No text of the real private knowledge library is used or copied; the checkout is a real git
+repository built in a test tmp directory (local ``git init`` / ``commit``, no network)."""
 
-# ruff: noqa: RUF001
-
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,7 +14,6 @@ from agent_06_fact_checker.library.reader import (
     LibraryRef,
 )
 
-SHA = "0123456789abcdef0123456789abcdef01234567"
 LIMITS = LibraryLimits(max_file_bytes=10_000, allowed_suffixes=frozenset({".txt", ".md"}))
 JOB_DATE = datetime(2026, 11, 19, tzinfo=UTC).date()
 
@@ -26,8 +24,8 @@ It is not time we lack but the will to hold it.
 § I.2
 A lamp unlit gives no account of the dark.
 § II.1
-Short  life is  a “borrowed” coat, said the clerk.
-He wore it’s patches with pride.
+Short  life\u00a0is  a \u201cborrowed\u201d coat, said the clerk.
+He wore it\u2019s patches with pride.
 """
 TRANSLATION_TEXT = """§ 1
 Every harbour was once an open shore.
@@ -102,21 +100,49 @@ def records() -> dict[str, WorkCopyrightRecord]:
     return {r.work_id: r for r in items}
 
 
-def make_library(root: Path, files: dict[str, str] | None = None, sha: str = SHA) -> Path:
+_GIT_ENV = {
+    "PATH": "/usr/local/bin:/usr/bin:/bin",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_AUTHOR_NAME": "t",
+    "GIT_AUTHOR_EMAIL": "t@example.invalid",
+    "GIT_COMMITTER_NAME": "t",
+    "GIT_COMMITTER_EMAIL": "t@example.invalid",
+}
+
+
+def git(repo: Path, *args: str) -> str:
+    done = subprocess.run(  # noqa: S603 - fixed argv built from test paths
+        ["git", "-C", str(repo), *args],  # noqa: S607
+        capture_output=True,
+        check=True,
+        text=True,
+        env=_GIT_ENV,
+    )
+    return done.stdout.strip()
+
+
+def make_library(root: Path, files: dict[str, str] | None = None) -> Path:
+    """A real, committed git repository holding the files (symlinks may be added after)."""
     repo = root / "lib"
-    git = repo / ".git"
-    (git / "refs" / "heads").mkdir(parents=True, exist_ok=True)
-    (git / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-    (git / "refs" / "heads" / "main").write_text(sha + "\n", encoding="utf-8")
+    repo.mkdir(parents=True, exist_ok=True)
+    git(repo, "init", "-q", "-b", "main")
     for rel, text in (files if files is not None else FILES).items():
         path = repo / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "synthetic library")
     return repo
 
 
+def head_sha(repo: Path) -> str:
+    return git(repo, "rev-parse", "HEAD")
+
+
 def make_reader(root: Path) -> CheckoutLibraryReader:
-    return CheckoutLibraryReader(LibraryRef(make_library(root), SHA), LIMITS)
+    repo = make_library(root)
+    return CheckoutLibraryReader(LibraryRef(repo, head_sha(repo)), LIMITS)
 
 
 class FixedClock:

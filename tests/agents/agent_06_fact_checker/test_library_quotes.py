@@ -1,7 +1,5 @@
 """QUOTE-VERIFY: exact match, source rules, fake-quote guard, credits. Synthetic text only."""
 
-# ruff: noqa: RUF001, PT018
-
 from datetime import date
 from pathlib import Path
 
@@ -39,8 +37,8 @@ from tests.agents.agent_06_fact_checker.library_support import (
 )
 
 pytestmark = pytest.mark.unit
-STRICT = QuoteSettings(require_locator=True, guard_min_words=4)
-LOOSE = QuoteSettings(require_locator=False, guard_min_words=4)
+STRICT = QuoteSettings(require_locator=True, guard_min_words=4, min_quote_chars=1)
+LOOSE = QuoteSettings(require_locator=False, guard_min_words=4, min_quote_chars=1)
 AUTHOR = "Aelius Testor"
 
 
@@ -88,15 +86,19 @@ def test_exact_quote_with_reference_is_kept(tmp_path: Path) -> None:
         QuoteAction.KEEP,
         ClaimStatus.VERIFIED,
     )
-    assert r.locator_verified is True and r.reason is None and r.revision_action is None
-    assert r.occurrences == 1 and r.match_start is not None and r.match_end is not None
+    assert r.locator_verified is True
+    assert r.reason is None
+    assert r.revision_action is None
+    assert r.occurrences == 1
+    assert r.match_start is not None
+    assert r.match_end is not None
     assert r.pd_reason is not None
 
 
 def test_whitespace_and_quote_marks_are_normalised_only(tmp_path: Path) -> None:
     quote = 'Short life is a "borrowed" coat, said the clerk.'
     assert check(tmp_path, sub(quote, loc="II.1")).code is QuoteCode.VERIFIED_EXACT
-    spaced = "Short  life \n is a “borrowed”  coat, said the clerk."
+    spaced = "Short\u00a0\u00a0life \n is a \u201cborrowed\u201d  coat, said the clerk."
     assert check(tmp_path, sub(spaced, loc="II.1")).code is QuoteCode.VERIFIED_EXACT
     apostrophe = "He wore it's patches with pride."
     assert check(tmp_path, sub(apostrophe, loc="II.1")).code is QuoteCode.VERIFIED_EXACT
@@ -111,7 +113,7 @@ def test_whitespace_and_quote_marks_are_normalised_only(tmp_path: Path) -> None:
         "It is not time we lack but the will to hold it...",  # ellipsis is literal
         "It is not time we lack but the wi​ll to hold it.",  # zero-width char
         "It is not time we lack but the will to hold it—",  # dash differs
-        "It is not timе we lack but the will to hold it.",  # Cyrillic look-alike e
+        "It is not timе we lack but the will to hold it.",  # noqa: RUF001 Cyrillic look-alike e
         "ime we lack but the will to hold it",  # starts inside a word
         "It is not time we lack but the will to hol",  # ends inside a word
         "A completely invented sentence about harbours.",
@@ -120,14 +122,16 @@ def test_whitespace_and_quote_marks_are_normalised_only(tmp_path: Path) -> None:
 def test_changed_quote_is_a_fake_and_blocks_the_claim(tmp_path: Path, fake: str) -> None:
     r = check(tmp_path, sub(fake))
     assert r.code is QuoteCode.NOT_IN_SOURCE
-    assert r.action is QuoteAction.BLOCK_CLAIM and r.status is ClaimStatus.CONTRADICTED
+    assert r.action is QuoteAction.BLOCK_CLAIM
+    assert r.status is ClaimStatus.CONTRADICTED
     assert r.reason is ReasonCode.QUOTE_NOT_ATTRIBUTABLE
     assert r.revision_action is RevisionAction.REMOVE_OR_REWORD
 
 
 def test_quote_from_another_section_has_a_wrong_reference(tmp_path: Path) -> None:
     r = check(tmp_path, sub("A lamp unlit gives no account of the dark.", loc="I.1"))
-    assert r.code is QuoteCode.LOCATOR_MISMATCH and r.action is QuoteAction.BLOCK_CLAIM
+    assert r.code is QuoteCode.LOCATOR_MISMATCH
+    assert r.action is QuoteAction.BLOCK_CLAIM
 
 
 def test_unknown_reference_is_blocked_and_missing_reference_removed(tmp_path: Path) -> None:
@@ -141,7 +145,8 @@ def test_unknown_reference_is_blocked_and_missing_reference_removed(tmp_path: Pa
 
 def test_reference_is_optional_only_when_configured(tmp_path: Path) -> None:
     ok = check(tmp_path, sub("A lamp unlit gives no account of the dark.", loc=None), LOOSE)
-    assert ok.code is QuoteCode.VERIFIED_EXACT and ok.locator_verified is False
+    assert ok.code is QuoteCode.VERIFIED_EXACT
+    assert ok.locator_verified is False
     bad = check(tmp_path, sub("A lamp that never existed.", loc=None), LOOSE)
     assert bad.code is QuoteCode.NOT_IN_SOURCE
 
@@ -156,7 +161,8 @@ def test_text_without_markers_or_with_repeated_marker_cannot_verify_a_reference(
     tmp_path: Path,
 ) -> None:
     plain = check(tmp_path, sub("A plain text", work="plain", loc="1"))
-    assert plain.code is QuoteCode.LOCATOR_UNVERIFIABLE and plain.action is QuoteAction.REMOVE_QUOTE
+    assert plain.code is QuoteCode.LOCATOR_UNVERIFIABLE
+    assert plain.action is QuoteAction.REMOVE_QUOTE
     dup = check(tmp_path, sub("First body line here.", work="dup", loc="A"))
     assert dup.code is QuoteCode.LOCATOR_UNVERIFIABLE
 
@@ -166,7 +172,8 @@ def test_misattribution_is_blocked(tmp_path: Path) -> None:
         tmp_path,
         sub("A lamp unlit gives no account of the dark.", author="Quintus Fictus", loc="I.2"),
     )
-    assert r.code is QuoteCode.ATTRIBUTION_MISMATCH and r.action is QuoteAction.BLOCK_CLAIM
+    assert r.code is QuoteCode.ATTRIBUTION_MISMATCH
+    assert r.action is QuoteAction.BLOCK_CLAIM
     same = check(
         tmp_path,
         sub("A lamp unlit gives no account of the dark.", author="  aelius   TESTOR ", loc="I.2"),
@@ -236,7 +243,8 @@ def test_results_carry_no_source_or_quote_text(tmp_path: Path) -> None:
     dumped = r.model_dump_json()
     for line in FILES["phil/original.txt"].splitlines():
         assert len(line) < 12 or line not in dumped
-    assert quote not in dumped and "river of days" not in dumped
+    assert quote not in dumped
+    assert "river of days" not in dumped
     assert len(r.quote_sha256) == 64
     assert isinstance(SpyReader(make_reader(tmp_path)), KnowledgeLibraryReader)
 
@@ -252,7 +260,7 @@ def test_result_maps_into_the_existing_agent_06_verdicts(tmp_path: Path) -> None
 
 
 def test_matching_helpers() -> None:
-    assert normalise_quote_text("  a  b\n\tc ") == "a b c"
+    assert normalise_quote_text("  a\u00a0 b\n\tc ") == "a b c"
     assert find_exact("abc def abc", "abc") == (0, 3, 2)
     assert find_exact("xabc abc", "abc") == (5, 8, 1)
     assert find_exact("abc", "") is None
@@ -261,7 +269,7 @@ def test_matching_helpers() -> None:
 
 
 SCRIPT = (
-    "He said “It is not time we lack but the will to hold it.” and then "
+    "He said \u201cIt is not time we lack but the will to hold it.\u201d and then "
     '"a made up line of four words" and also «another invented line for the guard», '
     'plus "short one".'
 )
@@ -330,3 +338,89 @@ def test_translator_name_is_required_in_the_credit(tmp_path: Path) -> None:
     partial = "Quintus Fictus, On trans. Public domain."
     found = check_credits([UsedWork("trans", WorkUse.QUOTED)], recs, partial, job_date=JOB_DATE)
     assert [f.problem for f in found] == [CreditProblem.CREDIT_MISSING]
+
+
+def test_quote_spanning_two_sections_never_verifies_without_a_locator(tmp_path: Path) -> None:
+    joined = "will to hold it. A lamp unlit gives no account of the dark."
+    assert check(tmp_path, sub(joined, loc=None), LOOSE).code is QuoteCode.NOT_IN_SOURCE
+    assert check(tmp_path, sub(joined, loc="I.1"), LOOSE).code is QuoteCode.NOT_IN_SOURCE
+    assert check(tmp_path, sub(joined, loc="I.2"), LOOSE).code is QuoteCode.NOT_IN_SOURCE
+    # each half on its own does verify without a locator, and reports one section's offsets
+    first = check(tmp_path, sub("It is not time we lack but the will to hold it.", loc=None), LOOSE)
+    assert first.code is QuoteCode.VERIFIED_EXACT
+    assert first.locator_verified is False
+
+
+def test_quote_spanning_a_repeated_locator_never_verifies(tmp_path: Path) -> None:
+    both = "First body line here. Second body line here."
+    result = check(tmp_path, sub(both, work="dup", loc=None), LOOSE)
+    assert result.code is QuoteCode.NOT_IN_SOURCE
+    one = check(tmp_path, sub("Second body line here.", work="dup", loc=None), LOOSE)
+    assert one.code is QuoteCode.VERIFIED_EXACT
+
+
+def test_sections_keep_every_occurrence_as_its_own_part() -> None:
+    parts = split_sections("§ A\nalpha beta\n§ B\ngamma\n§ A\ndelta\n").parts
+    assert parts == ("alpha beta", "gamma", "delta")
+
+
+DEFAULTS = QuoteSettings(require_locator=True, guard_min_words=4)
+
+
+def test_default_minimum_quote_length_is_documented_and_applied(tmp_path: Path) -> None:
+    assert DEFAULTS.min_quote_chars == 20
+    short = check(tmp_path, sub("the will", loc="I.1"), DEFAULTS)  # in the section, 8 chars
+    assert short.code is QuoteCode.QUOTE_TOO_SHORT
+    assert (short.action, short.status) == (
+        QuoteAction.REMOVE_QUOTE,
+        ClaimStatus.NEEDS_SUBSTANTIATION,
+    )
+    assert short.reason is ReasonCode.QUOTE_NOT_ATTRIBUTABLE
+    assert short.revision_action is RevisionAction.REMOVE_OR_REWORD
+
+
+def test_minimum_length_boundary(tmp_path: Path) -> None:
+    text = "will to hold it."  # 16 chars
+    settings = QuoteSettings(require_locator=True, guard_min_words=4, min_quote_chars=16)
+    assert check(tmp_path, sub(text), settings).code is QuoteCode.VERIFIED_EXACT
+    settings = QuoteSettings(require_locator=True, guard_min_words=4, min_quote_chars=17)
+    assert check(tmp_path, sub(text), settings).code is QuoteCode.QUOTE_TOO_SHORT
+
+
+def test_length_is_measured_on_the_normalised_quote(tmp_path: Path) -> None:
+    padded = "   a   b   "
+    result = check(tmp_path, sub(padded), DEFAULTS)
+    assert result.code is QuoteCode.QUOTE_TOO_SHORT
+
+
+def test_block_outcomes_win_over_the_length_check(tmp_path: Path) -> None:
+    wrong = check(tmp_path, sub("hold it", author="Someone Else"), DEFAULTS)
+    assert wrong.code is QuoteCode.ATTRIBUTION_MISMATCH
+    modern = check(tmp_path, sub("short", work="modern", author="Quintus Fictus"), DEFAULTS)
+    assert modern.code is QuoteCode.NOT_PUBLIC_DOMAIN
+    missing = check(tmp_path, sub("short", loc=None), DEFAULTS)
+    assert missing.code is QuoteCode.LOCATOR_MISSING
+
+
+@pytest.mark.parametrize("kwargs", [{"min_quote_chars": 0}, {"guard_min_words": 0}])
+def test_settings_reject_non_positive_thresholds(kwargs: dict[str, int]) -> None:
+    from amw_core.errors import InputInvalidError
+
+    base = {"guard_min_words": 4, "min_quote_chars": 20, **kwargs}
+    with pytest.raises(InputInvalidError):
+        QuoteSettings(require_locator=True, **base)
+
+
+def test_bce_author_quote_can_verify_and_a_modern_one_cannot(tmp_path: Path) -> None:
+    from tests.agents.agent_06_fact_checker.library_support import record
+
+    plato = record("plato", "phil/translation.txt", author="Plato", author_death=-347)
+    modern = record("mod", "phil/translation.txt", author="Plato", author_death=1990)
+    reader = make_reader(tmp_path)
+    text = "Every harbour was once an open shore."
+    submission = QuoteSubmission("c1", text, "Plato", "plato", "1")
+    ok = QuoteVerifier({"plato": plato}, reader, DEFAULTS).verify([submission], job_date=JOB_DATE)
+    assert ok[0].code is QuoteCode.VERIFIED_EXACT
+    submission = QuoteSubmission("c1", text, "Plato", "mod", "1")
+    no = QuoteVerifier({"mod": modern}, reader, DEFAULTS).verify([submission], job_date=JOB_DATE)
+    assert no[0].code is QuoteCode.NOT_PUBLIC_DOMAIN
