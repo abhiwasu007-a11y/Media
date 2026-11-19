@@ -9,8 +9,9 @@ is rejected (blueprint 6.4(5), AN-01 to AN-07). Bar numbers are dataset bar inde
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AnnotationKind(StrEnum):
@@ -33,6 +34,26 @@ class Annotation(BaseModel):
     text: str | None = None
     price: str | None = None
     extend_right: bool = False
+
+
+class Connector(BaseModel):
+    """Proposed annotation kind ``CONNECT_BARS`` (CCR-255): a straight segment between two bars,
+    given as window-relative offsets (0 = first bar of the window), both inside the window, never
+    extended, no text. ``PRICE`` joins the bars' ``anchor`` prices, ``RSI`` the computed RSI
+    values."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    from_offset: Annotated[int, Field(ge=0)]
+    to_offset: Annotated[int, Field(ge=0)]
+    panel: Literal["PRICE", "RSI"]
+    anchor: Literal["HIGH", "LOW"] = "HIGH"
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if self.to_offset <= self.from_offset:
+            raise ValueError("a connector joins an earlier bar to a later bar")
+        return self
 
 
 class Rejection(StrEnum):

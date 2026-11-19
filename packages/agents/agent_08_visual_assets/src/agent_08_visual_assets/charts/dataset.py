@@ -1,14 +1,18 @@
 """``DatasetLoader`` and ``BarSeries``: the owner's historical OHLC dataset (blueprint 10.3, U-06).
 
-Format: UTF-8 CSV with header ``date,open,high,low,close`` (extra columns are ignored). The loader
-verifies the SHA-256 against the registered hash before parsing (S-06), requires ISO dates in
-strictly ascending order and decimal prices with no empty cell, NaN or infinity, and a bounded
-number of bars. Decimals only: no float ever touches a price.
+Format: UTF-8 CSV with header ``date,open,high,low,close`` (extra columns are ignored); the course
+``data_pack`` names the first column ``timestamp`` and is read the same way (daily and weekly rows
+carry an ISO date; a row with a clock time is refused as intraday, which the chart path does not
+support). The loader verifies the SHA-256 against the registered hash before parsing (S-06),
+requires ISO dates in strictly ascending order and decimal prices with no empty cell, NaN or
+infinity, no row longer than the header, and a bounded number of bars. Decimals only: no float
+ever touches a price.
 """
 
 import csv
 import hashlib
 import io
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -17,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 from amw_core.errors import CorruptedOutputError, InputInvalidError
 
 REQUIRED_COLUMNS = ("date", "open", "high", "low", "close")
+DATE_COLUMN_ALIASES = ("date", "timestamp")
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,13 +55,23 @@ class BarSeries:
         return self.bars[first : last + 1]
 
 
+_PLAIN_DECIMAL = re.compile(r"^[0-9]{1,12}(\.[0-9]{1,8})?$")
+
+
 def _decimal(raw: str) -> Decimal:
+    """A plain positive decimal price: no sign, no exponent, no NaN or infinity, not zero."""
+    text = raw.strip()
+    if not _PLAIN_DECIMAL.match(text):
+        lowered = text.lower()
+        if lowered in ("nan", "inf", "infinity", "-inf", "+inf"):
+            raise InputInvalidError("dataset holds a non-finite price")
+        raise InputInvalidError("dataset holds a non-decimal or signed price")
     try:
-        value = Decimal(raw.strip())
-    except InvalidOperation:
+        value = Decimal(text)
+    except InvalidOperation:  # pragma: no cover - the pattern admits only valid decimals
         raise InputInvalidError("dataset holds a non-decimal price") from None
-    if not value.is_finite():
-        raise InputInvalidError("dataset holds a non-finite price")
+    if value <= 0:
+        raise InputInvalidError("dataset holds a zero price")
     return value
 
 
@@ -80,16 +95,29 @@ class DatasetLoader:
         except UnicodeDecodeError:
             raise InputInvalidError("dataset is not UTF-8") from None
         reader = csv.DictReader(io.StringIO(text))
-        if reader.fieldnames is None or any(c not in reader.fieldnames for c in REQUIRED_COLUMNS):
+        names = reader.fieldnames or []
+        date_col = next((c for c in DATE_COLUMN_ALIASES if c in names), None)
+        if date_col is None or any(c not in names for c in REQUIRED_COLUMNS[1:]):
             raise InputInvalidError("dataset header must contain date,open,high,low,close")
         bars: list[Bar] = []
-        for row in reader:
+        for line, row in enumerate(reader, start=2):
             if len(bars) >= max_bars:
                 raise InputInvalidError("dataset has more bars than the configured maximum")
+            if None in row:
+                raise InputInvalidError(
+                    "dataset row has more cells than the header", details={"line": line}
+                )
+            raw_day = (row[date_col] or "").strip()
+            if len(raw_day) != 10:
+                raise InputInvalidError(
+                    "dataset holds a non-ISO date or an intraday timestamp", details={"line": line}
+                )
             try:
-                day = date.fromisoformat((row["date"] or "").strip())
+                day = date.fromisoformat(raw_day)
             except ValueError:
-                raise InputInvalidError("dataset holds a non-ISO date") from None
+                raise InputInvalidError(
+                    "dataset holds a non-ISO date", details={"line": line}
+                ) from None
             o, h, low, c = (_decimal(row[k] or "") for k in ("open", "high", "low", "close"))
             if high_low_broken(o, h, low, c):
                 raise InputInvalidError("dataset bar has high below low or outside open/close")

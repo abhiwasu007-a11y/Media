@@ -38,6 +38,12 @@ from agent_08_visual_assets.cascade.tier_cascade import (
     skip_with,
 )
 from agent_08_visual_assets.charts.cases import ChartCase, ChartRequest, StoredCase
+from agent_08_visual_assets.charts.datapack_builder import (
+    DataPackChartBuilder,
+    DataPackChartRequest,
+    RegisteredDataset,
+    is_data_within_lag,
+)
 from agent_08_visual_assets.charts.dataset import BarSeries, DatasetLoader
 from agent_08_visual_assets.charts.lag import EarliestPublishDate
 from agent_08_visual_assets.charts.pipeline import BuiltChart, ChartContext, ChartPath
@@ -120,6 +126,7 @@ from amw_core.enums import (
     LicenceUsageKind,
     ShotIntentKind,
     ShotSourcingStatus,
+    ShotUnresolvedReason,
     SourcingWarning,
     VisualSkipReason,
     VisualSourceTier,
@@ -609,6 +616,8 @@ class AssetSourcingStage:
                 palette,
             )
             stored = ChartPath.case_for(base)
+            if stored is not None and stored.case.window_dates is not None:
+                return self._datapack_chart(tx, stored, base, licences, shot)
             series, ds_id, released = None, None, False
             if stored is not None:
                 series, ds_id = self._dataset(tx, ctx, stored.case.dataset_asset_id)
@@ -764,6 +773,61 @@ class AssetSourcingStage:
             out.append(rec)
         return sorted(out, key=lambda r: r.asset_id)[: self._s.max_candidates_per_shot]
 
+    def _datapack_chart(
+        self,
+        tx: TenantTransaction,
+        stored: StoredCase,
+        base: ChartContext,
+        licences: Mapping[LicenceSourceType, LicenceRecord],
+        shot: ShotRequirement,
+    ) -> ChartAttempt[_Sourced]:
+        """Tier C data_pack chart scene: an owner case with a date window (CCR-259) over a
+        registered data_pack dataset, drawn by ``DataPackChartBuilder`` with the stage's clock as
+        the only as-of source; registered like every other chart."""
+        case = stored.case
+        series, ds_id = self._dataset(tx, tx.context, case.dataset_asset_id)
+        rec = self._assets.get(tx, ds_id) if ds_id is not None else None
+        if series is None or rec is None or case.window_dates is None or case.instrument is None:
+            return ChartAttempt(unresolved=ShotUnresolvedReason.NO_DATASET)
+        if case.method_content and not self._approvals.is_released(
+            tx, stored.asset_id, stored.sha256
+        ):
+            return ChartAttempt(unresolved=ShotUnresolvedReason.METHOD_NOT_RELEASED)
+        request = DataPackChartRequest(
+            chart_id=base.request.chart_id,
+            instrument=case.instrument,
+            timeframe=case.timeframe,
+            window_start=case.window_dates.start_date,
+            window_end=case.window_dates.end_date,
+            indicators=case.indicators,
+            annotations=case.annotations,
+            connectors=case.connectors,
+            on_screen_text_allowlist=tuple(base.on_screen_text_allowlist),
+            rsi_guides=case.rsi_guides,
+            reveal_steps=base.change_events + 1,
+            aspect_ratio=base.aspect_ratio,
+        )
+        builder = DataPackChartBuilder(
+            palette=base.palette,
+            clock=self._clock,
+            lag_days=self._s.price_data_lag_days,
+            platform_min_lag_days=self._s.price_data_lag_platform_min_days,
+            width_px=base.width_px,
+            height_px=base.height_px,
+        )
+        dataset = RegisteredDataset(
+            rec.asset_id, rec.asset.content_sha256, rec.asset.attributes, series
+        )
+        try:
+            chart = builder.build(request, dataset)
+        except InputInvalidError as exc:
+            if is_data_within_lag(exc):
+                return ChartAttempt(unresolved=ShotUnresolvedReason.DATA_WITHIN_LAG)
+            raise
+        return ChartAttempt(
+            accepted=self._register_chart(tx, chart.as_built(stored), licences, ds_id, shot)
+        )
+
     def _register_chart(
         self,
         tx: TenantTransaction,
@@ -774,6 +838,7 @@ class AssetSourcingStage:
     ) -> _Sourced:
         lic = licences[LicenceSourceType.CODE_GENERATED]
         attrs = {
+            **built.extra_attributes,
             "dataset_asset_id": ds_id,
             "case_id": built.case.case.case_id,
             "spec_sha256": built.spec_sha256,

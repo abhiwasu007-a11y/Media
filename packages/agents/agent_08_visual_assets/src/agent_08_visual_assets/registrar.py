@@ -8,18 +8,20 @@ task type; it never lets an agent certify its own material.
 """
 
 import io
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
 from agent_08_visual_assets.charts.cases import ChartCase
+from agent_08_visual_assets.charts.datapack import DataPackReader
 from agent_08_visual_assets.charts.dataset import DatasetLoader
 from agent_08_visual_assets.persistence.protocols import AssetRepository
 from agent_08_visual_assets.persistence.records import AssetRecord, NewAsset
 from agent_08_visual_assets.reuse.fingerprint import Fingerprinter
 from amw_core.enums import ActorKind, AssetKind, LicenceSourceType, VisualSourceTier
-from amw_core.errors import InputInvalidError, PermissionDeniedError
+from amw_core.errors import CorruptedOutputError, InputInvalidError, PermissionDeniedError
 from amw_core.ids import ActorRef
 from amw_core.interfaces.audit_log import AuditLog, NewAuditEntry
 from amw_core.interfaces.storage import BlobStorage
@@ -153,6 +155,43 @@ class AssetRegistrar:
         title: str,
     ) -> AssetRecord:
         attributes = self._guard(tx, intake, "dataset")
+        return self._insert_dataset(tx, attributes, content, instrument, timeframe, title)
+
+    def register_data_pack_series(
+        self,
+        tx: TenantTransaction,
+        intake: Intake,
+        reader: DataPackReader,
+        *,
+        instrument: str,
+        timeframe: str,
+        title: str,
+    ) -> AssetRecord:
+        """Register one course data_pack file as a ``DATASET`` asset. The intake guard runs (and
+        is audited) BEFORE the pack is read; the stored blob is exactly the bytes read, its
+        SHA-256 is the asset's ``content_sha256``, and the pack manifest hash is recorded."""
+        attributes = self._guard(tx, intake, "dataset")
+        pack = reader.read(instrument, timeframe)
+        if DatasetLoader.sha256(pack.content) != pack.sha256:
+            raise CorruptedOutputError("data_pack file hash does not match the bytes read")
+        return self._insert_dataset(
+            tx,
+            {**attributes, "data_pack_manifest_sha256": pack.manifest_sha256},
+            pack.content,
+            instrument,
+            timeframe,
+            title,
+        )
+
+    def _insert_dataset(
+        self,
+        tx: TenantTransaction,
+        attributes: Mapping[str, object],
+        content: bytes,
+        instrument: str,
+        timeframe: str,
+        title: str,
+    ) -> AssetRecord:
         series = DatasetLoader.parse(
             content, max_bars=self._max_bars, sha256=DatasetLoader.sha256(content)
         )
