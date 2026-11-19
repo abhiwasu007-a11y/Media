@@ -8,7 +8,7 @@ as a default: parsers raise ``MeasurementUnavailable`` first.
 """
 
 import itertools
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from decimal import Decimal
 from fractions import Fraction
@@ -1089,6 +1089,27 @@ def edit_cuts_j_l(*, jl_count: int, min_count: int | None) -> CheckResult:
     return verdict_by(
         "edit.cuts.j_l", jl_count >= min_count, measured=jl_count, threshold=min_count, unit="cuts"
     )
+
+
+#: ``section_id`` of the hook scenes (agent_05 section 8.3, CCR-202): reserved, never a section.
+HOOK_SECTION_ID = "hook"
+
+
+def section_starts_ms(shots: Iterable[tuple[str | None, int]]) -> list[int]:
+    """Chapter starts the plan implies (18 ``edit.chapters``, CCR-202).
+
+    ``shots`` are ``(section_id, start_ms)`` in plan order. Only real sections count (the reserved
+    ``hook`` id and ``None`` do not); the first section starts at 0 by definition (its chapter
+    covers the lead-in), every later section starts at its first shot.
+    """
+    starts: list[int] = []
+    seen: set[str] = set()
+    for section_id, start_ms in shots:
+        if section_id is None or section_id == HOOK_SECTION_ID or section_id in seen:
+            continue
+        seen.add(section_id)
+        starts.append(0 if not starts else start_ms)
+    return starts
 
 
 def edit_chapters(

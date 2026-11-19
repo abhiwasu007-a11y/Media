@@ -130,7 +130,7 @@ def test_segment_argv_has_the_target_a_lossless_reference_and_never_filler(
     tmp_path: Path,
 ) -> None:
     world = World(tmp_path, shots=2)
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert out.status is OutputStatus.SUCCEEDED
     segments = [c.argv for c in world.runner.calls if c.kind == "segment"]
     assert segments
@@ -164,7 +164,7 @@ def test_reference_is_deleted_when_the_encode_fails(tmp_path: Path) -> None:
     world = World(tmp_path, shots=2)
     world.runner.crash_on_encode = {1}
     with pytest.raises(AmwError):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert not list(tmp_path.rglob("segment_ref.part"))
 
 
@@ -172,7 +172,7 @@ def test_reference_is_deleted_when_the_encode_fails(tmp_path: Path) -> None:
 def test_an_ssim_pair_count_mismatch_is_not_measured(tmp_path: Path) -> None:
     world = World(tmp_path, shots=2)
     world.runner.ssim_pair_offset = 1  # one pair too many: frames are not aligned
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     quality = payload_data(out)["encoder"]["quality_metric"]
     assert quality["ssim_all"] is None
     assert quality["frames_measured"] == 0
@@ -183,7 +183,7 @@ def test_a_segment_with_other_settings_fails_the_render(tmp_path: Path) -> None:
     world = World(tmp_path, shots=2)
     world.runner.strip_sei = True  # a segment without the x264 settings record
     with pytest.raises(RenderCrashError):
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
 
 
 # ----------------------------------------------------------------------------- real FFmpeg
@@ -254,7 +254,7 @@ def test_still_graphics_encode_at_the_target_without_padding_and_pass_qc(
     assert not EditListChecker.has_edit_list(final_path)  # INF-13 "No Edit Lists"
     texts = X264SeiParser.texts_in_file(final_path)
     assert len(texts) == data["segments"]["planned"]  # one SEI per segment
-    qc = QcStage(world.deps(), _PassingSelfTests()).run(chain["qc_input"], world.attempt)
+    qc = QcStage(world.deps(), _PassingSelfTests()).execute(chain["qc_input"], world.attempt)
     assert qc.status is OutputStatus.SUCCEEDED
     by_id = {r.check_id: r for r in qc.validation_results}
     assert by_id["qc.video.encoder_settings"].verdict == "PASS"
@@ -489,7 +489,7 @@ def test_mux_without_edit_lists_keeps_audio_in_sync(tmp_path: Path) -> None:
 def test_a_reference_with_a_wrong_frame_count_is_not_measured(tmp_path: Path, offset: int) -> None:
     world = World(tmp_path, shots=2)
     world.runner.reference_frame_offset = offset
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert out.status is OutputStatus.SUCCEEDED
     quality = payload_data(out)["encoder"]["quality_metric"]
     assert quality["ssim_all"] is None
@@ -513,7 +513,7 @@ class _ShortReferenceRunner(ProcessFfmpegRunner):
 def test_a_short_reference_is_caught_with_real_ffmpeg(tmp_path: Path, stills: _StillMedia) -> None:
     world = World(tmp_path, shots=2, shot_ms=1000, config=_cfg(), media=stills)
     world.runner = _ShortReferenceRunner()  # type: ignore[assignment]
-    out = RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    out = RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert out.status is OutputStatus.SUCCEEDED
     quality = payload_data(out)["encoder"]["quality_metric"]
     assert quality["ssim_all"] is None  # the filter alone would have reported a value

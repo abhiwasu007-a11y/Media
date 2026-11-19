@@ -30,12 +30,14 @@ from agent_10_video_editor.contracts import (
     TierMixOut,
 )
 from agent_10_video_editor.deps import StageDeps
+from agent_10_video_editor.entry import run_task
 from agent_10_video_editor.errors import (
     MeasurementUnavailable,
     config_invalid,
     input_invalid,
     map_measurement_error,
     missing_dependency,
+    violations_of,
 )
 from agent_10_video_editor.ffmpeg import ArgvBuilder, RunLimits, ffmpeg_build_id
 from agent_10_video_editor.frames import FrameQuantiser
@@ -78,6 +80,8 @@ from agent_10_video_editor.taskio import (
     drain_action,
     ffmpeg_cost_entry,
     output_ref,
+    parse_blob,
+    parse_json_object,
     to_validation_result,
     usage,
     validate_budget,
@@ -100,6 +104,7 @@ from amw_core.errors import (
     RenderCrashError,
     SchemaInvalidError,
 )
+from amw_core.exec_context import ExecContext
 from amw_core.ids import ActorRef
 from amw_core.interfaces.tenancy_context import TenantContext
 
@@ -151,7 +156,16 @@ class QcStage:
         self._d = deps
         self._selftests = selftests
 
-    def run(
+    def run(self, task_input: TaskInput, ctx: ExecContext) -> TaskOutput:
+        """``TaskWorker`` entry point (03 section 1 rule 5, CCR-203); every failure is returned."""
+        return run_task(
+            task_input,
+            ctx,
+            self._d.clock,
+            lambda: self.execute(task_input, str(ctx.attempt_id), str(ctx.org_id)),
+        )
+
+    def execute(
         self, task_input: TaskInput, attempt_id: str, envelope_org: str | None = None
     ) -> TaskOutput:
         """``envelope_org`` is the organisation of the Task Input envelope the worker received; when
@@ -256,20 +270,30 @@ class _QcRun:
         render_out = _json(self.scope.read_bytes(*refs["agent_10.render.output"]))
         self._render_out = render_out
         timeline = _timeline(self.scope.read_bytes(*refs["agent_10.timeline"]))
-        plan = ShotPlan.model_validate_json(
-            self.scope.read_bytes(*refs["agent_09.shot_plan.output"])
+        plan = parse_blob(
+            ShotPlan,
+            self.scope.read_bytes(*refs["agent_09.shot_plan.output"]),
+            "agent_09.shot_plan.output",
         )
-        manifest = AssetManifest.model_validate_json(
-            self.scope.read_bytes(*refs["agent_08.asset_sourcing.output"])
+        manifest = parse_blob(
+            AssetManifest,
+            self.scope.read_bytes(*refs["agent_08.asset_sourcing.output"]),
+            "agent_08.asset_sourcing.output",
         )
-        audio = AudioMaster.model_validate_json(
-            self.scope.read_bytes(*refs["agent_07.audio_master.output"])
+        audio = parse_blob(
+            AudioMaster,
+            self.scope.read_bytes(*refs["agent_07.audio_master.output"]),
+            "agent_07.audio_master.output",
         )
-        narration = NarrationTimeline.model_validate_json(
-            self.scope.read_bytes(*refs["agent_07.voice_synthesis.output"])
+        narration = parse_blob(
+            NarrationTimeline,
+            self.scope.read_bytes(*refs["agent_07.voice_synthesis.output"]),
+            "agent_07.voice_synthesis.output",
         )
-        script = ScriptStrings.model_validate_json(
-            self.scope.read_bytes(*refs["agent_05.script_document"])
+        script = parse_blob(
+            ScriptStrings,
+            self.scope.read_bytes(*refs["agent_05.script_document"]),
+            "agent_05.script_document",
         )
         subs_out = _json(self.scope.read_bytes(*refs["agent_10.subtitles.output"]))
         with d.tenancy.transaction(self.ctx) as tx:
@@ -381,7 +405,7 @@ class _QcRun:
             ),
             selftest=SelftestOut(
                 ffmpeg_build_id=build_id,
-                selftest_ref=_selftest_ref(self.scope, ti.job_id, selftest),
+                selftest_ref=_selftest_ref(self.scope, ti, self.attempt_id, selftest),
                 passed=selftest.passed,
             ),
         )
@@ -684,7 +708,7 @@ class _QcRun:
         except InputInvalidError as exc:
             # a malformed stored SRT (BOM, CRLF, bad time line) is a gate FAIL (remedy s10_render)
             srt_cues = []
-            srt_errors = [f"PARSE:{', '.join(exc.details.get('violations', ['SRT_UNPARSEABLE']))}"]
+            srt_errors = [f"PARSE:{', '.join(violations_of(exc) or ['SRT_UNPARSEABLE'])}"]
         else:
             srt_errors = SrtValidator.validate(srt_cues, total_ms)
             self._run(self.argv.srt_check("sub.srt"), work)
@@ -987,12 +1011,7 @@ class _QcRun:
                 jl_count=sum(1 for s in plan.shots if s.jl_kind), min_count=qc.min_jl_cuts
             )
         )
-        starts: list[int] = []
-        seen: set[str] = set()
-        for s in plan.shots:
-            if s.section_id is not None and s.section_id not in seen:
-                seen.add(s.section_id)
-                starts.append(s.start_ms)
+        starts = C.section_starts_ms((s.section_id, s.start_ms) for s in plan.shots)
         out.append(
             C.edit_chapters(
                 chapters_ms=[c.start_ms for c in plan.chapters],
@@ -1034,7 +1053,7 @@ class _QcRun:
         frames = writer.extract_frames("final.mp4", timeline, row.duration_ms, work)
         sheet = writer.contact_sheet(len(frames), work)
         series = writer.loudness_series("final.mp4", work)
-        base = f"{self.ti.job_id}/tasks/{self.ti.task_id}/attempts/{self.attempt_id}/artifacts"
+        base = (self.ti.job_id, self.ti.task_id, self.attempt_id)
         return writer.write(
             base=base,
             render_id=payload.render_id,
@@ -1132,16 +1151,11 @@ class _QcState(BaseModel):
 
 
 def _json(data: bytes) -> dict[str, Any]:
-    import json
-
-    value = json.loads(data)
-    if not isinstance(value, dict):
-        raise SchemaInvalidError("expected a JSON object")
-    return value
+    return parse_json_object(data)
 
 
 def _timeline(data: bytes) -> Timeline:
-    return Timeline.model_validate_json(data)
+    return parse_blob(Timeline, data, "agent_10.timeline")
 
 
 def _words(text: str) -> list[str]:
@@ -1251,7 +1265,9 @@ def _tier_mix(timeline: Timeline) -> TierMixOut:
     return TierMixOut(**{k: v * 1000 // total for k, v in frames.items()}, ai_video_ms=ai_ms)
 
 
-def _selftest_ref(scope: TenantScope, job_id: str, record: SelfTestRecord) -> BlobRef:
+def _selftest_ref(
+    scope: TenantScope, ti: TaskInput, attempt_id: str, record: SelfTestRecord
+) -> BlobRef:
     data = canonical_json(
         {
             "ffmpeg_build_id": record.ffmpeg_build_id,
@@ -1262,7 +1278,10 @@ def _selftest_ref(scope: TenantScope, job_id: str, record: SelfTestRecord) -> Bl
         }
     )
     info = scope.put_bytes(
-        scope.uri("jobs", f"{job_id}/qc/selftest-{sha256_hex(data)[:16]}.json"), data
+        scope.artifact_uri(
+            ti.job_id, ti.task_id, attempt_id, f"selftest-{sha256_hex(data)[:16]}.json"
+        ),
+        data,
     )
     return BlobRef(uri=info.uri, sha256=info.sha256)
 

@@ -2,7 +2,7 @@
 name = "agent-10-video-editor"
 version = "0.0.0"
 requires-python = "==3.14.*"
-dependencies = ["amw-core"]
+dependencies = ["amw-core", "fonttools>=4.55"]
 
 [build-system]
 requires = ["hatchling"]

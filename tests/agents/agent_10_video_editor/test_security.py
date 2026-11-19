@@ -58,7 +58,7 @@ def test_s06_no_payload_text_reaches_an_argument() -> None:
 @pytest.mark.security
 def test_s06_script_text_never_reaches_any_recorded_command(tmp_path: Path) -> None:
     world = World(tmp_path, script_overrides={"s1": EVIL})
-    RenderStage(world.deps()).run(world.render_input(), world.attempt)
+    RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     for call in world.runner.calls:
         assert all("rm -rf" not in a and "touch" not in a for a in call.argv)
 
@@ -69,7 +69,7 @@ def test_s01_s03_s04_tenant_isolation_of_blobs_scratch_and_segment_cache(tmp_pat
     a = World(tmp_path / "a", storage=shared)
     b = World(tmp_path / "b", storage=shared)
     assert a.org != b.org
-    out_a = RenderStage(a.deps()).run(a.render_input(), a.attempt)
+    out_a = RenderStage(a.deps()).execute(a.render_input(), a.attempt)
     assert payload_data(out_a)["segments"]["encoded"] == 2
     # tenant B cannot read tenant A's blobs, with or without the right hash
     a_uri = payload_data(out_a)["render_ref"]["uri"]
@@ -79,7 +79,7 @@ def test_s01_s03_s04_tenant_isolation_of_blobs_scratch_and_segment_cache(tmp_pat
     with pytest.raises(CrossTenantRefError):
         shared.head(b.ctx, a_uri)
     # the content-addressed segment cache is looked up only under the tenant's own prefix
-    out_b = RenderStage(b.deps()).run(b.render_input(), b.attempt)
+    out_b = RenderStage(b.deps()).execute(b.render_input(), b.attempt)
     assert payload_data(out_b)["segments"]["reused"] == 0
     assert payload_data(out_b)["segments"]["encoded"] == 2
     assert a_uri != payload_data(out_b)["render_ref"]["uri"]
@@ -140,6 +140,6 @@ def test_s05_error_objects_carry_no_text_from_inputs(tmp_path: Path) -> None:
     from amw_core.errors import RenderCrashError
 
     with pytest.raises(RenderCrashError) as info:
-        RenderStage(world.deps()).run(world.render_input(), world.attempt)
+        RenderStage(world.deps()).execute(world.render_input(), world.attempt)
     assert EVIL not in str(info.value)
     assert EVIL not in str(info.value.details)

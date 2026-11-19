@@ -100,7 +100,7 @@ def test_subtitle_stage_writes_one_srt_and_one_asset_row(tmp_path: Path) -> None
     assert all(r.verdict == "PASS" and not r.gate for r in out.validation_results)
     assert len(world.assets.subtitles) == 1
     # replay: byte-identical SRT finds the existing asset row (UNIQUE org + content sha256)
-    again = SubtitleStage(world.deps()).run(
+    again = SubtitleStage(world.deps()).execute(
         world.task_input(
             "subtitles",
             {
@@ -140,7 +140,7 @@ def test_subtitle_stage_rejects_script_hash_and_caption_style(tmp_path: Path) ->
         "caption_style": None,
     }
     with pytest.raises(InputInvalidError):
-        SubtitleStage(world.deps()).run(
+        SubtitleStage(world.deps()).execute(
             world.task_input(
                 "subtitles", {**base, "verified_script_sha256": "7" * 64}, schemas=schemas
             ),
@@ -149,7 +149,7 @@ def test_subtitle_stage_rejects_script_hash_and_caption_style(tmp_path: Path) ->
     from amw_core.errors import SchemaInvalidError
 
     with pytest.raises(SchemaInvalidError):
-        SubtitleStage(world.deps()).run(
+        SubtitleStage(world.deps()).execute(
             world.task_input("subtitles", {**base, "caption_style": {"x": 1}}, schemas=schemas),
             world.attempt,
         )
@@ -160,7 +160,7 @@ def test_subtitle_stage_is_blocked_by_market_hours(tmp_path: Path) -> None:
     world = World(tmp_path)
     chain = run_chain(world)
     world.probe.now = LocalTime.parse("WED", "11:00")
-    out = SubtitleStage(world.deps()).run(
+    out = SubtitleStage(world.deps()).execute(
         world.task_input(
             "subtitles",
             {
@@ -198,7 +198,7 @@ def test_subtitle_checks_fail_when_text_would_differ(tmp_path: Path) -> None:
         update={"sub": world.cfg.sub.model_copy(update={"max_chars_per_cue": 3})}
     )
     with pytest.raises((InputInvalidError, IncompleteOutputError)):
-        SubtitleStage(world.deps()).run(
+        SubtitleStage(world.deps()).execute(
             world.task_input(
                 "subtitles",
                 {
