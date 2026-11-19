@@ -137,12 +137,13 @@ def make_env(
     feedback: list[dict[str, Any]] | None = None,
     fallback_flag: bool = False,
     kit: bool = True,
+    font: bytes | None = None,
     **cfg: Any,
 ) -> Env:
     org = str(new_id(Prefix.ORGANISATION))
     storage = FakeStorage()
     tc = TenantContext(org_id=org, actor="agent_11")  # type: ignore[arg-type]
-    font_bytes = build_font()
+    font_bytes = font if font is not None else build_font()
     font_sha = hashlib.sha256(font_bytes).hexdigest()
     font_uri = str(storage.blob_uri(tc, "fonts", "test.ttf"))
     storage.blobs[font_uri] = font_bytes
