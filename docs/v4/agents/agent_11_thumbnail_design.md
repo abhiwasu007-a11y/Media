@@ -510,7 +510,7 @@ agent_11_thumbnail_design/
 ```
 ```mermaid
 classDiagram
-  class ThumbnailStage { +run(task_input, ctx) TaskOutput }
+  class ThumbnailStage { +run(task_input, ctx: ExecContext) TaskOutput }
   class InputGate
   class TextOptionBuilder
   class SubjectOptionBuilder
@@ -707,7 +707,7 @@ Owner questions (CCR register §6, provisional defaults apply): Q-O4 (`fallback_
 | `CK1_OPTIONS` | P2 | option sets (IDs, hashes), template-set hash, exclusions | skip recompute when input and config hashes are unchanged |
 | `CK2_CONCEPTS` | P5 | accepted concepts, `call_seq`, cost entry IDs, guard hits | no model call repeated (`llm.call` key) |
 | `CK3_VARIANT_n` | each composed and checked variant | file blob hash, check results | skip finished variants; persist only the rest |
-Rules: (1) a checkpoint is valid only if the script SHA-256, config version, template-set hash and font asset hashes equal the current ones, else discarded and recomputed (recorded paid calls stay reusable by key); (2) blobs are written under a temp name and moved atomically, SHA-256 verified on read (07 §10); (3) one writer: the lease holder; a late write after `LEASE_EXPIRED` is rejected by the key check; (4) a DLQ replay re-runs with the same keys: the same file hashes, no second `assets` row, no second ledger row.
+Rules: (1) a checkpoint is valid only if the script SHA-256, config version, template-set hash and font asset hashes equal the current ones, else discarded and recomputed (recorded paid calls stay reusable by key); (2) blobs are written under a temp name and moved atomically, SHA-256 verified on read (07 §10); paths follow 03 §8 rule 5 (CCR-208): the thumbnail PNGs, the set manifest and the recorded concept responses under `jobs/<job>/tasks/<task>/attempts/<att>/artifacts/`, checkpoint blobs under `jobs/<job>/checkpoints/<task>/`; there is no `thumbnails`, `llm` or `checkpoints` area, and a replay in a new attempt writes byte-identical files at that attempt's path (a recorded response is read back from the path its idempotency row names); (3) one writer: the lease holder; a late write after `LEASE_EXPIRED` is rejected by the key check; (4) a DLQ replay re-runs with the same keys: the same file hashes, no second `assets` row, no second ledger row.
 
 ---
 

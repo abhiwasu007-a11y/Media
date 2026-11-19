@@ -222,7 +222,7 @@ Closes the coverage gap for the deterministic rules that have no LLM step: FIN-R
 ```
 
 ## 3. `expected`
-The function's result object exactly: `rule_id`, `check_verdict` (`PASS` / `FAIL` / `WARN` / `SKIPPED`), `compliance_verdict` (`ALLOWED` / `BLOCKED` / `NEEDS_HUMAN_REVIEW` / null) plus the function's extras (`price_lag`: `days_until_compliant`, the earliest-compliant-publish-date input; `disclaimer`: `description_check`, `report_label` "DRAFT, not lawyer-approved" in 3A, 3A R5; `live_format`: `metadata_check`; `licence`: one result per rule `YTG-R5` / `YTG-R6` and `expiring_assets`; `disclosure`: `{rule_id: "YTG-R3", disclosure_decision, decided_by_order}` where `decided_by_order` is the first matching row 1–3 of blueprint §6.4; `audience`: the V11a result, which the judge part V11 can only make stricter).
+The function's result object exactly: `rule_id`, `check_verdict` (`PASS` / `FAIL` / `WARN` / `SKIPPED`), `compliance_verdict` (`ALLOWED` / `BLOCKED` / `NEEDS_HUMAN_REVIEW` / null) plus the function's extras (`price_lag`: `days_until_compliant`, the earliest-compliant-publish-date input; `disclaimer`: `description_check`, `report_label` "DRAFT – not lawyer-approved" in 3A (3A R5, CCR-212); `live_format`: `metadata_check`; `licence`: one result per rule `YTG-R5` / `YTG-R6` and `expiring_assets`; `disclosure`: `{rule_id: "YTG-R3", disclosure_decision, decided_by_order}` where `decided_by_order` is the first matching row 1–3 of blueprint §6.4; `audience`: the V11a result, which the judge part V11 can only make stricter).
 
 ## 4. Threshold
 **100 %** (deterministic; any failure blocks the PR). Numeric values are test inputs, not rule thresholds (the lag of 30 days is the config default of IN-02).
