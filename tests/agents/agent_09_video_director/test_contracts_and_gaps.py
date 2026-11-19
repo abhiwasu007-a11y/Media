@@ -452,3 +452,50 @@ def test_s01_cross_tenant_blob_is_refused() -> None:
 
 
 _ = (AspectRatio, NarrationTimeline, OutputRefData, TASK_ID, timeline_for)
+
+
+def test_previous_timeline_ref_platform_uri_and_missing_reader() -> None:
+    script, durs = sample_script()
+    first = make_step()[0].run(make_request(script, durs))
+    old_tl = make_request(script, durs).timeline
+    grown = {k: (v + 300 if k in ("s4", "s5") else v) for k, v in durs.items()}
+    platform = TimelineRef("amw-blob://platform/jobs/t.json", "b" * 64)
+    req = make_request(script, grown, iteration=1, previous_plan=first.plan,
+                       previous_timeline_ref=platform, timeline_sha256="c" * 64)  # fmt: skip
+    with pytest.raises(CrossTenantRefError):  # never a platform blob
+        make_step()[0].run(req, read_timeline=lambda ref: old_tl)
+    own = TimelineRef(f"amw-blob://{ORG_ID}/jobs/t.json", "b" * 64)
+    req2 = make_request(script, grown, iteration=1, previous_plan=first.plan,
+                        previous_timeline_ref=own, timeline_sha256="c" * 64)  # fmt: skip
+    with pytest.raises(ConfigInvalidError):  # a worker wiring defect, not an input fault
+        make_step()[0].run(req2)
+
+
+def test_shot_plan_task_rebases_through_the_storage_reader() -> None:
+    import hashlib
+
+    script, durs = sample_script()
+    old_tl = make_request(script, durs).timeline
+    body = old_tl.model_dump_json().encode()
+    old_sha = hashlib.sha256(body).hexdigest()
+    store = MemBlob()
+    uri = str(store.blob_uri(ctx(), "jobs", "old_timeline.json"))
+    store.data[uri] = body
+    first = make_step()[0].run(make_request(script, durs, timeline_sha256=old_sha))
+    grown = {k: (v + 300 if k in ("s4", "s5") else v) for k, v in durs.items()}
+    req = make_request(script, grown, iteration=1, previous_plan=first.plan,
+                       previous_timeline_ref=TimelineRef(uri, old_sha),
+                       timeline_sha256="c" * 64)  # fmt: skip
+    out = ShotPlanTask(make_step()[0], store).run(
+        req, ctx(), task_path=f"{TASK_ID}/attempts/a2/output.json",
+        now=datetime(2026, 1, 1, tzinfo=UTC), currency="USD",
+    )  # fmt: skip
+    assert out.status.value == "SUCCEEDED"
+    bad = make_request(script, grown, iteration=1, previous_plan=first.plan,
+                       previous_timeline_ref=TimelineRef(uri, "d" * 64),
+                       timeline_sha256="c" * 64)  # fmt: skip
+    with pytest.raises(InputInvalidError):  # the ref is not the timeline the plan was made on
+        ShotPlanTask(make_step()[0], store).run(
+            bad, ctx(), task_path=f"{TASK_ID}/attempts/a3/output.json",
+            now=datetime(2026, 1, 1, tzinfo=UTC), currency="USD",
+        )  # fmt: skip

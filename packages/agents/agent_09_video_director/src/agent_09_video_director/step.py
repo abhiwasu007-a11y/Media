@@ -63,7 +63,12 @@ from agent_09_video_director.timeline.timemap import TimeMap, build_time_map
 from amw_adapters.llm.protocol import LlmAdapter
 from amw_core.contracts.task_output import ValidationResult
 from amw_core.enums import CheckVerdict
-from amw_core.errors import BudgetExhaustedError, ConfigInvalidError, QualityRepeatedFailureError
+from amw_core.errors import (
+    BudgetExhaustedError,
+    ConfigInvalidError,
+    CrossTenantRefError,
+    QualityRepeatedFailureError,
+)
 
 log = logging.getLogger("agent_09")
 
@@ -153,6 +158,9 @@ class ShotPlanStep:
         assert_tenant_consistent(
             req.org_id, declared_orgs=req.declared_orgs, uris=(*req.uris, *ref_uris)
         )
+        if any(not u.startswith(f"amw-blob://{req.org_id}/") for u in ref_uris):
+            # a previous dependency output is always tenant-owned: platform URIs are refused
+            raise CrossTenantRefError("previous_timeline_ref must be a tenant blob")
         pair_ok = (req.production_type_key, req.aspect_ratio) in {
             ("CHANNEL_LONG_FORM", AspectRatio.LANDSCAPE),
             ("SHORTS", AspectRatio.PORTRAIT),
@@ -190,8 +198,10 @@ class ShotPlanStep:
         if prev.narration_timeline_sha256 == req.timeline_sha256:
             return prev.shots
         ref = req.previous_timeline_ref
-        if ref is None or read_timeline is None or ref.sha256 != prev.narration_timeline_sha256:
+        if ref is None or ref.sha256 != prev.narration_timeline_sha256:
             raise input_invalid("PREVIOUS_TIMELINE_MISSING")
+        if read_timeline is None:  # a wiring defect of the worker, not an orchestrator input fault
+            raise ConfigInvalidError("previous timeline reader is not wired")
         previous_timeline = read_timeline(ref)
         old = {
             s.segment_id: (s.start_ms, s.end_ms)
