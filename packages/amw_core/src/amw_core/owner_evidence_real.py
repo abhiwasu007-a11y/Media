@@ -75,6 +75,7 @@ from amw_core.owner_evidence_status import (
     subject_key,
 )
 from amw_core.owner_evidence_verifier import (
+    DEFAULT_RECORD_KIND_RULES,
     QUESTION_OR_DEFERRED,
     SessionEventSource,
     VerifierPolicy,
@@ -219,23 +220,38 @@ APPROVE_FORMS: Final = (("approve", None), (None, "मंजूर"))
 _SENTENCE_END: Final = frozenset(".!।")
 
 
+_DEVANAGARI_WORDS: Final = frozenset({"मंजूर", "पक्के"})
+
+
 def _strict_words(content: str) -> list[str] | None:
-    """NFKC, case-folded words of a short reply, or ``None`` if any character other than a
-    letter, mark, digit or space occurs (one final ``.`` / ``!`` / ``।`` is allowed): so
-    ``R7K2_``, ``R7<ZWSP>K2``, quotes and other punctuation are never a confirmation."""
-    text = unicodedata.normalize("NFKC", content).casefold().strip()
+    """The two words of a short reply, or ``None``. No compatibility folding: only NFC (so the
+    Devanagari words compare in one form), only plain ASCII spaces (leading / trailing ones
+    stripped, exactly one between the words), every word either ASCII letters and digits
+    (lower-cased) or exactly ``मंजूर`` / ``पक्के``; one final ``.`` / ``!`` / ``।`` is
+    allowed. So fullwidth letters, NBSP or em space separators, ``R7K2_``, ``R7<ZWSP>K2``,
+    quotes and other punctuation are never a confirmation."""
+    text = unicodedata.normalize("NFC", content).strip(" ")
     if text and text[-1] in _SENTENCE_END:
-        text = text[:-1].rstrip()
-    if any(unicodedata.category(c)[0] not in "LMN" and c != " " for c in text):
+        text = text[:-1].rstrip(" ")
+    words = text.split(" ")
+    if len(words) != 2:
         return None
-    return text.split(" ") if text and "  " not in text else None
+    out: list[str] = []
+    for word in words:
+        if word in _DEVANAGARI_WORDS:
+            out.append(word)
+        elif word.isascii() and word.isalnum():
+            out.append(word.lower())
+        else:
+            return None
+    return out
 
 
 def exact_confirmation(content: str, code: str, decision: ApprovalStepState | None) -> bool:
     """Exactly one of the confirmation forms (``approve`` forms only for an APPROVED record)."""
     words = _strict_words(content)
-    folded = code.casefold()
-    if words is None or len(words) != 2 or not folded:
+    folded = code.lower()
+    if words is None or not folded or not (code.isascii() and code.isalnum()):
         return False
     forms = CONFIRM_FORMS + (APPROVE_FORMS if decision is ApprovalStepState.APPROVED else ())
     for before, after in forms:
@@ -256,6 +272,20 @@ def _is_echo(text: str, row: EvidenceRecord) -> bool:
     code = row.evidence.review_code or ""
     shown = row.evidence.quote.replace("\r", " ").replace("\n", " ")[:ECHO_QUOTE_PREFIX]
     return _names_code(text, code) and bool(shown.strip()) and shown in text
+
+
+def superseded(row: EvidenceRecord, siblings: Iterable[EvidenceRecord]) -> bool:
+    """A decision record is superseded by any other decision record on the same subject and code
+    whose owner message is as late or later, in any state (fail closed, also for a tie)."""
+    code = (row.evidence.review_code or "").upper()
+    return any(
+        r.id != row.id
+        and (r.evidence.review_code or "").upper() == code
+        and DEFAULT_RECORD_KIND_RULES.get(r.evidence.record_kind)
+        is EvidenceVerificationKind.DECISION
+        and r.evidence.message_at >= row.evidence.message_at
+        for r in siblings
+    )
 
 
 class VerifierWorker:
@@ -316,11 +346,13 @@ class VerifierWorker:
             for r in self._db.for_subject(self._session, tx, e.subject_kind, e.subject_id)
             if r.id != row.id and (r.evidence.review_code or "").upper() == code.upper()
         ]
-        others = {r.evidence.event_uuid for r in siblings} - {e.event_uuid}
         live = [r for r in siblings if r.state is not EvidenceState.REFUSED]
+        others = {r.evidence.event_uuid for r in live} - {e.event_uuid}
         if self._policy.record_kind_rules.get(e.record_kind) is EvidenceVerificationKind.DECISION:
-            if any(r.evidence.message_at > e.message_at for r in live):
-                # only the latest decision on a code counts (CCR-264): a later one supersedes this
+            if superseded(row, siblings):
+                # only the latest decision on a code counts (CCR-264); fail closed: a later or
+                # simultaneous decision record on the code supersedes this one whatever its
+                # state (a refused later reject still means the owner did not stay at this one)
                 ended = self._db.refuse(self._session, tx, row.id, SUPERSEDED, {SUPERSEDED: False})
                 return ConfirmationScan(ConfirmationOutcome.SUPERSEDED, ended)
         elif any(r.state is EvidenceState.VERIFIED for r in live):
@@ -527,6 +559,12 @@ class ConfirmedEvidenceLookup:
         real = result.get(PRODUCTION_MARK) is True and not result.get(TEST_MARK)
         source = EvidenceSourceKind.REAL if real else EvidenceSourceKind.TEST_FIXTURE
         bound = mac_valid and real and binding.org_id == row.org_id and self._bound(row, binding)
+        if (
+            bound
+            and DEFAULT_RECORD_KIND_RULES.get(e.record_kind) is EvidenceVerificationKind.DECISION
+        ):
+            siblings = self._db.for_subject(self._session, self._tx, e.subject_kind, e.subject_id)
+            bound = not superseded(row, siblings)  # a newer decision makes a confirmed one unusable
         subject = (
             subject_key(
                 binding.kind, binding.provider, binding.amount_minor, binding.currency, row.org_id

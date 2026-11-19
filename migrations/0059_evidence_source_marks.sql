@@ -13,6 +13,8 @@
 --    MERGE the new result into the stored one (0009 replaced it, so a TEST row confirmed by a real
 --    worker came out marked production). The stored marks always win, and the earlier checks are
 --    kept, so a dispute no longer erases the verification result.
+-- 3. amw_evidence_mark_confirmed refuses a decision record that a later (or simultaneous)
+--    decision record on the same subject and code supersedes (PR #77 recheck N1, CCR-264).
 -- amw_verifier_fn owns the functions. As in 0051, this file grants SET on it for its own
 -- transaction only and revokes it at the end. Every function pins search_path to end with pg_temp.
 
@@ -110,6 +112,19 @@ BEGIN
   END IF;
   IF amw_evidence_mac_of(e) IS DISTINCT FROM e.evidence_mac THEN
     RAISE EXCEPTION 'evidence MAC is not valid' USING ERRCODE = 'AMW02';
+  END IF;
+  -- Only the latest decision on a code is confirmed (CCR-264): any other decision record on the
+  -- same subject and code whose owner message is as late or later, in any state, refuses this
+  -- one (fail closed, also for a tie).
+  IF e.record_kind IN ('STEP_DECISION', 'COMPLIANCE_DECISION', 'KNOWLEDGE_RELEASE_REQUEST')
+     AND EXISTS (
+       SELECT 1 FROM owner_instruction_evidence o
+        WHERE o.org_id = e.org_id AND o.id <> e.id
+          AND o.subject_kind = e.subject_kind AND o.subject_id = e.subject_id
+          AND upper(o.review_code) = upper(e.review_code)
+          AND o.record_kind IN ('STEP_DECISION', 'COMPLIANCE_DECISION', 'KNOWLEDGE_RELEASE_REQUEST')
+          AND o.message_at >= e.message_at) THEN
+    RAISE EXCEPTION 'a later decision on this code supersedes this record' USING ERRCODE = 'AMW02';
   END IF;
   e.state := 'CONFIRMED';
   e.confirmation_event_uuid := p_confirmation_event_uuid;

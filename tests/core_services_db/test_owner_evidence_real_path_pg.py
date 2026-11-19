@@ -423,3 +423,30 @@ def test_test_mark_survives_a_real_confirmation(real: Real, admin: Conn) -> None
         prod = EvidenceVerifierService(real.db, verifier, memory, policy, {PRODUCTION_MARK: True})
         with real.verifier_db.transaction(real.ctx) as tx, pytest.raises(PermissionDeniedError):
             prod.verify_recorded(tx, row2.id, real.anchors(tx, row2), real.at(30))
+
+
+def test_database_refuses_to_confirm_a_superseded_decision(real: Real) -> None:
+    """0059 guard: a later decision record on the same code (here refused) blocks the older
+    decision's confirmation in the definer function itself, whatever the worker read."""
+    real.t.human("approve R7K2", real.at(1))
+    real.t.write(real.root)
+    approve = real.verify(real.record("approve R7K2"))
+    later = real.t.human("reject R7K2", real.at(2))
+    real.t.write(real.root)
+    found = locate(real.src, real.t.session_id, "reject R7K2")
+    draft = real.draft(
+        later, "reject R7K2", found.timestamp, parsed_decision=ApprovalStepState.REJECTED
+    )
+    with real.operator_db.transaction(real.ctx) as tx:
+        reject = real.db.insert_evidence(PgDbSession(DbRole.OPERATOR), tx, draft)
+    with real.verifier_db.transaction(real.ctx) as tx:
+        real.db.refuse(PgDbSession(DbRole.VERIFIER), tx, reject.id, "operator_refused", {})
+    conf = real.t.human("confirm R7K2", real.at(4))
+    real.t.write(real.root)
+    with real.verifier_db.transaction(real.ctx) as tx, pytest.raises(PermissionDeniedError):
+        real.worker._service.confirm(
+            tx, approve.id, real.t.session_id, conf, "confirm R7K2", real.at(60)
+        )
+    with real.verifier_db.transaction(real.ctx) as tx:
+        scan = real.worker.confirm_from_chat(tx, approve.id, real.at(60))
+    assert scan.outcome is ConfirmationOutcome.SUPERSEDED

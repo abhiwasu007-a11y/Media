@@ -28,6 +28,7 @@ from amw_core.errors import (
     InputInvalidError,
     InvalidTransitionError,
     MissingDependencyError,
+    PermissionDeniedError,
 )
 from amw_core.interfaces import DbRole, EvidenceRecord, NewEvidence, TenantContext
 from amw_core.interfaces.tenancy_context import TenantTransaction
@@ -775,3 +776,97 @@ def test_dispute_keeps_the_verification_checks(tmp_path: Path) -> None:
     ended = w.scan(row).row
     assert ended.verifier_result[PRODUCTION_MARK] is True
     assert set(verified.verifier_result) < set(ended.verifier_result)
+
+
+NBSP, EM_SPACE = chr(0x00A0), chr(0x2003)
+
+
+def fullwidth(text: str) -> str:
+    return "".join(chr(ord(c) + 0xFEE0) if c.isascii() and c.isalnum() else c for c in text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        fullwidth("approve") + " R7K2",
+        f"approve{NBSP}R7K2",
+        f"approve{EM_SPACE}R7K2",
+        "confirm " + fullwidth("R7K2"),
+        f"R7K2{NBSP}पक्के",
+    ],
+)
+def test_no_compatibility_folding_in_the_reply_forms(text: str) -> None:
+    assert not exact_confirmation(text, CODE, ApprovalStepState.APPROVED)
+
+
+def test_a_refused_later_reject_still_supersedes_the_approval(tmp_path: Path) -> None:
+    """Recheck N1: approve (A, VERIFIED), a later reject (B) refused for any reason, then
+    `confirm R7K2`: A is never confirmed (fail closed)."""
+    w, approve, reject = decision_world(tmp_path, "approve R7K2", "reject R7K2")
+    verifier = w.db.login(DbRole.VERIFIER, PASSWORDS[DbRole.VERIFIER])
+    w.db.refuse(verifier, w.tx, reject.id, "operator_refused", {})
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    scan = w.scan(approve)
+    assert scan.outcome is ConfirmationOutcome.SUPERSEDED
+    assert scan.row.state is EvidenceState.REFUSED
+
+
+def test_simultaneous_approve_and_reject_confirm_nothing(tmp_path: Path) -> None:
+    w = make_world(tmp_path)
+    a = w.t.human("approve R7K2", minutes(5))
+    b = w.t.human("reject R7K2", minutes(5))
+    w.write()
+    rows = [
+        w.record(a, "approve R7K2", minutes(5)),
+        w.record(b, "reject R7K2", minutes(5), parsed_decision=ApprovalStepState.REJECTED),
+    ]
+    for row in rows:
+        w.verify(row)
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    assert [w.scan(r).outcome for r in rows] == [ConfirmationOutcome.SUPERSEDED] * 2
+
+
+def test_the_store_refuses_to_confirm_a_superseded_decision(tmp_path: Path) -> None:
+    """The database guard (0059; modelled by the fake) holds even when the worker's sibling read
+    raced: a later decision recorded before the confirmation call refuses it."""
+    w, approve, _ = decision_world(tmp_path, "approve R7K2", "reject R7K2")
+    conf = w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    with pytest.raises(PermissionDeniedError):
+        w.worker._service.confirm(
+            w.tx, approve.id, w.t.session_id, conf, "confirm R7K2", minutes(30)
+        )
+
+
+def test_a_newer_decision_makes_a_confirmed_one_unusable(tmp_path: Path) -> None:
+    """Consumer side: a CONFIRMED decision with a newer decision record on its code is no longer
+    bound (``kind`` / ``subject`` None), whatever its quote states."""
+
+    class QuoteAlwaysBound(ConfirmedEvidenceLookup):
+        def _bound(self, row: EvidenceRecord, binding: ConfirmationBinding) -> bool:
+            return True  # isolate the supersession check from the quote binding
+
+    w = make_world(tmp_path)
+    uid = w.t.human("approve R7K2", minutes(5))
+    w.write()
+    row = w.record(uid, "approve R7K2", minutes(5))
+    w.t.human("confirm R7K2", minutes(8))
+    w.write()
+    w.verify(row)
+    assert w.scan(row).outcome is ConfirmationOutcome.CONFIRMED
+    app = w.db.login(DbRole.APP, PASSWORDS[DbRole.APP])
+    binding = [ConfirmationBinding(row.id, FIN_R10, org_id=row.org_id)]
+    lookup = QuoteAlwaysBound(w.db, app, w.tx, binding, allowed_kinds=ANY_KIND)
+    before = lookup.get(row.id)
+    assert before is not None
+    assert before.usable
+    later = w.t.human("reject R7K2", minutes(9))
+    w.write()
+    w.record(later, "reject R7K2", minutes(9), parsed_decision=ApprovalStepState.REJECTED)
+    after = lookup.get(row.id)
+    assert after is not None
+    assert (after.evidence_state, after.subject, after.kind, after.usable) == (
+        "CONFIRMED", None, None, False,
+    )  # fmt: skip

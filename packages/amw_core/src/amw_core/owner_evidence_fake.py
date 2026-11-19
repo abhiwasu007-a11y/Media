@@ -402,6 +402,8 @@ class FakeEvidenceDatabase:
             raise IdempotencyConflictError("a record's own event cannot confirm a record")
         if confirmation_message_at <= row.evidence.message_at:
             raise InvalidTransitionError("the confirmation must be later than the event")
+        if self._superseded(row):
+            raise PermissionDeniedError("a later decision on this code supersedes this record")
         row = self._stamp(
             replace(
                 row,
@@ -414,6 +416,23 @@ class FakeEvidenceDatabase:
         )
         self._rows[(org, row.id)] = row
         return row
+
+    def _superseded(self, row: EvidenceRecord) -> bool:
+        """0059: another decision record on the same subject and code, as late or later."""
+        rules = DEFAULT_RECORD_KIND_RULES
+        if rules.get(row.evidence.record_kind) is not EvidenceVerificationKind.DECISION:
+            return False
+        e, code = row.evidence, (row.evidence.review_code or "").upper()
+        return any(
+            o.id != row.id
+            and o.evidence.subject_kind == e.subject_kind
+            and o.evidence.subject_id == e.subject_id
+            and (o.evidence.review_code or "").upper() == code
+            and rules.get(o.evidence.record_kind) is EvidenceVerificationKind.DECISION
+            and o.evidence.message_at >= e.message_at
+            for (org, _), o in self._rows.items()
+            if org == row.org_id
+        )
 
     def refuse(
         self,
