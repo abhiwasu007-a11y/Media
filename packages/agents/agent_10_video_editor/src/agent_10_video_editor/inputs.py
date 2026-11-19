@@ -8,7 +8,10 @@ validation error. All models are frozen.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
+
+from agent_10_video_editor.canonical import sha256_hex
+from agent_10_video_editor.taskio import parse_blob
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ShotId = Annotated[str, StringConstraints(pattern=r"^sh[0-9]{2,4}$")]
@@ -267,8 +270,67 @@ class NarrationTimeline(_Model):
 
 
 class ScriptStrings(_Model):
-    """Script text by reference: ``segment_id`` to string, and on-screen strings by SHA-256."""
+    """The strings Agent 10 reads from a script: ``segment_id`` to text, and on-screen strings by
+    SHA-256. Built from the real Agent 05 document by ``ScriptDocumentSlice.to_strings``."""
 
     script_sha256: Sha256 | None = None
     segments: dict[str, str]
     on_screen: dict[str, str] = {}
+
+
+class ScriptSegmentSlice(_Model):
+    """One ``agent_05.script_document`` segment (``DocSegment``): the two fields Agent 10 reads."""
+
+    segment_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    text: str
+
+
+class ScriptSceneSlice(_Model):
+    """One ``agent_05.script_document`` scene: its on-screen strings (bound by SHA-256)."""
+
+    on_screen_text: tuple[str, ...]
+
+
+class ScriptDisclaimerSlice(_Model):
+    """One ``disclaimer_slots[]`` entry: the slot's text is its ``DISCLAIMER`` segment."""
+
+    text_sha256: Sha256
+    segment_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+
+
+class ScriptDocumentSlice(_Model):
+    """Agent 10's slice of the real Agent 05 ``agent_05.script_document`` 1.0.0 (CCR-200, 03
+    section 2.3 rule 2): ``segments`` is a list of ``DocSegment`` objects, ``scenes`` carry the
+    on-screen strings, ``disclaimer_slots`` the disclaimer text hashes. Every field read is
+    required and typed (no defaults); unread fields are ignored. Fail closed: no segment, a
+    duplicate ``segment_id`` or a disclaimer slot naming no segment is a schema error."""
+
+    segments: Annotated[tuple[ScriptSegmentSlice, ...], Field(min_length=1)]
+    scenes: tuple[ScriptSceneSlice, ...]
+    disclaimer_slots: tuple[ScriptDisclaimerSlice, ...]
+
+    @model_validator(mode="after")
+    def _ids_unique_and_resolved(self) -> ScriptDocumentSlice:
+        ids = [s.segment_id for s in self.segments]
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate segment_id in the script document")
+        known = set(ids)
+        for slot in self.disclaimer_slots:
+            if slot.segment_id not in known:
+                raise ValueError("disclaimer slot names a segment that is not in the document")
+        return self
+
+    def to_strings(self) -> ScriptStrings:
+        """The ``segment_id -> text`` view and the on-screen strings keyed by their SHA-256."""
+        text = {s.segment_id: s.text for s in self.segments}
+        on_screen = {
+            sha256_hex(t.encode("utf-8")): t for sc in self.scenes for t in sc.on_screen_text
+        }
+        for slot in self.disclaimer_slots:
+            on_screen.setdefault(slot.text_sha256, text[slot.segment_id])
+        return ScriptStrings(segments=text, on_screen=on_screen)
+
+
+def parse_script_document(data: bytes, what: str = "agent_05.script_document") -> ScriptStrings:
+    """The real Agent 05 script document through its slice (``SCHEMA_INVALID`` on failure)."""
+    return parse_blob(ScriptDocumentSlice, data, what).to_strings()

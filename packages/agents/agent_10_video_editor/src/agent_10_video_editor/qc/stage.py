@@ -48,6 +48,7 @@ from agent_10_video_editor.inputs import (
     NarrationTimeline,
     ScriptStrings,
     ShotPlan,
+    parse_script_document,
 )
 from agent_10_video_editor.media import ProbeService, StopRequested, run_checked
 from agent_10_video_editor.observability import LogContext, emit, labels
@@ -290,11 +291,7 @@ class _QcRun:
             self.scope.read_bytes(*refs["agent_07.voice_synthesis.output"]),
             "agent_07.voice_synthesis.output",
         )
-        script = parse_blob(
-            ScriptStrings,
-            self.scope.read_bytes(*refs["agent_05.script_document"]),
-            "agent_05.script_document",
-        )
+        script = parse_script_document(self.scope.read_bytes(*refs["agent_05.script_document"]))
         subs_out = _json(self.scope.read_bytes(*refs["agent_10.subtitles.output"]))
         with d.tenancy.transaction(self.ctx) as tx:
             row = d.renders.get(tx, payload.render_id)
