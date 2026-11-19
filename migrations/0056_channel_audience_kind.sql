@@ -1,4 +1,4 @@
--- 0053 R14 write path for channels.audience_kind (CCR-114; 04 sections 5.1, 3.6a; ticket P4-02).
+-- 0056 R14 write path for channels.audience_kind (CCR-114; 04 sections 5.1, 3.6a; ticket P4-02).
 -- The column is set only through a NEW_CHANNEL approval (subject_kind 'channel', subject_id the
 -- channel, subject_sha256 the SHA-256 of the canonical JSON {"audience_kind": ..., "channel_id":
 -- ...}; canonical form of 03 section 9.1: UTF-8, keys sorted, no insignificant whitespace; the
@@ -55,6 +55,12 @@ BEGIN
   END IF;
   IF TG_OP = 'INSERT' THEN
     -- Serialises with amw_human_record_apply, which takes the same lock before it reads the steps.
+    -- The lock only orders the two when each reads after it (READ COMMITTED); a REPEATABLE READ
+    -- or SERIALIZABLE snapshot taken earlier would miss the other's commit, so it is refused.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'approval steps are added only under READ COMMITTED (PROPOSED CCR-190)'
+        USING ERRCODE = 'AMW02';
+    END IF;
     PERFORM pg_advisory_xact_lock(hashtextextended(NEW.approval_id::text, 190));
     IF EXISTS (SELECT 1 FROM approvals a
                 WHERE a.org_id = NEW.org_id AND a.id = NEW.approval_id AND a.state <> 'PENDING')
@@ -146,7 +152,12 @@ BEGIN
     RAISE EXCEPTION 'evidence is not CONFIRMED with a valid MAC' USING ERRCODE = 'AMW02';
   END IF;
   IF ev.approval_id IS NOT NULL THEN
-    -- Same lock as the approval_steps insert trigger: no step can be added while this runs.
+    -- Same lock as the approval_steps insert trigger: no step can be added while this runs. It
+    -- orders the two only under READ COMMITTED (each statement reads after the lock), so another
+    -- isolation level is refused (review m2: an older snapshot could miss a committed new step).
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'human records are applied only under READ COMMITTED' USING ERRCODE = 'AMW02';
+    END IF;
     PERFORM pg_advisory_xact_lock(hashtextextended(ev.approval_id::text, 190));
     SELECT * INTO ap FROM approvals WHERE id = ev.approval_id AND org_id = ev.org_id;
   END IF;

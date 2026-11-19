@@ -1,4 +1,4 @@
-"""R14 write path of ``channels.audience_kind`` (CCR-114, migration 0053; 04 sections 5.1, 3.6a).
+"""R14 write path of ``channels.audience_kind`` (CCR-114, migration 0056; 04 sections 5.1, 3.6a).
 
 The column changes only inside ``amw_human_record_apply`` when the confirmed, MAC-valid decision
 of the final step of a ``NEW_CHANNEL`` approval is ``APPROVED``; the value comes from the subject
@@ -519,3 +519,46 @@ def test_freeze_triggers_are_owned_invoker_functions(admin: Conn) -> None:
         " WHERE g.rolname = 'amw_verifier_fn' AND u.rolname = 'amw_owner'"
     ).fetchall()
     assert [tuple(r) for r in member] == [(False, False)]
+
+
+def run_at_level(
+    admin: Conn, level: str, role: str, tenant: Tenant, query: str, params: tuple[Any, ...]
+) -> None:
+    """One transaction at isolation ``level`` whose session and current user are ``role``."""
+    with admin.transaction():
+        admin.execute(psycopg.sql.SQL("SET TRANSACTION ISOLATION LEVEL " + level))
+        admin.execute(
+            psycopg.sql.SQL("SET LOCAL SESSION AUTHORIZATION {}").format(
+                psycopg.sql.Identifier(role)
+            )
+        )
+        admin.execute("SELECT set_config('app.org_id', %s, true)", (str(tenant.org_uuid),))
+        admin.execute("SELECT set_config('app.actor', 'sys_operator', true)")
+        admin.execute(query, params)
+
+
+@pytest.mark.parametrize("level", ["REPEATABLE READ", "SERIALIZABLE"])
+def test_apply_and_step_insert_refuse_a_snapshot_isolation_level(
+    admin: Conn, tenant_a: Tenant, level: str
+) -> None:
+    """Review m2: the advisory lock orders the apply and a new step only under READ COMMITTED;
+    an older snapshot could miss a committed step 2 and treat step 1 as final."""
+    channel = insert_channel(admin, tenant_a)
+    w = new_channel_world(admin, tenant_a, channel)
+    ev = confirm_decision(admin, w, channel)
+    for role, query, params in [
+        ("amw_operator", "SELECT amw_human_record_apply(%s)", (ev,)),
+        (
+            "amw_app",
+            "INSERT INTO approval_steps (id, org_id, approval_id, step_no, required_role, state)"
+            " VALUES (%s, %s, %s, 2, 'REVIEWER_APPROVER', 'PENDING')",
+            (new_uuid7(), tenant_a.org_uuid, w.approval),
+        ),
+    ]:
+        with pytest.raises(psycopg.Error) as err:
+            run_at_level(admin, level, role, tenant_a, query, params)
+        assert err.value.sqlstate == "AMW02"
+    assert audience_of(admin, channel) is None
+    assert step_state(admin, w) == "PENDING"
+    apply(admin, w, ev)  # READ COMMITTED (the default) still applies
+    assert audience_of(admin, channel) == "KIDS"
