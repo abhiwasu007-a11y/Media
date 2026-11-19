@@ -814,7 +814,10 @@ class _RenderRun:
             a10_q_colour_tags(probed=full.video.colour, configured=cfg.colour.model_dump()).verdict
             is CheckVerdict.FAIL
         ):
-            raise RenderCrashError("segment colour tags differ from configuration")
+            raise RenderCrashError(
+                "segment colour tags differ from configuration "
+                f"(probed {dict(full.video.colour)}, configured {cfg.colour.model_dump()})"
+            )
 
     # -- mux and register ---------------------------------------------------------------------
 
