@@ -116,6 +116,7 @@ from amw_core.contracts.task_input import TaskInput  # noqa: E402
 from amw_core.ids import ASSET, ATTEMPT, JOB, ORG, TASK, ActorRef  # noqa: E402
 from amw_core.interfaces.tenancy_context import TenantContext  # noqa: E402
 from amw_core.testing.memory import MemoryCheckpointStore, MemoryIdempotencyStore  # noqa: E402
+from tests.agents.agent_10_video_editor.real_script import real_script_document  # noqa: E402
 
 IDK = "idk_" + "ab" * 32
 COR = "cor_0192f5a4-7c1e-7b3a-9d2e-4c5b6a7d8e94"
@@ -149,6 +150,7 @@ class World:
         media: MediaFactory | None = None,
         storage: MemoryBlobStorage | None = None,
         script_overrides: dict[str, str] | None = None,
+        on_screen: tuple[str, ...] = (),
         entry_overrides: dict[int, dict[str, Any]] | None = None,
         channel_id: str | None = None,
     ) -> None:
@@ -176,6 +178,7 @@ class World:
         self.n_shots, self.shot_ms, self.chart = shots, shot_ms, chart
         self.media = media
         self.script_overrides = script_overrides or {}
+        self.on_screen = on_screen
         self.entry_overrides = entry_overrides or {}
         self.channel_id = channel_id
         self.refs: dict[str, tuple[str, str]] = {}
@@ -223,7 +226,6 @@ class World:
         total = self.n_shots * self.shot_ms
         shots: list[dict[str, Any]] = []
         entries: list[dict[str, Any]] = []
-        segments: dict[str, str] = {}
         narration: list[dict[str, Any]] = []
         for n in range(self.n_shots):
             sid = f"sh{n + 1:02d}"
@@ -281,10 +283,19 @@ class World:
                 }
             )
             entries[-1].update(self.entry_overrides.get(n, {}))
-            segments[f"s{n + 1}"] = f"line number {n + 1} of the narration text"
             narration.append({"segment_id": f"s{n + 1}", "start_ms": start, "end_ms": end})
-        segments.update(self.script_overrides)
-        script_sha = sha256_hex(json.dumps(segments, sort_keys=True).encode())
+        # the real emitted document; the narrated segments keep short fixed lines so cue counts
+        # stay stable (the shape, ids and every other field are Agent 05's own output)
+        lines = {
+            f"s{n + 1}": f"line number {n + 1} of the narration text" for n in range(self.n_shots)
+        }
+        script_doc = real_script_document(
+            self.n_shots,
+            text_overrides={**lines, **self.script_overrides},
+            on_screen=self.on_screen,
+        )
+        self.script_segments = {s["segment_id"]: s["text"] for s in script_doc["segments"]}
+        script_sha = sha256_hex(json.dumps(script_doc, sort_keys=True).encode())
         self.script_sha = script_sha
         plan = {
             "timing_basis": "MEASURED",
@@ -326,7 +337,7 @@ class World:
                 "language": "mr",
                 "segments": narration,
             },
-            "agent_05.script_document": {"script_sha256": script_sha, "segments": segments},
+            "agent_05.script_document": script_doc,
         }
         self.docs = docs
         for schema, doc in docs.items():
