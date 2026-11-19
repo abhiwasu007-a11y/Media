@@ -30,6 +30,12 @@ test parses the document):
   the owner to type, e.g. ``approve R7K2`` / ``R7K2 मंजूर``. A whole message wrapped in quotation
   marks is also refused. This is stricter than the "closed grammar" sentence of 03 rule 7
   (raised with the contract integrator).
+* Records without an approval (CCR-116): ``OWNER_TOPIC``, ``DATASET_INTAKE`` and any other
+  ``CONTENT`` / ``SCORE`` evidence without ``approval_id`` get their **own** review code from the
+  evidence store at recording (``amw_core.owner_evidence_review_code``; unique per org across
+  approval and evidence codes); the echo shows it and the confirmation names exactly that code.
+  The first ``OWNER_TOPIC`` / ``DATASET_INTAKE`` message carries no subject reference (A8
+  exception: a code-shaped token or job wire ID in it refuses it).
 * ``CONTENT`` (``CONTRIBUTION``, ``OWNER_TOPIC``, ``DATASET_INTAKE``): no decision; the quote
   carries content (contributions >= ``min_contribution_chars``); refused for negation or
   withholding language (English, Marathi and Hindi, Devanagari or Romanised and inflected),
@@ -67,7 +73,7 @@ from amw_core.enums import (
     InstructionSourceKind,
     QualityDimension,
 )
-from amw_core.ids import ActorRef, ApprovalId, JobId, UserId, WireId
+from amw_core.ids import ActorRef, ApprovalId, JobId, Prefix, UserId, WireId
 
 VerificationKind = EvidenceVerificationKind
 USER_ROLE: Final = "user"
@@ -487,13 +493,35 @@ def clarity_problem(content: str, policy: VerifierPolicy) -> str | None:
     return None
 
 
+_ALNUM_RUN = re.compile(r"[^\W_]+")
+
+
+def _strict_words(content: str) -> list[str]:
+    """Strict token boundary: invisible (``Cf``) characters are removed, then every run of letters
+    and digits is a word (an apostrophe, underscore or any punctuation ends it), so ``R7K2's``,
+    ``R7K2_`` and ``R<ZWSP>7K2`` all contain the code-shaped word ``r7k2``."""
+    folded = normalise("".join(c for c in content if unicodedata.category(c) != "Cf"))
+    return _ALNUM_RUN.findall(folded)
+
+
 def _subject_reference(content: str, evidence: NewEvidence, policy: VerifierPolicy) -> bool:
     """A8 for CONTENT / SCORE: the review code exactly once (and no other code-shaped token) or
-    the job wire ID."""
+    the job wire ID. Exception (CCR-116): ``OWNER_TOPIC`` / ``DATASET_INTAKE`` precede the job and
+    their own code is issued only at recording, so their first message carries **no** subject
+    reference: any code-shaped token or job wire ID refuses it."""
+    shape = re.compile(policy.review_code_pattern)
+    if evidence.record_kind in _NO_ANCHOR_KINDS:
+        if evidence.job_id is not None and evidence.job_id in content:
+            return False
+        job_prefix = f"{Prefix.JOB.value}_"
+        strict = _strict_words(content)
+        clean = normalise("".join(c for c in content if unicodedata.category(c) != "Cf"))
+        return job_prefix not in clean and not any(
+            shape.fullmatch(w) for w in (*tokens(content), *strict)
+        )
     text = content.replace(evidence.job_id, " ") if evidence.job_id else content
     words = tokens(text)
     code = normalise(evidence.review_code) if evidence.review_code else None
-    shape = re.compile(policy.review_code_pattern)
     other_codes = [w for w in words if shape.fullmatch(w) and w != code]
     if other_codes:
         return False

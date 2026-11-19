@@ -120,6 +120,13 @@ def _insert_evidence(
         "refused_reason": "refused" if state == "REFUSED" else None,
         **(extra or {}),
     }
+    if cols["approval_id"] is not None and "review_code" not in cols and state != "REFUSED":
+        # evidence tied to an approval carries that approval's code (0055)
+        row = conn.execute(
+            "SELECT review_code FROM approvals WHERE id = %s", (cols["approval_id"],)
+        ).fetchone()
+        assert row is not None
+        cols["review_code"] = row[0]
     names = psycopg.sql.SQL(", ").join(map(psycopg.sql.Identifier, cols))
     marks = psycopg.sql.SQL(", ").join(psycopg.sql.Placeholder() * len(cols))
     conn.execute(
