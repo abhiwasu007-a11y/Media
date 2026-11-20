@@ -37,8 +37,8 @@ from tests.agents.agent_06_fact_checker.library_support import (
 )
 
 pytestmark = pytest.mark.unit
-STRICT = QuoteSettings(require_locator=True, guard_min_words=4, min_quote_chars=1)
-LOOSE = QuoteSettings(require_locator=False, guard_min_words=4, min_quote_chars=1)
+STRICT = QuoteSettings(require_locator=True, min_quote_chars=1)
+LOOSE = QuoteSettings(require_locator=False, min_quote_chars=1)
 AUTHOR = "Aelius Testor"
 
 
@@ -364,7 +364,7 @@ def test_sections_keep_every_occurrence_as_its_own_part() -> None:
     assert parts == ("alpha beta", "gamma", "delta")
 
 
-DEFAULTS = QuoteSettings(require_locator=True, guard_min_words=4)
+DEFAULTS = QuoteSettings(require_locator=True)
 
 
 def test_default_minimum_quote_length_is_documented_and_applied(tmp_path: Path) -> None:
@@ -381,9 +381,9 @@ def test_default_minimum_quote_length_is_documented_and_applied(tmp_path: Path) 
 
 def test_minimum_length_boundary(tmp_path: Path) -> None:
     text = "will to hold it."  # 16 chars
-    settings = QuoteSettings(require_locator=True, guard_min_words=4, min_quote_chars=16)
+    settings = QuoteSettings(require_locator=True, min_quote_chars=16)
     assert check(tmp_path, sub(text), settings).code is QuoteCode.VERIFIED_EXACT
-    settings = QuoteSettings(require_locator=True, guard_min_words=4, min_quote_chars=17)
+    settings = QuoteSettings(require_locator=True, min_quote_chars=17)
     assert check(tmp_path, sub(text), settings).code is QuoteCode.QUOTE_TOO_SHORT
 
 
@@ -402,11 +402,11 @@ def test_block_outcomes_win_over_the_length_check(tmp_path: Path) -> None:
     assert missing.code is QuoteCode.LOCATOR_MISSING
 
 
-@pytest.mark.parametrize("kwargs", [{"min_quote_chars": 0}, {"guard_min_words": 0}])
+@pytest.mark.parametrize("kwargs", [{"min_quote_chars": 0}])
 def test_settings_reject_non_positive_thresholds(kwargs: dict[str, int]) -> None:
     from amw_core.errors import InputInvalidError
 
-    base = {"guard_min_words": 4, "min_quote_chars": 20, **kwargs}
+    base = {"min_quote_chars": 20, **kwargs}
     with pytest.raises(InputInvalidError):
         QuoteSettings(require_locator=True, **base)
 

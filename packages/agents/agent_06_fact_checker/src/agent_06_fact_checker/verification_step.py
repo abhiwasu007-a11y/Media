@@ -5,7 +5,7 @@ Evidence only, never the model's knowledge. The model compares; code selects the
 guards every assessment and derives status, verdict, gate result and revision requests."""
 
 import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -27,6 +27,7 @@ from agent_06_fact_checker.models import (
     ClaimMode,
     EvidenceScope,
     Provenance,
+    ReasonCode,
     RefusalReason,
     VerificationBatchOutput,
     VerificationClaim,
@@ -48,6 +49,7 @@ from agent_06_fact_checker.outputs import (
 from agent_06_fact_checker.planner import ClaimPlan, plan_claims, reject_blocked_input
 from agent_06_fact_checker.ports import CitationRow, ClaimStore, KnowledgeReader, ScriptRegistry
 from agent_06_fact_checker.prompts import PromptSource, render_system
+from agent_06_fact_checker.quote_guard import GuardReason, guard_reasons
 from agent_06_fact_checker.reconcile import (
     Outcome,
     reconcile_claim,
@@ -270,9 +272,24 @@ class ClaimVerificationStep:
         facts = {f.ref_id: f for f in inp.chart_facts}
 
         plans = plan_claims(inp.claims, inp.verify_mode, s, facts)
-        quotes = self._quote_check(task, inp, plans)
-        review = quotes.review(plans) if quotes is not None else None
-        quoted = review.outcomes if review is not None else {}
+        reasons = guard_reasons([p.claim for p in plans], s)
+        # independent of any quote check: such a claim never gets a model verdict
+        guarded = {i for i, r in reasons.items() if r is not GuardReason.REPORTED_SPEECH}
+        quotes = self._quote_check(task, inp, plans, guarded)
+        review = quotes.review(plans, guarded) if quotes is not None else None
+        quoted = dict(review.outcomes) if review is not None else {}
+        for p in plans:  # reported speech: no library proof possible, a human decides
+            if (
+                reasons.get(p.claim.local_id) is GuardReason.REPORTED_SPEECH
+                and p.claim.local_id not in quoted
+                and p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
+            ):
+                quoted[p.claim.local_id] = Outcome(
+                    p.claim,
+                    ClaimMode.CODE_ONLY,
+                    ClaimStatus.NEEDS_SUBSTANTIATION,
+                    [ReasonCode.QUOTE_NOT_ATTRIBUTABLE],
+                )
         with self._tenancy.transaction(tenant) as tx:
             evidence = resolver.resolve(
                 tx,
@@ -374,13 +391,17 @@ class ClaimVerificationStep:
         )
 
     def _quote_check(
-        self, task: TaskInput, inp: VerificationInput, plans: Sequence[ClaimPlan]
+        self,
+        task: TaskInput,
+        inp: VerificationInput,
+        plans: Sequence[ClaimPlan],
+        guarded: Collection[str],
     ) -> QuoteCheck | None:
         """The quote check of this job. FAIL CLOSED (D12): a claim typed as a quote is never sent to
         the model for a verdict. With no check configured, or a factory that cannot build one,
         the task ends with a typed error before any paid call."""
         needed = any(  # a quote without a citation is already CODE_ONLY (never a model call)
-            p.claim.claim_type is ClaimType.QUOTED_THIRD_PARTY
+            (p.claim.claim_type is ClaimType.QUOTED_THIRD_PARTY or p.claim.local_id in guarded)
             and p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
             for p in plans
         )
@@ -388,8 +409,8 @@ class ClaimVerificationStep:
         if source is None:
             if needed:
                 raise MissingDependencyError(
-                    "the script quotes a third party but no quote check is configured: "
-                    "quotes are never verified by the model",
+                    "the script quotes or attributes words to a third party but no quote check is "
+                    "configured: quotes are never verified by the model",
                     details={"reason": "QUOTE_CHECK_NOT_CONFIGURED"},
                 )
             return None

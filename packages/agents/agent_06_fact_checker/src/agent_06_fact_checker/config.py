@@ -14,6 +14,8 @@ from typing import Annotated, Self
 from pydantic import Field, StringConstraints, model_validator
 
 from agent_06_fact_checker.models import Verdict
+from agent_06_fact_checker.pattern_safety import validate_pattern
+from agent_06_fact_checker.quote_marks import QuoteMarkConfig
 from amw_core.contracts.common import AmwModel
 from amw_core.enums import ClaimStatus, ClaimType
 from amw_core.errors import ConfigInvalidError
@@ -113,6 +115,25 @@ class FactCheckSettings(AmwModel):
     """``factcheck.detect.advice_words`` per language (P10 recommendation wording)."""
     advice_suffixes: tuple[str, ...] = ()
     """Inflection suffixes tried after an advice word (config, e.g. ``ing``, ``ed``)."""
+    quote_guard_min_words: Annotated[int, Field(ge=1)]
+    """``factcheck.quote_guard.min_words``: a quoted span of this many words in a claim that is not
+    typed as a quote makes it a guarded claim (never a model verdict; CCR-303)."""
+    quote_attribution_patterns: Annotated[tuple[str, ...], Field(min_length=1)]
+    """``factcheck.quote_guard.attribution_patterns`` (regular expressions, case-insensitive):
+    wording that attributes words to a person without quotation marks, per language (English
+    ``said``, ``wrote``; Marathi equivalents). Required and non-empty: an empty list would switch
+    the guard off silently (fail closed, D16: data, not literals). Seeded production list:
+    ``data/quote_guard.seed.json`` (provisional, needs editor review)."""
+    quote_reported_speech_patterns: Annotated[tuple[str, ...], Field(min_length=1)]
+    """``factcheck.quote_guard.reported_speech_patterns``: a person's view in reported speech
+    (``believed``, ``argued``; Marathi ``मानत``). A claim that matches goes to HUMAN REVIEW (the
+    library cannot prove it, the model must not judge it)."""
+    quote_marks: QuoteMarkConfig
+    """``factcheck.quote_guard.marks``: quotation mark pairs, categories, invisible separators."""
+    quote_pattern_max_length: Annotated[int, Field(ge=1)]
+    """``factcheck.quote_guard.pattern_max_length``: longest accepted pattern (characters)."""
+    quote_pattern_max_repeat: Annotated[int, Field(ge=1)]
+    """``factcheck.quote_guard.pattern_max_repeat``: largest finite repeat bound accepted."""
     max_repairs: Annotated[int, Field(ge=0, le=1)] = 1
 
     @model_validator(mode="after")
@@ -124,6 +145,12 @@ class FactCheckSettings(AmwModel):
                 details={"missing": missing},
             )
         self._check_verdict_map()
+        for pattern in (*self.quote_attribution_patterns, *self.quote_reported_speech_patterns):
+            validate_pattern(
+                pattern,
+                max_length=self.quote_pattern_max_length,
+                max_repeat=self.quote_pattern_max_repeat,
+            )
         if len(set(self.tier_order)) != len(self.tier_order):
             raise ConfigInvalidError("tier_order has duplicates")
         for tier in (self.min_tier_for_verified, self.unranked_tier):
