@@ -10,6 +10,7 @@ from typing import Any
 
 from amw_core.contracts import OwnerTopic, ResourceBudget, TaskOutput
 from amw_core.ids import (
+    APPROVAL,
     ATTEMPT,
     CHANNEL,
     CORRELATION,
@@ -324,9 +325,11 @@ class World:
                              "scorer_kind": "DETERMINISTIC", "criteria": []}]},
         )  # fmt: skip
         self.render_id = str(self.up["s10_render"].payload.data["render_id"])  # type: ignore[union-attr, index]
+        final_apr = str(APPROVAL.new())
         self.add("a_final", "svc_s07.request_approval.output",
-                 approval_output(rnd.sha256, evidence_ids=[
-                     self.evidence.record(self.job.org_id, "render", self.render_id)]))  # fmt: skip
+                 approval_output(rnd.sha256, approval_id=final_apr, evidence_ids=[
+                     self.evidence.record(self.job.org_id, "render", self.render_id,
+                                          approval_id=final_apr, subject_sha256=rnd.sha256)]))  # fmt: skip
         self.add(
             "s16_auth", "agent_16.publication_authorisation.output",
             {"verdict": "ALLOWED", "authorised_action": "DELIVERY", "authorisation_verdict_id": "vrd_x",
