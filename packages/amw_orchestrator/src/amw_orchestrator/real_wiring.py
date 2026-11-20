@@ -245,7 +245,7 @@ def build_port_set(ctx: WiringContext, approval: ApprovalWorker | None = None) -
     clock = _SystemClock()
     audit = PgAuditLog()
     idempotency = PgIdempotencyStore()
-    lock_ms = ctx.run.claim_lease_ms  # the score effect lock follows the task lease (config)
+    lock_ms = ctx.run.score_lock_ms  # its own config key (CCR-304); seeded equal to the lease
     ports: dict[str, Any] = {
         "llm": ctx.providers.llm,
         "tts": ctx.providers.tts,

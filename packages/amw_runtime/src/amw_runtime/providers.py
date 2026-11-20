@@ -14,6 +14,7 @@ at call time by the adapter.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Final
 
 import httpx
 
@@ -42,6 +43,14 @@ class ProviderSet:
     real: bool
     llm: LlmAdapter
     tts: TtsAdapter
+
+
+DEFAULT_TTS_PROVIDER: Final = "elevenlabs"
+"""The only TTS route with a real adapter today (kept for callers that choose no route)."""
+
+TTS_ADAPTERS: Final[frozenset[str]] = frozenset({DEFAULT_TTS_PROVIDER})
+"""TTS provider names that have a real adapter in this package. A new route adds its name here
+together with its adapter (and, for a PAID route, its ``PROVIDER_LIMIT`` item in the config)."""
 
 
 def _spec(config: RuntimeConfig, role: str, expected: str) -> ProviderSpec:
@@ -78,9 +87,16 @@ def build_providers(
     catalogue: ProviderCatalogue | None = None,
     transports: Mapping[str, httpx.BaseTransport] | None = None,
     backoff: RetryPolicySettings = DEFAULT_BACKOFF,
+    tts_provider: str | None = None,
 ) -> ProviderSet:
     """The adapters for this run. ``env`` is only read for secret NAMES (and by the adapter at
-    call time); ``transports`` (``{"anthropic": ..., "elevenlabs": ...}``) are for tests."""
+    call time); ``transports`` (``{"anthropic": ..., "elevenlabs": ...}``) are for tests.
+
+    ``tts_provider`` is the run's chosen voice route (``tts.provider`` of the run entry settings,
+    CCR-304). ``None`` keeps the original behaviour (the configured TTS provider must be
+    ``elevenlabs``). A name with no adapter in ``TTS_ADAPTERS`` is refused (``CONFIG_INVALID``):
+    a free route stays refused until its adapter exists (CCR-305, PROPOSED); there is no silent
+    fallback to another provider."""
     if config.mode is RunMode.DRY_RUN:
         return ProviderSet(mode=config.mode, real=False, llm=FakeLlmAdapter(), tts=FakeTtsAdapter())
     if config.mode is not RunMode.REAL_RUN:  # pragma: no cover - closed enum
@@ -97,7 +113,13 @@ def build_providers(
     if guard_for is None:
         raise ConfigInvalidError("real providers need a call guard (per-video hard stop)")
     llm_spec = _spec(config, "LLM", "anthropic")
-    tts_spec = _spec(config, "TTS", "elevenlabs")
+    tts_name = tts_provider if tts_provider is not None else DEFAULT_TTS_PROVIDER
+    if tts_name not in TTS_ADAPTERS:
+        raise ConfigInvalidError(
+            "no real adapter for the chosen voice (TTS) provider",
+            details={"role": "TTS", "provider": tts_name},
+        )
+    tts_spec = _spec(config, "TTS", tts_name)
     llm_auth = _authorisation(preflight, llm_spec.name)
     tts_auth = _authorisation(preflight, tts_spec.name)
     assert llm_spec.secret_name is not None  # noqa: S101 - checked in _spec

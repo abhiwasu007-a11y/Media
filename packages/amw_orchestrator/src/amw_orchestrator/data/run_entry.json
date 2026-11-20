@@ -6,6 +6,7 @@
   "stage_max_wall_ms": 3600000,
   "stage_max_llm_calls": 40,
   "claim_lease_ms": 3600000,
+  "score_lock_ms": 3600000,
   "worker_statuses": [
     "IDLE",
     "BUSY"

@@ -8,6 +8,7 @@ that have no production wiring."""
 
 import dataclasses
 import io
+import json
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,7 @@ from amw_runtime.providers import build_providers
 from tests.adapters.conftest import packaged_with_render_minutes  # noqa: F401  (autouse)
 from tests.adapters.mock_providers import ANTHROPIC_SECRET, TEST_ENV
 from tests.adapters.preflight_support import EVENING, limits
-from tests.orchestrator.run_job_world import SATURDAY, World, make_world
+from tests.orchestrator.run_job_world import EXPECTED_UNMET_PORTS, SATURDAY, World, make_world
 from tests.orchestrator.test_run_job import REAL_ENV, NoNetwork, lookup_factory
 from tests.orchestrator.world import LONG
 
@@ -72,14 +73,8 @@ def test_real_run_builds_the_wiring_and_stops_at_the_missing_ports(world: World)
     err = exc.value
     unmet: list[str] = err.details["unmet"]
     assert err.code.endswith("MISSING_DEPENDENCY")
-    for needed in (
-        "agent_05.script_draft:resolver",  # InputResolver
-        "agent_08.asset_sourcing:brand_kits",  # brand kit reader
-        "agent_05.script_draft:chunks",  # library chunk index
-        "agent_16.quality_score:groups",  # GroupRequestBuilder
-        "agent_06.claim_verification:quotes",  # quote check needs library config
-    ):
-        assert needed in unmet
+    assert set(unmet) == EXPECTED_UNMET_PORTS  # the exact set, not a membership check
+    assert len(unmet) == len(set(unmet))
     # ports with a real implementation are provided, not listed
     assert not any(
         u.endswith((":llm", ":tenancy", ":storage", ":clock", ":checkpoints")) for u in unmet
@@ -116,6 +111,82 @@ def test_an_unknown_tts_provider_is_refused_not_replaced(world: World) -> None:
     net = NoNetwork()
     with pytest.raises(ConfigInvalidError):
         _compose(world, net, world.run_entry_file(tts_provider="some_free_engine"))
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t", "  \n "])
+def test_a_blank_tts_provider_counts_as_unset(world: World, blank: str) -> None:
+    net = NoNetwork()
+    with pytest.raises(MissingDependencyError) as exc:
+        _compose(world, net, world.run_entry_file(tts_provider=blank))
+    assert exc.value.details["unmet"] == ["tts.provider"]
+    assert net.requests == []
+
+
+@pytest.mark.parametrize(
+    "variant", ["ElevenLabs", "ELEVENLABS", " elevenlabs", "elevenlabs ", "eleven labs"]
+)
+def test_a_case_or_space_variant_of_the_tts_provider_is_refused_not_normalised(
+    world: World, variant: str
+) -> None:
+    net = NoNetwork()
+    with pytest.raises(ConfigInvalidError) as exc:
+        _compose(world, net, world.run_entry_file(tts_provider=variant))
+    assert exc.value.details["provider"] == variant
+    assert net.requests == []
+
+
+def test_a_run_entry_file_without_the_tts_key_refuses_as_unset(world: World) -> None:
+    data = json.loads(world.run_entry_file().read_text(encoding="utf-8"))
+    del data["tts"]  # the key is absent altogether, not just null
+    path = world.tmp / "run_entry_no_tts.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    net = NoNetwork()
+    with pytest.raises(MissingDependencyError) as exc:
+        _compose(world, net, path)
+    assert exc.value.details["unmet"] == ["tts.provider"]
+    assert net.requests == []
+
+
+def test_the_tts_choice_is_checked_before_any_provider_evidence_is_demanded(
+    world: World,
+) -> None:
+    net = NoNetwork()
+    with pytest.raises(MissingDependencyError) as exc:  # no confirmations at all: no evidence
+        compose(
+            world.request(confirmations=()), config=load_runtime_config(REAL_ENV),
+            settings=world.settings(),
+            run=load_run_entry_settings(world.run_entry_file(tts_provider=None)), env=REAL_ENV,
+            evidence_factory=lookup_factory(world, []), transports=net.transports(),
+            render_start=EVENING, clock=lambda: SATURDAY,
+        )  # fmt: skip
+    assert exc.value.details["unmet"] == ["tts.provider"]
+
+
+def test_build_providers_takes_the_chosen_tts_route_and_never_a_free_one(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    net = NoNetwork()
+    captured: dict[str, Any] = {}
+    real_build = build_providers
+
+    def spy_build(config: Any, *, preflight: Any, **kw: Any) -> Any:
+        captured["report"], captured["tts"] = preflight, kw.get("tts_provider")
+        return real_build(config, preflight=preflight, **kw)
+
+    monkeypatch.setattr("amw_orchestrator.composition.build_providers", spy_build)
+    with pytest.raises(MissingDependencyError):
+        _compose(world, net)
+    assert captured["tts"] == "elevenlabs"  # run.tts.provider reaches build_providers
+    config = load_runtime_config(REAL_ENV)
+    for route in ("some_free_engine", "ElevenLabs", ""):
+        with pytest.raises(ConfigInvalidError) as exc:
+            build_providers(
+                config, preflight=captured["report"], env=REAL_ENV,
+                guard_for=lambda _a: None,  # type: ignore[arg-type,return-value]
+                transports=net.transports(), tts_provider=route,
+            )  # fmt: skip
+        assert exc.value.details["provider"] == route
+    assert net.requests == []
 
 
 def test_the_seeded_run_entry_file_has_no_tts_default() -> None:
@@ -213,6 +284,34 @@ def test_a_fake_provider_set_is_refused_by_the_port_builder(world: World) -> Non
     ports = build_port_set(ctx)
     assert ctx.config.per_video_cap_micros == 5_000_000  # the per-video hard stop (USD 5), config
     assert "budget_guard" in ports and "ids" in ports
+
+
+def test_the_score_lock_window_has_its_own_key_not_the_task_lease(world: World) -> None:
+    from amw_orchestrator.real_wiring import build_port_set
+
+    seeded = load_run_entry_settings()
+    assert seeded.score_lock_ms == seeded.claim_lease_ms  # CCR-304: seeded equal, still separate
+    data = json.loads(world.run_entry_file().read_text(encoding="utf-8"))
+    data["score_lock_ms"] = 123_456  # differs from claim_lease_ms
+    path = world.tmp / "run_entry_lock.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    holder: dict[str, Any] = {}
+
+    class Spy(ProductionWiring):
+        def registry(self, ctx: Any, approval: Any) -> Any:
+            holder["ctx"] = ctx
+            raise MissingDependencyError("stop", details={"unmet": ["x"]})
+
+    records = [r for r in limits(world.seed.org_id) if r.provider]
+    with pytest.raises(MissingDependencyError):
+        compose(
+            world.request(confirmations=tuple(records)), config=load_runtime_config(REAL_ENV),
+            settings=world.settings(), run=load_run_entry_settings(path),
+            env=REAL_ENV, real_wiring=Spy(), evidence_factory=lookup_factory(world, records),
+            transports=NoNetwork().transports(), render_start=EVENING, clock=lambda: SATURDAY,
+        )  # fmt: skip
+    store = build_port_set(holder["ctx"]).ports["score_store"]
+    assert store._lock_ms == 123_456 != holder["ctx"].run.claim_lease_ms
 
 
 def test_a_spec_with_every_port_and_a_factory_builds_lazily_from_the_first_input() -> None:

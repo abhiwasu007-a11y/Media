@@ -40,6 +40,8 @@ class RunEntrySettings(_Model):
     stage_max_wall_ms: int = Field(gt=0)
     stage_max_llm_calls: int = Field(gt=0)
     claim_lease_ms: int = Field(gt=0)
+    score_lock_ms: int = Field(gt=0)
+    """Window of the ``ScoreStore`` effect lock (CCR-304). Its own key: it is not the task lease."""
     worker_name_prefix: str
     """Only workers whose ``logical_name`` starts with it are used (empty: any worker)."""
     worker_statuses: tuple[str, ...] = Field(min_length=1)
