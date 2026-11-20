@@ -202,7 +202,8 @@ def payload_doc_ref(ctx: BuildContext, stage_id: str) -> DocRef:
 
 def bound_script_approval(ctx: BuildContext) -> ApprovalOutput | None:
     """The ``a_script`` approval, accepted only for the CURRENT script (state, kind, document
-    hash, confirmed evidence, no TEST_FIXTURE in a real run: CCR-296 PROVISIONAL). ``None`` when
+    hash, approval-decision evidence of this approval read through the ApprovalEvidencePort, no
+    TEST_FIXTURE in a real run: CCR-296). ``None`` when
     the graph has no ``a_script`` stage (the default registry leaves it disabled). Called by every
     builder that hands the script approval to a PAID stage (``agent_07``, ``agent_09``) and by
     ``agent_16``, so an unconfirmed, stale or other-subject approval is refused before any spend."""
