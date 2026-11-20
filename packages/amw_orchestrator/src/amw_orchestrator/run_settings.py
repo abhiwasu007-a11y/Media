@@ -28,6 +28,16 @@ class DeliveryLimitsSeed(_Model):
     max_thumbnail_bytes: int = Field(gt=0)
 
 
+class DeliveryPolicySeed(_Model):
+    """Wording and limits of the REAL delivery bundle (``agent_13``): seeded DRAFT text, REQUIRES
+    REVIEW (Phase 1): owner. The FIN-R10 disclaimer is the runtime data file's, not this one."""
+
+    config_version: str = Field(min_length=1)
+    banner: str = Field(min_length=1)
+    disclosure_note: str = Field(min_length=1)
+    limits: DeliveryLimitsSeed
+
+
 class TtsSettings(_Model):
     provider: str | None = None
     """``tts.provider``: the owner's voice route. NO default: unset refuses a real run."""
@@ -46,7 +56,11 @@ class RunEntrySettings(_Model):
     """Only workers whose ``logical_name`` starts with it are used (empty: any worker)."""
     worker_statuses: tuple[str, ...] = Field(min_length=1)
     stage_cost_budget_micros: dict[str, int]
+    prompts_dir: str = Field(min_length=1)
+    """Directory of the released prompt files (hash-pinned in ``data/prompt_registry.json``);
+    relative = repository root."""
     dry_run_delivery_limits: DeliveryLimitsSeed
+    delivery: DeliveryPolicySeed
     tts: TtsSettings = TtsSettings()
 
     def delivery_limits(self) -> DeliveryLimits:

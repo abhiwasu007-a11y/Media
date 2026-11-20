@@ -76,8 +76,11 @@ def test_real_run_builds_the_wiring_and_stops_at_the_missing_ports(world: World)
     assert set(unmet) == EXPECTED_UNMET_PORTS  # the exact set, not a membership check
     assert len(unmet) == len(set(unmet))
     # ports with a real implementation are provided, not listed
+    # agent_05 takes its own narrow CheckpointPort, which the core store is not (CCR-307)
     assert not any(
-        u.endswith((":llm", ":tenancy", ":storage", ":clock", ":checkpoints")) for u in unmet
+        u.endswith((":llm", ":tenancy", ":storage", ":clock", ":checkpoints"))
+        for u in unmet
+        if u != "agent_05.script_draft:checkpoints"
     )
     assert not any(
         u.startswith("agent_16.quality_score:")
@@ -95,6 +98,9 @@ def test_real_run_builds_the_wiring_and_stops_at_the_missing_ports(world: World)
         "budget_guard",
         "approval_worker",
         "library_ref",
+        "script_registry",
+        "render_hash_reader",
+        "prompts",
     } <= provided
     assert net.requests == []  # nothing was called
 
