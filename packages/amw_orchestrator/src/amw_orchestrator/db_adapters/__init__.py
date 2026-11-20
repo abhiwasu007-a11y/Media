@@ -13,6 +13,7 @@ from amw_orchestrator.db_adapters.chunk_reader import (
     LibraryChunkReader,
 )
 from amw_orchestrator.db_adapters.fact_rows import PgFactRowReader
+from amw_orchestrator.db_adapters.hash_readers import PgRenderHashReader, PgScriptRegistry
 from amw_orchestrator.db_adapters.job_destination import PgJobDestinationReader
 from amw_orchestrator.db_adapters.score_store import PgScoreStore
 from amw_orchestrator.db_adapters.script_rows import PgScriptRowPort
@@ -23,7 +24,9 @@ __all__ = [
     "LibraryChunkReader",
     "PgFactRowReader",
     "PgJobDestinationReader",
+    "PgRenderHashReader",
     "PgScoreStore",
+    "PgScriptRegistry",
     "PgScriptRowPort",
     "UnavailableBrandKitReader",
 ]

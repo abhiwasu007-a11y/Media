@@ -1,0 +1,21 @@
+{
+  "schema": "prompt_registry/1",
+  "note": "SHA-256 pins of the released prompt files (docs/v4/prompts). A changed prompt is a NEW version file and a new pin (27 section 4, eval gate); a pin that does not match refuses before any model call. Regenerate with amw_orchestrator.prompt_store.compute_registry only together with the eval gate.",
+  "prompts": {
+    "agent_04/research_pack_notes.v1": "653ff0f2624b5fbe24fb8b78362a281ca5ef2e94906cddcf877628aa1ff594cc",
+    "agent_04/research_pack_plan.v1": "2537c998fdb241c0ffdaea46b9383ed4c83dc49cddf90beb2e53e5a091e25088",
+    "agent_05/script_draft.v1": "43e8eb019ef0bb3937a7ff3b0b21978c68d73f2fdf1d779a1f2512430bb6c2ee",
+    "agent_05/script_draft_section.v1": "893825e4d837d463e8b00a101e1cb642f8f1aae30a9c6d655c36a841e4b61470",
+    "agent_05/shorts_adaptation.v1": "7ff3bd03b819bb67cf68a269c7d1776dbb707ede6c3589cce2cc703565c5a120",
+    "agent_06/claim_extraction.v1": "fe02c90ae93269d9165f55722e56b973ad2e7b85876540b629518cde625f2a4d",
+    "agent_06/claim_verification.v1": "beb8b42f34243c8184e5ce7c4c47576903553e90f83c66fc532a860bb6b104b6",
+    "agent_08/candidate_rank.v1": "8ccf7cbaf51e38b74439e9bb54031155c36b7bdda91d4d1cb94ff924c28b4408",
+    "agent_08/query_plan.v1": "6b3e1247bd19cd975b2c29f54e61af55ad77644f3810066a3aecb09a08bad375",
+    "agent_09/shot_direction.v1": "9bc8308acf81610884a5e68946aaffa60847496ba01f06a69e93bf1990ec6764",
+    "agent_11/thumbnail_concepts.v1": "af15476c54861301233e869e94e498eab5e9dacef6689cc042654b5ea832f1b3",
+    "agent_16/compliance_gate.v1": "09ee92d4b24f823aaad9ca59c6372ba4d4ceb1cef21a815d40439edfddce55da",
+    "agent_16/compliance_gate_frames.v1": "99763ac4cb7898b15f0ba552045771c5d20e60a849eaf33c31b4c92c5792191c",
+    "agent_16/compliance_gate_paraphrase.v1": "311411426da1b0b268176a7ab59d95e454eba4e76f17be4a8b8fc168ef89ad00",
+    "agent_16/quality_score.v1": "b2758de4d5ece69c2f37631cc8a846036858f90ddd5b0d595b0d9f078d266312"
+  }
+}

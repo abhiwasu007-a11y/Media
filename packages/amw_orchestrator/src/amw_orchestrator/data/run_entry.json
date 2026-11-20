@@ -1,6 +1,6 @@
 {
   "schema": "run_entry/1",
-  "note": "SEEDED DEFAULTS of the run entry point (REQUIRES REVIEW (Phase 1): owner). Operational values live here and in amw_core settings, never as literals in code. A stage budget set in amw_core settings (llm.tasks.<task_type>.cost_budget_micros) wins over the seed below. All money is integer micros.",
+  "note": "SEEDED DEFAULTS of the run entry point (REQUIRES REVIEW (Phase 1): owner). Operational values live here and in amw_core settings, never as literals in code. A stage budget set in amw_core settings (llm.tasks.<task_type>.cost_budget_micros) wins over the seed below. All money is integer micros. prompts_dir: where the hash-pinned prompt files are read (relative = repository root). delivery: wording and limits of the real delivery bundle, SEEDED DRAFT TEXT, REQUIRES REVIEW (Phase 1): owner; the disclaimer text itself comes from the runtime disclaimer data file.",
   "database_role": "amw_app",
   "worker_name_prefix": "",
   "stage_max_wall_ms": 3600000,
@@ -26,9 +26,20 @@
   "tts": {
     "provider": null
   },
+  "prompts_dir": "docs/v4/prompts",
   "dry_run_delivery_limits": {
     "max_file_bytes": 1000000000,
     "max_total_bytes": 1000000000,
     "max_thumbnail_bytes": 10000000
+  },
+  "delivery": {
+    "config_version": "delivery.seed.1",
+    "banner": "REAL RUN - DRAFT DELIVERY BUNDLE - OWNER REVIEW REQUIRED BEFORE ANY USE",
+    "disclosure_note": "The owner decides the YouTube altered or synthetic content label and applies it by hand; this bundle uploads nothing.",
+    "limits": {
+      "max_file_bytes": 1000000000,
+      "max_total_bytes": 1000000000,
+      "max_thumbnail_bytes": 10000000
+    }
   }
 }

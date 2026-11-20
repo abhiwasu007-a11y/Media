@@ -52,10 +52,13 @@ from amw_core.exec_context import ExecContext
 from amw_core.idempotency_store import PgIdempotencyStore
 from amw_core.ids import new_id
 from amw_core.interfaces import TaskWorker
+from amw_delivery.stage import DeliveryStage
 from amw_orchestrator.db_adapters import (
     PgFactRowReader,
     PgJobDestinationReader,
+    PgRenderHashReader,
     PgScoreStore,
+    PgScriptRegistry,
     PgScriptRowPort,
 )
 from amw_orchestrator.executor import (
@@ -66,6 +69,12 @@ from amw_orchestrator.executor import (
     WorkerRegistry,
 )
 from amw_orchestrator.input_builders import BuilderTable
+from amw_orchestrator.prompt_store import (
+    PinnedPrompts,
+    load_prompt_registry,
+    resolve_prompts_dir,
+)
+from amw_orchestrator.real_services import ProductionBuildServices
 
 if TYPE_CHECKING:  # composition imports this module; the context type is only needed for typing
     from amw_core.contracts.payloads import PayloadSchemaRegistry
@@ -99,7 +108,50 @@ _ALIASES: Final[Mapping[str, str]] = {
 
 _TASK_ALIASES: Final[Mapping[tuple[str, str], str]] = {
     ("agent_05.script_draft", "scripts"): "script_rows",
+    ("agent_05.script_draft", "prompts"): "prompts",
+    ("agent_06.claim_extraction", "scripts"): "script_registry",
+    ("agent_06.claim_extraction", "prompts"): "prompts",
+    ("agent_06.claim_verification", "scripts"): "script_registry",
+    ("agent_06.claim_verification", "prompts"): "prompts",
+    ("agent_09.shot_plan", "prompts"): "prompts",
+    ("agent_11.thumbnail_variants", "prompt"): "prompts",
+    ("agent_16.compliance_gate", "prompts"): "prompts",
+    ("agent_16.quality_score", "prompt"): "prompts",
+    ("agent_16.quality_score", "renders"): "render_hash_reader",
 }
+"""Parameters whose port id differs from the shared alias of the same name."""
+
+_NOT_SHARED: Final[frozenset[tuple[str, str]]] = frozenset(
+    {
+        # agent_05's own narrow Protocols (CallBudget, CallLedger, CheckpointPort, TaskIdempotency,
+        # AuditPort): the name matches a core port but the TYPE does not, so the core store is no
+        # provider (CCR-310)
+        ("agent_05.script_draft", "budget"),
+        ("agent_05.script_draft", "ledger"),
+        ("agent_05.script_draft", "checkpoints"),
+        ("agent_05.script_draft", "idempotency"),
+        ("agent_05.script_draft", "audit"),
+        # ``ledger`` of agent_08 is the LICENCE ledger repository, not the cost ledger
+        ("agent_08.asset_sourcing", "ledger"),
+        # agent_07 takes a ``TtsSynthesizer`` (adapter plus declared capabilities), not the adapter
+        ("agent_07.voice_synthesis", "tts"),
+        # ``store`` of the uniqueness check is the VerdictStore, not the score store
+        ("svc_s02.uniqueness_check", "store"),
+    }
+)
+"""Parameters that look like a shared port by name and are NOT one by type: they are listed as
+unmet until a task-specific port (``<task_type>:<name>``) exists."""
+
+_COMPOSED: Final[Mapping[str, frozenset[str]]] = {
+    # built by the factory from other ports or packaged data, with no I/O
+    "agent_04.research_pack": frozenset({"resolver_factory"}),
+    "agent_10.render": frozenset({"runner", "timers"}),
+    "agent_10.subtitles": frozenset({"runner", "timers"}),
+    "agent_10.technical_qc": frozenset({"runner", "timers"}),
+    "agent_11.thumbnail_variants": frozenset({"composer", "templates"}),
+    "svc_s02.uniqueness_check": frozenset({"extractor"}),
+}
+"""Parameters the factory builds itself (no separate port, no listing)."""
 
 _EXTRA_REQUIRED: Final[Mapping[str, tuple[str, ...]]] = {
     # optional in the signature, but fail closed (CCR-302, #117): a quote claim with no quote check
@@ -107,6 +159,10 @@ _EXTRA_REQUIRED: Final[Mapping[str, tuple[str, ...]]] = {
     "agent_06.claim_verification": ("quotes",),
     # optional in the signature; without it agent_08 cannot read the brand kit / destination
     "agent_08.asset_sourcing": ("brand_kits", "job_destinations"),
+    # ``ports`` of ShotPlanTask is skipped as composed; it is a real port (CCR-267)
+    "agent_09.shot_plan": ("plan_input_ports",),
+    # the QC self-test record is readiness-owned (18 section 7.11)
+    "agent_10.technical_qc": ("selftests",),
 }
 _EXTRA_ALIASES: Final[Mapping[tuple[str, str], str]] = {
     ("agent_06.claim_verification", "quotes"): "quote_check_factory",
@@ -172,16 +228,35 @@ class WorkerSpec:
 
     def unmet(self, provided: Mapping[str, Any]) -> tuple[str, ...]:
         """Parameters of this worker without a provider, as ``<task_type>:<name>``."""
-        missing: list[str] = []
-        for name in self.parameters:
-            port = (
-                _TASK_ALIASES.get((self.task_type, name))
-                or _EXTRA_ALIASES.get((self.task_type, name))
-                or _ALIASES.get(name)
-            )
-            if port is None or port not in provided:
-                missing.append(f"{self.task_type}:{name}")
-        return tuple(missing)
+        return tuple(
+            f"{self.task_type}:{name}"
+            for name in self.parameters
+            if name not in _COMPOSED.get(self.task_type, ())
+            and resolve_port_id(self.task_type, name, provided) is None
+        )
+
+
+def resolve_port_id(task_type: str, name: str, provided: Mapping[str, Any]) -> str | None:
+    """The id of the port that serves parameter ``name`` of ``task_type``, or ``None`` if unmet.
+
+    The single resolution used by BOTH the REAL pre-check (``WorkerSpec.unmet``) and the worker
+    factories, so what the pre-check accepts is exactly what a factory reads (no late
+    ``MISSING_DEPENDENCY`` after paid stages ran)."""
+    own = f"{task_type}:{name}"
+    if own in provided:  # a port of this one worker
+        return own
+    port = (
+        _TASK_ALIASES.get((task_type, name))
+        or _EXTRA_ALIASES.get((task_type, name))
+        or _ALIASES.get(name)
+    )
+    if (
+        port is None
+        or port not in provided
+        or ((task_type, name) in _NOT_SHARED and port == _ALIASES.get(name))
+    ):
+        return None
+    return port
 
 
 def worker_specs(factories: Mapping[str, WorkerFactory] | None = None) -> dict[str, WorkerSpec]:
@@ -262,7 +337,14 @@ def build_port_set(ctx: WiringContext, approval: ApprovalWorker | None = None) -
         "job_destination": PgJobDestinationReader(),
         "fact_rows": PgFactRowReader(),
         "score_store": PgScoreStore(clock, idempotency, lock_ms=lock_ms),
+        "script_registry": PgScriptRegistry(),
+        "render_hash_reader": PgRenderHashReader(),
     }
+    prompt_root = resolve_prompts_dir(ctx.run.prompts_dir)
+    if prompt_root is not None:  # a missing directory leaves the port unwired, never guessed
+        pinned = PinnedPrompts(prompt_root, load_prompt_registry())
+        pinned.verify_all()  # a changed or missing prompt file is CONFIG_INVALID before any call
+        ports["prompts"] = pinned
     if approval is not None:
         ports["approval_worker"] = approval
     library = LibraryRef(ctx.request.library.repo_path, ctx.request.library.commit_sha)
@@ -327,6 +409,10 @@ class ProductionWiring:
         *,
         delivery_scratch: Path | None = None,
     ) -> None:
+        if factories is None:
+            from amw_orchestrator.worker_factories import FACTORIES
+
+            factories = FACTORIES
         self._specs = worker_specs(factories)
         self._scratch = delivery_scratch
         self.last_ports: PortSet | None = None
@@ -334,6 +420,11 @@ class ProductionWiring:
     def registry(self, ctx: WiringContext, approval: ApprovalWorker) -> WorkerRegistry:
         ports = build_port_set(ctx, approval)
         self.last_ports = ports
+        return self.build_registry(ports, approval)
+
+    def build_registry(self, ports: PortSet, approval: ApprovalWorker) -> WorkerRegistry:
+        """The workers of a real run from a built ``PortSet``: refuses (typed, listing every
+        missing port) unless every port of every worker exists; nothing is called here."""
         unmet = unmet_ports(self._specs, ports)
         if unmet:
             raise MissingDependencyError(
@@ -350,6 +441,9 @@ class ProductionWiring:
             t: LazyRealWorker(s, ports) for t, s in self._specs.items()
         }
         workers[APPROVAL_TASK_TYPE] = approval
+        workers[DELIVERY_TASK_TYPE] = DeliveryStage(
+            ports.get("storage"), ports.get("clock"), scratch_root=self._scratch
+        )
         return RealRegistry(workers)
 
     def schemas(self) -> PayloadSchemaRegistry:
@@ -365,10 +459,20 @@ class ProductionWiring:
         )
 
     def build_services(self, ctx: WiringContext) -> BuildServices:
-        raise MissingDependencyError(
-            "the build services (document reader, cost report, delivery policy) are not wired",
-            details={"unmet": ["build_services"]},
-        )
+        from amw_core.job_store.pg import PgJobStore
+        from amw_runtime.disclaimer import get_disclaimer
+
+        exponents = {
+            **ctx.config.currency_minor_exponent,
+            **ctx.settings.finance.currency_minor_exponent,
+        }
+        return ProductionBuildServices(
+            org_id=ctx.request.org_id, tenancy=ctx.tenancy,
+            jobs=PgJobStore(PgAuditLog(), max_tasks_per_job=ctx.settings.limits.max_tasks_per_job),
+            ledger=ctx.ledger, guard=ctx.guard, now=lambda: _SystemClock().now(),
+            policy=ctx.run.delivery, disclaimer=get_disclaimer(ctx.config.disclaimer_version),
+            minor_exponents=exponents, run_label=ctx.settings.environment,
+        )  # fmt: skip
 
 
 def summarize(unmet: Sequence[str]) -> dict[str, list[str]]:
