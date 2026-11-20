@@ -20,6 +20,7 @@ from agent_06_fact_checker.models import (
 )
 from agent_06_fact_checker.ports import CitationRow, SourceText
 from agent_06_fact_checker.prompts import PromptDoc, parse_prompt_doc
+from agent_06_fact_checker.quote_guard import load_quote_guard_seed
 from agent_06_fact_checker.rulepack import FinLexicon, RulePack, load_provisional_finance_lexicon
 from amw_adapters.common import CallUsage
 from amw_adapters.llm.protocol import LlmRequest, LlmResponse
@@ -84,11 +85,9 @@ NOW = datetime(2026, 11, 18, 9, 0, tzinfo=UTC)
 
 # Test lexicon only (the 13 5.4 examples). Production lists are rule-pack data (REQUIRES REVIEW).
 TEST_MARKERS = {"en": ("will", "should", "likely to", "target", "next move", "again", "repeat")}
-# Test attribution patterns (English and Marathi); production lists are config data (D16).
-QUOTE_ATTRIBUTION_PATTERNS = [
-    r"\b(?:said|says|wrote|writes|stated|declared)\b",
-    r"म्हणाले|म्हणाला|म्हणतो|म्हणतात|लिहिले|लिहिलं",
-]
+# The seeded production lists (quotation marks, attribution and reported-speech patterns, limits)
+# are config data shipped with the package; the tests run on them (D16).
+QUOTE_GUARD_SEED = load_quote_guard_seed()
 
 
 def make_settings(**over: Any) -> FactCheckSettings:
@@ -109,7 +108,7 @@ def make_settings(**over: Any) -> FactCheckSettings:
         "price_data_lag_days": 30,
         "referral_patterns": [r"\bcode[:=]\s?[A-Z0-9]{4,}\b"],
         "quote_guard_min_words": 6,
-        "quote_attribution_patterns": QUOTE_ATTRIBUTION_PATTERNS,
+        **QUOTE_GUARD_SEED,
         "min_tier_for_verified": "C_SECONDARY",
         "tier_order": ["A_PRIMARY", "B_PUBLISHED", "C_SECONDARY", "D_UNVERIFIED"],
         "unranked_tier": "D_UNVERIFIED",

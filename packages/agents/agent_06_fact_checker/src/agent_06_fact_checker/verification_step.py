@@ -27,6 +27,7 @@ from agent_06_fact_checker.models import (
     ClaimMode,
     EvidenceScope,
     Provenance,
+    ReasonCode,
     RefusalReason,
     VerificationBatchOutput,
     VerificationClaim,
@@ -48,7 +49,7 @@ from agent_06_fact_checker.outputs import (
 from agent_06_fact_checker.planner import ClaimPlan, plan_claims, reject_blocked_input
 from agent_06_fact_checker.ports import CitationRow, ClaimStore, KnowledgeReader, ScriptRegistry
 from agent_06_fact_checker.prompts import PromptSource, render_system
-from agent_06_fact_checker.quote_guard import guard_reason
+from agent_06_fact_checker.quote_guard import GuardReason, guard_reasons
 from agent_06_fact_checker.reconcile import (
     Outcome,
     reconcile_claim,
@@ -271,12 +272,24 @@ class ClaimVerificationStep:
         facts = {f.ref_id: f for f in inp.chart_facts}
 
         plans = plan_claims(inp.claims, inp.verify_mode, s, facts)
-        guarded = {
-            p.claim.local_id for p in plans if guard_reason(p.claim, s) is not None
-        }  # independent of any quote check: such a claim never gets a model verdict
+        reasons = guard_reasons([p.claim for p in plans], s)
+        # independent of any quote check: such a claim never gets a model verdict
+        guarded = {i for i, r in reasons.items() if r is not GuardReason.REPORTED_SPEECH}
         quotes = self._quote_check(task, inp, plans, guarded)
         review = quotes.review(plans, guarded) if quotes is not None else None
-        quoted = review.outcomes if review is not None else {}
+        quoted = dict(review.outcomes) if review is not None else {}
+        for p in plans:  # reported speech: no library proof possible, a human decides
+            if (
+                reasons.get(p.claim.local_id) is GuardReason.REPORTED_SPEECH
+                and p.claim.local_id not in quoted
+                and p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
+            ):
+                quoted[p.claim.local_id] = Outcome(
+                    p.claim,
+                    ClaimMode.CODE_ONLY,
+                    ClaimStatus.NEEDS_SUBSTANTIATION,
+                    [ReasonCode.QUOTE_NOT_ATTRIBUTABLE],
+                )
         with self._tenancy.transaction(tenant) as tx:
             evidence = resolver.resolve(
                 tx,

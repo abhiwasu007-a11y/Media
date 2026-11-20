@@ -1,0 +1,68 @@
+{
+ "status": "provisional seed written by the build lane; REQUIRES REVIEW (Phase 1): Marathi editor / owner. NOT complete: wording the lists do not name is not guarded by them. The apostrophe and the closing curly mark never open a span (possessives).",
+ "quote_marks": {
+  "pairs": [
+   ["\"", "\""],
+   ["＂", "＂"],
+   ["“", "”"],
+   ["”", "”"],
+   ["„", "“"],
+   ["„", "”"],
+   ["‘", "’"],
+   ["‚", "‘"],
+   ["‚", "’"],
+   ["‛", "’"],
+   ["‟", "”"],
+   ["«", "»"],
+   ["»", "«"],
+   ["‹", "›"],
+   ["›", "‹"],
+   ["「", "」"],
+   ["『", "』"],
+   ["｢", "｣"],
+   ["﹁", "﹂"],
+   ["﹃", "﹄"],
+   ["〝", "〞"],
+   ["〝", "〟"],
+   ["❮", "❯"],
+   ["⸂", "⸃"],
+   ["⸄", "⸅"],
+   ["⸉", "⸊"],
+   ["⸌", "⸍"],
+   ["⸜", "⸝"],
+   ["⸠", "⸡"]
+  ],
+  "opening_categories": [
+   "Pi"
+  ],
+  "closing_categories": [
+   "Pf"
+  ],
+  "invisible_separators": [
+   "​"
+  ]
+ },
+ "pattern_limits": {
+  "max_length": 200,
+  "max_repeat": 20
+ },
+ "attribution_patterns": [
+  "\\b(?:said|says|stated|declared|wrote|writes|tells)\\b",
+  "\\baccording\\s+to\\b",
+  "\\bin\\s+the\\s+words\\s+of\\b",
+  "\\bas\\s+\\S+(?:\\s+\\S+)?(?:\\s+\\S+)?\\s+put\\s+it\\b",
+  "(?<![\\wऀ-ॿ])म्हणा(?:ला|ली|ले|ल्या)",
+  "(?<![\\wऀ-ॿ])म्हणत(?:ो|े|ात)",
+  "(?<![\\wऀ-ॿ])म्हणे",
+  "(?<![\\wऀ-ॿ])म्हट(?:ले|ला|ली|लं)",
+  "(?<![\\wऀ-ॿ])लिहि(?:ले|लं|तो|ते|तात)",
+  "(?<![\\wऀ-ॿ])सांगित(?:ले|लं)",
+  "नुसार",
+  "च्या\\s+मते"
+ ],
+ "reported_speech_patterns": [
+  "\\b(?:believed|believes|argued|argues|claimed|claims)\\b",
+  "(?<![\\wऀ-ॿ])मानत",
+  "(?<![\\wऀ-ॿ])मान(?:ले|लं)"
+ ]
+}

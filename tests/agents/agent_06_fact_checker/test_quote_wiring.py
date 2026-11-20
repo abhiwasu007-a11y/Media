@@ -52,7 +52,7 @@ def quote_claim(text: str = GOOD, who: str = "Testor", **over: Any) -> dict[str,
     return claim(1, **{**base, **over})
 
 
-SETTINGS = QuoteSettings(require_locator=True, guard_min_words=6)
+SETTINGS = QuoteSettings(require_locator=True)
 
 
 def library(tmp_path: Path) -> tuple[Path, Any, StaticLibraryIndex]:
@@ -423,3 +423,30 @@ def test_ordinary_factual_claims_are_not_guarded_with_or_without_a_quote_check(
         )
         assert [c["status"] for c in doc(out)["claims"]] == ["VERIFIED", "VERIFIED"]
         assert w.llm.calls == 1
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "Seneca believed that time is the only thing we truly own.",
+        "सेनेका असे मानत होता की वेळ आपली आहे.",
+    ],
+)
+def test_reported_speech_goes_to_human_review_with_or_without_a_quote_check(
+    tmp_path: Path, quote: str
+) -> None:
+    reported = claim(1, claim_type="FACTUAL", quote=quote, normalized_claim="A view of a person.")
+    for kw in ({}, {"quotes": None}):
+        out, w = run(tmp_path, [reported], responses=[batch(result_for("c1"))], **kw)
+        c = one(out)
+        assert c["status"] == "NEEDS_SUBSTANTIATION"
+        assert c["reason_codes"] == ["QUOTE_NOT_ATTRIBUTABLE"] and c["mode"] == "CODE_ONLY"
+        assert w.llm.calls == 0
+
+
+def test_a_quote_split_across_two_claims_is_guarded_in_both(tmp_path: Path) -> None:
+    first = claim(1, claim_type="FACTUAL", quote="He added “one two three")
+    second = claim(2, claim_type="FACTUAL", quote="four five six seven” and left.")
+    out, w = run(tmp_path, [first, second], responses=[batch(result_for("c1"), result_for("c2"))])
+    assert [c["status"] for c in doc(out)["claims"]] == ["NEEDS_SUBSTANTIATION"] * 2
+    assert w.llm.calls == 0
