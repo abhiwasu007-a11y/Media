@@ -20,6 +20,7 @@ from amw_core.interfaces.storage import BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.storage.local import LocalDiskStorage
 from amw_core.tenancy.storage_paths import blob_uri
+from amw_orchestrator.input_limits import packaged_input_limits
 from amw_orchestrator.script_inputs import (
     ChannelFacts,
     LibrarySourceClassifier,
@@ -140,6 +141,7 @@ class World:
         self.channels = Channels(self.ctx)
         self.documents = Documents(self.ctx)
         self.dates = FixedDate()
+        self.limits = packaged_input_limits()
         self.library_for: Any = lambda _t: self.library
         self.non_finance: object = frozenset({"youtube_general"})
         self.pack_doc = sp.make_pack().model_dump_json().encode()
@@ -153,6 +155,7 @@ class World:
             classifier=LibrarySourceClassifier(self.index, self.records),
             library_for=lambda t: self.library_for(t),
             job_dates=self.dates,
+            limits=self.limits,
             non_finance_categories=self.non_finance,
         )
 

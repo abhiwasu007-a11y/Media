@@ -298,7 +298,14 @@ def test_cli_prints_counts_only_and_verifies(
     root, sha, idx = lib
     config = tmp_path / "cfg.json"
     config.write_text(
-        json.dumps({"index_dir": str(idx), "max_file_bytes": 100000, "allowed_suffixes": [".txt"]})
+        json.dumps(
+            {
+                "index_dir": str(idx),
+                "max_file_bytes": 100000,
+                "allowed_suffixes": [".txt"],
+                "git_timeout_seconds": 30,
+            }
+        )
     )
     common = [
         "--config", str(config), "--library", str(root), "--commit", sha,
@@ -321,11 +328,16 @@ def test_cli_refuses_with_a_code_and_no_detail(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    root, sha, _ = lib
+    root, sha, idx = lib
     config = tmp_path / "cfg.json"
     config.write_text(
         json.dumps(
-            {"index_dir": str(root / "inside"), "max_file_bytes": 10, "allowed_suffixes": [".txt"]}
+            {
+                "index_dir": str(root / "inside"),
+                "max_file_bytes": 10,
+                "allowed_suffixes": [".txt"],
+                "git_timeout_seconds": 30,
+            }
         )
     )
     args = ["--config", str(config), "--library", str(root), "--commit", sha,
@@ -336,4 +348,8 @@ def test_cli_refuses_with_a_code_and_no_detail(
     assert "refused" in captured.err
     assert str(root) not in captured.err
     config.write_text("{}")
+    assert index_cli.main(["build", *args]) == 2
+    config.write_text(  # no default timeout (D16): a config without it is refused
+        json.dumps({"index_dir": str(idx), "max_file_bytes": 1000, "allowed_suffixes": [".txt"]})
+    )
     assert index_cli.main(["build", *args]) == 2

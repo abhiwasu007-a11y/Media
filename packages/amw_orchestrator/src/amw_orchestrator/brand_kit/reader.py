@@ -28,25 +28,30 @@ from amw_core.interfaces.tenancy_context import TenantTransaction
 from amw_core.tenancy.storage_paths import uri_owner
 from amw_orchestrator.brand_kit.fonts import FontManifest, check_kit_fonts
 from amw_orchestrator.brand_kit.model import BrandKitDocument
-
-_MAX_DOC_BYTES = 64 * 1024
-"""A brand-kit document is a few hundred bytes of config; a larger blob is not one."""
+from amw_orchestrator.input_limits import InputLimits, read_bounded
 
 
 class ManifestBrandKitReader:
     def __init__(
-        self, storage: BlobStorage, assets: AssetRepository, manifest: FontManifest
+        self,
+        storage: BlobStorage,
+        assets: AssetRepository,
+        manifest: FontManifest,
+        limits: InputLimits,
     ) -> None:
         self._storage, self._assets, self._manifest = storage, assets, manifest
+        self._limits = limits
 
     def _document(self, tx: TenantTransaction, uri: str, sha256: str | None) -> BrandKitDocument:
         if not sha256:
             raise InputInvalidError("the brand kit reference has no SHA-256")
         if uri_owner(uri) != str(tx.context.org_id):
             raise CrossTenantRefError("the brand kit belongs to another tenant")
-        data = b"".join(self._storage.get(tx.context, BlobUri(uri), sha256))
-        if len(data) > _MAX_DOC_BYTES:
-            raise InputInvalidError("the brand kit document is too large")
+        data = read_bounded(
+            self._storage.get(tx.context, BlobUri(uri), sha256),
+            self._limits.max_brand_kit_bytes,
+            lambda: InputInvalidError("the brand kit document is too large"),
+        )
         try:
             return BrandKitDocument.model_validate(json.loads(data))
         except ValidationError as exc:

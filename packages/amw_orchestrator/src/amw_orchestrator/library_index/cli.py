@@ -5,8 +5,8 @@
     python -m amw_orchestrator.library_index verify --config C ... (same arguments)
 
 ``--config`` is a JSON file OUTSIDE the repository: ``index_dir`` (private directory outside git),
-``max_file_bytes`` and ``allowed_suffixes`` (the reader limits have no default, CCR-291) and the
-optional ``git_timeout_seconds``. Output is COUNTS only: no path, locator, hash or text is printed.
+``max_file_bytes``, ``allowed_suffixes`` and ``git_timeout_seconds`` (the reader limits have no
+default, CCR-291, D16). Output is COUNTS only: no path, locator, hash or text is printed.
 Exit codes: 0 done, 2 refused (typed error, its code is printed)."""
 
 import argparse
@@ -30,7 +30,7 @@ class IndexConfig(BaseModel):
     index_dir: Path
     max_file_bytes: int = Field(ge=1)
     allowed_suffixes: frozenset[str] = Field(min_length=1)
-    git_timeout_seconds: float = Field(default=30.0, gt=0)
+    git_timeout_seconds: float = Field(gt=0)
 
     def limits(self) -> LibraryLimits:
         return LibraryLimits(

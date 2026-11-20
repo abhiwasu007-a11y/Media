@@ -56,6 +56,8 @@ class FontManifest:
         purpose = str(entry.get("purpose"))
         if purpose not in BRAND_PURPOSES:
             raise ConfigInvalidError("a brand-kit font has no brand purpose in the manifest")
+        if "file" not in entry:
+            raise ConfigInvalidError("a font manifest entry has no file")
         return ManifestFont(key, self._dir / str(entry["file"]), str(entry.get("sha256")), purpose)
 
     def read(self, font: ManifestFont) -> bytes:

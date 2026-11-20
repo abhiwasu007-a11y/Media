@@ -40,10 +40,11 @@ from agent_06_fact_checker.library.reader import KnowledgeLibraryReader
 from amw_core.config import effective_non_finance_categories
 from amw_core.contracts.task_input import TaskInput
 from amw_core.enums import ContextRefPurpose
-from amw_core.ids import Prefix, new_id
+from amw_core.ids import ActorRef, CorrelationId, OrgId, Prefix, new_id
 from amw_core.interfaces.storage import BlobStorage, BlobUri
 from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.tenancy.storage_paths import uri_owner
+from amw_orchestrator.input_limits import InputLimits, read_bounded
 from amw_orchestrator.script_inputs.sources import (
     NOT_A_LIBRARY_WORK,
     LibrarySourceClassifier,
@@ -52,8 +53,6 @@ from amw_orchestrator.script_inputs.sources import (
 )
 
 PACK_SCHEMA = "agent_04.research_pack.output"
-_MAX_PACK_BYTES = 8 * 1024 * 1024
-"""A research pack is a JSON document of notes; a larger blob is not one (fail closed)."""
 
 
 @dataclass(slots=True)
@@ -122,12 +121,14 @@ class ScriptInputResolver:
         classifier: LibrarySourceClassifier,
         library_for: LibraryFor,
         job_dates: JobDateSource,
+        limits: InputLimits,
         non_finance_categories: object,
         new_script_id: Callable[[], str] = lambda: str(new_id(Prefix.SCRIPT)),
     ) -> None:
         self._storage, self._channels, self._documents = storage, channels, documents
         self._classifier, self._library_for, self._job_dates = classifier, library_for, job_dates
         self._non_finance = effective_non_finance_categories(non_finance_categories)
+        self._limits = limits
         self._new_script_id = new_script_id
 
     # -- the InputResolver port ----------------------------------------------------------------
@@ -199,12 +200,19 @@ class ScriptInputResolver:
             )
         return template
 
+    @staticmethod
+    def _tenant(ctx: StepContext) -> TenantContext:
+        return TenantContext(
+            OrgId(ctx.org_id), ActorRef(ctx.actor), CorrelationId(ctx.correlation_id)
+        )
+
     def _read(self, ctx: StepContext, uri: str, sha256: str) -> bytes:
-        tenant = TenantContext(ctx.org_id, "agent_05", ctx.channel_id)  # type: ignore[arg-type]
-        data = b"".join(self._storage.get(tenant, BlobUri(uri), sha256))
-        if len(data) > _MAX_PACK_BYTES:
-            raise InputInvalid("a context document is too large")
-        return data
+        """The research pack, bounded while it is read (a larger blob is not a pack)."""
+        return read_bounded(
+            self._storage.get(self._tenant(ctx), BlobUri(uri), sha256),
+            self._limits.max_research_pack_bytes,
+            lambda: InputInvalid("a context document is too large"),
+        )
 
     def _pack(self, ctx: StepContext, task_input: TaskInput) -> ResearchPackView:
         refs = [
@@ -229,7 +237,7 @@ class ScriptInputResolver:
             raise InputInvalid("the research pack does not match its view") from None
 
     def _ref_facts(self, ctx: StepContext, task_input: TaskInput) -> list[RefFact]:
-        tenant = TenantContext(ctx.org_id, "agent_05", ctx.channel_id)  # type: ignore[arg-type]
+        tenant = self._tenant(ctx)
         facts: list[RefFact] = []
         for ref in task_input.context_refs:
             owner = uri_owner(ref.uri)

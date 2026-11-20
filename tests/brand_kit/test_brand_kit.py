@@ -38,6 +38,7 @@ from amw_orchestrator.brand_kit import (
     seed_brand_kit,
 )
 from amw_orchestrator.brand_kit.packaged import packaged_brand_kit_bytes
+from amw_orchestrator.input_limits import packaged_input_limits
 
 pytestmark = pytest.mark.unit
 ORG_A = ORG.from_uuid(new_uuid7())
@@ -65,7 +66,10 @@ class World:
             for key in ("mukta_regular", "noto_sans_devanagari_vf"):
                 self.add_font(key)
         self.reader = ManifestBrandKitReader(
-            self.storage, self.assets, FontManifest(packaged_manifest_path())
+            self.storage,
+            self.assets,
+            FontManifest(packaged_manifest_path()),
+            packaged_input_limits(),
         )
 
     def add_font(self, key: str, kind: AssetKind = AssetKind.FONT) -> str:

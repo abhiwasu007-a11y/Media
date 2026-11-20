@@ -77,7 +77,10 @@ def _write_atomic(path: Path, data: bytes, *, overwrite: bool) -> None:
         if path.read_bytes() == data:
             return
         if not overwrite:
-            raise InputInvalidError("an index file with other content already exists")
+            raise InputInvalidError(
+                "an index file with other content already exists "
+                "(a changed chunker version needs a fresh index directory)"
+            )
     tmp = path.with_name(f".{path.name}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as handle:
