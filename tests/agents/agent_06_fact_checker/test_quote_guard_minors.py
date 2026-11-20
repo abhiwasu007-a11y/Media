@@ -95,6 +95,32 @@ def test_a_span_longer_than_the_configured_bound_is_no_span() -> None:
     assert len(table.spans("“" + "w " * (limit // 2 - 1) + "”")) == 1
 
 
+def test_a_stray_mark_on_an_earlier_line_does_not_hide_a_later_quote() -> None:
+    text = 'the bolt is 5" long\n"alpha beta gamma delta epsilon zeta eta"'
+    table = make_settings().quote_marks.compiled()
+    assert max(sp.words for sp in table.spans(text)) == 7  # per-line spans AND cross-line spans
+    assert guard_reason(vc(quote=text), make_settings()) is GuardReason.QUOTE_SPAN
+
+
+def test_the_union_is_sorted_unique_and_never_less_than_the_whole_text_scan() -> None:
+    table = make_settings().quote_marks.compiled()
+    text = "“one two”\n“three four five six seven eight”\nx\n“a b”"
+    out = table.spans(text)
+    assert [(m.start, m.end) for m in out] == sorted({(m.start, m.end) for m in out})
+    assert len(out) == 3
+
+
+def test_a_split_quote_longer_than_the_span_bound_is_still_guarded_in_its_claims() -> None:
+    limit = make_settings().quote_marks.max_quote_span_chars
+    chunk = "w " * (limit // 4)  # three chunks together exceed the bound
+    a = vc(1, quote="He said “" + chunk)
+    b = vc(2, quote=chunk)
+    c = vc(3, quote=chunk + "” and left")
+    assert len(chunk) * 3 > limit
+    got = guard_reasons([a, b, c], make_settings(quote_split_window_claims=3))
+    assert set(got) == {a.local_id, b.local_id, c.local_id}
+
+
 # (4) seed lists, human review versus quote check --------------------------------------------
 
 

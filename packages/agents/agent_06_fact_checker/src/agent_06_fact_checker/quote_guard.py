@@ -69,20 +69,15 @@ def _matches(texts: Sequence[str], patterns: Sequence[str], settings: FactCheckS
     return False
 
 
-def _has_span(texts: Sequence[str], settings: FactCheckSettings) -> bool:
-    marks = settings.quote_marks.compiled()
-    return any(
-        s.words >= settings.quote_guard_min_words for text in texts for s in marks.spans(text)
-    )
-
-
-def _span_hits(texts: Sequence[str], settings: FactCheckSettings) -> list[tuple[int, int]]:
+def _span_hits(
+    texts: Sequence[str], settings: FactCheckSettings, *, unbounded: bool = False
+) -> list[tuple[int, int]]:
     """Offsets (marks included) of the spans of ``texts`` that are long enough."""
     marks = settings.quote_marks.compiled()
     return [
         (s.start - 1, s.end + 1)
         for text in texts
-        for s in marks.spans(text)
+        for s in marks.spans(text, unbounded=unbounded)
         if s.words >= settings.quote_guard_min_words
     ]
 
@@ -92,7 +87,7 @@ def _texts(claim: VerificationClaim) -> tuple[str, str]:
 
 
 def _reason(texts: Sequence[str], settings: FactCheckSettings) -> GuardReason | None:
-    if _has_span(texts, settings):
+    if _span_hits(texts, settings):
         return GuardReason.QUOTE_SPAN
     if _matches(texts, settings.quote_attribution_patterns, settings):
         return GuardReason.ATTRIBUTION
@@ -115,7 +110,8 @@ def guard_reasons(
     (one opens, a later one closes, up to ``quote_split_window_claims`` claims) is not a span in
     any single claim: the texts of every window of 2 .. N neighbours (none typed as a quote) are
     joined, and the claims that the span touches are guarded (already guarded ones keep their
-    reason)."""
+    reason). A joined window is scanned without the span-length bound (it is longer than one
+    claim by construction), so a long split quote is not dropped."""
     out: dict[str, GuardReason] = {}
     for claim in claims:
         reason = guard_reason(claim, settings)
@@ -131,7 +127,7 @@ def guard_reasons(
                 break
             for field in range(2):
                 parts = [_texts(c)[field] for c in window]
-                spans = _span_hits([" ".join(parts)], settings)
+                spans = _span_hits([" ".join(parts)], settings, unbounded=True)
                 if not spans:
                     continue
                 offset = 0

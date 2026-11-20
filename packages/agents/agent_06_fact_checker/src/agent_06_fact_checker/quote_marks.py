@@ -151,9 +151,32 @@ class QuoteMarks:
                 out.append(ch)
         return len("".join(out).split())
 
-    def spans(self, text: str, work: WorkCounter | None = None) -> list[MarkedSpan]:
-        """Marked spans, left to right, in O(len(text)): the nearest closer after every position
-        comes from one backward pass, so no opener rescans the text."""
+    def spans(
+        self, text: str, work: WorkCounter | None = None, *, unbounded: bool = False
+    ) -> list[MarkedSpan]:
+        """Marked spans, left to right, in O(len(text)). The text is scanned as a whole (a span
+        may cross a line break: verse) AND line by line; the result is the union, so a stray
+        mark on one line (``5" long``) cannot pair with a quote on a later line and hide it.
+        ``unbounded`` lifts ``max_span_chars`` (joined claim windows, which are longer than one
+        claim by construction)."""
+        cap = len(text) if unbounded else self.max_span_chars
+        found = self._scan(text, 0, work, cap)
+        lines = text.splitlines(keepends=True)
+        if len(lines) > 1:
+            seen = {(m.start, m.end) for m in found}
+            base = 0
+            for line in lines:
+                for m in self._scan(line, base, work, cap):
+                    if (m.start, m.end) not in seen:
+                        seen.add((m.start, m.end))
+                        found.append(m)
+                base += len(line)
+            found.sort(key=lambda m: (m.start, m.end))
+        return found
+
+    def _scan(self, text: str, base: int, work: WorkCounter | None, cap: int) -> list[MarkedSpan]:
+        """One pass: the nearest closer after every position comes from one backward pass, so no
+        opener rescans the text. Offsets are shifted by ``base``."""
         n = len(text)
         nearest = [n] * (n + 1)  # nearest[k] = first closer at or after k (n = none)
         for k in range(n - 1, -1, -1):
@@ -169,8 +192,8 @@ class QuoteMarks:
                 i += 1
                 continue
             j = nearest[i + 1]
-            if j < n and j - i - 1 <= self.max_span_chars:
-                found.append(MarkedSpan(i + 1, j, self.count_words(text[i + 1 : j])))
+            if j < n and j - i - 1 <= cap:
+                found.append(MarkedSpan(base + i + 1, base + j, self.count_words(text[i + 1 : j])))
                 if work is not None:
                     work.steps += j - i
                 i = j + 1
