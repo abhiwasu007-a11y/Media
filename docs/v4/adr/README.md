@@ -19,6 +19,7 @@ Format of every ADR: header table (status, decider, dependencies, directive sect
 | ADR-013 | Not defined in `00_EXECUTION_PLAN.md` §3.1 (which lists ADR-001 … ADR-012). **REQUIRES REVIEW (Phase 1): lead to assign the subject.** | — | Not started | — | — |
 | ADR-014 | Video encode targets: YouTube's bitrate is an encoder target (H.264 High VBR); encoder-settings check; SSIM against a lossless intermediate (report only until 3B); no filler | [ADR-014_video_encode_targets.md](ADR-014_video_encode_targets.md) | **Accepted** (owner decision D10) | 3A (threshold 3B) | INF-10, INF-12, INF-13 |
 | ADR-015 | Free voice options for the Seneca sample (Marathi, no paid ElevenLabs): no option is licence-clean and offline-runnable yet; owner picks | [ADR-015_free_voice_options.md](ADR-015_free_voice_options.md) | **Proposed** | 3A sample | FV-01 to FV-10 |
+| ADR-016 | VPS render profile as dashboard settings (D15 limits become defaults; capacity block; no hard-coding; discuss-then-build) | [ADR-016_vps_render_profile_settings.md](ADR-016_vps_render_profile_settings.md) | **Proposed** (not built) | none now; after the Seneca sample | none (owner decisions D15, D16) |
 
 ADR titles 002–011 are taken from `00_EXECUTION_PLAN.md` step 3.1.
 

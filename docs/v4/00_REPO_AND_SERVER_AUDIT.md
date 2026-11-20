@@ -101,6 +101,9 @@ Binding as given by the owner. Night window 00:00-07:00 IST only.
 
 The Seneca sample stays in the development environment; VPS rendering only after the sample passes. Nothing is changed or deployed on the VPS by this record (the slice and any deployment are a later ticket, VPS-RENDER-1).
 
+### C-2.2a Update (D16): the limits above are DEFAULTS of settings
+The owner decided on 2026-11-20 (D16) that these limits are dashboard settings the administrator can change when the VPS is upsized, and must not be hard-coded. The numbers in C-2.2 remain the audited defaults. Design note: `adr/ADR-016_vps_render_profile_settings.md` (PROPOSED, not built, discuss-then-build); contract question: CCR-298.
+
 ### C-2.3 Relation to existing documents (mismatches recorded, no numbers invented)
 1. **Market-hours guard.** The runtime guard blocks 09:00 to 16:00 IST on trading days (regular session 09:15 to 15:30; `runtime/README.md`, item 8; the session hours themselves are in the research log, NSE-01). The owner window 00:00-07:00 IST lies outside that interval, so the two guards do not conflict. `06_NIGHT_SCHEDULING.md` section 11 deliberately states no session time and no relation to the window; each guard is evaluated on its own configuration.
 2. **`render.max_duration_minutes`.** Shipped as `null` in the runtime configuration; the real-run preflight refuses until it is set from a measured skeleton render time (`runtime/README.md`, item 0). The owner gave no duration in D15, so this is **still open**. The whole render must also fit inside the window and clear the market-hours guard.
