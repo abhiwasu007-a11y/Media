@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | **PARTIAL.** Parts A, B and D are complete. Part C (VPS) is PENDING the owner's run of the read-only script. |
+| Status | **PARTIAL.** Parts A, B and D are complete. Part C (VPS) is PENDING the owner's run of the read-only script; the owner's summary of a 24 h audit is recorded in Part C-2 (D15), without the raw output. |
 | Audit date | 2026-11-18 |
 | Method | Read-only. Media: git inspection. Private repos: shallow read-only clone with file listing and counts only; nothing modified, nothing copied. VPS: not touched (directive rule 2). |
 
@@ -68,6 +68,47 @@
 
 ### C.1 How the script stays read-only
 It never starts/stops/restarts anything, never connects to a DB, never prints environment variables or config contents, runs every command with `nice -n 19`/`ionice -c3` and a timeout, and writes only its own report files. It was tested in the development container on 2026-11-18 (all 11 sections produced, no errors).
+
+## Part C-2 — Owner-run 24 h read-only audit (2026-11-20)
+
+**Source = owner-run audit.** The owner ran a 24-hour read-only audit and reported the numbers below in the owner chat on 2026-11-20. The assistant did not see the raw output; only the owner's summary is recorded here. The raw output stays outside git. The measured items of Part C that this summary does not cover (OS and kernel, services, ports, databases, reverse proxy, existing limits, disk, `/opt` path) remain PENDING and are not inferred.
+
+### C-2.1 Reported measurements (owner words, exactly)
+| Item | Value (source = owner-run audit) |
+|---|---|
+| Host | 2 vCPU |
+| Load average, night | 0.23 |
+| Load average, market | 0.28 |
+| Short load spikes | to about 3.3 ("ATP one-off jobs", as the owner wrote it; ATP is an unrelated trading app) |
+| `mem_available` minimum, night | 3.7 GB |
+| `mem_available` minimum, market | 3.0 GB |
+| `mem_available` minimum, other | 2.4 GB |
+| Swap, maximum | 376 MB |
+| OOM / reboot | none |
+
+### C-2.2 FIXED LIMITS for any VPS render (owner decision D15)
+Binding as given by the owner. Night window 00:00-07:00 IST only.
+| Limit | Value |
+|---|---|
+| Window | 00:00-07:00 IST only |
+| systemd slice `MemoryHigh` | 1.5G |
+| systemd slice `MemoryMax` | 2G |
+| `CPUQuota` | 100% |
+| `CPUWeight` / `IOWeight` | low |
+| Process priority | nice 19 and ionice idle |
+| Concurrency | one render at a time |
+| Pause or abort | if `mem_available` < 1.5 GB, or PSI cpu `avg10` > 40 for 2 minutes |
+
+The Seneca sample stays in the development environment; VPS rendering only after the sample passes. Nothing is changed or deployed on the VPS by this record (the slice and any deployment are a later ticket, VPS-RENDER-1).
+
+### C-2.3 Relation to existing documents (mismatches recorded, no numbers invented)
+1. **Market-hours guard.** The runtime guard blocks 09:00 to 16:00 IST on trading days (regular session 09:15 to 15:30; `runtime/README.md`, item 8; the session hours themselves are in the research log, NSE-01). The owner window 00:00-07:00 IST lies outside that interval, so the two guards do not conflict. `06_NIGHT_SCHEDULING.md` section 11 deliberately states no session time and no relation to the window; each guard is evaluated on its own configuration.
+2. **`render.max_duration_minutes`.** Shipped as `null` in the runtime configuration; the real-run preflight refuses until it is set from a measured skeleton render time (`runtime/README.md`, item 0). The owner gave no duration in D15, so this is **still open**. The whole render must also fit inside the window and clear the market-hours guard.
+3. **Render time and CPU (ADR-014).** The ADR-014 render-time figures (a 10-minute 1080p30 render about 25 to 34 min for encode + reference, plus SSIM time) are **ESTIMATES**, extrapolated from short clips measured on a shared 4-CPU development box. `CPUQuota=100%` is one core, so a render in the VPS slice will be slower than those figures by a factor that has **not been measured**; no number is computed here. **REQUIRES REVIEW (Phase 1): measure on the VPS slice before the first VPS render.**
+4. **Peak memory (ADR-014).** The only measured memory figure in the docs is RSS about 600-930 MB with split + FFV1 (about 290 MB for x264 alone), on short 1080p clips on the shared 4-CPU box, stated there as upper bounds, not for a long render. The docs state no peak for a long render. Whether a long render stays inside `MemoryMax` 2G and the `mem_available` < 1.5 GB pause threshold is **REQUIRES REVIEW (Phase 1): measure on the VPS slice**.
+5. **Disk.** ADR-014 estimates up to about 4.6 GB of FFV1 per 60 s segment (30 fps). The audit summary reports no disk figure; the free-space pre-check is not built (ADR-014, REQUIRES REVIEW for the VPS placement).
+
+---
 
 ## Part D — Conclusions so far (from Parts A–B only)
 1. The Media repo is public, so private knowledge, the course, book material and market data must be read at runtime from **private factory storage**, never committed here. `.gitignore` already blocks the common forms.
