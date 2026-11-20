@@ -309,7 +309,9 @@ def test_guard_sends_a_long_unchecked_quote_of_a_known_author_to_a_human(tmp_pat
     assert w.llm.calls == 0
 
 
-def test_guard_lets_a_proven_quote_continue_and_ignores_unknown_authors(tmp_path: Path) -> None:
+def test_guard_lets_a_proven_quote_continue_but_an_unknown_author_goes_to_a_human(
+    tmp_path: Path,
+) -> None:
     proven = claim(
         1,
         claim_type="FACTUAL",
@@ -319,6 +321,8 @@ def test_guard_lets_a_proven_quote_continue_and_ignores_unknown_authors(tmp_path
     )
     out, w = run(tmp_path, [proven], responses=[batch(result_for("c1"))])
     assert w.llm.calls == 1 and doc(out)["claims"][0]["local_id"] == "c1"
+    # QUOTE-GUARD-2: a marked quote of nobody the library knows was a fail-open (the model was
+    # asked); it now ends in human review, never in a model verdict
     stranger = claim(
         1,
         claim_type="FACTUAL",
@@ -327,4 +331,95 @@ def test_guard_lets_a_proven_quote_continue_and_ignores_unknown_authors(tmp_path
         citation_refs=[REF],
     )
     out2, w2 = run(tmp_path, [stranger], responses=[batch(result_for("c1"))])
-    assert w2.llm.calls == 1 and doc(out2)["claims"][0]["local_id"] == "c1"
+    c = one(out2)
+    assert c["status"] == "NEEDS_SUBSTANTIATION" and c["reason_codes"] == ["QUOTE_NOT_ATTRIBUTABLE"]
+    assert w2.llm.calls == 0
+
+
+MARATHI_ATTRIBUTED = "टेस्टर यांनी लिहिले की वेळ कमी नसतो."  # INVENTED, no quotation marks
+UNMARKED = [
+    ("Testor wrote that time is short.", "Testor wrote a sentence about time."),
+    ("Testor said time is short.", "A statement about time."),
+    ("The CEO says the market is calm.", "A statement about the market."),
+    (MARATHI_ATTRIBUTED, "टेस्टर यांचे विधान."),
+    ("वेळ कमी आहे असे टेस्टर म्हणाले.", "टेस्टर यांचे विधान."),
+]
+
+
+@pytest.mark.parametrize(("quote", "norm"), UNMARKED)
+def test_unmarked_attribution_goes_to_the_check_and_then_a_human_never_the_model(
+    tmp_path: Path, quote: str, norm: str
+) -> None:
+    sneaky = claim(1, claim_type="FACTUAL", quote=quote, normalized_claim=norm, citation_refs=[REF])
+    out, w = run(tmp_path, [sneaky], responses=[batch(result_for("c1"))])
+    c = one(out)
+    assert c["status"] == "NEEDS_SUBSTANTIATION" and c["reason_codes"] == ["QUOTE_NOT_ATTRIBUTABLE"]
+    assert c["mode"] == "CODE_ONLY" and c["evidence"] == []
+    assert w.llm.calls == 0
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [f'Testor wrote "{FAKE}"', f'The CEO said "{FAKE}"', 'टेस्टर म्हणाले "' + FAKE + '"'],
+)
+def test_without_a_quote_check_a_guarded_claim_is_a_typed_error_not_a_model_verdict(
+    tmp_path: Path, quote: str
+) -> None:
+    sneaky = claim(
+        1,
+        claim_type="FACTUAL",
+        quote=quote,
+        normalized_claim="A statement about time.",
+        citation_refs=[REF],
+    )
+    out, w = run(tmp_path, [sneaky], quotes=None, responses=[batch(result_for("c1"))])
+    assert error_code(out) == "PERMANENT.MISSING_DEPENDENCY"
+    assert out.error is not None and out.error.details is not None
+    assert out.error.details.reason == "QUOTE_CHECK_NOT_CONFIGURED"
+    assert w.llm.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("quote", "norm"),
+    [(UNMARKED[0][0], UNMARKED[0][1]), (MARATHI_ATTRIBUTED, "टेस्टर यांचे विधान.")],
+)
+def test_without_a_quote_check_an_unmarked_attribution_is_a_typed_error(
+    tmp_path: Path, quote: str, norm: str
+) -> None:
+    sneaky = claim(1, claim_type="FACTUAL", quote=quote, normalized_claim=norm, citation_refs=[REF])
+    out, w = run(tmp_path, [sneaky], quotes=None, responses=[batch(result_for("c1"))])
+    assert error_code(out) == "PERMANENT.MISSING_DEPENDENCY" and w.llm.calls == 0
+
+
+def test_factory_without_a_library_reference_refuses_a_guarded_claim_too(tmp_path: Path) -> None:
+    sneaky = claim(
+        1,
+        claim_type="FACTUAL",
+        quote=UNMARKED[0][0],
+        normalized_claim=UNMARKED[0][1],
+        citation_refs=[REF],
+    )
+    f = factory(library(tmp_path), lambda: None)
+    out, w = run(tmp_path, [sneaky], quotes=f, responses=[batch(result_for("c1"))])
+    assert error_code(out) == "PERMANENT.MISSING_DEPENDENCY" and w.llm.calls == 0
+
+
+def test_ordinary_factual_claims_are_not_guarded_with_or_without_a_quote_check(
+    tmp_path: Path,
+) -> None:
+    plain = claim(1, claim_type="FACTUAL")
+    short_term = claim(  # a short term in quotation marks is not a quotation (below the config)
+        2,
+        claim_type="FACTUAL",
+        quote='The "stoic" school began in Athens.',
+        normalized_claim="The Stoic school began in Athens.",
+    )
+    for kw in ({}, {"quotes": None}):
+        out, w = run(
+            tmp_path,
+            [plain, short_term],
+            responses=[batch(result_for("c1"), result_for("c2"))],
+            **kw,
+        )
+        assert [c["status"] for c in doc(out)["claims"]] == ["VERIFIED", "VERIFIED"]
+        assert w.llm.calls == 1

@@ -7,6 +7,7 @@ object is built by the worker from ``amw_core.config`` (core_need: that module i
 of Step 0), so the step code never reads the environment.
 """
 
+import re
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import Annotated, Self
@@ -113,6 +114,14 @@ class FactCheckSettings(AmwModel):
     """``factcheck.detect.advice_words`` per language (P10 recommendation wording)."""
     advice_suffixes: tuple[str, ...] = ()
     """Inflection suffixes tried after an advice word (config, e.g. ``ing``, ``ed``)."""
+    quote_guard_min_words: Annotated[int, Field(ge=1)]
+    """``factcheck.quote_guard.min_words``: a quoted span of this many words in a claim that is not
+    typed as a quote makes it a guarded claim (never a model verdict; CCR-303)."""
+    quote_attribution_patterns: Annotated[tuple[str, ...], Field(min_length=1)]
+    """``factcheck.quote_guard.attribution_patterns`` (regular expressions, case-insensitive):
+    wording that attributes words to a person without quotation marks, per language (English
+    ``said``, ``wrote``; Marathi equivalents). Required and non-empty: an empty list would switch
+    the guard off silently (fail closed, D16: data, not literals)."""
     max_repairs: Annotated[int, Field(ge=0, le=1)] = 1
 
     @model_validator(mode="after")
@@ -124,6 +133,14 @@ class FactCheckSettings(AmwModel):
                 details={"missing": missing},
             )
         self._check_verdict_map()
+        for pattern in self.quote_attribution_patterns:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ConfigInvalidError(
+                    "quote_attribution_patterns holds an invalid regular expression",
+                    details={"pattern": pattern, "error": str(exc)},
+                ) from exc
         if len(set(self.tier_order)) != len(self.tier_order):
             raise ConfigInvalidError("tier_order has duplicates")
         for tier in (self.min_tier_for_verified, self.unranked_tier):
