@@ -25,9 +25,8 @@ class VoiceSynthesisBuilder:
             raise InputInvalidError("the verified script is not the script to be voiced")
         docs = ctx.job.documents
         dictionary = c.need(docs.voice_dictionary, "the pronunciation dictionary")
-        approval = None
-        if c.has_stage(ctx, "a_script"):
-            approval = c.payload(ctx, "a_script").get("approval_id")
+        bound = c.bound_script_approval(ctx)  # BEFORE the paid voice stage: fail closed
+        approval = bound.approval_id if bound is not None else None
         data = {
             "purpose": "PRODUCTION",
             "script_id": script["script_id"],

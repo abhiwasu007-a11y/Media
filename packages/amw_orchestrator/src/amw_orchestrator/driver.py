@@ -100,6 +100,7 @@ from amw_core.interfaces import (
 )
 from amw_core.interfaces.job_store import JobRecord, JobTransition
 from amw_core.interfaces.queue import ClaimedItem
+from amw_core.owner_evidence_status import EvidenceStatusLookup
 from amw_core.state_machine import check_job, check_task, derive_job
 from amw_core.state_machine.machine import TaskView
 from amw_orchestrator.executor import (
@@ -232,6 +233,8 @@ class GraphRunner:
         task_io: TaskIo,
         spend: SpendReader | None = None,
         build_services: BuildServices | None = None,
+        evidence: EvidenceStatusLookup | None = None,
+        real_run: bool = True,
         require_per_video: Callable[[TenantTransaction, str, str], object] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -240,6 +243,7 @@ class GraphRunner:
         self._cal, self._cfg, self._now = calendar, config, clock
         self._io, self._spend, self._per_video = task_io, spend, require_per_video
         self._build_services = build_services
+        self._evidence, self._real_run = evidence, real_run
         self._feedback: dict[str, tuple[ValidationResult, ...]] = {}
         self._feedback_src: dict[str, str] = {}
         self._max_loops = 3
@@ -599,6 +603,8 @@ class GraphRunner:
             revision_feedback=tuple(self._feedback.get(stage.stage_id, ())),
             revision_source_stage_id=self._feedback_src.get(stage.stage_id),
             services=_RunServices(self._io, self._ctx(job), self._build_services),
+            evidence=self._evidence,
+            real_run=self._real_run,
         )
 
     def _run_task(
