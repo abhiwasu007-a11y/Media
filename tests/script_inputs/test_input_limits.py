@@ -70,7 +70,7 @@ def test_resolver_storage_calls_carry_actor_and_correlation_id(tmp_path: Path) -
     w = World(tmp_path)
     ref = w.put(w.pack_doc)
     spy = SpyStorage(w.storage)
-    w.storage = spy
+    w.storage = spy  # type: ignore[assignment]
     w.ctx = dataclasses.replace(w.ctx, actor="agent_05", correlation_id="corr-123")
     ti = w.task(refs=[{**ref, **PACK_REF}])
     w.resolver().resolve(w.ctx, ti, w.data(ti))
@@ -87,7 +87,7 @@ def test_oversize_research_pack_is_refused_without_reading_it_whole(tmp_path: Pa
     big = json.dumps({"pad": "x" * 300_000}).encode()
     ref = w.put(big, "big.json")
     spy = SpyStorage(w.storage)
-    w.storage = spy
+    w.storage = spy  # type: ignore[assignment]
     w.limits = InputLimits(max_research_pack_bytes=1024, max_brand_kit_bytes=1024)
     ti = w.task(refs=[{**ref, **PACK_REF}])
     with pytest.raises(InputInvalid):
