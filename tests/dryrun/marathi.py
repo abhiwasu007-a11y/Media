@@ -69,5 +69,7 @@ def localize_section(section: dict[str, Any], n: int) -> dict[str, Any]:
         )
         scene["sentences"][1]["text"] = f"मग आपण {word} भागावर क्षणभर थांबतो."
     return section
+
+
 BRAND_FONT_KEY = "mukta_regular"
 """Pinned brand font of the repo manifest (D10): Mukta with the Noto fallback."""

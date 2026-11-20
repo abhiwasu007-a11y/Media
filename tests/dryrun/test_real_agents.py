@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from amw_core.enums import OutputStatus, TaskState
+from amw_core.ids import ActorRef, OrgId
 from amw_core.interfaces import TenantContext
 from amw_core.interfaces.storage import BlobUri
 from tests.dryrun.harness import Result, run_hybrid
@@ -205,7 +206,8 @@ def test_the_whole_real_chain_runs_for_a_marathi_job(marathi_chain: Result) -> N
 
 def _read(res: Result, uri: str, sha256: str) -> bytes:
     org = res.job.org_id
-    return b"".join(res.rig.storage.get(TenantContext(org, "agent_10", None), BlobUri(uri), sha256))
+    ctx = TenantContext(OrgId(org), ActorRef("agent_10"), None)
+    return b"".join(res.rig.storage.get(ctx, BlobUri(uri), sha256))
 
 
 def test_marathi_voice_subtitles_and_thumbnails_are_devanagari_and_covered(

@@ -16,6 +16,7 @@ from agent_06_fact_checker.config import FactCheckSettings
 from agent_06_fact_checker.conflicts import find_pairs
 from agent_06_fact_checker.evidence import ClaimEvidence, EvidenceResolver
 from agent_06_fact_checker.hashing import claims_sha256
+from agent_06_fact_checker.library.wiring import CREDITS_FILE, QuoteCheck, QuoteReview
 from agent_06_fact_checker.models import (
     BatchConflict,
     ClaimMode,
@@ -122,7 +123,9 @@ class ClaimVerificationStep:
         prompts: PromptSource,
         settings: FactCheckSettings,
         conflict_finder: ConflictFinder = find_pairs,
+        quotes: QuoteCheck | None = None,
     ) -> None:
+        self._quotes = quotes
         self._finder = conflict_finder
         self._tenancy = tenancy
         self._clock = clock
@@ -262,9 +265,22 @@ class ClaimVerificationStep:
         facts = {f.ref_id: f for f in inp.chart_facts}
 
         plans = plan_claims(inp.claims, inp.verify_mode, s, facts)
+        review = self._quotes.review(plans) if self._quotes is not None else None
+        quoted = review.outcomes if review is not None else {}
         with self._tenancy.transaction(tenant) as tx:
-            evidence = resolver.resolve(tx, channel, plans, inp.available_citations, facts)
-        verifiable = [p for p in plans if p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)]
+            evidence = resolver.resolve(
+                tx,
+                channel,
+                [p for p in plans if p.claim.local_id not in quoted],
+                inp.available_citations,
+                facts,
+            )
+        verifiable = [
+            p
+            for p in plans
+            if p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
+            and p.claim.local_id not in quoted
+        ]
         pairs = self._finder([p.claim for p in verifiable], s)
         in_pair = {i for pair in pairs for i in pair}
         sendable = [
@@ -273,9 +289,9 @@ class ClaimVerificationStep:
             if evidence[p.claim.local_id].candidates or p.claim.local_id in in_pair
         ]
         sent_ids = {p.claim.local_id for p, _ in sendable}
-        outcomes: dict[str, Outcome] = {}
+        outcomes: dict[str, Outcome] = dict(quoted)  # exact-quote outcomes: no model call (CCR-302)
         for p in plans:
-            if p.claim.local_id not in sent_ids:
+            if p.claim.local_id not in sent_ids and p.claim.local_id not in quoted:
                 outcomes[p.claim.local_id] = static_outcome(p, evidence.get(p.claim.local_id))
 
         batches = build_batches(sendable, pairs, s)
@@ -347,7 +363,9 @@ class ClaimVerificationStep:
         )
         if result.claims:
             self._persist(task, ctx, inp, result, reads)
-        return self._assemble(task, ctx, state, started, inp, output, ordered, evidence, leaks)
+        return self._assemble(
+            task, ctx, state, started, inp, output, ordered, evidence, leaks, review
+        )
 
     # ------------------------------------------------------------------ V-S4
     def _verify_batch(
@@ -484,10 +502,19 @@ class ClaimVerificationStep:
         outcomes: Sequence[Outcome],
         evidence: Mapping[str, ClaimEvidence],
         leaks: int,
+        review: QuoteReview | None,
     ) -> TaskOutput:
         tenant = ctx.tenant
         doc = output.to_doc()
         ref = write_blob(self._blobs, tenant, task, ctx, "claim_verification_output.json", doc)
+        refs = [ref]
+        credits = (
+            self._quotes.credits(review, script_id=inp.script_id, script_sha256=inp.script_sha256)
+            if self._quotes is not None and review is not None
+            else None
+        )
+        if credits is not None:  # credit data for the script gate (CCR-302), codes and ids only
+            refs.append(write_blob(self._blobs, tenant, task, ctx, CREDITS_FILE, credits.to_doc()))
         results = self._results(inp, output, outcomes, evidence, leaks)
         failed = [r.check_id for r in results if r.gate and r.verdict.value == "FAIL"]
         log.info(  # ids, counts and codes only (NFR-6): never claim text or evidence
@@ -505,7 +532,7 @@ class ClaimVerificationStep:
             started_ms=started,
             schema=OUTPUT_SCHEMA,
             doc=doc,
-            refs=[ref],
+            refs=refs,
             results=results,
             usage=state.usage,
             next_action=next_action_for(output.overall.proposed_verdict, failed),
@@ -638,6 +665,8 @@ def _verified_violations(
         if c.status is not ClaimStatus.VERIFIED:
             continue
         o = by_local[c.local_id]
+        if o.quote_exact:
+            continue
         wanted = numerals(o.claim.quote + " " + o.claim.normalized_claim)
         if missing_numerals(wanted, o.support_texts, s.rounding_match):
             bad[c.local_id] = "number"

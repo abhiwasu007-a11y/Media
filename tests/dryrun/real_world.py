@@ -612,8 +612,12 @@ def add_pinned_font(w: Any, key: str) -> str:
         w.assets.insert(
             w.tx,
             NewAsset(
-                kind=AssetKind.FONT, source_type=LicenceSourceType.FONT, content_sha256=sha,
-                uri=str(uri), size_bytes=len(data), title="font",
+                kind=AssetKind.FONT,
+                source_type=LicenceSourceType.FONT,
+                content_sha256=sha,
+                uri=str(uri),
+                size_bytes=len(data),
+                title="font",
             ),
         ).asset_id
     )
@@ -624,7 +628,6 @@ def build_agent_08(t: Tenant, storage: LocalDiskStorage, scratch: Path) -> TaskW
     licences, the platform template assets), real storage; the brand kit and job destination ports
     have no production implementation yet (in-memory readers below)."""
     from agent_08_visual_assets.stage import AssetSourcingStage, BrandKit
-    from tests.dryrun import marathi as mr
     from amw_core.enums import LicenceSourceType
     from amw_core.interfaces.tenancy_context import TenantContext
     from amw_core.testing.memory import MemoryTransaction
@@ -636,6 +639,7 @@ def build_agent_08(t: Tenant, storage: LocalDiskStorage, scratch: Path) -> TaskW
         lic,
         settings,
     )
+    from tests.dryrun import marathi as mr
 
     w = World.__new__(World)
     w.org = t.org

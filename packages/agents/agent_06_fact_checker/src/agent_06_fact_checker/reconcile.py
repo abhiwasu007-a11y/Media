@@ -52,6 +52,9 @@ class Outcome:
     """Batch evidence ids of the valid evidence items (self-checks of blueprint 8.4)."""
     support_texts: list[str] = field(default_factory=list)
     support_tiers: list[str | None] = field(default_factory=list)
+    quote_exact: bool = False
+    """``VERIFIED`` by the exact-quote check against the library text (CCR-302): that proof is code,
+    so the evidence-based self-checks of blueprint 8.4 do not apply to the claim."""
 
 
 def static_outcome(plan: ClaimPlan, ev: ClaimEvidence | None) -> Outcome:
