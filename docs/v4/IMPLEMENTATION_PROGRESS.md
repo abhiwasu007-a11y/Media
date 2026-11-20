@@ -225,7 +225,29 @@ Operator summary:
 1. **Numbers recorded** in `00_REPO_AND_SERVER_AUDIT.md` Part C-2 with source = owner-run audit. The owner ran the audit; the assistant did not see the raw output (it stays outside git).
 2. **Policy:** the Seneca sample stays in the development environment; VPS rendering only AFTER the sample passes. No VPS change or deployment is made now (read-only audit only). The systemd slice and any deployment are a LATER ticket for the owner/operator, not built.
 3. **Relation to existing docs** (details in Part C-2.3): the owner night window is outside the market-hours guard; `render.max_duration_minutes` is still `null` and still open (no duration given); the ADR-014 render-time figures are ESTIMATES for a 4-CPU dev box and a 1-core slice will be slower by an unmeasured factor (**REQUIRES REVIEW (Phase 1): measure on the VPS slice before the first VPS render**); ADR-014 states only short-clip RSS figures, no long-render peak.
-4. **Backlog ticket VPS-RENDER-1 (later, not now; design note only, not built).** A runner guard for any VPS render: (a) run only inside the night window 00:00-07:00 IST (in addition to the market-hours guard); (b) one render at a time; (c) start under nice 19 and ionice idle, inside the slice with the D15 limits; (d) sample `mem_available` and PSI cpu `avg10` while rendering; if `mem_available` < 1.5 GB, or `avg10` > 40 for 2 minutes, pause or abort the render at its next safe point (checkpoint per `06_NIGHT_SCHEDULING.md`), record the reason in the audit log, and fail closed (no admission) if the readings are unavailable. Which of pause or abort applies is **REQUIRES REVIEW (owner)**. Creating the slice is a deployment step for the owner/operator, outside this ticket.
+4. **Backlog ticket VPS-RENDER-1 (later, not now; design note only, not built).** A runner guard for any VPS render (**amended by D16:** every limit below is read from the render-profile settings of ADR-016, with these numbers as the seeded defaults; they are not constants in code): (a) run only inside the night window 00:00-07:00 IST (in addition to the market-hours guard); (b) one render at a time; (c) start under nice 19 and ionice idle, inside the slice with the D15 limits; (d) sample `mem_available` and PSI cpu `avg10` while rendering; if `mem_available` < 1.5 GB, or `avg10` > 40 for 2 minutes, pause or abort the render at its next safe point (checkpoint per `06_NIGHT_SCHEDULING.md`), record the reason in the audit log, and fail closed (no admission) if the readings are unavailable. Which of pause or abort applies is **REQUIRES REVIEW (owner)**. Creating the slice is a deployment step for the owner/operator, outside this ticket.
+
+### D16 (2026-11-20, owner chat messages): VPS render limits are settings the administrator can change; no hard-coding
+Recorded from two owner chat messages (R14: operator's record, not production-verified owner evidence). Quoted verbatim.
+
+Message 1 (Marathi):
+
+> आवश्यकता पडल्यास आपण व्हीपीएस वाढवून घेणार आहोत तशी सेटिंग तुम्ही डॅशबोर्ड मध्ये ठेवा जेणेकरून रेंडरिंगचा इशू आला की ते सेटिंग कमी जास्त करता येईल
+
+English rendering (operator's, not the owner's words): "If needed we will upsize the VPS; keep that setting in the dashboard so that when a rendering issue comes up, the setting can be increased or decreased."
+
+Message 2 (Marathi):
+
+> जी सेटिंग ऍडमिनिस्ट्रेटर करू शकतो की हार्ट कोडे ठेवू नका नाहीतर भविष्यात अडचण तयार होईल आणि मला कोड सदर बदलावीत राहावे लागेल
+
+English rendering (operator's): "Whatever setting the administrator can change, do not hard-code it, otherwise trouble will arise in future and I will have to keep changing code." (The Marathi text is quoted exactly as received; "हार्ट कोडे" is read as "hard-code".)
+
+Operator summary:
+1. **The D15 render limits become DEFAULTS of dashboard-editable settings**, not fixed constants. The D15 numbers stay as the audited, seeded defaults. Design note: **ADR-016 (PROPOSED, discuss-then-build, owner rule A6)**. Nothing is built; the dashboard does not exist yet (S8 is 3C; 3A has an operator tool only, `16_COMMAND_CENTER.md`, `3A_SLICE_SPEC.md`). VPS rendering still waits for the Seneca sample (D15); the render happens in the development environment now.
+2. **Project rule (consequence of message 2): no hard-coding of operational values.** Every operational limit an administrator may need to change (windows, memory and CPU limits, thresholds, concurrency, capacity, timeouts, retry counts, caps, lag days, bitrate targets) lives in settings with seeded defaults in config data, never as a literal in code. The rule already exists (`27_ENGINEERING_STANDARDS.md` §7.3 rule 1; lane rule 3 "config via amw_core.config only"; `runtime/README.md`: caps as hard ceilings in packaged data); D16 restates it as an owner demand and **the code does not follow it everywhere** (read-only scan in ADR-016 Appendix A; ticket **CFG-AUDIT**, nothing changed in code now).
+3. **Who may change the render profile:** "the administrator". The documents define the roles `PLATFORM_OWNER`, `ORG_OWNER`, `ORG_ADMIN` (`08_SECURITY.md` §3, GLOSSARY §6.44). Which of them is "the administrator" for a host-level setting is **REQUIRES REVIEW (owner)** (ADR-016 §5). Whether RAISING a limit above the audited defaults needs an extra owner confirmation is **REQUIRES REVIEW (owner)**.
+4. **Different rule from D10 / `runtime/README.md`:** there, packaged caps are hard ceilings and an override may only LOWER them. Render limits here must be RAISABLE (the VPS is upsized); the bound is the host CAPACITY setting minus a reserve, not a packaged ceiling. The two rules are kept apart (ADR-016 §3).
+5. **Tickets (backlog, not built):** VPS-RENDER-2 (settings schema, validation, audit, confirmation), VPS-RENDER-3 (dashboard page, depends on S8), CFG-AUDIT (hard-coded values scan and migration list); VPS-RENDER-1 now reads its limits from the settings (see D15 item 4, amended). CCR-298 filed as PROPOSED for the storage of the settings.
 
 ## Owner inputs: status
 
