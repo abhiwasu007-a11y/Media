@@ -321,7 +321,7 @@ def _run_to_decision(
         pg_dsn, tmp / "blobs", registry_factory=factory, real_run=real_run,
         schemas=agent_registry(real_outputs=False), build_services=RuntimeFacts(), desk=TestDesk(),
     )  # fmt: skip
-    base = rig.intake("non-finance")
+    base = rig.intake("youtube_general")
     org = base.org_id
     docs = JobDocuments(
         brand_kit=doc_ref(org, "brand_kit.json"),
