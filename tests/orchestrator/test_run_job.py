@@ -21,6 +21,7 @@ import pytest
 from amw_core.errors import ConfigInvalidError, InputInvalidError, MissingDependencyError
 from amw_core.owner_evidence_approvals import PgApprovalEvidencePort
 from amw_core.owner_evidence_status import EvidenceStatusLookup
+from amw_orchestrator import composition as composition_module
 from amw_orchestrator.approval_desk import PgApprovalDesk
 from amw_orchestrator.composition import (
     RealRunWiring,
@@ -40,6 +41,7 @@ from amw_orchestrator.plumbing import (
 from amw_orchestrator.run_job import format_report, main, scrub
 from amw_orchestrator.run_request import load_request
 from amw_orchestrator.run_settings import load_run_entry_settings
+from amw_orchestrator.services import intake
 from amw_orchestrator.workers import read_workers
 from amw_runtime.config import ENV_MODE, RunMode, RuntimeConfig, load_runtime_config
 from amw_runtime.confirmations import ConfirmationRecord
@@ -430,3 +432,80 @@ def test_the_run_entry_code_has_no_operational_number_literals() -> None:
             and id(n) not in allowed
         ]
         assert bad == [], f"{name}: number literals at lines {bad}"
+
+
+# ---- a dry run and a real run never share a job (CCR-299) ----------------------------------
+
+
+def _real_comp(world: World) -> Any:
+    records = [r for r in limits(world.seed.org_id) if r.provider]
+    return compose(
+        world.request(confirmations=tuple(records)), config=load_runtime_config(REAL_ENV),
+        settings=world.settings(), run=load_run_entry_settings(world.run_entry_file()),
+        env=REAL_ENV, real_wiring=FakeWiring(), evidence_factory=lookup_factory(world, records),
+        transports=NoNetwork().transports(), render_start=EVENING, clock=lambda: SATURDAY,
+    )  # fmt: skip
+
+
+def _dry_comp(world: World) -> Any:
+    return compose(
+        world.request(), config=load_runtime_config(DRY_ENV), settings=world.settings(),
+        run=load_run_entry_settings(world.run_entry_file()), env=DRY_ENV, clock=lambda: SATURDAY,
+    )  # fmt: skip
+
+
+def _task_count(world: World, comp: Any) -> int:
+    from amw_core.ids import ActorRef, JobId, OrgId
+    from amw_core.interfaces import TenantContext
+    from amw_orchestrator.composition import build_infrastructure
+
+    infra = build_infrastructure(
+        world.settings(), load_run_entry_settings(world.run_entry_file()),
+        load_runtime_config(DRY_ENV),
+    )  # fmt: skip
+    ctx = TenantContext(OrgId(comp.job.org_id), ActorRef("sys_operator"))
+    with infra.tenancy.transaction(ctx) as tx:
+        return len([t for t in infra.jobs.list_tasks(tx, JobId(comp.job.job_id)) if t.stage_id])
+
+
+def test_a_real_run_never_resumes_the_job_of_an_earlier_dry_run(world: World) -> None:
+    code, text = run_main(world, DRY_ENV, clock=lambda: SATURDAY)
+    assert code == 0 and "status: DELIVERED" in text
+    dry_job = next(ln for ln in text.splitlines() if ln.startswith("job:"))
+    real = _real_comp(world)
+    assert real.resume is False  # not the dry job: a fresh job with no tasks
+    assert real.job.job_id not in dry_job
+    assert _task_count(world, real) == 0  # nothing of the dry run was reused
+    again = run_main(world, DRY_ENV, clock=lambda: SATURDAY)  # the dry job still resumes as before
+    assert dry_job in again[1] and again[0] == 0
+
+
+def test_a_dry_run_never_resumes_or_overwrites_the_job_of_an_earlier_real_run(
+    world: World,
+) -> None:
+    real = _real_comp(world)  # intake created the real job (idempotent) and nothing ran
+    dry = _dry_comp(world)
+    assert dry.job.job_id != real.job.job_id
+    assert dry.resume is False and real.resume is False
+    code, text = run_main(world, DRY_ENV, clock=lambda: SATURDAY)
+    assert code == 0 and "status: DELIVERED" in text
+    assert real.job.job_id not in text  # the dry run worked on its own job
+    assert _task_count(world, _real_comp(world)) == 0  # the real job stayed untouched
+    assert _real_comp(world).job.job_id == real.job.job_id  # and a second real intake reuses it
+
+
+def test_a_job_created_in_another_run_mode_is_refused_with_a_typed_error(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def mode_less(*args: Any, **kwargs: Any) -> JobFacts:
+        return intake(*args, **{**kwargs, "run_mode": None})
+
+    monkeypatch.setattr(composition_module, "intake", mode_less)
+    for env in (DRY_ENV, REAL_ENV):
+        with pytest.raises(InputInvalidError) as exc:
+            compose(
+                world.request(), config=load_runtime_config(env), settings=world.settings(),
+                run=load_run_entry_settings(world.run_entry_file()), env=env,
+                clock=lambda: SATURDAY,
+            )  # fmt: skip
+        assert [v.keyword for v in exc.value.details["violations"]] == ["RUN_MODE_JOB_MISMATCH"]

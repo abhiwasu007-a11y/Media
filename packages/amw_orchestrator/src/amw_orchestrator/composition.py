@@ -48,6 +48,7 @@ from amw_core.ids import CORRELATION, ActorRef, JobId, OrgId
 from amw_core.interfaces import TenancyContext, TenantContext
 from amw_core.interfaces.owner_evidence import DbRole
 from amw_core.job_store.pg import PgJobStore
+from amw_core.owner_evidence_approvals import ApprovalEvidencePort
 from amw_core.owner_evidence_pg import PgDbSession, PgEvidenceDatabase
 from amw_core.owner_evidence_real import ConfirmedEvidenceLookup, EvidenceMode
 from amw_core.owner_evidence_status import EvidenceStatusLookup
@@ -80,6 +81,7 @@ from amw_orchestrator.services import (
     PgMeter,
     StageBudgets,
     intake,
+    job_create_key,
     require_per_video_budget,
     run_job_preflight,
 )
@@ -233,7 +235,7 @@ def _runner(
     schemas: PayloadSchemaRegistry,
     desk: ApprovalDesk,
     meter: PgMeter,
-    evidence: Any,
+    evidence: ApprovalEvidencePort | None,
     real_run: bool,
     build_services: BuildServices,
     clock: Callable[[], datetime] | None,
@@ -307,13 +309,14 @@ def compose(
             project_id=request.project_id, channel_id=request.channel_id, topic=request.topic,
             production_type=production, version=record(production).version,
             correlation_id=str(CORRELATION.new()), currency=config.currency,
-            rule_packs=settings.rule_packs,
+            rule_packs=settings.rule_packs, run_mode=config.mode.value,
         )  # fmt: skip
     except psycopg.errors.ForeignKeyViolation:
         raise InputInvalidError(
             "the request names a workspace, project or channel that is not in this org",
             details={"violations": [violation("REQUEST_REFERENCE_UNKNOWN", "/request")]},
         ) from None
+    _require_job_of_this_mode(infra, request, job, config.mode)
     graph = job_graph(production)
     comp = (
         _dry_run(infra, request, job, graph, config, settings, run, clock, scratch)
@@ -328,6 +331,28 @@ def compose(
     ) as tx:
         comp.resume = any(t.stage_id for t in infra.jobs.list_tasks(tx, JobId(job.job_id)))
     return comp
+
+
+def _require_job_of_this_mode(
+    infra: Infrastructure, request: JobRequest, job: JobFacts, mode: RunMode
+) -> None:
+    """A run only ever works on a job created in its own run mode (its ``job.create`` key carries
+    the mode). A REAL run must never resume or reuse anything a DRY_RUN produced (stand-in outputs,
+    TEST_FIXTURE approvals), and a DRY run must never overwrite real outputs: any other key is a
+    typed refusal before anything is built."""
+    expected = job_create_key(
+        request.org_id, request.channel_id, request.topic, request.production_type,
+        None, mode.value,
+    )  # fmt: skip
+    with infra.tenancy.transaction(
+        TenantContext(OrgId(job.org_id), ActorRef("sys_operator"))
+    ) as tx:
+        rec = infra.jobs.get_job(tx, JobId(job.job_id))
+    if rec is None or str(rec.idempotency_key) != str(expected):
+        raise InputInvalidError(
+            "the job was not created in this run mode; a dry run and a real run never share a job",
+            details={"violations": [violation("RUN_MODE_JOB_MISMATCH", "/mode")]},
+        )
 
 
 def _meter(infra: Infrastructure, providers: ProviderSet, currency: str) -> PgMeter:
