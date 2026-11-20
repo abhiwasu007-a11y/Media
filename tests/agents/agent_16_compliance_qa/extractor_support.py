@@ -293,7 +293,9 @@ class Rows:
     def job(self, tx: TenantTransaction, job_id: str) -> JobRow | None:
         return self.job_row
 
-    def assets(self, tx: TenantTransaction, asset_ids: Sequence[str]) -> Mapping[str, AssetFactRow]:
+    def assets(
+        self, tx: TenantTransaction, asset_ids: Sequence[str], job_id: str
+    ) -> Mapping[str, AssetFactRow]:
         return {a: self.asset_rows[a] for a in asset_ids if a in self.asset_rows}
 
     def voice_presenter_kind(self, tx: TenantTransaction, job_id: str) -> PresenterKind | None:

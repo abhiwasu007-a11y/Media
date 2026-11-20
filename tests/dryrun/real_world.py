@@ -894,7 +894,7 @@ class Rows16:
             routing_thumbnails_stage_id="s11_thumbs",
         )  # fmt: skip
 
-    def assets(self, tx: Any, asset_ids: Any) -> Any:
+    def assets(self, tx: Any, asset_ids: Any, job_id: str) -> Any:
         from agent_16_compliance_qa.inputs.extractors import AssetFactRow
 
         w08 = self.t.shared["w08"]
