@@ -1,0 +1,30 @@
+{
+  "schema": "run_entry/1",
+  "note": "SEEDED DEFAULTS of the run entry point (REQUIRES REVIEW (Phase 1): owner). Operational values live here and in amw_core settings, never as literals in code. A stage budget set in amw_core settings (llm.tasks.<task_type>.cost_budget_micros) wins over the seed below. All money is integer micros.",
+  "database_role": "amw_app",
+  "worker_name_prefix": "",
+  "stage_max_wall_ms": 3600000,
+  "stage_max_llm_calls": 40,
+  "claim_lease_ms": 3600000,
+  "worker_statuses": [
+    "IDLE",
+    "BUSY"
+  ],
+  "stage_cost_budget_micros": {
+    "agent_04.research_pack": 100000,
+    "agent_05.script_draft": 100000,
+    "agent_06.claim_extraction": 100000,
+    "agent_06.claim_verification": 100000,
+    "agent_07.voice_synthesis": 100000,
+    "agent_08.asset_sourcing": 100000,
+    "agent_09.shot_plan": 100000,
+    "agent_11.thumbnail_variants": 100000,
+    "agent_16.compliance_gate": 100000,
+    "agent_16.quality_score": 100000
+  },
+  "dry_run_delivery_limits": {
+    "max_file_bytes": 1000000000,
+    "max_total_bytes": 1000000000,
+    "max_thumbnail_bytes": 10000000
+  }
+}

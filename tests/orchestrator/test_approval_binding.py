@@ -309,7 +309,8 @@ def _run_to_decision(
     """The run report and the stand-ins (``seen``: the stages that really started)."""
     from amw_core.ids import Prefix
     from amw_orchestrator.executor import JobDocuments, RulePackDoc
-    from tests.orchestrator.test_dryrun_builders import Registry, RuntimeFacts, StandIns, _Clock
+    from amw_orchestrator.plumbing import StandIns
+    from tests.orchestrator.test_dryrun_builders import Registry, RuntimeFacts, _Clock
 
     stand: list[Any] = []
 
