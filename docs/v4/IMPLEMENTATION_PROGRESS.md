@@ -267,6 +267,7 @@ Operator summary:
 | A12 | **D13:** provider spending limits (Anthropic, ElevenLabs), confirmed in chat | **Waiting (owner).** Pre-flight refuses a real run until confirmed. |
 | A13 | **D13:** API keys through the credential form | **Waiting (owner).** Never in chat or git. |
 | A14 | **D13:** voice choice | **Waiting (owner).** D14: the voice for sample #1 is a free TTS; **REQUIRES REVIEW (Phase 1): which free Marathi-capable TTS, licence terms for monetised YouTube use.** |
+| A15 | **Gate before approving sample #1 (CCR-303):** a human checks every quote or attribution to a person (Seneca and others) in the script, title, description, chapter titles and thumbnail text against the private library | **Open (owner / reviewer).** Agent 06 sees claims only; the title, description, chapters and thumbnail text never reach it, and agent_16 `quote_verified` checks only its own findings. Until a whole-script guard exists (CCR-303 NOT DONE) this is a manual gate item for the agent_16 authorisation. The seeded Marathi / English attribution and reported-speech lists are provisional: **REQUIRES REVIEW (Phase 1): Marathi editor / owner.** |
 
 ## Open questions (new since the plan; provisional default applies until the owner answers, per owner rule A.9)
 

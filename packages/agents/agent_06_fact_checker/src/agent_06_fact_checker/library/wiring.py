@@ -20,7 +20,7 @@ outcome carries codes only. A work that is not public domain is never read; it c
 ideas only and then needs the further-reading credit (``credit_line``)."""
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -183,23 +183,6 @@ class QuoteCheck:
             for span in spans
         ]
 
-    def _is_guarded(self, claim: VerificationClaim) -> bool:
-        """Fake-quote guard (claim level): a claim that is NOT typed as a quote, but holds a quoted
-        span of ``guard_min_words`` words or more and names an author of the library, is treated
-        as a quote claim too. The script text itself is not part of the verification input, so a
-        quotation that was never extracted as a claim cannot be seen here (documented limit)."""
-        words = self._verifier.settings.guard_min_words
-        long_span = any(s.words >= words for s in find_quoted_spans(claim.quote))
-        if not long_span:
-            return False
-        text = f"{claim.quote} {claim.normalized_claim}"
-        for entry in self._index.works().values():
-            record = self._records.get(entry.work_id)
-            names = (*entry.names, record.author) if record is not None else entry.names
-            if _names_in(text, names):
-                return True
-        return False
-
     def _verify(self, claim: VerificationClaim) -> list[QuoteCheckResult]:
         subs = self._submissions(claim)
         try:
@@ -208,7 +191,9 @@ class QuoteCheck:
             # the library could not be read or is not the pinned commit: typed, fail closed
             return [unreadable_result(sub) for sub in subs]
 
-    def review(self, plans: Sequence[ClaimPlan]) -> QuoteReview:
+    def review(self, plans: Sequence[ClaimPlan], guarded: Collection[str] = ()) -> QuoteReview:
+        """``guarded``: ``local_id`` of the claims the fake-quote guard (``quote_guard``) found in
+        claims that are not typed as quotes; they go through the same check."""
         outcomes: dict[str, Outcome] = {}
         codes: dict[str, tuple[QuoteCode, ...]] = {}
         used: dict[str, WorkUse] = {}
@@ -223,7 +208,7 @@ class QuoteCheck:
             if plan.mode is ClaimMode.SKIPPED:
                 continue
             typed = claim.claim_type is ClaimType.QUOTED_THIRD_PARTY
-            if not typed and not self._is_guarded(claim):
+            if not typed and claim.local_id not in guarded:
                 continue
             results = self._verify(claim)
             worst = max(results, key=lambda r: (_RANK[r.action], r.status.value))

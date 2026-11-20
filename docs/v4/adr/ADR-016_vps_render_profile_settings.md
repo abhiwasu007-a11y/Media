@@ -104,7 +104,7 @@ Method: `grep` over `packages/*/src` and `packages/agents/*/src` for module cons
 | `amw_orchestrator/.../registry.py` | `MAX_REVISION_LOOPS_CEILING` 10 | module constant | `orchestrator.max_revision_loops_ceiling` | administrator |
 | `amw_runtime/.../preflight.py` | `SCOPE_TTL` 60 s | module constant | `preflight.scope_ttl_seconds` | administrator |
 | `amw_core/.../config/settings.py` | breaker `window_ms` default 60,000 (default in the model; real value comes from config) | field default | already a config field; seeded default belongs in packaged data | administrator |
-| `agent_06/.../library/quotes.py` | `min_quote_chars` 20 (provisional, CCR-291); `guard_min_words` has no default | dataclass default | `agent_06.quotes.min_quote_chars` | administrator |
+| `agent_06/.../library/quotes.py` | `min_quote_chars` 20 (provisional, CCR-291); the span length is the single key `quote_guard_min_words` (`FactCheckSettings`, CCR-303, no default) | dataclass default | `agent_06.quotes.min_quote_chars` | administrator |
 | `agent_06/.../library/copyright.py` | `PD_YEARS_AFTER_DEATH` 60, `EARLIEST_DEATH_YEAR` -3500 | module constant (legal rule and CCR-291 provisional) | `library.pd_years_after_death` (legal value: counsel; not administrator-editable without review), `library.earliest_death_year` | owner (legal) |
 | `agent_06/.../reconcile.py` | `MAX_EVIDENCE_ITEMS` 6 | module constant | `agent_06.max_evidence_items` | administrator |
 | `agent_04/.../guards/copy_guard.py` | `MIN_SHARED_WORDS` 3 | module constant | `agent_04.copy_guard.min_shared_words` | administrator |

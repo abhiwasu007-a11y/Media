@@ -37,6 +37,7 @@ from agent_06_fact_checker.library.copyright import (
 )
 from agent_06_fact_checker.library.reader import KnowledgeLibraryReader
 from agent_06_fact_checker.models import ReasonCode, RevisionAction
+from agent_06_fact_checker.quote_marks import QuoteMarks, default_quote_marks
 from amw_core.contracts.common import AmwModel
 from amw_core.enums import ClaimStatus
 from amw_core.errors import InputInvalidError
@@ -46,11 +47,6 @@ _QUOTE_MAP = {
     **dict.fromkeys((0x201C, 0x201D, 0x201E, 0x201F), '"'),
 }
 _SECTION_MARKER = re.compile(r"^§[ \t]*(?P<loc>\S.*?)[ \t]*$")
-_SPANS = (
-    re.compile("\\u201c([^\\u201c\\u201d]*)\\u201d"),
-    re.compile("\\u00ab([^\\u00ab\\u00bb]*)\\u00bb"),
-    re.compile(r'"([^"\n]*)"'),
-)
 
 
 def normalise_quote_text(text: str) -> str:
@@ -120,19 +116,18 @@ class QuoteSubmission:
 
 @dataclass(frozen=True, slots=True)
 class QuoteSettings:
-    """Configuration; the two required fields have no defaults."""
+    """Configuration. The fake-quote span length is NOT here: one key, ``quote_guard_min_words``
+    of ``FactCheckSettings`` (``unchecked_quotes`` takes it as ``min_words``)."""
 
     require_locator: bool
     """``True``: a PD quote without a verifiable chapter / verse reference is not accepted."""
-    guard_min_words: int
-    """Quoted spans of at least this many words must be checked quotes (fake-quote guard)."""
     min_quote_chars: int = 20
     """Shortest quote (code points of the normalised text) that can be verified. PROVISIONAL
     default, not derived from any source: CCR-291 PROPOSED, owner / librarian to set it.
     Counts characters, not words, so scripts written without spaces are handled too."""
 
     def __post_init__(self) -> None:
-        if self.min_quote_chars < 1 or self.guard_min_words < 1:
+        if self.min_quote_chars < 1:
             raise InputInvalidError("quote settings need positive thresholds")
 
 
@@ -365,15 +360,17 @@ class QuotedSpan:
     sha256: str
 
 
-def find_quoted_spans(script_text: str) -> list[QuotedSpan]:
-    """Spans in double quotation marks (straight, curly, guillemets). Single quotes are not
-    scanned: an apostrophe cannot be told from a mark by a pure rule (documented limit)."""
+def find_quoted_spans(script_text: str, marks: QuoteMarks | None = None) -> list[QuotedSpan]:
+    """Spans between ANY opening mark and ANY closing mark of the configured table (every Unicode
+    quotation mark pair, mixed and mismatched marks included; ``quote_marks``). ``marks`` defaults
+    to the seeded table. The apostrophe is no mark (documented limit). Words are counted after
+    invisible characters are handled (a zero-width space separates words)."""
+    table = marks if marks is not None else default_quote_marks()
     spans: list[QuotedSpan] = []
-    for pattern in _SPANS:
-        for m in pattern.finditer(script_text):
-            inner = normalise_quote_text(m.group(1))
-            spans.append(QuotedSpan(m.start(1), m.end(1), len(inner.split()), _sha(inner)))
-    return sorted(spans, key=lambda s: s.start)
+    for found in table.spans(script_text):
+        inner = normalise_quote_text(script_text[found.start : found.end])
+        spans.append(QuotedSpan(found.start, found.end, found.words, _sha(inner)))
+    return spans
 
 
 def unchecked_quotes(
