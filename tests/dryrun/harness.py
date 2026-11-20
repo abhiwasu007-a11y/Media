@@ -15,12 +15,12 @@ from amw_delivery.stage import DeliveryStage
 from amw_orchestrator.driver import RunReport
 from amw_orchestrator.executor import ApprovalWorker, DocRef, JobDocuments, JobFacts, RulePackDoc
 from amw_orchestrator.input_builders import BuilderTable
+from amw_orchestrator.plumbing import StandIns
 from amw_orchestrator.registry import job_graph
 from tests.dryrun.real_world import FACTORIES, LazyWorker
 from tests.orchestrator.agent_schemas import INPUTS, OUTPUTS, Open
 from tests.orchestrator.test_dryrun_builders import (
     RuntimeFacts,
-    StandIns,
     _Clock,
 )
 from tests.orchestrator.world import LONG, Rig, TestDesk, build_rig
