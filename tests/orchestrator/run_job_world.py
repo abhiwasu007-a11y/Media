@@ -44,9 +44,10 @@ class World:
     def settings(self) -> AmwSettings:
         return load_settings(environ=self.env())
 
-    def run_entry_file(self) -> Path:
+    def run_entry_file(self, tts_provider: str | None = "elevenlabs") -> Path:
         data = json.loads(DEFAULT_FILE.read_text(encoding="utf-8"))
         data["worker_name_prefix"] = "orchtest-"  # only this suite's worker rows
+        data["tts"] = {"provider": tts_provider}  # the owner's route: no default in the seed
         path = self.tmp / "run_entry.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         return path

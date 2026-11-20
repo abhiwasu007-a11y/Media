@@ -28,6 +28,11 @@ class DeliveryLimitsSeed(_Model):
     max_thumbnail_bytes: int = Field(gt=0)
 
 
+class TtsSettings(_Model):
+    provider: str | None = None
+    """``tts.provider``: the owner's voice route. NO default: unset refuses a real run."""
+
+
 class RunEntrySettings(_Model):
     schema_id: str = Field(alias="schema")
     note: str
@@ -40,6 +45,7 @@ class RunEntrySettings(_Model):
     worker_statuses: tuple[str, ...] = Field(min_length=1)
     stage_cost_budget_micros: dict[str, int]
     dry_run_delivery_limits: DeliveryLimitsSeed
+    tts: TtsSettings = TtsSettings()
 
     def delivery_limits(self) -> DeliveryLimits:
         d = self.dry_run_delivery_limits

@@ -237,7 +237,9 @@ def test_a_tampered_config_is_refused_before_anything_is_built(world: World) -> 
         )  # fmt: skip
 
 
-def test_a_passed_preflight_without_worker_wiring_ends_in_the_honest_refusal(world: World) -> None:
+def test_a_passed_preflight_with_the_production_wiring_lists_every_missing_port(
+    world: World,
+) -> None:
     net = NoNetwork()
     records = [r for r in limits(world.seed.org_id) if r.provider]
     req = world.request(confirmations=tuple(records))
@@ -248,8 +250,9 @@ def test_a_passed_preflight_without_worker_wiring_ends_in_the_honest_refusal(wor
             evidence_factory=lookup_factory(world, records), transports=net.transports(),
             render_start=EVENING, clock=lambda: SATURDAY,
         )  # fmt: skip
-    assert isinstance(exc.value, MissingDependencyError)
-    assert exc.value.details["unmet"] == ["REAL_WIRING"]
+    unmet = exc.value.details["unmet"]
+    assert "REAL_WIRING" not in unmet and unmet  # the placeholder is gone: exact ports instead
+    assert "agent_05.script_draft:resolver" in unmet
     assert net.requests == []
 
 
