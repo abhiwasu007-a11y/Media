@@ -20,12 +20,17 @@ A claim is guarded when ``claim.quote`` or ``claim.normalized_claim``
 
 Matching runs on NFC text with invisible characters removed (a zero-width joiner inside a word must
 not defeat a pattern; a zero-width space still separates words). A quotation split across two
-neighbouring claims is joined (``guard_reasons``)."""
+neighbouring claims, up to ``quote_split_window_claims`` of them, is joined (``guard_reasons``).
+
+HUMAN-REVIEW list vs QUOTE-CHECK list: ``quote_attribution_patterns`` (a named speaker: said,
+wrote, म्हणाला) goes through the exact-quote check; ``quote_reported_speech_patterns`` (a view or
+a bare source word: believed, thought, per, नुसार, च्या मते) goes to human review. The bare
+``नुसार`` / ``मते`` (``अहवालानुसार``, ``नियमानुसार``) are in the human-review list on purpose:
+they name no person, so the library check has nothing to compare."""
 
 import re
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
-from itertools import pairwise
 from typing import Any
 
 from agent_06_fact_checker.config import FactCheckSettings
@@ -49,6 +54,7 @@ def load_quote_guard_seed() -> dict[str, Any]:
         "quote_marks": raw["quote_marks"],
         "quote_attribution_patterns": raw["attribution_patterns"],
         "quote_reported_speech_patterns": raw["reported_speech_patterns"],
+        "quote_split_window_claims": raw["split_window_claims"],
         "quote_pattern_max_length": raw["pattern_limits"]["max_length"],
         "quote_pattern_max_repeat": raw["pattern_limits"]["max_repeat"],
     }
@@ -68,6 +74,17 @@ def _has_span(texts: Sequence[str], settings: FactCheckSettings) -> bool:
     return any(
         s.words >= settings.quote_guard_min_words for text in texts for s in marks.spans(text)
     )
+
+
+def _span_hits(texts: Sequence[str], settings: FactCheckSettings) -> list[tuple[int, int]]:
+    """Offsets (marks included) of the spans of ``texts`` that are long enough."""
+    marks = settings.quote_marks.compiled()
+    return [
+        (s.start - 1, s.end + 1)
+        for text in texts
+        for s in marks.spans(text)
+        if s.words >= settings.quote_guard_min_words
+    ]
 
 
 def _texts(claim: VerificationClaim) -> tuple[str, str]:
@@ -94,22 +111,33 @@ def guard_reason(claim: VerificationClaim, settings: FactCheckSettings) -> Guard
 def guard_reasons(
     claims: Sequence[VerificationClaim], settings: FactCheckSettings
 ) -> Mapping[str, GuardReason]:
-    """``local_id`` -> reason for every guarded claim. A quotation split across two neighbouring
-    claims (one opens, the next closes) is not a span in either: the texts of two neighbours that
-    are both unguarded are joined, and when the join holds a span both are guarded."""
+    """``local_id`` -> reason for every guarded claim. A quotation split over consecutive claims
+    (one opens, a later one closes, up to ``quote_split_window_claims`` claims) is not a span in
+    any single claim: the texts of every window of 2 .. N neighbours (none typed as a quote) are
+    joined, and the claims that the span touches are guarded (already guarded ones keep their
+    reason)."""
     out: dict[str, GuardReason] = {}
     for claim in claims:
         reason = guard_reason(claim, settings)
         if reason is not None:
             out[claim.local_id] = reason
-    for left, right in pairwise(claims):
-        if (
-            left.local_id in out
-            or right.local_id in out
-            or ClaimType.QUOTED_THIRD_PARTY in (left.claim_type, right.claim_type)
-        ):
-            continue
-        joined = [f"{a} {b}" for a, b in zip(_texts(left), _texts(right), strict=True)]
-        if _has_span(joined, settings):
-            out[left.local_id] = out[right.local_id] = GuardReason.QUOTE_SPAN
+    total = len(claims)
+    for start in range(total):
+        for size in range(2, settings.quote_split_window_claims + 1):
+            window = claims[start : start + size]
+            if len(window) < size:
+                break
+            if any(c.claim_type is ClaimType.QUOTED_THIRD_PARTY for c in window):
+                break
+            for field in range(2):
+                parts = [_texts(c)[field] for c in window]
+                spans = _span_hits([" ".join(parts)], settings)
+                if not spans:
+                    continue
+                offset = 0
+                for claim, part in zip(window, parts, strict=True):
+                    lo, hi = offset, offset + len(part)
+                    if any(a < hi and lo < b for a, b in spans):
+                        out.setdefault(claim.local_id, GuardReason.QUOTE_SPAN)
+                    offset = hi + 1
     return out
