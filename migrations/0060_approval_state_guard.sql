@@ -42,10 +42,14 @@ DECLARE
   st approval_steps;
   ev owner_instruction_evidence;
   n int := 0;
+  v_profile text;
+  v_prod boolean;
+  v_test boolean;
 BEGIN
   IF p_state NOT IN ('APPROVED', 'REJECTED', 'CHANGES_REQUESTED') THEN
     RETURN false;  -- no evidence path writes any other decided state
   END IF;
+  SELECT profile INTO v_profile FROM evidence_db_profile WHERE id;
   SELECT * INTO ap FROM approvals WHERE org_id = p_org AND id = p_approval;
   IF NOT FOUND THEN
     RETURN false;
@@ -71,6 +75,17 @@ BEGIN
        OR ev.subject_kind IS DISTINCT FROM ap.subject_kind
        OR ev.subject_id IS DISTINCT FROM ap.subject_id
        OR upper(ev.review_code) IS DISTINCT FROM upper(ap.review_code) THEN
+      RETURN false;
+    END IF;
+    -- source mark (PR 108 r2 MAJOR; 0059): a REAL-profile database accepts only evidence the
+    -- verifier marked as a production session record (an unmarked result is NOT production, as in
+    -- the Python port); a TEST-profile database accepts only the test-fixture mark.
+    v_prod := coalesce(ev.verifier_result -> 'session_source_production' = 'true'::jsonb, false);
+    v_test := coalesce(ev.verifier_result -> 'session_source_test_fixture' = 'true'::jsonb, false);
+    IF v_profile IS NULL
+       OR (v_profile = 'REAL' AND NOT (v_prod AND NOT v_test))
+       OR (v_profile = 'TEST' AND NOT (v_test AND NOT v_prod))
+       OR v_profile NOT IN ('REAL', 'TEST') THEN
       RETURN false;
     END IF;
     -- not superseded: same rule as amw_evidence_mark_confirmed (0059)
@@ -116,6 +131,10 @@ BEGIN
   IF ap.state <> 'PENDING' THEN
     RETURN false;  -- already settled (the caller compares the state it wanted)
   END IF;
+  -- hold the deciding evidence row against a concurrent change until this transaction ends
+  -- (the publish guard re-checks the evidence at use time as well)
+  PERFORM 1 FROM owner_instruction_evidence e
+   WHERE e.org_id = ap.org_id AND e.id = st.evidence_id FOR SHARE;
   UPDATE approvals SET state = st.state, decided_at = now()
    WHERE id = ap.id AND org_id = ap.org_id AND state = 'PENDING';
   RETURN true;
@@ -156,6 +175,11 @@ BEGIN
       RAISE EXCEPTION 'an approval''s subject, hash, kind and workflow never change'
         USING ERRCODE = 'AMW02';
     END IF;
+    IF NEW.current_step IS DISTINCT FROM OLD.current_step
+       OR NEW.managed_service IS DISTINCT FROM OLD.managed_service THEN
+      RAISE EXCEPTION 'an approval''s current step and managed-service flag are not written here'
+        USING ERRCODE = 'AMW02';  -- no legal writer exists yet (step advance is not built)
+    END IF;
     IF OLD.state IN ('APPROVED', 'REJECTED', 'CHANGES_REQUESTED', 'WITHDRAWN') THEN
       IF NEW.state IS DISTINCT FROM OLD.state OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
          OR NEW.subject_sha256 IS DISTINCT FROM OLD.subject_sha256 THEN
@@ -172,6 +196,10 @@ BEGIN
         RAISE EXCEPTION 'no confirmed owner evidence backs this approval decision'
           USING ERRCODE = 'AMW02';
       END IF;
+    ELSIF NEW.state IS DISTINCT FROM OLD.state OR NEW.decided_at IS DISTINCT FROM OLD.decided_at THEN
+      -- EXPIRED / PENDING rewrites have no legal writer yet (expiry is not built): fail closed
+      RAISE EXCEPTION 'approvals.state and decided_at change only through amw_approval_settle'
+        USING ERRCODE = 'AMW02';
     ELSIF OLD.subject_sha256 IS NULL AND NEW.subject_sha256 IS NOT NULL
           AND OLD.state <> 'PENDING' THEN
       RAISE EXCEPTION 'the subject hash is set only while the approval is PENDING'
@@ -283,7 +311,7 @@ BEGIN
   IF NEW.approval_id IS NOT NULL AND NOT EXISTS (
        SELECT 1 FROM approvals a
         WHERE a.org_id = NEW.org_id AND a.id = NEW.approval_id AND a.state = 'PENDING'
-          AND (a.job_id IS NULL OR a.job_id = NEW.job_id)) THEN
+          AND a.job_id IS NOT NULL AND a.job_id = NEW.job_id) THEN
     RAISE EXCEPTION 'tasks.approval_id points only to a PENDING approval of the same job'
       USING ERRCODE = 'AMW02';
   END IF;
@@ -329,3 +357,6 @@ BEGIN
 END
 $$;
 RESET ROLE;
+
+-- Hygiene (PR 108 r2 MINOR): the nologin definer/owner roles create no objects in schema public.
+REVOKE CREATE ON SCHEMA public FROM amw_verifier_fn, amw_owner, amw_sysfn;

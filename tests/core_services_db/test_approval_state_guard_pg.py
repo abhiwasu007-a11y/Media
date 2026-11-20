@@ -292,3 +292,121 @@ def test_evidence_port_never_answers_for_a_rejection(world: World) -> None:
         assert lookup.explain(step_ev, wire, decision="APPROVED", subject_sha256=SHA) == (
             "evidence carries another decision than the one asked for"
         )
+
+
+# ---- PR 108 r2: source mark vs database profile (MAJOR), residual columns (MINORs) --------------
+def _set_marks(world: World, job: Job, result: str) -> None:
+    """Rewrite the stored verifier result of the step evidence as the database owner (the
+    trigger-free path of a forged or unmarked verification)."""
+    evidence = world.step_evidence(job)
+    with world.admin.transaction():
+        world.admin.execute("SET LOCAL session_replication_role = replica")
+        world.admin.execute(
+            "UPDATE owner_instruction_evidence SET verifier_result = %s::jsonb WHERE id = %s",
+            (result, evidence),
+        )
+
+
+def _marks(world: World, job: Job) -> str:
+    got = world.admin.execute(
+        "SELECT verifier_result::text FROM owner_instruction_evidence WHERE id = %s",
+        (world.step_evidence(job),),
+    ).fetchone()
+    assert got is not None
+    return str(got[0])
+
+
+def test_real_profile_settle_needs_the_production_mark(world: World) -> None:
+    job, approval = opened(world)
+    world.owner_decides(job)
+    real_result = _marks(world, job)
+    assert "session_source_production" in real_result
+    _set_marks(world, job, "{}")  # verified without the production mark
+    with pytest.raises(PermissionDeniedError):
+        world.real.decision(job.task_input(), job.ctx())
+    refused(world, "amw_app", "SELECT amw_approval_settle(%s)", (approval,))
+    assert state_of(world, approval)[0] == "PENDING"
+    _set_marks(world, job, '{"session_source_test_fixture": true}')  # a TEST mark in REAL
+    refused(world, "amw_app", "SELECT amw_approval_settle(%s)", (approval,))
+    _set_marks(world, job, real_result)  # the mark is what decides: restored, it settles
+    with world.app_db.transaction(world.ctx) as tx:
+        got = connection_of(tx).execute("SELECT amw_approval_settle(%s)", (approval,)).fetchone()
+    assert got == (True,)
+    assert state_of(world, approval)[0] == "APPROVED"
+
+
+def test_real_profile_publish_guard_needs_the_production_mark(world: World) -> None:
+    job, approval = settled(world)
+    pub = _publication(world, job, approval)
+    assert "editorial contribution" in _upload(world, pub)  # the approval check passes
+    _set_marks(world, job, "{}")
+    assert state_of(world, approval)[0] == "APPROVED"
+    assert "no APPROVED approval" in _upload(world, pub)
+
+
+def test_test_profile_accepts_only_the_test_mark(world: World, admin: Conn) -> None:
+    from tests.core_services_db.test_approval_desk_pg import dry_decision, profile_test
+
+    job = world.job()
+    world.real.open(job.task_input(), job.ctx())
+    approval = world.approval(job)["id"]
+    with profile_test(admin):
+        dry_decision(world, job)  # TEST-marked evidence
+        original = _marks(world, job)
+        assert "session_source_test_fixture" in original
+        _set_marks(world, job, '{"session_source_production": true}')
+        refused(world, "amw_app", "SELECT amw_approval_settle(%s)", (approval,))
+        _set_marks(world, job, "{}")
+        refused(world, "amw_app", "SELECT amw_approval_settle(%s)", (approval,))
+        _set_marks(world, job, original)
+        assert world.dry.decision(job.task_input(), job.ctx()) is not None
+    assert state_of(world, approval)[0] == "APPROVED"
+
+
+@pytest.mark.parametrize("role", ["amw_app", "amw_publisher"])
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        "state = 'EXPIRED'",
+        "decided_at = now()",
+        "current_step = current_step + 1",
+        "managed_service = NOT managed_service",
+    ],
+)
+def test_a_pending_approval_keeps_state_step_and_service_flag(
+    world: World, role: str, assignment: str
+) -> None:
+    _, approval = opened(world)
+    refused(world, role, f"UPDATE approvals SET {assignment} WHERE id = %s", (approval,))  # noqa: S608
+    assert state_of(world, approval)[0] == "PENDING"
+
+
+def test_the_task_pointer_needs_an_approval_of_the_same_job(world: World) -> None:
+    free = world.job()
+    task = ids.TASK.to_uuid(free.task)
+    _, other = opened(world)
+    with world.admin.transaction():  # an approval without a job (the schema allows NULL)
+        orphan = world.admin.execute(
+            "INSERT INTO approvals (id, org_id, kind, subject_kind, subject_id, state,"
+            " workflow_key, current_step, managed_service, requested_by, review_code)"
+            " SELECT gen_random_uuid(), org_id, kind, subject_kind, gen_random_uuid(), 'PENDING',"
+            " workflow_key, 1, managed_service, requested_by, 'ZZ99'"
+            " FROM approvals WHERE id = %s RETURNING id",
+            (other,),
+        ).fetchone()
+    assert orphan is not None
+    for target in (orphan[0], other):
+        refused(
+            world,
+            "amw_app",
+            "UPDATE tasks SET approval_id = %s WHERE id = %s",
+            (target, task),
+        )
+
+
+def test_definer_roles_cannot_create_objects_in_public(world: World) -> None:
+    for role in ("amw_verifier_fn", "amw_owner", "amw_sysfn"):
+        got = world.admin.execute(
+            "SELECT has_schema_privilege(%s, 'public', 'CREATE')", (role,)
+        ).fetchone()
+        assert got == (False,), role
