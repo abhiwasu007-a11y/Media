@@ -16,7 +16,12 @@ from agent_06_fact_checker.config import FactCheckSettings
 from agent_06_fact_checker.conflicts import find_pairs
 from agent_06_fact_checker.evidence import ClaimEvidence, EvidenceResolver
 from agent_06_fact_checker.hashing import claims_sha256
-from agent_06_fact_checker.library.wiring import CREDITS_FILE, QuoteCheck, QuoteReview
+from agent_06_fact_checker.library.wiring import (
+    CREDITS_FILE,
+    QuoteCheck,
+    QuoteCheckFactory,
+    QuoteReview,
+)
 from agent_06_fact_checker.models import (
     BatchConflict,
     ClaimMode,
@@ -66,7 +71,7 @@ from agent_06_fact_checker.verdicts import (
 from amw_adapters.llm.protocol import LlmAdapter
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput, ValidationResult
-from amw_core.enums import ActorKind, ClaimStatus
+from amw_core.enums import ActorKind, ClaimStatus, ClaimType
 from amw_core.errors import (
     AgentError,
     BudgetExhaustedError,
@@ -123,7 +128,7 @@ class ClaimVerificationStep:
         prompts: PromptSource,
         settings: FactCheckSettings,
         conflict_finder: ConflictFinder = find_pairs,
-        quotes: QuoteCheck | None = None,
+        quotes: QuoteCheck | QuoteCheckFactory | None = None,
     ) -> None:
         self._quotes = quotes
         self._finder = conflict_finder
@@ -265,7 +270,8 @@ class ClaimVerificationStep:
         facts = {f.ref_id: f for f in inp.chart_facts}
 
         plans = plan_claims(inp.claims, inp.verify_mode, s, facts)
-        review = self._quotes.review(plans) if self._quotes is not None else None
+        quotes = self._quote_check(task, inp, plans)
+        review = quotes.review(plans) if quotes is not None else None
         quoted = review.outcomes if review is not None else {}
         with self._tenancy.transaction(tenant) as tx:
             evidence = resolver.resolve(
@@ -364,8 +370,32 @@ class ClaimVerificationStep:
         if result.claims:
             self._persist(task, ctx, inp, result, reads)
         return self._assemble(
-            task, ctx, state, started, inp, output, ordered, evidence, leaks, review
+            task, ctx, state, started, inp, output, ordered, evidence, leaks, quotes, review
         )
+
+    def _quote_check(
+        self, task: TaskInput, inp: VerificationInput, plans: Sequence[ClaimPlan]
+    ) -> QuoteCheck | None:
+        """The quote check of this job. FAIL CLOSED (D12): a claim typed as a quote is never sent to
+        the model for a verdict. With no check configured, or a factory that cannot build one,
+        the task ends with a typed error before any paid call."""
+        needed = any(  # a quote without a citation is already CODE_ONLY (never a model call)
+            p.claim.claim_type is ClaimType.QUOTED_THIRD_PARTY
+            and p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
+            for p in plans
+        )
+        source = self._quotes
+        if source is None:
+            if needed:
+                raise MissingDependencyError(
+                    "the script quotes a third party but no quote check is configured: "
+                    "quotes are never verified by the model",
+                    details={"reason": "QUOTE_CHECK_NOT_CONFIGURED"},
+                )
+            return None
+        if isinstance(source, QuoteCheck):
+            return source
+        return source(task, inp, job_date=self._clock.now().date(), required=needed)
 
     # ------------------------------------------------------------------ V-S4
     def _verify_batch(
@@ -502,6 +532,7 @@ class ClaimVerificationStep:
         outcomes: Sequence[Outcome],
         evidence: Mapping[str, ClaimEvidence],
         leaks: int,
+        quotes: QuoteCheck | None,
         review: QuoteReview | None,
     ) -> TaskOutput:
         tenant = ctx.tenant
@@ -509,8 +540,8 @@ class ClaimVerificationStep:
         ref = write_blob(self._blobs, tenant, task, ctx, "claim_verification_output.json", doc)
         refs = [ref]
         credits = (
-            self._quotes.credits(review, script_id=inp.script_id, script_sha256=inp.script_sha256)
-            if self._quotes is not None and review is not None
+            quotes.credits(review, script_id=inp.script_id, script_sha256=inp.script_sha256)
+            if quotes is not None and review is not None
             else None
         )
         if credits is not None:  # credit data for the script gate (CCR-302), codes and ids only

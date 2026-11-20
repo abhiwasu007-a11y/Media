@@ -75,6 +75,9 @@ class QuoteCode(StrEnum):
     LOCATOR_MISMATCH = "LOCATOR_MISMATCH"
     NOT_IN_SOURCE = "NOT_IN_SOURCE"
     QUOTE_TOO_SHORT = "QUOTE_TOO_SHORT"
+    SOURCE_UNREADABLE = "SOURCE_UNREADABLE"
+    """The library text could not be read or does not equal the pinned commit (missing file,
+    dirty checkout, moved HEAD): nothing was verified, so the claim is left unverified."""
 
 
 class QuoteAction(StrEnum):
@@ -93,6 +96,7 @@ _OUTCOME: Mapping[QuoteCode, tuple[QuoteAction, ClaimStatus]] = {
     QuoteCode.LOCATOR_MISSING: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
     QuoteCode.LOCATOR_UNVERIFIABLE: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
     QuoteCode.QUOTE_TOO_SHORT: (QuoteAction.REMOVE_QUOTE, ClaimStatus.NEEDS_SUBSTANTIATION),
+    QuoteCode.SOURCE_UNREADABLE: (QuoteAction.REMOVE_QUOTE, ClaimStatus.UNVERIFIABLE),
     QuoteCode.ATTRIBUTION_MISMATCH: (QuoteAction.BLOCK_CLAIM, ClaimStatus.CONTRADICTED),
     QuoteCode.NOT_PUBLIC_DOMAIN: (QuoteAction.BLOCK_CLAIM, ClaimStatus.CONTRADICTED),
     QuoteCode.LOCATOR_NOT_FOUND: (QuoteAction.BLOCK_CLAIM, ClaimStatus.CONTRADICTED),
@@ -180,6 +184,11 @@ def _result(
     )
 
 
+def unreadable_result(sub: QuoteSubmission) -> QuoteCheckResult:
+    """Typed fail-closed result for a quote whose library text could not be read (never a pass)."""
+    return _result(sub, QuoteCode.SOURCE_UNREADABLE, quote=normalise_quote_text(sub.quoted_text))
+
+
 @dataclass(frozen=True, slots=True)
 class _Sections:
     by_locator: Mapping[str, str]
@@ -260,6 +269,10 @@ class QuoteVerifier:
         self._reader = reader
         self._settings = settings
         self._sections: dict[str, _Sections] = {}
+
+    @property
+    def settings(self) -> QuoteSettings:
+        return self._settings
 
     def verify(
         self, submissions: Sequence[QuoteSubmission], *, job_date: date

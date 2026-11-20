@@ -221,7 +221,9 @@ def test_marathi_voice_subtitles_and_thumbnails_are_devanagari_and_covered(
 
     real = marathi_chain.registry.real
     voice = real["agent_07.voice_synthesis"]
-    assert voice.last_input is not None and voice.last_input.payload.data["language"] == "mr-IN"  # type: ignore[index]
+    assert voice.last_input is not None
+    voice_data = voice.last_input.payload.data
+    assert voice_data is not None and voice_data["language"] == "mr-IN"
     subs = real["agent_10.subtitles"].last_output
     assert subs is not None and subs.payload is not None and subs.payload.data is not None
     (srt,) = subs.payload.data["srt"]
@@ -233,6 +235,25 @@ def test_marathi_voice_subtitles_and_thumbnails_are_devanagari_and_covered(
     assert thumbs is not None and thumbs.payload is not None and thumbs.payload.data is not None
     assert thumbs.payload.data["language"] == "mr-IN"
     assert thumbs.payload.data["variant_count_produced"] == 3
+
+
+def test_glyph_check_refuses_a_devanagari_code_point_the_pinned_font_lacks_and_noto_supplies() -> (
+    None
+):
+    """The cmap rule (no conjunct shaping): U+0978 is Devanagari, absent from the pinned Mukta, and
+    present in the pinned Noto Sans Devanagari; a code point in neither (Bengali) stays uncovered."""
+    from agent_11_thumbnail_design.pinning import FALLBACK_FONT_KEY, pinned_font_bytes
+    from amw_core.font_coverage import fallback_code_points, read_cmap, uncovered_code_points
+    from tests.dryrun.marathi import BRAND_FONT_KEY
+
+    mukta = read_cmap(pinned_font_bytes(BRAND_FONT_KEY))
+    noto = read_cmap(pinned_font_bytes(FALLBACK_FONT_KEY))
+    text = "ऱ ळ ज्ञ क्ष \u0978"
+    assert 0x0978 not in mukta and 0x0978 in noto
+    assert uncovered_code_points([text], [mukta]) == {0x0978}  # Mukta alone: refused
+    assert not uncovered_code_points([text], [mukta, noto])  # with the Noto fallback: covered
+    assert fallback_code_points([text], mukta, noto) == {0x0978}  # and Noto is what draws it
+    assert uncovered_code_points(["\u0985"], [mukta, noto]) == {0x0985}  # in neither font
 
 
 def test_no_book_text_and_no_finance_rule_pack_reach_any_real_agent(chain: Result) -> None:
