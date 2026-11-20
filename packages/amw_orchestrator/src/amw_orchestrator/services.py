@@ -9,12 +9,13 @@ breached budget (``SUSPENDED_EXCEEDED``); the next E1 / E2 then refuses (hard st
 """
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
 from amw_adapters.common import CallUsage
+from amw_core.config import RulePackSettings
 from amw_core.contracts import OwnerTopic, ResourceBudget, Stage, violation
 from amw_core.enums import (
     BudgetPeriod,
@@ -51,12 +52,17 @@ from amw_core.interfaces import (
     TenantTransaction,
 )
 from amw_core.interfaces.job_store import NewJob
-from amw_orchestrator.executor import JobFacts, resolve_channel_category
+from amw_core.tenancy.channel_category import read_channel_category
+from amw_orchestrator.executor import ChannelCategory, JobFacts, resolve_channel_category
 from amw_orchestrator.metering import MeteredTask
-from amw_runtime.config import RunMode, RuntimeConfig
+from amw_runtime.config import RuntimeConfig
 from amw_runtime.confirmations import ConfirmationRecord
-from amw_runtime.errors import PreflightRefused
-from amw_runtime.preflight import PreflightReport, run_preflight
+from amw_runtime.preflight import (
+    PreflightReport,
+    mint_job_scope,
+    register_job_scope_minter,
+    run_preflight,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -309,25 +315,33 @@ def intake(
     requested_by: str = "sys_operator",
     parent_job_id: str | None = None,
     currency: str = "USD",
-    channel_category: str | None = None,
+    rule_packs: RulePackSettings | None = None,
 ) -> JobFacts:
     """3A-03: J01 for one owner topic (``amw.owner_topic`` recorded by the operator, D5).
     Idempotent on ``job.create`` over (channel, topic title, production type, parent).
 
     A production job without ``project_id`` is refused before anything is written
     (``PERMANENT.INPUT_INVALID``, violation ``PROJECT_MISSING``; 03 section 3.1, CCR-214 (b)).
-    ``channel_category`` is the channel's explicit category (CCR-273); unset or unknown =
-    FINANCE."""
+    The job category is decided HERE and nowhere else (CCR-273, D13 fail closed):
+    ``channels.category`` of the job's ``channel_id`` is read inside the tenant transaction
+    (explicit org filter), never taken from a caller argument. It is non-finance only for an
+    explicit non-finance label or a documented non-finance category of the validated rule-pack
+    config (``rule_packs`` = ``settings.rule_packs``; the packaged default when omitted; PASS6-N);
+    a missing channel row, a NULL, an unreadable value, an unknown value or ``finance`` = FINANCE.
+    ``jobs`` has no category column (CCR-292 PROPOSED): the resolved category lives in the returned
+    ``JobFacts`` and the preflight report, and a job resumed through ``intake`` is re-resolved from
+    the channel row."""
     if not project_id:
         raise InputInvalidError(
             "a production job needs its project",
             details={"violations": [violation("PROJECT_MISSING", "/project_id")]},
         )
-    category = resolve_channel_category(channel_category)
     key = make_idempotency_key(
         org_id, "job.create", [channel_id, topic.title, production_type.value, parent_job_id or ""]
     )
     with tenancy.transaction(TenantContext(org_id, ActorRef(requested_by))) as tx:  # type: ignore[arg-type]
+        row_category = read_channel_category(tx, channel_id)
+        category = resolve_channel_category(row_category, rule_packs)
         rec = jobs.create_job(
             tx,
             NewJob(
@@ -362,45 +376,71 @@ def intake(
         currency=currency,
         channel_category=category,
         channel_category_row=(
-            channel_category
-            if isinstance(channel_category, str) and channel_category.strip()
-            else None
+            row_category if isinstance(row_category, str) and row_category.strip() else None
         ),
     )
+
+
+def _preflight_category(
+    tenancy: TenancyContext,
+    jobs: JobStore,
+    job: JobFacts,
+    rule_packs: RulePackSettings | None,
+) -> ChannelCategory:
+    """The category the preflight decides by: re-read from the database for this job, never from
+    the caller's ``JobFacts`` (a public dataclass: ``channel_category`` and ``finance_rules_apply``
+    there are ignored). The job's own row names its channel (not ``JobFacts.channel_id``), and
+    ``channels.category`` of that channel is read in the tenant transaction (explicit org filter)
+    and resolved with the validated ``RulePackSettings``. Anything that goes wrong (no such job,
+    no channel, no row, a database or tenancy error) is FINANCE: this decision fails closed."""
+    try:
+        with tenancy.transaction(TenantContext(job.org_id, ActorRef("sys_operator"))) as tx:  # type: ignore[arg-type]
+            rec = jobs.get_job(tx, JobId(job.job_id))
+            if rec is None or rec.channel_id is None or str(rec.org_id) != job.org_id:
+                return ChannelCategory.FINANCE
+            raw = read_channel_category(tx, str(rec.channel_id))
+    except Exception:  # fail closed: every failure here means finance
+        return ChannelCategory.FINANCE
+    return resolve_channel_category(raw, rule_packs)
 
 
 def run_job_preflight(
     job: JobFacts,
     config: RuntimeConfig,
     confirmations: Sequence[ConfirmationRecord],
+    *,
+    tenancy: TenancyContext,
+    jobs: JobStore,
+    rule_packs: RulePackSettings | None = None,
     **kwargs: Any,
 ) -> PreflightReport:
-    """``amw_runtime`` preflight for one job. FIN-R10 (the SEBI owner confirmation) is a
-    finance-only gate (D13 item 2, CCR-273): for a job whose channel category is explicitly
-    non-finance an otherwise-clean refusal that lists only ``FIN_R10`` is waived and says so in
-    the report notes; every other unmet item (PROVIDER_LIMIT, secrets, caps, environment, market
-    hours) still refuses. A finance job, and any job with an unset or unknown category, gets the
-    refusal unchanged (fail closed). The report of a waived preflight carries NO provider
-    authorisation, so a REAL_RUN of a non-finance job cannot build real providers until
-    ``amw_runtime`` is category-aware (CAT-01; REQUIRES REVIEW, CCR-273)."""
+    """``amw_runtime`` preflight for one job. The finance-only items (FIN-R10, the price-data lag
+    config item) apply only when the job's channel category is finance (D13 item 2, CCR-273
+    PROPOSED); a non-finance job still needs PROVIDER_LIMIT evidence and every other item, and a
+    passing REAL_RUN mints its provider authorisations as for any job.
+
+    The decision is DERIVED HERE, never taken from a caller object: the job's channel is read from
+    its row and ``channels.category`` is re-read in the tenant transaction (``_preflight_category``;
+    ``rule_packs`` = the validated ``settings.rule_packs``, the packaged default when omitted). Only
+    ``org_id`` and ``job_id`` of ``job`` are used; its category fields are ignored, so a
+    ``JobFacts`` built or ``dataclasses.replace``d to say non-finance changes nothing. The sealed
+    scope is minted below (this function is the one registered minter) and is verified, bound to
+    this org and job and used once, inside ``run_preflight``; a caller cannot pass ``job_scope``,
+    ``org_id`` or ``job_id`` through ``kwargs`` (they are overwritten)."""
     # the provider authorisations are bound to this org and this job (a job-scoped call guard
     # refuses a token with another or no job); the caller may not pass another job's binding
+    category = _preflight_category(tenancy, jobs, job, rule_packs)
     kwargs["org_id"] = job.org_id
     kwargs["job_id"] = job.job_id
-    try:
-        return run_preflight(config, confirmations, **kwargs)
-    except PreflightRefused as refusal:
-        if job.finance_rules_apply:
-            raise
-        rest = tuple(i for i in refusal.items if i.code != "FIN_R10")
-        if rest:
-            raise PreflightRefused(rest) from None
-        return PreflightReport(
-            mode=config.mode,
-            checks_passed=(),
-            secrets_checked=config.mode is RunMode.REAL_RUN,
-            test_confirmation_used=False,
-            disclaimer_status="",
-            open_owner_items=(),
-            notes=("FIN_R10 waived: non-finance channel category (CCR-273 PROPOSED)",),
-        )
+    kwargs["job_scope"] = mint_job_scope(
+        org_id=job.org_id,
+        job_id=job.job_id,
+        finance_rules_apply=category is ChannelCategory.FINANCE,
+    )
+    report = run_preflight(config, confirmations, **kwargs)
+    # the resolved category goes into the run report (jobs has no category column, CCR-292)
+    note = f"job channel category (re-read from channels.category): {category.value}"
+    return replace(report, notes=(*report.notes, note))
+
+
+register_job_scope_minter(run_job_preflight.__code__)

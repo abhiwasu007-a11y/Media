@@ -103,11 +103,11 @@ def intake_job(rig: Rig, language: str, title: str = "Seneca on the shortness of
             "owner_references": [], "target_duration_ms": 60_000, "shorts_wanted": False,
         }
     )  # fmt: skip
+    rig.set_channel_category("youtube_general")  # intake reads channels.category (CCR-273, D13)
     return intake(
         rig.tenancy, rig.jobs, org_id=rig.seed.org_id, workspace_id=rig.seed.workspace_id,
         project_id=rig.seed.project_id, channel_id=rig.seed.channel_id, topic=topic,
         production_type=LONG, version=2, correlation_id=str(CORRELATION.new()),
-        channel_category="non-finance",
     )  # fmt: skip
 
 

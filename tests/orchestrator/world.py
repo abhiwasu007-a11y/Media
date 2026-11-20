@@ -113,6 +113,15 @@ class Seed:
     workers: dict[ResourceClass, Any]
 
 
+def set_channel_category(dsn: str, channel_id: str, category: str | None) -> None:
+    """Test setup: write ``channels.category`` as the table owner (bypasses RLS on purpose)."""
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute(
+            "UPDATE channels SET category = %s WHERE id = %s",
+            (category, CHANNEL.to_uuid(channel_id)),
+        )
+
+
 def seed(dsn: str) -> Seed:
     org, wsp, chn, usr, prj = (new_uuid7() for _ in range(5))
     workers: dict[ResourceClass, Any] = {}
@@ -378,7 +387,16 @@ class Rig:
     registry: Any
     make_runner: Callable[[], GraphRunner]
 
-    def intake(self, category: str | None = "non-finance", title: str = "Seneca test") -> JobFacts:
+    def set_channel_category(self, category: str | None) -> None:
+        """Test setup only: the job category is read from ``channels.category`` (CCR-273, D13); the
+        seeded channel stores ``philosophy`` (unknown = finance), so a test that needs another
+        value writes it here as the table owner, outside the code under test."""
+        set_channel_category(self.dsn, self.seed.channel_id, category)
+
+    def intake(
+        self, category: str | None = "youtube_general", title: str = "Seneca test"
+    ) -> JobFacts:
+        self.set_channel_category(category)
         topic = OwnerTopic.model_validate(
             {
                 "schema_version": "1.0.0",
@@ -404,7 +422,6 @@ class Rig:
             production_type=LONG,
             version=2,
             correlation_id=str(CORRELATION.new()),
-            channel_category=category,
         )
 
 

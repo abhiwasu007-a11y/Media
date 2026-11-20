@@ -173,7 +173,7 @@ def test_the_default_job_sends_the_channel_row_value_and_the_gate_is_not_blocked
 ) -> None:
     gate = chain.registry.real["agent_16.compliance_gate"]
     assert gate.last_input is not None
-    assert gate.last_input.payload.data["channel_category"] == "non-finance"  # type: ignore[index]
+    assert gate.last_input.payload.data["channel_category"] == "youtube_general"  # type: ignore[index]
     assert gate.last_output is not None and gate.last_output.payload is not None
     assert gate.last_output.payload.data is not None
     # NEEDS_HUMAN_REVIEW here is YTG-R5 (third-party permission unknown), not a finance rule
