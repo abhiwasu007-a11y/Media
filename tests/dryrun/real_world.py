@@ -95,8 +95,11 @@ def responder_04(request: Any, queries_language: str | None = None) -> str:
 
     payload = user_payload(request)
     if "topic_title" in payload:
+        from tests.dryrun import marathi as mr
+
+        label = mr.TERM_LOCAL if mr.is_devanagari_job(payload["video_language"]) else "finite time"
         concept = {
-            "concept_id": "c01", "label": "finite time", "label_en": "finite time",
+            "concept_id": "c01", "label": label, "label_en": "finite time",
             "kind": "CORE_CONCEPT", "rationale": "needed", "evidence_needs": ["DEFINITION"],
             "time_reference": "TIMELESS",
             "queries": [{"text": "time", "language": queries_language or payload["video_language"].split("-")[0], "purpose": "PRIMARY"}],
@@ -230,8 +233,14 @@ def _llm05_cls() -> Any:
             import json
 
             body = sp.user_input(request)
+            from tests.dryrun import marathi as mr
+
+            deva = mr.is_devanagari_job(body.get("language"))
             if "section_plan" in body:
-                return json.dumps(sp.section_json(body))
+                sec = sp.section_json(body)
+                if deva:
+                    sec = mr.localize_section(sec, int(body["section_plan"]["section_id"][3:]))
+                return json.dumps(sec)
             plan = sp.plan_json(self.n, key=body["concept_briefs"][0]["term_local"])
             brief_refs = {b["concept_id"]: b["citation_refs"] for b in body["concept_briefs"]}
             known = set(brief_refs)
@@ -243,6 +252,9 @@ def _llm05_cls() -> Any:
             ]
             for sec in plan["sections"]:
                 sec["concept_ids"] = [k for k in sec["concept_ids"] if k in known]
+            if deva:
+                first = body["concept_briefs"][0]
+                plan = mr.localize_plan(plan, first["term_local"], first["term_en"])
             for h in plan["hooks"]:
                 for b in h["beats"]:
                     b["chart_request"] = None
@@ -582,11 +594,37 @@ def tiny_png(n: int) -> bytes:
     )
 
 
+def add_pinned_font(w: Any, key: str) -> str:
+    """Register a pinned font of the repo manifest (D10) as the brand font asset of agent_08's world
+    (the same steps as ``World.add_font``, other bytes)."""
+    import hashlib
+    import io
+
+    from agent_08_visual_assets.persistence.records import NewAsset
+    from agent_11_thumbnail_design.pinning import pinned_font_bytes
+    from amw_core.enums import AssetKind, LicenceSourceType
+
+    data = pinned_font_bytes(key)
+    sha = hashlib.sha256(data).hexdigest()
+    uri = w.blobs.blob_uri(w.ctx, "assets", f"fonts/{sha}.ttf")
+    w.blobs.put(w.ctx, uri, io.BytesIO(data))
+    return str(
+        w.assets.insert(
+            w.tx,
+            NewAsset(
+                kind=AssetKind.FONT, source_type=LicenceSourceType.FONT, content_sha256=sha,
+                uri=str(uri), size_bytes=len(data), title="font",
+            ),
+        ).asset_id
+    )
+
+
 def build_agent_08(t: Tenant, storage: LocalDiskStorage, scratch: Path) -> TaskWorker:
     """Agent 08 over its own in-memory repositories (one World re-keyed on this tenant: standing
     licences, the platform template assets), real storage; the brand kit and job destination ports
     have no production implementation yet (in-memory readers below)."""
     from agent_08_visual_assets.stage import AssetSourcingStage, BrandKit
+    from tests.dryrun import marathi as mr
     from amw_core.enums import LicenceSourceType
     from amw_core.interfaces.tenancy_context import TenantContext
     from amw_core.testing.memory import MemoryTransaction
@@ -644,6 +682,8 @@ def build_agent_08(t: Tenant, storage: LocalDiskStorage, scratch: Path) -> TaskW
             ),
         )  # fmt: skip
     font = w.add_font()
+    if mr.is_devanagari_job(t.shared.get("language")):
+        font = add_pinned_font(w, mr.BRAND_FONT_KEY)  # Mukta covers Devanagari, DejaVu does not
 
     class Brands:
         def brand_kit(self, tx: Any, uri: str, sha256: str | None) -> Any:
@@ -779,9 +819,15 @@ def build_agent_11(t: Tenant, storage: LocalDiskStorage, scratch: Path) -> TaskW
     from tests.agents.agent_11_thumbnail_design.env import make_env
     from tests.agents.agent_11_thumbnail_design.fakes import FakeRepo
     from tests.agents.agent_11_thumbnail_design.fontgen import build_font
+    from tests.dryrun import marathi as mr
 
     env = make_env()
-    font = build_font()
+    if mr.is_devanagari_job(t.shared.get("language")):
+        from agent_11_thumbnail_design.pinning import pinned_font_bytes
+
+        font = pinned_font_bytes(mr.BRAND_FONT_KEY)  # the pinned Mukta of the repo manifest (D10)
+    else:
+        font = build_font()
     font_sha = hashlib.sha256(font).hexdigest()
     font_uri = f"amw-blob://{t.org}/assets/{new_id_asset()}/test.ttf"
     storage.put(
@@ -838,7 +884,7 @@ class Rows16:
         from agent_16_compliance_qa.inputs.extractors import JobRow
 
         return JobRow(
-            language="en-IN", production_type_key="CHANNEL_LONG_FORM", live_format=None,
+            language=str(self.t.shared.get("language", "en-IN")), production_type_key="CHANNEL_LONG_FORM", live_format=None,
             active_pack_keys=tuple(self.t.shared.get("packs16", ("rp.youtube_general",))),
             routing_script_stage_id="s05_script", routing_assets_stage_id="s08_assets",
             routing_thumbnails_stage_id="s11_thumbs",
