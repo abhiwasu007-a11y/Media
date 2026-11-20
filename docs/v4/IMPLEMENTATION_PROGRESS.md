@@ -211,11 +211,27 @@ Operator summary:
 4. **Priority unchanged: Seneca sample MP4 with FREE VOICE.** The voice provider is a free TTS: **REQUIRES REVIEW (Phase 1): which free Marathi-capable TTS, licence terms for monetised YouTube use** (researched by another lane; no provider is chosen here). This does not change D13 item 6 beyond the voice choice (A14) now being a free TTS.
 5. **Owner reply required:** ETA in hours and the single next blocker, in Marathi, at most 5 lines (given in the session reply, not in this ledger). SEBI registration status stays needed only for finance channels.
 
+### D15 (2026-11-20, owner chat message): owner-run VPS audit, fixed render limits
+Recorded from the owner's chat message (R14: operator's record, not production-verified owner evidence). Quoted verbatim:
+
+> VPS audit (24 h, read-only) results — use as fixed limits for any VPS render:
+> - Host 2 vCPU: load avg 0.23 night / 0.28 market, short spikes to ~3.3 (ATP one-off jobs).
+> - mem_available min: 3.7 GB night, 3.0 GB market, 2.4 GB other; swap max 376 MB; no OOM/reboot.
+> Render limits (night window 00:00–07:00 IST only): systemd slice MemoryHigh=1.5G, MemoryMax=2G, CPUQuota=100%, low CPUWeight/IOWeight, nice 19 + ionice idle, one render at a time; pause/abort if mem_available < 1.5 GB or PSI cpu avg10 > 40 for 2 min.
+> The Seneca sample stays in the dev env; VPS rendering only after the sample passes.
+> Record these numbers in 00_REPO_AND_SERVER_AUDIT.md with source = owner-run audit.
+
+Operator summary:
+1. **Numbers recorded** in `00_REPO_AND_SERVER_AUDIT.md` Part C-2 with source = owner-run audit. The owner ran the audit; the assistant did not see the raw output (it stays outside git).
+2. **Policy:** the Seneca sample stays in the development environment; VPS rendering only AFTER the sample passes. No VPS change or deployment is made now (read-only audit only). The systemd slice and any deployment are a LATER ticket for the owner/operator, not built.
+3. **Relation to existing docs** (details in Part C-2.3): the owner night window is outside the market-hours guard; `render.max_duration_minutes` is still `null` and still open (no duration given); the ADR-014 render-time figures are ESTIMATES for a 4-CPU dev box and a 1-core slice will be slower by an unmeasured factor (**REQUIRES REVIEW (Phase 1): measure on the VPS slice before the first VPS render**); ADR-014 states only short-clip RSS figures, no long-render peak.
+4. **Backlog ticket VPS-RENDER-1 (later, not now; design note only, not built).** A runner guard for any VPS render: (a) run only inside the night window 00:00-07:00 IST (in addition to the market-hours guard); (b) one render at a time; (c) start under nice 19 and ionice idle, inside the slice with the D15 limits; (d) sample `mem_available` and PSI cpu `avg10` while rendering; if `mem_available` < 1.5 GB, or `avg10` > 40 for 2 minutes, pause or abort the render at its next safe point (checkpoint per `06_NIGHT_SCHEDULING.md`), record the reason in the audit log, and fail closed (no admission) if the readings are unavailable. Which of pause or abort applies is **REQUIRES REVIEW (owner)**. Creating the slice is a deployment step for the owner/operator, outside this ticket.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
 |---|---|---|
-| A1 | VPS read-only output | **Waiting; owner will provide on 2026-11-19.** Script delivered. |
+| A1 | VPS read-only output | **RECEIVED 2026-11-20** as the owner's summary of a 24 h audit (numbers recorded in `00_REPO_AND_SERVER_AUDIT.md` Part C-2; raw output not seen, stays outside git). D15. |
 | A2 | `trade-data` + `atp-private` read access | **Received** (2026-11-18, read-only clones) |
 | A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
 | A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
