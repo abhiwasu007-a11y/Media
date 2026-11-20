@@ -15,8 +15,8 @@ human-score rows are the S7 service, which does not exist yet; its builder and i
 the production implementations of the ports listed in ``docs/v4/DRYRUN2_REAL_AGENTS.md``.
 
 The real chain now reaches ``DELIVERED`` (CCR-283: ``svc_s07.request_approval.*`` registered, PROVISIONAL).
-What is still open is listed as strict xfails with their CCR reference (the Marathi run); every
-other break found has a regression test or an entry in the report."""
+The Marathi (mr-IN) run of the whole chain passes on SYNTHETIC Marathi fixtures; every
+break found has a regression test or an entry in the report."""
 
 import io
 import json
@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from amw_core.enums import OutputStatus, TaskState
+from amw_core.ids import ActorRef, OrgId
 from amw_core.interfaces import TenantContext
 from amw_core.interfaces.storage import BlobUri
 from tests.dryrun.harness import Result, run_hybrid
@@ -181,34 +182,78 @@ def test_the_default_job_sends_the_channel_row_value_and_the_gate_is_not_blocked
     assert {p["key"] for p in gate.last_output.payload.data["packs"]} == {"rp.youtube_general"}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="CCR-289 (remainder, PROPOSED; report break O6): the canned model responses of the real "
-    "agents' fakes are English, so the Marathi (mr-IN) run of the whole real chain stops at "
-    "s05_script (AGENT.QUALITY_REPEATED_FAILURE, a05.plan.lang: the language check refuses English "
-    "text for an mr-IN job). agent_04 (CCR-289) passes; the Devanagari content of agents 05 to 16 "
-    "has no fixtures",
-)
-def test_the_whole_real_chain_runs_for_a_marathi_job(pg_dsn: str, tmp_path: Path) -> None:
-    res = run_hybrid(
-        pg_dsn, tmp_path, real=set(ALL_REAL), language="mr-IN", options={"queries_language": "en"}
+@pytest.fixture(scope="module")
+def marathi_chain(pg_dsn: str, tmp_path_factory: pytest.TempPathFactory) -> Result:
+    return run_hybrid(
+        pg_dsn,
+        tmp_path_factory.mktemp("marathichain"),
+        real=set(ALL_REAL),
+        language="mr-IN",
+        options={"queries_language": "en"},
     )
+
+
+def test_the_whole_real_chain_runs_for_a_marathi_job(marathi_chain: Result) -> None:
+    """The Marathi (mr-IN) run of the whole real chain (CCR-289 remainder, break O6): the canned
+    answers of the fakes are SYNTHETIC invented Marathi (``tests/dryrun/marathi.py``), so the real
+    language checks of agents 05 to 16 run on Devanagari text. Before the fixtures the run stopped
+    at ``s05_script`` (``a05.plan.lang``); after the script was Marathi the next break was
+    ``s11_thumbs`` (the test box font has no Devanagari glyph), then none."""
+    res = marathi_chain
     assert res.report.status == "DELIVERED", res.report.detail
+    assert [r.state for r in res.report.stages.values()].count(TaskState.COMPLETED) == 19
 
 
-def test_the_marathi_run_stops_where_the_report_says_it_stops(pg_dsn: str, tmp_path: Path) -> None:
-    """The first break of the Marathi run, stated exactly (the xfail above says it must change)."""
-    res = run_hybrid(
-        pg_dsn, tmp_path, real=set(ALL_REAL), language="mr-IN", options={"queries_language": "en"}
-    )
-    assert res.report.status == "FAILED"
-    assert res.report.order == ["s04_research", "s05_script"]
-    assert res.report.stages["s04_research"].state is TaskState.COMPLETED
-    failed = res.report.stages["s05_script"]
-    assert failed.state is TaskState.FAILED and failed.output is not None
-    assert failed.output.error is not None
-    assert failed.output.error.code == "AGENT.QUALITY_REPEATED_FAILURE"
-    assert "a05.plan.lang" in str(failed.output.error.details)
+def _read(res: Result, uri: str, sha256: str) -> bytes:
+    org = res.job.org_id
+    ctx = TenantContext(OrgId(org), ActorRef("agent_10"), None)
+    return b"".join(res.rig.storage.get(ctx, BlobUri(uri), sha256))
+
+
+def test_marathi_voice_subtitles_and_thumbnails_are_devanagari_and_covered(
+    marathi_chain: Result,
+) -> None:
+    """agent_07 gets mr-IN, the subtitle cues are Devanagari, the pinned Mukta covers every glyph of
+    them (``amw_core.font_coverage``), and agent_11 composed with the pinned Mukta + Noto fallback."""
+    from agent_11_thumbnail_design.pinning import pinned_font_bytes
+    from amw_core.font_coverage import read_cmap, uncovered_code_points
+    from tests.dryrun.marathi import BRAND_FONT_KEY, is_devanagari_job
+
+    real = marathi_chain.registry.real
+    voice = real["agent_07.voice_synthesis"]
+    assert voice.last_input is not None
+    voice_data = voice.last_input.payload.data
+    assert voice_data is not None and voice_data["language"] == "mr-IN"
+    subs = real["agent_10.subtitles"].last_output
+    assert subs is not None and subs.payload is not None and subs.payload.data is not None
+    (srt,) = subs.payload.data["srt"]
+    assert srt["language"] == "mr-IN" and srt["cue_count"] > 0
+    text = _read(marathi_chain, srt["uri"], srt["sha256"]).decode("utf-8")
+    assert is_devanagari_job("mr-IN") and any("\u0900" <= ch <= "\u097f" for ch in text)
+    assert not uncovered_code_points([text], [read_cmap(pinned_font_bytes(BRAND_FONT_KEY))])
+    thumbs = real["agent_11.thumbnail_variants"].last_output
+    assert thumbs is not None and thumbs.payload is not None and thumbs.payload.data is not None
+    assert thumbs.payload.data["language"] == "mr-IN"
+    assert thumbs.payload.data["variant_count_produced"] == 3
+
+
+def test_glyph_check_refuses_a_devanagari_code_point_the_pinned_font_lacks_and_noto_supplies() -> (
+    None
+):
+    """The cmap rule (no conjunct shaping): U+0978 is Devanagari, absent from the pinned Mukta, and
+    present in the pinned Noto Sans Devanagari; a code point in neither (Bengali) stays uncovered."""
+    from agent_11_thumbnail_design.pinning import FALLBACK_FONT_KEY, pinned_font_bytes
+    from amw_core.font_coverage import fallback_code_points, read_cmap, uncovered_code_points
+    from tests.dryrun.marathi import BRAND_FONT_KEY
+
+    mukta = read_cmap(pinned_font_bytes(BRAND_FONT_KEY))
+    noto = read_cmap(pinned_font_bytes(FALLBACK_FONT_KEY))
+    text = "ऱ ळ ज्ञ क्ष \u0978"
+    assert 0x0978 not in mukta and 0x0978 in noto
+    assert uncovered_code_points([text], [mukta]) == {0x0978}  # Mukta alone: refused
+    assert not uncovered_code_points([text], [mukta, noto])  # with the Noto fallback: covered
+    assert fallback_code_points([text], mukta, noto) == {0x0978}  # and Noto is what draws it
+    assert uncovered_code_points(["\u0985"], [mukta, noto]) == {0x0985}  # in neither font
 
 
 def test_no_book_text_and_no_finance_rule_pack_reach_any_real_agent(chain: Result) -> None:

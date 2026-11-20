@@ -68,6 +68,18 @@ def _qc_refs(ctx: BuildContext) -> tuple[DocRef, DocRef]:
     )
 
 
+def _credit_refs(ctx: BuildContext) -> list[Any]:
+    """CCR-302 (PROPOSED): the quote / further-reading credit data of ``s06_verify`` rides to the
+    script gate as a PRIOR_OUTPUT context ref (no payload field is added to agent_16's input).
+    Absent when the script uses no library work."""
+    out = c.stage_output(ctx, "s06_verify")
+    found = [r for r in out.output_refs if r.uri.endswith("/artifacts/quote_credits.json")]
+    if not found:
+        return []
+    ref = DocRef(found[0].uri, found[0].sha256)
+    return [c.context_ref(ref, P, "agent_06.quote_credits", "1.0.0")]
+
+
 def _common_refs(ctx: BuildContext) -> list[Any]:
     refs = [c.profile_ref(ctx), *c.rule_pack_refs(ctx)]
     if ctx.job.finance_rules_apply:  # the disclaimer template is a finance input (7.1)
@@ -130,7 +142,7 @@ class ComplianceGateBuilder:
             },
             "inputs": {**{k: c.as_wire(v) for k, v in refs.items()}, "metadata_ref": None},
         }
-        return BuiltInput(GATE_SCHEMA, "1.0.0", data, tuple(_common_refs(ctx)))
+        return BuiltInput(GATE_SCHEMA, "1.0.0", data, (*_common_refs(ctx), *_credit_refs(ctx)))
 
 
 def _channel_category(job: JobFacts) -> str:
@@ -197,7 +209,7 @@ class QualityScoreBuilder:
 
 def _bound_final_approval(ctx: BuildContext) -> ApprovalOutput:
     """The final approval, accepted only for the CURRENT render (and, when the graph approves the
-    script, the CURRENT script): hash, subject, org and confirmed evidence (CCR-296 PROVISIONAL,
+    script, the CURRENT script): hash, subject, org and confirmed evidence (CCR-296,
     ``amw_orchestrator.approval_binding``)."""
     sub = _subject(ctx)
     org = ctx.job.org_id

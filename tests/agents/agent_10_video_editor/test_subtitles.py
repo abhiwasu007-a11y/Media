@@ -1,5 +1,6 @@
 """Subtitles: cue builder, SRT writer/parser/validator and the ``agent_10.subtitles`` stage."""
 
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,45 @@ def test_srt_roundtrip_is_utf8_lf_no_bom_and_numbered() -> None:
         (c.index, c.start_ms, c.end_ms, c.text) for c in cues
     ]
     assert SrtValidator.validate(parsed, 3000) == []
+
+
+_VIRAMA = "\u094d"
+_ZWJ = frozenset({"\u200c", "\u200d"})
+
+
+def _is_cluster_continuation(ch: str) -> bool:
+    """Combining marks (matras, anusvara, nukta, virama) and joiners never start a cluster."""
+    return unicodedata.category(ch).startswith("M") or ch in _ZWJ
+
+
+@pytest.mark.unit
+def test_long_marathi_cue_is_split_at_spaces_and_never_inside_a_conjunct_or_matra() -> None:
+    """INVENTED Marathi with conjuncts (क्ष, ज्ञ, त्र, ट्रे) and matras: the builder breaks only at
+    spaces, so no line begins with a combining mark or ends with a virama (a cluster is whole)."""
+    text = (
+        "विद्यार्थ्यांनी ज्ञानाचे क्षेत्र समजून घेताना त्रास न मानता ट्रेंडचा अभ्यास सातत्याने "
+        "करावा आणि प्रत्येक निष्कर्षाची तपासणी स्वतः क्रमाने करावी"
+    )
+    built = CueBuilder.build("s1", 0, 12000, text, 24)
+    lines = [c.text for c in built.cues]
+    assert len(lines) > 2
+    assert built.warnings == ()
+    assert " ".join(lines).split() == text.split()  # nothing lost, nothing cut inside a word
+    for line in lines:
+        assert len(line) <= 24
+        assert not _is_cluster_continuation(line[0])
+        assert not line.endswith(_VIRAMA)
+
+
+@pytest.mark.unit
+def test_marathi_token_longer_than_the_limit_is_kept_whole_with_a_warning() -> None:
+    """Documented behaviour: an over-long word is NOT broken (breaking it could cut a cluster);
+    it stays on a line of its own and the cue carries ``OVERLONG_TOKEN``. The limit counts code
+    points (not grapheme clusters or rendered width)."""
+    word = "विद्यार्थ्यांच्याकडूनसुद्धा"
+    built = CueBuilder.build("s1", 0, 3000, f"आज {word} शिका", 10)
+    assert [c.text for c in built.cues] == ["आज", word, "शिका"]
+    assert built.warnings == ("OVERLONG_TOKEN:s1",)
 
 
 @pytest.mark.unit

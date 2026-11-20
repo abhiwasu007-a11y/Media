@@ -41,7 +41,7 @@ from amw_core.enums import OutputStatus, Priority, ProductionTypeKey
 from amw_core.errors import AmwError, MissingDependencyError, SchemaInvalidError
 from amw_core.exec_context import ExecContext
 from amw_core.interfaces import TaskWorker
-from amw_core.owner_evidence_status import EvidenceStatusLookup
+from amw_core.owner_evidence_approvals import ApprovalEvidencePort
 from amw_orchestrator.outputs import SpendLike, failed_output
 
 
@@ -182,9 +182,9 @@ class BuildContext:
     revision_feedback: tuple[ValidationResult, ...] = ()
     revision_source_stage_id: str | None = None
     services: BuildServices | None = None
-    evidence: EvidenceStatusLookup | None = None
-    """The owner-evidence reader a builder uses to confirm an approval (CCR-296 PROPOSED); ``None``
-    refuses every approval (fail closed)."""
+    evidence: ApprovalEvidencePort | None = None
+    """The long-lived approval-evidence port a builder uses to confirm an approval (CCR-296, S7
+    ``PgApprovalEvidencePort``); ``None`` refuses every approval (fail closed)."""
     real_run: bool = True
     """``True`` unless the run is a dry run: a ``TEST_FIXTURE`` evidence row authorises nothing
     in a real run (fail closed default)."""

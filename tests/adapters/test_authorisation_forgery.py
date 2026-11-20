@@ -60,7 +60,9 @@ def test_no_mint_function_or_mint_key_is_importable() -> None:
 def test_hand_built_token_with_any_seal_fails() -> None:
     real = auth("anthropic")
     base = fields(real)
-    for seal in (b"\0" * 32, b"", real.seal[:-1] + b"x"):
+    flipped = real.seal[:-1] + bytes([real.seal[-1] ^ 0x01])  # always differs from the real seal
+    assert flipped != real.seal
+    for seal in (b"\0" * 32, b"", flipped):
         forged = ProviderAuthorisation(**{**base, "seal": seal})  # type: ignore[arg-type]
         with pytest.raises(ConfigInvalidError):
             verify(forged)

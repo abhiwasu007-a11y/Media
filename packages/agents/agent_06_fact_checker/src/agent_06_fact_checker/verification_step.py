@@ -16,6 +16,12 @@ from agent_06_fact_checker.config import FactCheckSettings
 from agent_06_fact_checker.conflicts import find_pairs
 from agent_06_fact_checker.evidence import ClaimEvidence, EvidenceResolver
 from agent_06_fact_checker.hashing import claims_sha256
+from agent_06_fact_checker.library.wiring import (
+    CREDITS_FILE,
+    QuoteCheck,
+    QuoteCheckFactory,
+    QuoteReview,
+)
 from agent_06_fact_checker.models import (
     BatchConflict,
     ClaimMode,
@@ -65,7 +71,7 @@ from agent_06_fact_checker.verdicts import (
 from amw_adapters.llm.protocol import LlmAdapter
 from amw_core.contracts.task_input import TaskInput
 from amw_core.contracts.task_output import TaskOutput, ValidationResult
-from amw_core.enums import ActorKind, ClaimStatus
+from amw_core.enums import ActorKind, ClaimStatus, ClaimType
 from amw_core.errors import (
     AgentError,
     BudgetExhaustedError,
@@ -122,7 +128,9 @@ class ClaimVerificationStep:
         prompts: PromptSource,
         settings: FactCheckSettings,
         conflict_finder: ConflictFinder = find_pairs,
+        quotes: QuoteCheck | QuoteCheckFactory | None = None,
     ) -> None:
+        self._quotes = quotes
         self._finder = conflict_finder
         self._tenancy = tenancy
         self._clock = clock
@@ -262,9 +270,23 @@ class ClaimVerificationStep:
         facts = {f.ref_id: f for f in inp.chart_facts}
 
         plans = plan_claims(inp.claims, inp.verify_mode, s, facts)
+        quotes = self._quote_check(task, inp, plans)
+        review = quotes.review(plans) if quotes is not None else None
+        quoted = review.outcomes if review is not None else {}
         with self._tenancy.transaction(tenant) as tx:
-            evidence = resolver.resolve(tx, channel, plans, inp.available_citations, facts)
-        verifiable = [p for p in plans if p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)]
+            evidence = resolver.resolve(
+                tx,
+                channel,
+                [p for p in plans if p.claim.local_id not in quoted],
+                inp.available_citations,
+                facts,
+            )
+        verifiable = [
+            p
+            for p in plans
+            if p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
+            and p.claim.local_id not in quoted
+        ]
         pairs = self._finder([p.claim for p in verifiable], s)
         in_pair = {i for pair in pairs for i in pair}
         sendable = [
@@ -273,9 +295,9 @@ class ClaimVerificationStep:
             if evidence[p.claim.local_id].candidates or p.claim.local_id in in_pair
         ]
         sent_ids = {p.claim.local_id for p, _ in sendable}
-        outcomes: dict[str, Outcome] = {}
+        outcomes: dict[str, Outcome] = dict(quoted)  # exact-quote outcomes: no model call (CCR-302)
         for p in plans:
-            if p.claim.local_id not in sent_ids:
+            if p.claim.local_id not in sent_ids and p.claim.local_id not in quoted:
                 outcomes[p.claim.local_id] = static_outcome(p, evidence.get(p.claim.local_id))
 
         batches = build_batches(sendable, pairs, s)
@@ -347,7 +369,33 @@ class ClaimVerificationStep:
         )
         if result.claims:
             self._persist(task, ctx, inp, result, reads)
-        return self._assemble(task, ctx, state, started, inp, output, ordered, evidence, leaks)
+        return self._assemble(
+            task, ctx, state, started, inp, output, ordered, evidence, leaks, quotes, review
+        )
+
+    def _quote_check(
+        self, task: TaskInput, inp: VerificationInput, plans: Sequence[ClaimPlan]
+    ) -> QuoteCheck | None:
+        """The quote check of this job. FAIL CLOSED (D12): a claim typed as a quote is never sent to
+        the model for a verdict. With no check configured, or a factory that cannot build one,
+        the task ends with a typed error before any paid call."""
+        needed = any(  # a quote without a citation is already CODE_ONLY (never a model call)
+            p.claim.claim_type is ClaimType.QUOTED_THIRD_PARTY
+            and p.mode in (ClaimMode.EVIDENCE, ClaimMode.CHART_FACTS)
+            for p in plans
+        )
+        source = self._quotes
+        if source is None:
+            if needed:
+                raise MissingDependencyError(
+                    "the script quotes a third party but no quote check is configured: "
+                    "quotes are never verified by the model",
+                    details={"reason": "QUOTE_CHECK_NOT_CONFIGURED"},
+                )
+            return None
+        if isinstance(source, QuoteCheck):
+            return source
+        return source(task, inp, job_date=self._clock.now().date(), required=needed)
 
     # ------------------------------------------------------------------ V-S4
     def _verify_batch(
@@ -484,10 +532,20 @@ class ClaimVerificationStep:
         outcomes: Sequence[Outcome],
         evidence: Mapping[str, ClaimEvidence],
         leaks: int,
+        quotes: QuoteCheck | None,
+        review: QuoteReview | None,
     ) -> TaskOutput:
         tenant = ctx.tenant
         doc = output.to_doc()
         ref = write_blob(self._blobs, tenant, task, ctx, "claim_verification_output.json", doc)
+        refs = [ref]
+        credits = (
+            quotes.credits(review, script_id=inp.script_id, script_sha256=inp.script_sha256)
+            if quotes is not None and review is not None
+            else None
+        )
+        if credits is not None:  # credit data for the script gate (CCR-302), codes and ids only
+            refs.append(write_blob(self._blobs, tenant, task, ctx, CREDITS_FILE, credits.to_doc()))
         results = self._results(inp, output, outcomes, evidence, leaks)
         failed = [r.check_id for r in results if r.gate and r.verdict.value == "FAIL"]
         log.info(  # ids, counts and codes only (NFR-6): never claim text or evidence
@@ -505,7 +563,7 @@ class ClaimVerificationStep:
             started_ms=started,
             schema=OUTPUT_SCHEMA,
             doc=doc,
-            refs=[ref],
+            refs=refs,
             results=results,
             usage=state.usage,
             next_action=next_action_for(output.overall.proposed_verdict, failed),
@@ -638,6 +696,8 @@ def _verified_violations(
         if c.status is not ClaimStatus.VERIFIED:
             continue
         o = by_local[c.local_id]
+        if o.quote_exact:
+            continue
         wanted = numerals(o.claim.quote + " " + o.claim.normalized_claim)
         if missing_numerals(wanted, o.support_texts, s.rounding_match):
             bad[c.local_id] = "number"

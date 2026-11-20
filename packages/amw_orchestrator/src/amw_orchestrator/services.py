@@ -34,6 +34,7 @@ from amw_core.ids import (
     ChannelId,
     CorrelationId,
     ExecutorId,
+    IdempotencyKey,
     JobId,
     ProjectId,
     TaskId,
@@ -300,6 +301,23 @@ def require_per_video_budget(
     )
 
 
+def job_create_key(
+    org_id: str,
+    channel_id: str,
+    topic: OwnerTopic,
+    production_type: ProductionTypeKey,
+    parent_job_id: str | None = None,
+    run_mode: str | None = None,
+) -> IdempotencyKey:
+    """The ``job.create`` key (03 section 9.2). ``run_mode`` (CCR-299, provisional) is part of the
+    natural key when given: a DRY_RUN job and a REAL_RUN job of the same channel and topic are
+    two jobs, so a real run never resumes or reuses stand-in outputs, nor the other way round."""
+    natural: list[str | int] = [channel_id, topic.title, production_type.value, parent_job_id or ""]
+    if run_mode is not None:
+        natural.append(run_mode)
+    return make_idempotency_key(org_id, "job.create", natural)
+
+
 def intake(
     tenancy: TenancyContext,
     jobs: JobStore,
@@ -316,9 +334,11 @@ def intake(
     parent_job_id: str | None = None,
     currency: str = "USD",
     rule_packs: RulePackSettings | None = None,
+    run_mode: str | None = None,
 ) -> JobFacts:
     """3A-03: J01 for one owner topic (``amw.owner_topic`` recorded by the operator, D5).
-    Idempotent on ``job.create`` over (channel, topic title, production type, parent).
+    Idempotent on ``job.create`` over (channel, topic title, production type, parent and, when
+    given, the run mode: see ``job_create_key``).
 
     A production job without ``project_id`` is refused before anything is written
     (``PERMANENT.INPUT_INVALID``, violation ``PROJECT_MISSING``; 03 section 3.1, CCR-214 (b)).
@@ -336,9 +356,7 @@ def intake(
             "a production job needs its project",
             details={"violations": [violation("PROJECT_MISSING", "/project_id")]},
         )
-    key = make_idempotency_key(
-        org_id, "job.create", [channel_id, topic.title, production_type.value, parent_job_id or ""]
-    )
+    key = job_create_key(org_id, channel_id, topic, production_type, parent_job_id, run_mode)
     with tenancy.transaction(TenantContext(org_id, ActorRef(requested_by))) as tx:  # type: ignore[arg-type]
         row_category = read_channel_category(tx, channel_id)
         category = resolve_channel_category(row_category, rule_packs)

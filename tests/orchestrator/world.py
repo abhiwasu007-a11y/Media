@@ -28,6 +28,7 @@ from amw_core.cost.pg import PgCostLedger
 from amw_core.enums import Capability, ProductionTypeKey, ResourceClass
 from amw_core.exec_context import ExecContext
 from amw_core.ids import (
+    APPROVAL,
     CHANNEL,
     CORRELATION,
     ORG,
@@ -320,13 +321,14 @@ def approval_output(
     state: str = "APPROVED",
     target_stage: str | None = None,
     evidence_ids: list[str] | None = None,
+    approval_id: str | None = None,
 ) -> dict[str, object]:
     """An ``svc_s07.request_approval.output`` document in the CCR-283 PROVISIONAL shape."""
     from amw_core.ids import APPROVAL, OWNER_EVIDENCE
 
     owner = state in {"APPROVED", "REJECTED", "CHANGES_REQUESTED"}
     return {
-        "approval_id": str(APPROVAL.new()),
+        "approval_id": approval_id or str(APPROVAL.new()),
         "approval_kind": kind,
         "state": state,
         "subject_sha256": subject_sha256,
@@ -355,10 +357,16 @@ class TestDesk:
         subject = data.get("subject") or {}
         self.last_subject_sha256 = str(subject.get("sha256", "0" * 64))
         owner = state in {"APPROVED", "REJECTED", "CHANGES_REQUESTED"}
-        evidence = (  # TEST_FIXTURE owner evidence bound to the subject of the request
+        approval_id = str(APPROVAL.new())
+        evidence = (  # TEST_FIXTURE owner evidence of THIS approval and the request's subject
             [
                 self.evidence.record(
-                    str(task_input.org_id), str(subject.get("kind", "")), str(subject.get("id", ""))
+                    str(task_input.org_id),
+                    str(subject.get("kind", "")),
+                    str(subject.get("id", "")),
+                    approval_id=approval_id,
+                    subject_sha256=self.last_subject_sha256,
+                    decision=state,
                 )
             ]
             if owner
@@ -366,6 +374,7 @@ class TestDesk:
         )
         return approval_output(
             self.last_subject_sha256,
+            approval_id=approval_id,
             evidence_ids=evidence,
             kind=str(data.get("approval_kind", "FINAL_VIDEO")),
             state=state,
@@ -455,6 +464,7 @@ def build_rig(
     build_services: Any | None = None,
     desk: TestDesk | None = None,
     real_run: bool = False,
+    evidence: Any = ...,
 ) -> Rig:
     s = seed(dsn)
     with psycopg.connect(dsn, autocommit=True) as conn:
@@ -522,7 +532,7 @@ def build_rig(
             task_io=TaskIo(storage),
             spend=meter,
             build_services=build_services,
-            evidence=desk.evidence,
+            evidence=desk.evidence if evidence is ... else evidence,
             real_run=real_run,
             require_per_video=lambda tx, job_id, cur: require_per_video_budget(
                 guard, tx, job_id, cur
