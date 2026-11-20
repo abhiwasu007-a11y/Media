@@ -461,6 +461,7 @@ class FactRowReader(Protocol):
     ) -> Mapping[str, AssetFactRow]:
         """Fact rows of the assets; ``has_ledger_row`` counts only a ledger row of THIS job."""
         ...
+
     def voice_presenter_kind(self, tx: TenantTransaction, job_id: str) -> PresenterKind | None: ...
     def judged_qc_check_ids(self, tx: TenantTransaction, render_id: str) -> tuple[str, ...]:
         """``qc_results`` of the render that are ``SKIPPED`` with ``JUDGED_BY_AGENT_16``."""
