@@ -8,8 +8,16 @@ reversed ``»x«``) plus whole Unicode categories (``Pi`` opens, ``Pf`` closes),
 that the table forgot is still seen. The apostrophe ``'`` is in no table: it cannot be told from a
 mark by a pure rule (documented limit); a closing curly single mark alone never starts a span.
 
-Invisible characters: a ZERO WIDTH SPACE separates words (configured); every other format
-character (ZWJ, ZWNJ, soft hyphen, word joiner, bidi marks) is dropped before counting words."""
+Invisible characters: a ZERO WIDTH SPACE separates words (configured) in pattern matching; every
+other format character (ZWJ, ZWNJ, soft hyphen, word joiner, BOM, bidi marks) is dropped there.
+WORD COUNTING is stricter (fail closed, more words = more guarding): the configured
+``word_count_separators`` (format characters such as ZWNJ, ZWJ, word joiner, BOM, soft hyphen and
+the hyphens) also split words, so a six-word span glued together by invisible characters or hyphens
+is still six words.
+
+A span may cross line breaks (verse) but is at most ``max_quote_span_chars`` long. The scan is
+linear: a closer lookup table is built in one backward pass, so an opener with no closer (repeated
+``„``) costs nothing more than any other character; ``WorkCounter`` counts the steps for tests."""
 
 import json
 import unicodedata
@@ -40,6 +48,12 @@ class QuoteMarkConfig(AmwModel):
     invisible_separators: tuple[str, ...]
     """Invisible code points that separate words (``U+200B``); other format characters are
     removed."""
+    word_count_separators: tuple[str, ...]
+    """Code points that ALSO split words when words are counted (ZWNJ, ZWJ, word joiner, BOM, soft
+    hyphen, hyphens). Only for counting: pattern matching still removes the format characters."""
+    max_quote_span_chars: Annotated[int, Field(ge=1)]
+    """Longest span (code points between the marks, line breaks included); an opener whose nearest
+    closer lies further away opens no span (a stray mark must not swallow a document)."""
 
     @field_validator("opening_categories", "closing_categories")
     @classmethod
@@ -55,6 +69,14 @@ class QuoteMarkConfig(AmwModel):
         for ch in value:
             if len(ch) != 1 or unicodedata.category(ch) != _FORMAT:
                 raise ConfigInvalidError("not one invisible format character", details={"ch": ch})
+        return value
+
+    @field_validator("word_count_separators")
+    @classmethod
+    def _count_separators(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for ch in value:
+            if len(ch) != 1 or unicodedata.category(ch)[0] in "LNM":
+                raise ConfigInvalidError("not one separator code point", details={"ch": ch})
         return value
 
     @model_validator(mode="after")
@@ -79,6 +101,13 @@ class MarkedSpan:
     words: int
 
 
+@dataclass(slots=True)
+class WorkCounter:
+    """Optional deterministic step counter of ``QuoteMarks.spans`` (tests bound the work)."""
+
+    steps: int = 0
+
+
 @dataclass(frozen=True, slots=True)
 class QuoteMarks:
     openers: frozenset[str]
@@ -86,6 +115,8 @@ class QuoteMarks:
     opening_categories: frozenset[str]
     closing_categories: frozenset[str]
     separators: frozenset[str]
+    count_separators: frozenset[str]
+    max_span_chars: int
 
     def is_opener(self, ch: str) -> bool:
         return ch in self.openers or unicodedata.category(ch) in self.opening_categories
@@ -109,18 +140,62 @@ class QuoteMarks:
             ch for ch in unicodedata.normalize("NFC", text) if unicodedata.category(ch) != _FORMAT
         )
 
-    def spans(self, text: str) -> list[MarkedSpan]:
+    def count_words(self, text: str) -> int:
+        """Words of ``text`` for the guard: separators (configured) split, other format
+        characters are dropped."""
+        out = []
+        for ch in unicodedata.normalize("NFC", text):
+            if ch in self.separators or ch in self.count_separators:
+                out.append(" ")
+            elif unicodedata.category(ch) != _FORMAT:
+                out.append(ch)
+        return len("".join(out).split())
+
+    def spans(
+        self, text: str, work: WorkCounter | None = None, *, unbounded: bool = False
+    ) -> list[MarkedSpan]:
+        """Marked spans, left to right, in O(len(text)). The text is scanned as a whole (a span
+        may cross a line break: verse) AND line by line; the result is the union, so a stray
+        mark on one line (``5" long``) cannot pair with a quote on a later line and hide it.
+        ``unbounded`` lifts ``max_span_chars`` (joined claim windows, which are longer than one
+        claim by construction)."""
+        cap = len(text) if unbounded else self.max_span_chars
+        found = self._scan(text, 0, work, cap)
+        lines = text.splitlines(keepends=True)
+        if len(lines) > 1:
+            seen = {(m.start, m.end) for m in found}
+            base = 0
+            for line in lines:
+                for m in self._scan(line, base, work, cap):
+                    if (m.start, m.end) not in seen:
+                        seen.add((m.start, m.end))
+                        found.append(m)
+                base += len(line)
+            found.sort(key=lambda m: (m.start, m.end))
+        return found
+
+    def _scan(self, text: str, base: int, work: WorkCounter | None, cap: int) -> list[MarkedSpan]:
+        """One pass: the nearest closer after every position comes from one backward pass, so no
+        opener rescans the text. Offsets are shifted by ``base``."""
+        n = len(text)
+        nearest = [n] * (n + 1)  # nearest[k] = first closer at or after k (n = none)
+        for k in range(n - 1, -1, -1):
+            nearest[k] = k if self.is_closer(text[k]) else nearest[k + 1]
+        if work is not None:
+            work.steps += n
         found: list[MarkedSpan] = []
-        i, n = 0, len(text)
+        i = 0
         while i < n:
+            if work is not None:
+                work.steps += 1
             if not self.is_opener(text[i]):
                 i += 1
                 continue
-            j = i + 1
-            while j < n and text[j] != "\n" and not self.is_closer(text[j]):
-                j += 1
-            if j < n and text[j] != "\n":
-                found.append(MarkedSpan(i + 1, j, len(self.clean(text[i + 1 : j]).split())))
+            j = nearest[i + 1]
+            if j < n and j - i - 1 <= cap:
+                found.append(MarkedSpan(base + i + 1, base + j, self.count_words(text[i + 1 : j])))
+                if work is not None:
+                    work.steps += j - i
                 i = j + 1
             else:
                 i += 1
@@ -135,6 +210,8 @@ def _compile(cfg: QuoteMarkConfig) -> QuoteMarks:
         opening_categories=frozenset(cfg.opening_categories),
         closing_categories=frozenset(cfg.closing_categories),
         separators=frozenset(cfg.invisible_separators),
+        count_separators=frozenset(cfg.word_count_separators),
+        max_span_chars=cfg.max_quote_span_chars,
     )
 
 
