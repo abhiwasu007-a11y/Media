@@ -24,7 +24,7 @@ from amw_core.contracts import TaskOutput
 from amw_core.cost import JobHeader, TaskInfo, build_cost_stage_report
 from amw_core.cost.pg import PgCostLedger
 from amw_core.errors import TenantMismatchError
-from amw_core.ids import ActorRef, JobId, OrgId
+from amw_core.ids import ActorRef, JobId, OrgId, SystemActor
 from amw_core.interfaces import TenancyContext, TenantContext
 from amw_core.job_store.pg import PgJobStore
 from amw_orchestrator.executor import DocRef, JobFacts
@@ -61,7 +61,7 @@ class ProductionBuildServices:
     def _own(self, job: JobFacts) -> TenantContext:
         if job.org_id != self._org:
             raise TenantMismatchError("the job belongs to another tenant than these services")
-        return TenantContext(OrgId(job.org_id), ActorRef("sys_operator"))
+        return TenantContext(OrgId(job.org_id), ActorRef(SystemActor.OPERATOR.value))
 
     def cost_report(self, job: JobFacts) -> Mapping[str, Any]:
         job_id = JobId(job.job_id)

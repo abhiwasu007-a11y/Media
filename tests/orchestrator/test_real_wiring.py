@@ -76,7 +76,7 @@ def test_real_run_builds_the_wiring_and_stops_at_the_missing_ports(world: World)
     assert set(unmet) == EXPECTED_UNMET_PORTS  # the exact set, not a membership check
     assert len(unmet) == len(set(unmet))
     # ports with a real implementation are provided, not listed
-    # agent_05 takes its own narrow CheckpointPort, which the core store is not (CCR-307)
+    # agent_05 takes its own narrow CheckpointPort, which the core store is not (CCR-310)
     assert not any(
         u.endswith((":llm", ":tenancy", ":storage", ":clock", ":checkpoints"))
         for u in unmet

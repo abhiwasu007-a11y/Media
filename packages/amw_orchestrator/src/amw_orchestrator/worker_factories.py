@@ -52,10 +52,10 @@ from agent_16_compliance_qa.stages import (
     UniquenessStageDeps,
 )
 from amw_core.contracts import TaskInput
-from amw_core.errors import MissingDependencyError
+from amw_core.errors import ConfigInvalidError, MissingDependencyError
 from amw_core.interfaces import TaskWorker
 from amw_orchestrator.prompt_store import PinnedPrompts, PromptTextStore
-from amw_orchestrator.real_wiring import PortSet
+from amw_orchestrator.real_wiring import PortSet, resolve_port_id
 
 PROMPT_IDS: Final[Mapping[str, str]] = {
     "agent_11": "agent_11/thumbnail_concepts.v1",
@@ -70,8 +70,9 @@ Factory = Callable[[PortSet, TaskInput], TaskWorker]
 
 
 def _own(ports: PortSet, task_type: str, name: str) -> Any:
-    """The port that belongs to one worker (the text the refusal lists)."""
-    return ports.get(f"{task_type}:{name}")
+    """The port of one worker parameter, resolved exactly as the REAL pre-check resolves it."""
+    port_id = resolve_port_id(task_type, name, ports.ports)
+    return ports.get(port_id or f"{task_type}:{name}")
 
 
 def _prompts(ports: PortSet) -> PinnedPrompts:
@@ -112,8 +113,15 @@ def agent_05(ports: PortSet, _ti: TaskInput) -> TaskWorker:
         **_from(ports, tt, "hook_history", "checkpoints", "budget", "ledger", "control",
                 "idempotency", "audit", "chunks"),
     )  # fmt: skip
+    loaded = load_prompts(prompts.root)
+    pinned = set(prompts.registry.values())
+    for item in (loaded.plan, loaded.section, loaded.cut):  # pinned ON READ, not only before it
+        if item is not None and item.sha256 not in pinned:
+            raise ConfigInvalidError(
+                "prompt file does not match its pinned hash", details={"prompt": item.prompt_id}
+            )
     step = ScriptDraftStep(
-        ports.get("llm"), agent_ports, _own(ports, tt, "settings"), load_prompts(prompts.root),
+        ports.get("llm"), agent_ports, _own(ports, tt, "settings"), loaded,
         _own(ports, tt, "scanners_for"),
     )  # fmt: skip
     return ScriptDraftStage(step, _own(ports, tt, "resolver"), storage, ports.get("clock"))

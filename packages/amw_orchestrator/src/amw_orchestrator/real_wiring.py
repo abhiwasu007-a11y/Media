@@ -125,7 +125,7 @@ _NOT_SHARED: Final[frozenset[tuple[str, str]]] = frozenset(
     {
         # agent_05's own narrow Protocols (CallBudget, CallLedger, CheckpointPort, TaskIdempotency,
         # AuditPort): the name matches a core port but the TYPE does not, so the core store is no
-        # provider (CCR-307)
+        # provider (CCR-310)
         ("agent_05.script_draft", "budget"),
         ("agent_05.script_draft", "ledger"),
         ("agent_05.script_draft", "checkpoints"),
@@ -228,24 +228,35 @@ class WorkerSpec:
 
     def unmet(self, provided: Mapping[str, Any]) -> tuple[str, ...]:
         """Parameters of this worker without a provider, as ``<task_type>:<name>``."""
-        missing: list[str] = []
-        for name in self.parameters:
-            if name in _COMPOSED.get(self.task_type, ()):
-                continue
-            if f"{self.task_type}:{name}" in provided:  # a port of this one worker
-                continue
-            port = (
-                _TASK_ALIASES.get((self.task_type, name))
-                or _EXTRA_ALIASES.get((self.task_type, name))
-                or _ALIASES.get(name)
-            )
-            if (
-                port is None
-                or port not in provided
-                or ((self.task_type, name) in _NOT_SHARED and port == _ALIASES.get(name))
-            ):
-                missing.append(f"{self.task_type}:{name}")
-        return tuple(missing)
+        return tuple(
+            f"{self.task_type}:{name}"
+            for name in self.parameters
+            if name not in _COMPOSED.get(self.task_type, ())
+            and resolve_port_id(self.task_type, name, provided) is None
+        )
+
+
+def resolve_port_id(task_type: str, name: str, provided: Mapping[str, Any]) -> str | None:
+    """The id of the port that serves parameter ``name`` of ``task_type``, or ``None`` if unmet.
+
+    The single resolution used by BOTH the REAL pre-check (``WorkerSpec.unmet``) and the worker
+    factories, so what the pre-check accepts is exactly what a factory reads (no late
+    ``MISSING_DEPENDENCY`` after paid stages ran)."""
+    own = f"{task_type}:{name}"
+    if own in provided:  # a port of this one worker
+        return own
+    port = (
+        _TASK_ALIASES.get((task_type, name))
+        or _EXTRA_ALIASES.get((task_type, name))
+        or _ALIASES.get(name)
+    )
+    if (
+        port is None
+        or port not in provided
+        or ((task_type, name) in _NOT_SHARED and port == _ALIASES.get(name))
+    ):
+        return None
+    return port
 
 
 def worker_specs(factories: Mapping[str, WorkerFactory] | None = None) -> dict[str, WorkerSpec]:

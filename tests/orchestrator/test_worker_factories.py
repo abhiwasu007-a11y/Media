@@ -5,7 +5,6 @@ LLM and TTS adapters, the stores and the repositories are inert objects that fai
 factory USES them at construction time (construction composes only: no network, no process, no
 database read). The agents' own entry points are the real classes. No key, no paid call."""
 
-import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -133,8 +132,9 @@ def test_a_missing_port_is_a_typed_refusal_naming_it_never_a_fallback(
     for victim in own:
         reduced = PortSet({k: v for k, v in ports.ports.items() if k != victim})
         assert unmet_ports(spec, reduced) == [victim]  # the refusal names exactly this port
-        with contextlib.suppress(MissingDependencyError):
+        with pytest.raises(MissingDependencyError) as raised:
             FACTORIES[task_type](reduced, ti)  # a direct read of the port is typed too
+        assert raised.value.details["unmet"] == [victim]
 
 
 def test_the_registry_has_every_worker_once_all_ports_exist(ports: PortSet) -> None:
@@ -224,3 +224,45 @@ def test_the_job_documents_stay_refused_until_the_inputs_lane_lands() -> None:
     with pytest.raises(MissingDependencyError) as exc:
         wiring.job_documents(None, None)
     assert exc.value.details["unmet"] == ["job_documents"]
+
+
+@pytest.mark.parametrize(("task_type", "name", "alias"), [
+    ("agent_06.claim_verification", "quotes", "quote_check_factory"),
+    ("agent_08.asset_sourcing", "brand_kits", "brand_kit_reader"),
+])  # fmt: skip
+def test_factory_and_precheck_resolve_an_aliased_port_the_same_way(
+    ports: PortSet, task_type: str, name: str, alias: str
+) -> None:
+    """Regression: the pre-check accepted the alias port while the factory read the worker's own
+    id, so the REAL run passed its refusal and failed with MISSING_DEPENDENCY after paid stages."""
+    own = f"{task_type}:{name}"
+    marker = Inert(alias)
+    reduced = PortSet({**{k: v for k, v in ports.ports.items() if k != own}, alias: marker})
+    spec = {task_type: worker_specs(FACTORIES)[task_type]}
+    assert unmet_ports(spec, reduced) == []  # the pre-check accepts the alias ...
+    ti = type("TI", (), {"org_id": "org_x"})()
+    worker = FACTORIES[task_type](reduced, ti)  # ... so the factory must build from it
+    assert type(worker).__name__ == ENTRY_POINTS[task_type]
+    # and without either id both agree that the port is unmet
+    bare = PortSet({k: v for k, v in reduced.ports.items() if k != alias})
+    assert unmet_ports(spec, bare) == [own]
+    with pytest.raises(MissingDependencyError):
+        FACTORIES[task_type](bare, ti)
+
+
+def test_agent_05_refuses_a_prompt_file_that_changed_after_the_check(
+    ports: PortSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import amw_orchestrator.worker_factories as wf
+
+    real = wf.load_prompts  # type: ignore[attr-defined]
+
+    def swapped(root: Path) -> Any:
+        loaded = real(root)
+        object.__setattr__(loaded.plan, "sha256", "0" * 64)  # changed after the check
+        return loaded
+
+    monkeypatch.setattr(wf, "load_prompts", swapped)
+    ti = type("TI", (), {"org_id": "org_x"})()
+    with pytest.raises(ConfigInvalidError):
+        FACTORIES["agent_05.script_draft"](ports, ti)

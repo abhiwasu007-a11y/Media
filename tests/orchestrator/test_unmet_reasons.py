@@ -35,7 +35,7 @@ REASON_BY_PARAMETER = {
     "groups": NO_CONTRACT, "repo": NO_CONTRACT, "chart_ranges": NO_CONTRACT,
     "fingerprints": NO_CONTRACT,
     "budget": NO_CONTRACT, "checkpoints": NO_CONTRACT, "idempotency": NO_CONTRACT,
-    "audit": NO_CONTRACT,  # agent_05 narrow ports (CCR-307)
+    "audit": NO_CONTRACT,  # agent_05 narrow ports (CCR-310)
 }  # fmt: skip
 
 
