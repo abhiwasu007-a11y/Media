@@ -1,6 +1,6 @@
 # Dry run 2: the real agents behind the real driver (PLUMBING TEST - NOT QUALITY)
 
-Date: 2026-11-19. Branches `claude/v4-dryrun-real-agents` (run), `claude/v4-chain-complete` (this update: CCR-283, 288, 289). Tests: `tests/dryrun/` (`harness.py`, `real_world.py`,
+Date: 2026-11-19. Branches `claude/v4-dryrun-real-agents` (run), `claude/v4-chain-complete` (CCR-283, 288, 289), `claude/v4-marathi-quotes` (this update: Marathi run, exact-quote wiring, CCR-302). Tests: `tests/dryrun/` (`harness.py`, `real_world.py`,
 `test_real_agents.py`, `test_fixes.py`). No paid call, no network, no key; the content is an invented
 three-sentence-style script about the shortness of time (not book text, D12). Job: non-finance
 philosophy sample shape (D13), language `en-IN` (see "Not exercised").
@@ -20,9 +20,9 @@ model-response shape, tone TTS, descriptor-driven FFmpeg stubs, in-memory ports)
 |---|---|
 | Stages COMPLETED through the driver | 19 of 19 (`s04_research` ... `s13_deliver`); job status `DELIVERED` |
 | Stages run by real agents | 17 (`s04_research` ... `s16_score` and `s13_deliver`); `s16_auth` has a stand-in body (real builder and input model), `a_final` is the real `ApprovalWorker` over a test desk |
-| First failing stage | none for the `en-IN` chain. For an `mr-IN` job the first failing stage is `s05_script` (see "Marathi run") |
+| First failing stage | none for the `en-IN` chain and none for the `mr-IN` chain (19 of 19, job `DELIVERED`; see "Marathi run") |
 | Approval | `a_final` suspends (`AWAITING_APPROVAL`, payload state `PENDING`), the test desk reports the decision, the task resumes (second attempt) and its output validates against the registered `svc_s07.request_approval.output` model |
-| Measured | 15 real entry points plus agent_13's delivery stage, 16 real task runs before the approval (agent_06 verification runs twice), 1 attempt per stage (2 for `a_final`), about 3.7 s wall for the whole chain, 157 blobs written; `tests/dryrun`: 12 passed, 1 strict xfail |
+| Measured | 15 real entry points plus agent_13's delivery stage, 16 real task runs before the approval (agent_06 verification runs twice), 1 attempt per stage (2 for `a_final`), about 3.7 s wall for the whole `en-IN` chain, 157 blobs written; `tests/dryrun`: 14 passed, no xfail |
 
 ## Breaks found
 
@@ -38,7 +38,8 @@ model-response shape, tone TTS, descriptor-driven FFmpeg stubs, in-memory ports)
 | O3 | agent_04 hardcodes `library_languages=()`: PL11 refuses English queries for a non-English video | agent_04 | FIXED, PROVISIONAL (CCR-289: `CollectionView.languages` = distinct languages of the INDEXED sources, read in memory and in SQL, feeds `library_languages`); remainder: see "Marathi run" |
 | O4 | job-level documents (brand kit, profile, rule packs, uniqueness template) have no registered schema; three consumers read three brand-kit shapes through ports | contracts | OPEN, CCR-290 (not verified by this run) |
 | O5 | `TaskIo.put_input` / `put_output` failures escape `GraphRunner.run` as raw exceptions (job stays `RUNNING`) | orchestrator | OPEN, hardening ticket (see CCR-285) |
-| O6 | the canned model responses of the real agents' fakes are English: the Marathi run of the whole chain stops at `s05_script` | test fixtures | OPEN, strict xfail `test_the_whole_real_chain_runs_for_a_marathi_job` (CCR-289 remainder) |
+| O6 | the canned model responses of the real agents' fakes are English: the Marathi run of the whole chain stopped at `s05_script` (`a05.plan.lang`); after that the test box font had no Devanagari glyph (`s11_thumbs`) | test fixtures | FIXED in the fixtures only (SYNTHETIC invented Marathi, `tests/dryrun/marathi.py`; pinned Mukta with the Noto fallback as brand font). The strict xfail is replaced by passing tests. Product code unchanged for this break. Quality of the Marathi text is NOT shown (plumbing) |
+| O7 | agent_06 `ClaimVerificationStep` sent `QUOTED_THIRD_PARTY` claims with a citation to the model for a verdict (no exact-quote check in the stage: fail OPEN) | agent_06 | FIXED, PROVISIONAL (CCR-291 verifier wired by CCR-302): a quote claim is decided by code against the library text and never by the model; with no quote check configured the task ends with a typed `MISSING_DEPENDENCY` before any paid call; `LibraryQuoteCheckFactory` builds the check from the job's library path and full commit SHA; an unreadable or modified library leaves the quote `UNVERIFIABLE` (human review). OPEN: no production loader of the private library index and records (the dry run has none: it does not exercise the quote path); agent_16 does not consume `quote_credits.json` yet (needs Agent 12 metadata, CCR-278): the credit data only reaches the gate input as a context ref |
 
 Test-adapter gaps (not product breaks, fixed in `real_world.py`): the agent_06 `MemoryClaims` double kept
 the extraction verdict only through `register_extraction`; the agent_10 asset catalog double dropped
@@ -50,19 +51,31 @@ approval task (resume = second attempt of the suspended task).
 
 ## Marathi run (`mr-IN`, synthetic content)
 
-`run_hybrid(..., language="mr-IN")` over the real chain (`test_the_marathi_run_stops_where_the_report_says_it_stops`):
+`run_hybrid(..., language="mr-IN")` over the real chain (`test_the_whole_real_chain_runs_for_a_marathi_job`, module fixture
+`marathi_chain`): job `DELIVERED`, 19 of 19 stages COMPLETED, the same 17 real agent stages as the `en-IN` run. The canned
+model answers of the fakes are SYNTHETIC invented Marathi (`tests/dryrun/marathi.py`; generic sentences about time, no
+book text, D12), so the real deterministic checks of agents 05 to 16 run on Devanagari text.
 
-| Stage | Result |
+| Step | History |
 |---|---|
-| `s04_research` | COMPLETED with English queries over the English library (CCR-289: PL11 admits the library language; before the fix `OUTPUT_SCHEMA_INVALID plan failed the deterministic checks`) |
-| `s05_script` | FAILED `AGENT.QUALITY_REPEATED_FAILURE: deterministic checks still fail after the repair`, checks `a05.plan.lang` and `a05.plan.selection`: agent_05's language check refuses the English text of its canned model response for an `mr-IN` job (the check works; the fixture is the gap) |
-| `s06_claims` ... `s13_deliver` | not reached |
+| `s04_research` | COMPLETED with English queries over the English library (CCR-289: PL11 admits the library language) |
+| `s05_script` | FAILED before the fixtures (`AGENT.QUALITY_REPEATED_FAILURE`, `a05.plan.lang`: the check refused the English canned text for an `mr-IN` job; the check works, the fixture was the gap). COMPLETED with Marathi plan, section and label fixtures |
+| `s11_thumbs` | the next and last break: the test box font had no Devanagari glyph. COMPLETED with the pinned Mukta (brand font for agents 08, 10, 11) and the pinned Noto Sans Devanagari fallback in agent_11 |
+| `s06_claims` ... `s13_deliver` | COMPLETED |
 
-What this does and does not show: the `mr-IN` builder inputs of `s04_research` and `s05_script` validate, and agent_04
-works with a non-English video over an English library. It does not show anything about Devanagari handling in agents
-06 to 16, TTS `mr-IN`, Marathi subtitles or Marathi QC: those need Marathi canned responses (synthetic, not book text)
-for every real agent, which the fakes do not have. Next step: Marathi fixtures per agent, one agent at a time, starting
-with agent_05 (plan, sections), then 06, 07, 10.
+What is checked (`test_marathi_voice_subtitles_and_thumbnails_are_devanagari_and_covered`,
+`test_glyph_check_refuses_a_devanagari_code_point_the_pinned_font_lacks_and_noto_supplies`): agent_07 receives `mr-IN`;
+the subtitle SRT has `mr-IN` cues in Devanagari; every code point of them is in the pinned Mukta cmap
+(`amw_core.font_coverage`); agent_11 produces 3 Marathi variants; U+0978 (absent from Mukta, present in Noto) is
+refused with Mukta alone, covered with the fallback and drawn by it, and a code point in neither font stays uncovered.
+
+What this does NOT show: any quality of Marathi text, TTS `mr-IN` (tone TTS stub), real FFmpeg rendering of
+Devanagari, or shaping. The glyph check compares cmap code points only: it does not prove that a conjunct or matra
+is shaped correctly (agent_11 renders with Raqm, but the dry run has no pixel check of Marathi text). Subtitle line
+breaking (`agent_10` `CueBuilder`) splits at spaces only and counts code points, not grapheme clusters or rendered width:
+no word is ever cut, so no conjunct or matra is split (`test_long_marathi_cue_is_split_at_spaces_and_never_inside_a_conjunct_or_matra`);
+a word longer than the limit stays whole on its own line with an `OVERLONG_TOKEN` warning
+(`test_marathi_token_longer_than_the_limit_is_kept_whole_with_a_warning`).
 
 ## Shapes verified end to end (real producer output read by the real consumer)
 
@@ -83,7 +96,7 @@ agent_11 `ThumbnailRepository`; agent_16 `FactRowReader`, `PrivateChunkReader`, 
 
 ## Not exercised / not verified
 
-Marathi beyond `s04_research` (see "Marathi run"), a real S7 approval desk (the output shape is the PROVISIONAL
+Marathi quality, real Devanagari TTS / FFmpeg / shaping (see "Marathi run"), the exact-quote path in the chain (the dry run script has no library quote), a real S7 approval desk (the output shape is the PROVISIONAL
 CCR-283 proposal; the desk is a test double), the real meaning of a free-text channel category (CCR-295, PR 102),
 chart scenes (`s06_chart` ran with zero chart facts), finance jobs, revision loops, Shorts, crash-resume, real
 FFmpeg and TTS, the budget meter (each real agent used its own budget and ledger double, so the per-video cap of

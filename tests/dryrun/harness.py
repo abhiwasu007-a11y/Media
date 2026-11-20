@@ -156,7 +156,7 @@ def run_hybrid(
     options: Mapping[str, Any] | None = None,
 ) -> Result:
     holder: dict[str, HybridRegistry] = {}
-    shared: dict[str, Any] = dict(options or {})
+    shared: dict[str, Any] = {**(options or {}), "language": language}
     """Per-run options the in-memory adapters read (a canned query language, a channel label)."""
 
     def factory(approval: ApprovalWorker, storage: LocalDiskStorage) -> HybridRegistry:
