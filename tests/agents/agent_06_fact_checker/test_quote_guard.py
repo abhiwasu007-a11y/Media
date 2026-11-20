@@ -68,19 +68,21 @@ def test_guard_reason(over: dict[str, Any], expected: GuardReason | None) -> Non
         "ती म्हटली",
         "तो म्हटलं",
         "यांनी म्हटले",
-        "यांच्या मते",
-        "सेनेकाच्या  मते",
         "असे म्हणतात",
         "त्याने लिहिले",
         "तो लिहितो",
         "ती लिहिते",
         "त्याने सांगितले",
-        "सेनेकानुसार",
-        "अहवालानुसार",
         "Seneca said",
         "he says",
         "she wrote",
         "he writes",
+        "He noted it",
+        "Seneca remarks on it",
+        "तो सांगतो",
+        "ते बोलले",
+        "त्याने नमूद केले",
+        "असे म्हणत होता",
         "according to Seneca",
         "According   to him",
         "in the words of Seneca",
@@ -106,6 +108,16 @@ def test_seeded_attribution_patterns(text: str) -> None:
         "ते मानतात",
         "सेनेकाने असे मानले",
         "तो मानत होता",
+        "यांच्या मते",
+        "सेनेकाच्या  मते",
+        "सेनेकानुसार",
+        "अहवालानुसार",
+        "नियमानुसार",
+        "He thought so",
+        "She held that view",
+        "per Seneca",
+        "त्याचे वचन",
+        "सेनेकाचे म्हणणे",
     ],
 )
 def test_seeded_reported_speech_patterns_route_to_human_review(text: str) -> None:
@@ -153,12 +165,14 @@ def test_unicode_categories_catch_a_mark_the_pair_table_forgot() -> None:
         opening_categories=("Pi",),
         closing_categories=("Pf",),
         invisible_separators=("​",),
+        word_count_separators=("‌", "-"),
+        max_quote_span_chars=2000,
     )
     marks = cfg.compiled()
     assert [s.words for s in marks.spans("x ⸂a b c⸃ y")] == [3]
     assert marks.spans("it’s and the world’s end") == []  # a closing mark never opens
     assert marks.spans('one "unclosed quote here') == []
-    assert marks.spans('"a\nb"') == []  # a span never crosses a line break
+    assert [s.words for s in marks.spans('"a\nb"')] == [2]  # a span may cross a line break (verse)
 
 
 def test_mark_configuration_is_validated() -> None:
@@ -167,8 +181,12 @@ def test_mark_configuration_is_validated() -> None:
         "opening_categories": ("Pi",),
         "closing_categories": ("Pf",),
         "invisible_separators": ("​",),
+        "word_count_separators": ("-",),
+        "max_quote_span_chars": 100,
     }
     for bad in (
+        {"word_count_separators": ("a",)},
+        {"max_quote_span_chars": 0},
         {"pairs": (("a", "b"),)},  # letters are no marks
         {"pairs": (("((", "))"),)},
         {"pairs": ()},
@@ -221,7 +239,8 @@ def test_a_quote_split_across_two_neighbouring_claims_is_guarded_in_both() -> No
         second.local_id: GuardReason.QUOTE_SPAN,
     }
     far = VerificationClaim.model_validate(claim(3, claim_type="FACTUAL"))
-    assert guard_reasons([first, far, second], s) == {}  # not neighbours: listed as open
+    narrow = make_settings(quote_split_window_claims=2)
+    assert guard_reasons([first, far, second], narrow) == {}  # window 2: neighbours only
 
 
 @pytest.mark.parametrize(

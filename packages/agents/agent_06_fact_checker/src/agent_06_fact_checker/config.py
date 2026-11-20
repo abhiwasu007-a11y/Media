@@ -130,6 +130,9 @@ class FactCheckSettings(AmwModel):
     library cannot prove it, the model must not judge it)."""
     quote_marks: QuoteMarkConfig
     """``factcheck.quote_guard.marks``: quotation mark pairs, categories, invisible separators."""
+    quote_split_window_claims: Annotated[int, Field(ge=2)]
+    """``factcheck.quote_guard.split_window_claims``: a quotation split over up to this many
+    consecutive claims is joined and guards the claims it touches (2 = neighbours only)."""
     quote_pattern_max_length: Annotated[int, Field(ge=1)]
     """``factcheck.quote_guard.pattern_max_length``: longest accepted pattern (characters)."""
     quote_pattern_max_repeat: Annotated[int, Field(ge=1)]
