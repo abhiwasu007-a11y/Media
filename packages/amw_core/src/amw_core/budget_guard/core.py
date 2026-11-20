@@ -3,15 +3,15 @@
 ``BudgetGuardCore`` implements the ``BudgetGuard`` Protocol over a ``BudgetBackend`` (in-memory or
 PostgreSQL). Everything here is deterministic code; no model call.
 
-**Committed amount (CCR-106, PROPOSED).** 09 section 3.3 as written, ``committed = sum(ledger) +
-sum(HELD reservations)``, counts the spend of a running task twice (in the ledger and inside its
-own HELD hold). CCR-106 proposes the corrected text implemented here, no more and no less:
+**Committed amount (CCR-106, approved and applied to 09 section 3.3).** The earlier text,
+``committed = sum(ledger) + sum(HELD reservations)``, counted the spend of a running task twice
+(in the ledger and inside its own HELD hold). Implemented here, no more and no less:
 ``committed = sum(ledger) + sum over HELD of max(0, hold - spend already recorded for that task in
 the budget's scope and period)``; the hold is counted net of its own task's spend.
 
 **PER_VIDEO / PER_JOB** budgets apply per job: the ledger rows and holds of that job only. A
 breach stops only that job (E1 refuses its new tasks, E2 refuses its further calls, E3 audits it);
-the shared ``budgets`` row keeps its state (CCR-107, PROPOSED), so other jobs are unaffected.
+the shared ``budgets`` row keeps its state (CCR-107, approved), so other jobs are unaffected.
 **PILOT_TOTAL** never resets. **DAY / MONTH** follow the tenant time zone; a suspended DAY/MONTH
 budget returns to ACTIVE only when the period has rolled over since it was suspended (B6).
 **PROVIDER** budgets are the start gate (09 section 8) and cap the provider's spend; they are not
