@@ -183,8 +183,8 @@ def test_assets_join_licence_and_ledger(tenancy: PgTenancy, admin: Conn, tenant_
     missing = ASSET.from_uuid(new_uuid7())
     wanted = [ASSET.from_uuid(bare), ASSET.from_uuid(stock), missing]
     with tenancy.transaction(_ctx(tenant_a)) as tx:
-        got = READ.assets(tx, wanted)
-        assert READ.assets(tx, []) == {}
+        got = READ.assets(tx, wanted, JOB.from_uuid(s.job))
+        assert READ.assets(tx, [], JOB.from_uuid(s.job)) == {}
     assert set(got) == set(wanted[:2])  # the missing ID is simply absent
     plain, licensed = got[wanted[0]], got[wanted[1]]
     assert (plain.tier, plain.has_ledger_row, plain.licence_state) == (
@@ -198,12 +198,28 @@ def test_assets_join_licence_and_ledger(tenancy: PgTenancy, admin: Conn, tenant_
     assert (licensed.covers_monetized_youtube, licensed.third_party_permission) == (True, "UNKNOWN")
 
 
+def test_ledger_row_of_another_job_does_not_count(
+    tenancy: PgTenancy, admin: Conn, tenant_a: Tenant
+) -> None:
+    s = seed(admin, tenant_a)
+    other = seed(admin, tenant_a)  # a second job of the same tenant
+    lic = seed_licence(admin, tenant_a, covers=True, permission="UNKNOWN")
+    reused = seed_asset(admin, tenant_a, lic)
+    seed_ledger(admin, tenant_a, reused, lic, other.job, other.task)
+    wire = ASSET.from_uuid(reused)
+    with tenancy.transaction(_ctx(tenant_a)) as tx:
+        here = READ.assets(tx, [wire], JOB.from_uuid(s.job))[wire]
+        there = READ.assets(tx, [wire], JOB.from_uuid(other.job))[wire]
+    assert here.has_ledger_row is False  # ledgered for another job only: fail closed
+    assert there.has_ledger_row is True
+
+
 def test_assets_of_another_tenant_are_absent(
     tenancy: PgTenancy, admin: Conn, tenant_a: Tenant, tenant_b: Tenant
 ) -> None:
     asset = ASSET.from_uuid(seed_asset(admin, tenant_a))
     with tenancy.transaction(_ctx(tenant_b)) as tx:
-        assert READ.assets(tx, [asset]) == {}
+        assert READ.assets(tx, [asset], JOB.new()) == {}
 
 
 # -- approvals --------------------------------------------------------------------------------
@@ -344,7 +360,7 @@ def test_bad_ids_and_foreign_transactions_fail_closed(tenancy: PgTenancy, tenant
         for call in (
             lambda: READ.channel(tx, "chn_" + str(uuid.uuid4())),
             lambda: READ.job(tx, "garbage"),
-            lambda: READ.assets(tx, ["job_" + "0" * 36]),
+            lambda: READ.assets(tx, ["job_" + "0" * 36], JOB.new()),
             lambda: READ.qc_rows(tx, "garbage"),
         ):
             with pytest.raises(InputInvalidError):

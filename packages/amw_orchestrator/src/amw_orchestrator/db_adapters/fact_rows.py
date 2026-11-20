@@ -22,9 +22,9 @@ Sources and the provisional answers where 04 has no column (CCR-301, PROPOSED, f
   and ``chart_data_ref`` is ``None`` (the stricter reading, 15.1b). The ``SENSITIVE_CLAIM``
   approval is the newest approval of that kind whose ``subject_id`` is the claim; its state is
   derived later by the approval verifier, never here.
-* ``assets`` joins ``assets``, ``licences`` and ``licence_ledger``; the port carries no job ID, so
-  ``has_ledger_row`` means "the asset has a ledger row of this tenant" (REQUIRES REVIEW: CCR-301
-  asks for the job ID on the port).
+* ``assets`` joins ``assets``, ``licences`` and ``licence_ledger``; the port carries the job ID, so
+  ``has_ledger_row`` means "the asset has a ledger row of THIS job" (a ledger row of another job
+  of the tenant does not count, so a reused asset fails closed).
 """
 
 from collections.abc import Sequence
@@ -140,8 +140,9 @@ class PgFactRowReader:
             "   AND cpp.profile_id = cp.id"
             " JOIN rule_packs p ON p.id = cpp.rule_pack_id"
             " WHERE c.org_id = %s AND c.id = %s AND cp.status = 'ACTIVE' AND p.status = 'ACTIVE'"
+            " AND (p.org_id IS NULL OR p.org_id = %s)"
             " ORDER BY 1",
-            (org, org, channel),
+            (org, org, channel, org),
         )
         return tuple(str(r[0]) for r in found)
 
@@ -151,7 +152,10 @@ class PgFactRowReader:
         uuid_of(JOB, job_id)
         return None
 
-    def assets(self, tx: TenantTransaction, asset_ids: Sequence[str]) -> dict[str, AssetFactRow]:
+    def assets(
+        self, tx: TenantTransaction, asset_ids: Sequence[str], job_id: str
+    ) -> dict[str, AssetFactRow]:
+        job = uuid_of(JOB, job_id)
         wanted = {uuid_of(ASSET, a): a for a in asset_ids}
         if not wanted:
             return {}
@@ -159,11 +163,11 @@ class PgFactRowReader:
             tx,
             "SELECT a.id, a.visual_source_tier, a.depicts_real_person, a.is_realistic_synthetic,"
             " EXISTS (SELECT 1 FROM licence_ledger ll WHERE ll.org_id = a.org_id"
-            "   AND ll.asset_id = a.id),"
+            "   AND ll.job_id = %s AND ll.asset_id = a.id),"
             " l.state, l.covers_monetized_youtube, l.third_party_permission"
             " FROM assets a LEFT JOIN licences l ON l.id = a.licence_id"
             " WHERE a.org_id = %s AND a.id = ANY(%s)",
-            (org_of(tx), list(wanted)),
+            (job, org_of(tx), list(wanted)),
         )
         out: dict[str, AssetFactRow] = {}
         for aid, tier, person, synthetic, ledger, state, covers, permission in found:
