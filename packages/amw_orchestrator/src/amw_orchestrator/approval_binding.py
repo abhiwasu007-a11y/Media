@@ -1,22 +1,22 @@
 """An approval authorises only what it was given for (SAFETY: a stale approval never authorises a
 different render). Used by the builder that consumes an ``svc_s07.request_approval.output``.
 
-PROVISIONAL (CCR-296, PROPOSED). Fail closed: the approval is accepted only if ALL of these hold,
-checked against the CURRENT subject of the stage being authorised (never against the approval
-itself):
+CCR-296 (closed by this module with the S7 approval desk, CCR-297). Fail closed: the approval is
+accepted only if ALL of these hold, checked against the CURRENT subject of the stage being
+authorised (never against the approval itself):
 
 * the output is a well-formed ``ApprovalOutput`` (CCR-283), ``state`` ``APPROVED``, of the
-  expected ``approval_kind``;
-* ``subject_sha256`` equals the SHA-256 of the current subject (03 section 11.6 rule 1);
-* it names at least one evidence ID, and EVERY one is read through the ``EvidenceStatusLookup``
-  port (``amw_core.owner_evidence_status``) and is ``CONFIRMED``, owner-chat, MAC-valid, of the
-  run's org, bound to the same subject kind and ID as the approval, and ``REAL`` (a
-  ``TEST_FIXTURE`` row only when the run is a dry run: the rule of the run preflight);
-* no port, or an ID the port does not know, refuses.
-
-What the port cannot say today (``EvidenceStatus`` carries neither the approval ID nor the
-subject hash of the evidence row) is listed in CCR-296; the subject kind and ID of the row are
-the binding available now.
+  expected ``approval_kind``, ``subject_sha256`` equal to the SHA-256 of the current subject
+  (03 section 11.6 rule 1), naming at least one evidence ID;
+* the ``ApprovalEvidencePort`` (``amw_core.owner_evidence_approvals``) answers
+  ``approved(approval_id, subject_sha256)`` with an ``ApprovalEvidenceStatus`` (a base
+  ``EvidenceStatus`` or ``None`` refuses) of kind ``APPROVAL_DECISION`` (a whitelist) that is
+  ``CONFIRMED``, owner-chat, MAC-valid, of the run's org, of THIS approval (``approval_id``), of
+  the current subject hash, ``decision`` ``APPROVED``, bound to the same subject kind and ID as the
+  approval, and one of the output's ``evidence_ids``;
+* its source is ``REAL`` (``TEST_FIXTURE`` only when the run is a dry run: the rule of the run
+  preflight);
+* no port refuses.
 """
 
 from collections.abc import Mapping
@@ -26,18 +26,13 @@ from typing import Any
 from pydantic import ValidationError
 
 from amw_core.errors import InputInvalidError
-from amw_core.owner_evidence_real import FIN_R10, PROVIDER_LIMIT
-from amw_core.owner_evidence_status import (
-    OWNER_CHAT_OPERATOR,
-    EvidenceSourceKind,
-    EvidenceStatusLookup,
+from amw_core.owner_evidence_approvals import (
+    APPROVAL_DECISION,
+    ApprovalEvidencePort,
+    ApprovalEvidenceStatus,
 )
+from amw_core.owner_evidence_status import OWNER_CHAT_OPERATOR, EvidenceSourceKind
 from amw_orchestrator.payloads import ApprovalOutput
-
-_CONFIRMATION_KINDS: frozenset[str] = frozenset({PROVIDER_LIMIT, FIN_R10})
-"""``EvidenceStatus.kind`` values of the confirmation bindings (provider limit, FIN R10). Such a
-row backs a different claim and is never the evidence of an approval decision. ``EvidenceStatus``
-has no record kind, so "is an approval-decision row" is not decidable yet (CCR-296)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +59,7 @@ def require_bound_approval(
     approval_kind: str,
     subject: ExpectedSubject,
     org_id: str,
-    evidence: EvidenceStatusLookup | None,
+    evidence: ApprovalEvidencePort | None,
     real_run: bool,
 ) -> ApprovalOutput:
     """The validated approval, or a typed ``INPUT_INVALID`` refusal (fail closed)."""
@@ -81,24 +76,33 @@ def require_bound_approval(
     if not approval.evidence_ids:
         raise _refuse(stage_id, "no owner evidence")
     if evidence is None:
-        raise _refuse(stage_id, "no evidence reader: the evidence cannot be confirmed")
-    for evidence_id in approval.evidence_ids:
-        row = evidence.get(evidence_id)
-        if row is None:
-            raise _refuse(stage_id, "evidence row not found")
-        if not row.mac_valid:
-            raise _refuse(stage_id, "evidence MAC is not valid")
-        if row.evidence_state != "CONFIRMED" or row.recorded_from != OWNER_CHAT_OPERATOR:
-            raise _refuse(stage_id, "evidence is not CONFIRMED from the owner chat")
-        if row.source_kind is EvidenceSourceKind.TEST_FIXTURE:
-            if real_run:
-                raise _refuse(stage_id, "TEST_FIXTURE evidence refused in a real run")
-        elif row.source_kind is not EvidenceSourceKind.REAL:
-            raise _refuse(stage_id, "evidence source is neither REAL nor TEST_FIXTURE")
-        if row.evidence_id != evidence_id or row.org_id != org_id:
-            raise _refuse(stage_id, "evidence belongs to another org")
-        if row.kind in _CONFIRMATION_KINDS:
-            raise _refuse(stage_id, "evidence is a confirmation binding, not an owner decision")
-        if row.subject_kind != subject.kind or row.subject_id != subject.id:
-            raise _refuse(stage_id, "evidence is bound to another subject")
+        raise _refuse(stage_id, "no evidence port: the evidence cannot be confirmed")
+    row = evidence.approved(approval.approval_id, subject.sha256)
+    if row is None:
+        raise _refuse(stage_id, "no approved evidence for this approval and subject")
+    if not isinstance(row, ApprovalEvidenceStatus):
+        raise _refuse(stage_id, "evidence is not an approval-decision status")
+    if row.kind != APPROVAL_DECISION:
+        raise _refuse(stage_id, "evidence is not an approval decision")
+    if not row.mac_valid:
+        raise _refuse(stage_id, "evidence MAC is not valid")
+    if row.evidence_state != "CONFIRMED" or row.recorded_from != OWNER_CHAT_OPERATOR:
+        raise _refuse(stage_id, "evidence is not CONFIRMED from the owner chat")
+    if row.source_kind is EvidenceSourceKind.TEST_FIXTURE:
+        if real_run:
+            raise _refuse(stage_id, "TEST_FIXTURE evidence refused in a real run")
+    elif row.source_kind is not EvidenceSourceKind.REAL:
+        raise _refuse(stage_id, "evidence source is neither REAL nor TEST_FIXTURE")
+    if row.org_id != org_id:
+        raise _refuse(stage_id, "evidence belongs to another org")
+    if row.approval_id != approval.approval_id:
+        raise _refuse(stage_id, "evidence belongs to another approval")
+    if row.subject_sha256 != subject.sha256:
+        raise _refuse(stage_id, "evidence is bound to another subject hash")
+    if row.decision != "APPROVED":
+        raise _refuse(stage_id, f"evidence decision is {row.decision}, not APPROVED")
+    if row.evidence_id not in approval.evidence_ids:
+        raise _refuse(stage_id, "evidence is not one the approval names")
+    if row.subject_kind != subject.kind or row.subject_id != subject.id:
+        raise _refuse(stage_id, "evidence is bound to another subject")
     return approval

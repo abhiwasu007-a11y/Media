@@ -10,8 +10,13 @@ from typing import Any
 import pytest
 
 from amw_core.errors import InputInvalidError
-from amw_core.ids import OWNER_EVIDENCE, Prefix, new_id
-from amw_core.owner_evidence_status import EvidenceSourceKind
+from amw_core.ids import APPROVAL, OWNER_EVIDENCE, Prefix, new_id
+from amw_core.owner_evidence_approvals import (
+    APPROVAL_DECISION,
+    ApprovalEvidencePort,
+    PgApprovalEvidencePort,
+)
+from amw_core.owner_evidence_status import EvidenceSourceKind, EvidenceStatus
 from amw_core.storage.local import LocalDiskStorage
 from amw_delivery.stage import DeliveryStage
 from amw_orchestrator.approval_binding import ExpectedSubject, require_bound_approval
@@ -65,26 +70,88 @@ def test_a_new_render_after_the_approval_is_refused() -> None:
     _refused(w, "subject hash differs")
 
 
+def _swap_evidence(w: World, org: str | None, kind: str, subject_id: str, **kw: Any) -> None:
+    """The final approval now names evidence of the same approval but of another subject/org."""
+    data = _final(w)
+    ev = w.evidence.record(
+        org or w.job.org_id, kind, subject_id,
+        approval_id=data["approval_id"], subject_sha256=data["subject_sha256"], **kw,
+    )  # fmt: skip
+    _set_final(w, evidence_ids=[ev])
+
+
 def test_evidence_of_another_subject_kind_is_refused() -> None:
     w = World()
-    ev = w.evidence.record(w.job.org_id, "script", w.render_id)
-    _set_final(w, evidence_ids=[ev])
+    _swap_evidence(w, None, "script", w.render_id)
     _refused(w, "another subject")
 
 
 def test_evidence_of_another_job_s_render_is_refused() -> None:
     w = World()
-    ev = w.evidence.record(w.job.org_id, "render", new_id(Prefix.RENDER))
-    _set_final(w, evidence_ids=[ev])
+    _swap_evidence(w, None, "render", new_id(Prefix.RENDER))
     _refused(w, "another subject")
 
 
 def test_evidence_of_another_org_is_refused() -> None:
     w = World()
-    other = new_id(Prefix.ORGANISATION)
-    ev = w.evidence.record(other, "render", w.render_id)
-    _set_final(w, evidence_ids=[ev])
+    _swap_evidence(w, new_id(Prefix.ORGANISATION), "render", w.render_id)
     _refused(w, "another org")
+
+
+def test_evidence_of_another_approval_with_the_same_subject_is_refused() -> None:
+    """The earlier open gap: same subject kind and ID, but the evidence decided ANOTHER approval."""
+    w = World()
+    (ev,) = _final(w)["evidence_ids"]
+    w.evidence.change(ev, approval_id=str(APPROVAL.new()))
+    _refused(w, "another approval")
+
+
+def test_rejecting_evidence_is_refused_even_under_an_approved_output() -> None:
+    for decision in ("REJECTED", "CHANGES_REQUESTED"):
+        w = World()
+        (ev,) = _final(w)["evidence_ids"]
+        w.evidence.change(ev, decision=decision)
+        _refused(w, "not APPROVED")
+
+
+def test_evidence_of_a_stale_subject_hash_is_refused() -> None:
+    w = World()
+    (ev,) = _final(w)["evidence_ids"]
+    w.evidence.change(ev, subject_sha256=OTHER_SHA)
+    _refused(w, "another subject hash")
+
+
+def test_a_base_evidence_status_or_wrong_kind_is_refused() -> None:
+    w = World()
+    (ev,) = _final(w)["evidence_ids"]
+    row = w.evidence.rows[ev]
+    base = EvidenceStatus(
+        evidence_id=row.evidence_id, evidence_state="CONFIRMED", recorded_from=row.recorded_from,
+        org_id=row.org_id, kind=APPROVAL_DECISION, subject_kind=row.subject_kind,
+        subject_id=row.subject_id, subject=None, source_kind=row.source_kind, mac_valid=True,
+    )  # fmt: skip
+    w.evidence.rows[ev] = base  # type: ignore[assignment]  # a port that answers the base type
+    _refused(w, "not an approval-decision status")
+    for kind in (None, "PROVIDER_LIMIT", "FIN_R10_NOT_SEBI_REGISTERED", "SOMETHING_NEW"):
+        w2 = World()
+        (ev2,) = _final(w2)["evidence_ids"]
+        w2.evidence.change(ev2, kind=kind)
+        _refused(w2, "not an approval decision")
+
+
+def test_the_port_is_asked_for_this_approval_and_the_current_hash() -> None:
+    w = World()
+    BuilderTable().build(w.ctx("s16_auth"))
+    final = _final(w)
+    assert w.evidence.asked[-1] == (final["approval_id"], final["subject_sha256"])
+
+
+def test_evidence_the_approval_does_not_name_is_refused() -> None:
+    w = World()
+    (ev,) = _final(w)["evidence_ids"]
+    _set_final(w, evidence_ids=[str(OWNER_EVIDENCE.new())])
+    assert ev not in _final(w)["evidence_ids"]
+    _refused(w, "not one the approval names")
 
 
 @pytest.mark.parametrize("state", ["PENDING", "REJECTED", "EXPIRED", "WITHDRAWN"])
@@ -109,15 +176,8 @@ def test_missing_evidence_is_refused() -> None:
     _set_final(w, evidence_ids=[])
     _refused(w, "not a valid approval")  # the model demands the evidence
     w2 = World()
-    _set_final(w2, evidence_ids=[str(OWNER_EVIDENCE.new())])  # an ID the store does not know
-    _refused(w2, "not found")
-
-
-def test_one_bad_evidence_row_refuses_even_beside_a_good_one() -> None:
-    w = World()
-    bad = w.evidence.record(w.job.org_id, "script", w.render_id)
-    _set_final(w, evidence_ids=[*_final(w)["evidence_ids"], bad])
-    _refused(w, "another subject")
+    _set_final(w2, approval_id=str(APPROVAL.new()))  # an approval the port does not know
+    _refused(w2, "no approved evidence")
 
 
 def test_without_an_evidence_reader_nothing_is_authorised() -> None:
@@ -125,7 +185,7 @@ def test_without_an_evidence_reader_nothing_is_authorised() -> None:
     ctx = replace(w.ctx("s16_auth"), evidence=None)
     with pytest.raises(InputInvalidError) as exc:
         BuilderTable().build(ctx)
-    assert "no evidence reader" in str(exc.value.details)
+    assert "no evidence port" in str(exc.value.details)
 
 
 def test_a_mac_invalid_or_not_owner_chat_row_is_refused() -> None:
@@ -160,9 +220,12 @@ def test_test_fixture_evidence_is_refused_in_a_real_run_and_real_evidence_is_acc
     (ev,) = _final(w)["evidence_ids"]
     w.evidence.change(ev, source_kind=EvidenceSourceKind.REAL)
     assert BuilderTable().build(replace(w.ctx("s16_auth"), real_run=True)).data["approval_id"]
+    w.evidence.change(ev, source_kind="OTHER")  # neither REAL nor TEST_FIXTURE
+    with pytest.raises(InputInvalidError):
+        BuilderTable().build(replace(w.ctx("s16_auth"), real_run=True))
 
 
-def test_the_default_context_is_a_real_run_with_no_reader() -> None:
+def test_the_default_context_is_a_real_run_with_no_port() -> None:
     ctx = World().ctx("s16_auth")
     default = BuildContext(**{k: getattr(ctx, k) for k in (
         "job", "stage", "task_id", "iteration", "attempt_no", "idempotency_key",
@@ -178,9 +241,10 @@ def _with_script_approval(w: World, *, script_sha: str | None = None) -> None:
     assert script is not None and script.data is not None
     sid = str(script.data["script_id"])
     sha = script_sha or str(script.data["script_document"]["sha256"])
-    ev = w.evidence.record(w.job.org_id, "script", sid)
+    apr = str(APPROVAL.new())
+    ev = w.evidence.record(w.job.org_id, "script", sid, approval_id=apr, subject_sha256=sha)
     w.add("a_script", "svc_s07.request_approval.output",
-          approval_output(sha, kind="SCRIPT", evidence_ids=[ev]))  # fmt: skip
+          approval_output(sha, kind="SCRIPT", approval_id=apr, evidence_ids=[ev]))  # fmt: skip
 
 
 def test_a_script_approval_of_the_current_script_is_accepted() -> None:
@@ -224,7 +288,10 @@ def _script_approval_world(**ev: Any) -> World:
         ({"subject_kind": "render"}, "another subject"),
         ({"subject_id": "scr_other"}, "another subject"),
         ({"mac_valid": False}, "MAC"),
-        ({"kind": "PROVIDER_LIMIT"}, "confirmation binding"),
+        ({"kind": "PROVIDER_LIMIT"}, "not an approval decision"),
+        ({"approval_id": "apr_other"}, "another approval"),
+        ({"decision": "REJECTED"}, "not APPROVED"),
+        ({"subject_sha256": "e" * 64}, "another subject hash"),
     ],
 )
 def test_a_bad_script_approval_is_refused_by_the_paid_stage_builder_in_a_real_run(
@@ -255,7 +322,7 @@ def test_a_stale_hash_or_other_kind_script_approval_is_refused_before_paid_stage
 
 
 @pytest.mark.parametrize("stage", _PAID)
-def test_a_script_approval_that_is_not_approved_or_has_no_reader_is_refused(stage: str) -> None:
+def test_a_script_approval_that_is_not_approved_or_has_no_port_is_refused(stage: str) -> None:
     w = World()
     _with_script_approval(w)
     data = _script_data(w)
@@ -266,14 +333,7 @@ def test_a_script_approval_that_is_not_approved_or_has_no_reader_is_refused(stag
     _with_script_approval(w2)
     with pytest.raises(InputInvalidError) as exc:
         BuilderTable().build(replace(w2.ctx(stage), evidence=None))
-    assert "no evidence reader" in str(exc.value.details)
-
-
-def test_a_confirmation_binding_evidence_is_not_an_approval_decision() -> None:
-    w = World()
-    (ev,) = _final(w)["evidence_ids"]
-    w.evidence.change(ev, kind="FIN_R10_NOT_SEBI_REGISTERED")
-    _refused(w, "confirmation binding")
+    assert "no evidence port" in str(exc.value.details)
 
 
 def test_a_script_approval_of_an_older_script_is_refused() -> None:
@@ -298,13 +358,18 @@ def test_the_pure_check_returns_the_validated_approval() -> None:
     assert got.state == "APPROVED"
 
 
-def test_the_fake_reader_unknown_id_is_none() -> None:
-    assert FakeEvidenceStatuses().get(str(OWNER_EVIDENCE.new())) is None
+def test_the_fake_port_unknown_approval_is_none() -> None:
+    assert FakeEvidenceStatuses().approved(str(APPROVAL.new()), "a" * 64) is None
+
+
+def test_the_fake_and_the_postgresql_adapter_both_are_the_port() -> None:
+    assert isinstance(FakeEvidenceStatuses(), ApprovalEvidencePort)
+    assert issubclass(PgApprovalEvidencePort, ApprovalEvidencePort)
 
 
 # -- the whole chain through the driver ---------------------------------------------------------
 def _run_to_decision(
-    pg_dsn: str, tmp: Path, *, real_run: bool, script_approval: bool = False
+    pg_dsn: str, tmp: Path, *, real_run: bool, script_approval: bool = False, evidence: Any = ...
 ) -> tuple[Any, Any]:
     """The run report and the stand-ins (``seen``: the stages that really started)."""
     from amw_core.ids import Prefix
@@ -320,6 +385,7 @@ def _run_to_decision(
     rig = build_rig(
         pg_dsn, tmp / "blobs", registry_factory=factory, real_run=real_run,
         schemas=agent_registry(real_outputs=False), build_services=RuntimeFacts(), desk=TestDesk(),
+        evidence=evidence,
     )  # fmt: skip
     base = rig.intake("youtube_general")
     org = base.org_id
@@ -351,6 +417,17 @@ def test_the_chain_with_test_desk_evidence_is_delivered_in_a_dry_run(
 ) -> None:
     report, _ = _run_to_decision(pg_dsn, tmp_path, real_run=False)
     assert report.status == "DELIVERED"
+
+
+def test_a_real_run_without_the_port_refuses_the_whole_chain(pg_dsn: str, tmp_path: Path) -> None:
+    """Fail closed: no ``ApprovalEvidencePort`` injected into the runner, a real run authorises
+    nothing (a dry run neither: the port is the only reader of approval evidence)."""
+    report, _ = _run_to_decision(pg_dsn, tmp_path, real_run=True, evidence=None)
+    assert report.status != "DELIVERED"
+    auth = report.stages["s16_auth"]
+    assert auth.output is not None and auth.output.error is not None
+    assert "no evidence port" in str(auth.output.error.details)
+    assert "s13_deliver" not in report.order
 
 
 def test_the_same_chain_is_refused_at_the_authorisation_in_a_real_run(
