@@ -193,6 +193,22 @@ Operator summary:
 5. **Backlog ticket AI-PRESENTER (not built; do NOT build now).** A provider adapter "AI presenter": photo plus our own TTS audio to a talking-head clip, short segments. Provisional requirement lines (to be confirmed before any design): (a) a per-person written consent record for every person whose photo is used; (b) a mandatory synthetic-media disclosure flag set at upload (the YouTube field and policy are in RESEARCH_LOG YT-06 and YT-07; the Indian synthetic-information rules are IN-06; applicability to this use is **REQUIRES REVIEW (Phase 1): legal confirmation of the disclosure duty for AI presenter clips**); (c) blocked on finance channels (relates to FIN-R11 / YTG-R2 presenter-kind, 3A_SLICE_SPEC R4, and CCR-273); (d) its cost is counted in the per-video budget (D9: USD 5 cap, hard stop). No provider is chosen, no number is invented.
 6. **Still needed from the owner:** provider limits (Anthropic, ElevenLabs), API keys through the credential form, voice choice. SEBI registration status is needed **only for finance channels** (D13 item 2). Read access to the private repo (A9) is also needed. D12 items A9, A10 (now answered: topic = Seneca, On the Shortness of Life) and A11 stay as listed below.
 
+### D14 (2026-11-20, owner chat message): CCR-273 approved, category stored on the channel record, free voice
+Recorded from the owner's chat message (R14: operator's record, not production-verified owner evidence until ticket 3A-13 / the S7 desk lands). Quoted verbatim:
+
+> CCR-273 मंजूर
+>
+> Open item resolved: store category on the channel record (per org); the rule-pack map stays category → rule set only. Missing/unknown category = finance (fail-closed), and changing a channel's category needs owner approval + audit log entry. Remove the REQUIRES REVIEW for this item.
+>
+> Priority unchanged: Seneca sample MP4 with free voice. Reply with ETA (hours) and the single next blocker. Marathi, ≤5 lines.
+
+Operator summary:
+1. **CCR-273 = APPROVED** (owner, 2026-11-20, the exact phrase "CCR-273 मंजूर"). Contract docs 03/04/07/24/27 and MASTER_DIRECTIVE.md are not edited here.
+2. **Open item resolved:** the category is stored on the channel record per org (the `channels.category` column); the rule-pack map stays category -> rule set only; unset, missing or unknown = finance (fail closed); changing a channel's category needs owner approval and an audit log entry. The REQUIRES REVIEW on this item is removed from the CCR-273 row. Related rows updated: CCR-288 (storage resolved; exact value set stays open), CCR-295 (note; whether a job freezes the category stays open). Other REQUIRES REVIEW items are untouched.
+3. **New ticket CAT-07:** enforce that changing `channels.category` carries owner approval evidence and writes an audit log entry (fail closed, R14). A DB-level guard or trigger is a design for a CCR if it needs a migration; none is filed or built here.
+4. **Priority unchanged: Seneca sample MP4 with FREE VOICE.** The voice provider is a free TTS: **REQUIRES REVIEW (Phase 1): which free Marathi-capable TTS, licence terms for monetised YouTube use** (researched by another lane; no provider is chosen here). This does not change D13 item 6 beyond the voice choice (A14) now being a free TTS.
+5. **Owner reply required:** ETA in hours and the single next blocker, in Marathi, at most 5 lines (given in the session reply, not in this ledger). SEBI registration status stays needed only for finance channels.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
@@ -202,7 +218,7 @@ Operator summary:
 | A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
 | A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
 | A5 | Channel Google account / Brand Account decision | Waiting (same as A4) |
-| A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status (**finance channels only**, D13), GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
+| A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status (**finance channels only**, D13; CCR-273 approved, D14), GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
 | A7 | API keys | Not needed in this phase |
 | A8 | **Separate verifier host with its own platform-API credential** (D11 item 2) | **Mandatory gate before any YouTube publish and before the first client.** Not needed for 3A. |
 | A9 | **D12/D13:** create the private repo (D13 names it `amw-knowledge-library`) and grant read access (then the session attaches it); D13 sample #1 depends on it | **Done (D13 follow-up, 2026-11-19):** the owner created the private repo and the session attached it read-only: `abhiwasu007-a11y/amw-knowledge-library` @ `fb26bc9` (main). Books and studies are read from there only; nothing is copied into this repo; job inputs carry only the repo path and the commit SHA, never book text. Per-book rules: `philosophy/BOOKS_MANIFEST.md`. |
@@ -210,7 +226,7 @@ Operator summary:
 | A11 | **D12:** legal confirmation of the 60-year public-domain test | **REQUIRES REVIEW (Phase 1): legal confirmation of the public-domain test across the jurisdictions where the channel is distributed (the owner's rule is life plus 60 years; other jurisdictions may use a different term).** Also open: which freeze rules apply, and the order of sample #2 versus the three 3B samples (D12). |
 | A12 | **D13:** provider spending limits (Anthropic, ElevenLabs), confirmed in chat | **Waiting (owner).** Pre-flight refuses a real run until confirmed. |
 | A13 | **D13:** API keys through the credential form | **Waiting (owner).** Never in chat or git. |
-| A14 | **D13:** voice choice | **Waiting (owner).** |
+| A14 | **D13:** voice choice | **Waiting (owner).** D14: the voice for sample #1 is a free TTS; **REQUIRES REVIEW (Phase 1): which free Marathi-capable TTS, licence terms for monetised YouTube use.** |
 
 ## Open questions (new since the plan; provisional default applies until the owner answers, per owner rule A.9)
 
