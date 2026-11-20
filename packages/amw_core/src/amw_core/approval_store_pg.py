@@ -3,7 +3,8 @@
 
 What this store writes, as ``amw_app``: the approval row (with its ``review_code``, CCR-010/090,
 registered in ``review_codes`` by the 0055 trigger), its undecided step rows, the pointer
-``tasks.approval_id`` and the derived final ``approvals.state``. What it never writes: a decided
+``tasks.approval_id`` and, through ``amw_approval_settle`` (0060), the derived final
+``approvals.state``. What it never writes: a decided
 step or any other human row. Those are written only by ``amw_human_record_apply`` inside the
 database (the human-row trigger refuses everyone else, 0009), through the operator login.
 
@@ -331,17 +332,20 @@ class PgApprovalStore:
     ) -> bool:
         """Derive the final ``approvals.state`` from the decided step (04 section 5.16: the
         approval's state follows its steps). ``True`` when this call changed it, ``False`` when
-        it was already that state; another final state is ``PermissionDeniedError``. The CALLER
-        must have checked the confirmed evidence of the step first (``ApprovalEvidenceLookup``)."""
+        it was already that state; another final state is ``PermissionDeniedError``. Since migration
+        0060 the write goes through ``amw_approval_settle`` (``amw_app`` has no direct write on
+        ``approvals.state``); the database re-checks the confirmed evidence of the step itself
+        (``amw_approval_backed``) and refuses otherwise (``PermissionDeniedError``)."""
         if state.value not in FINAL_STATES:
             raise InputInvalidError("a step that is not decided cannot settle an approval")
         conn = connection_of(tx)
-        cur = conn.execute(
-            "UPDATE approvals SET state = %s, decided_at = now()"
-            " WHERE id = %s AND org_id = amw_current_org() AND state = 'PENDING'",
-            (state.value, APPROVAL.to_uuid(approval_id)),
-        )
-        if cur.rowcount == 1:
+        try:
+            row = conn.execute(
+                "SELECT amw_approval_settle(%s)", (APPROVAL.to_uuid(approval_id),)
+            ).fetchone()
+        except psycopg.Error as exc:
+            raise translate_db_error(exc) from exc
+        if row is not None and row[0] is True:
             return True
         current = self.get(tx, approval_id)
         if current is None:

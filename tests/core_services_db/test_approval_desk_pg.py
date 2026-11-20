@@ -38,7 +38,7 @@ from amw_core.errors import (
 )
 from amw_core.exec_context import ExecContext
 from amw_core.interfaces import DbRole, EvidenceRecord, NewEvidence, TenantContext
-from amw_core.owner_evidence_approvals import ApprovalEvidenceLookup
+from amw_core.owner_evidence_approvals import ApprovalEvidenceLookup, PgApprovalEvidencePort
 from amw_core.owner_evidence_fake import MemorySessionEventSource
 from amw_core.owner_evidence_operator import OperatorDesk, locate
 from amw_core.owner_evidence_pg import PgDbSession, PgEvidenceDatabase
@@ -51,7 +51,7 @@ from amw_core.owner_evidence_real import (
 )
 from amw_core.owner_evidence_status import EvidenceSourceKind, EvidenceStatusLookup
 from amw_core.owner_evidence_verifier import SessionEvent, VerifierPolicy
-from amw_core.tenancy import PgTenancy
+from amw_core.tenancy import PgTenancy, connection_of
 from amw_core.tenancy.evidence_keys import install_evidence_mac_key
 from amw_orchestrator.approval_desk import PgApprovalDesk
 from amw_orchestrator.payloads import ApprovalOutput
@@ -208,16 +208,32 @@ class World:
         with self.operator_db.transaction(self.ctx) as tx:
             self.db.human_record_apply(PgDbSession(DbRole.OPERATOR), tx, row.id)
 
-    def owner_decides(self, job: Job, decision: str = "approve", at: int = 1) -> EvidenceRecord:
+    def owner_decides(
+        self, job: Job, decision: str = "approve", at: int = 1, **change: Any
+    ) -> EvidenceRecord:
         """The whole real path for one decision: record, verify, confirm from the chat, apply."""
         code = self.approval(job)["code"]
-        row = self.verify(self.say(job, f"{decision} {code}", at))
+        row = self.verify(self.say(job, f"{decision} {code}", at, **change))
         assert self.confirm(row, f"confirm {code}", at + 2) is ConfirmationOutcome.CONFIRMED
         self.apply(row)
         return row
 
     def lookup(self, tx: Any) -> ApprovalEvidenceLookup:
         return ApprovalEvidenceLookup(self.db, PgApprovalStore(), PgDbSession(DbRole.APP), tx)
+
+    def desk_port(self) -> PgApprovalEvidencePort:
+        return self.real.evidence_port()
+
+    def step_evidence(self, job: Job) -> uuid.UUID:
+        got = self.admin.execute(
+            "SELECT evidence_id FROM approval_steps WHERE approval_id ="
+            " (SELECT approval_id FROM tasks WHERE id = %s)",
+            (ids.TASK.to_uuid(job.task),),
+        ).fetchone()
+        assert got is not None
+        value = got[0]
+        assert isinstance(value, uuid.UUID)
+        return value
 
     def step(self, job: Job) -> tuple[Any, ...]:
         got = self.admin.execute(
@@ -317,15 +333,28 @@ def test_workflows_that_are_not_built_are_refused(world: World) -> None:
 def test_the_app_login_cannot_write_a_decided_step(world: World) -> None:
     job = world.job()
     world.real.open(job.task_input(), job.ctx())
-    with world.app_db.transaction(world.ctx) as tx:
-        from amw_core.tenancy import connection_of
-
-        with pytest.raises(psycopg.Error):
-            connection_of(tx).execute(
-                "UPDATE approval_steps SET state = 'APPROVED', decided_by = %s,"
-                " approval_channel = 'OWNER_CHAT_OPERATOR', recorded_by = 'svc_s07'",
-                (world.owner,),
-            )
+    with world.app_db.transaction(world.ctx) as tx, pytest.raises(psycopg.Error):
+        connection_of(tx).execute(
+            "UPDATE approval_steps SET state = 'APPROVED', decided_by = %s,"
+            " approval_channel = 'OWNER_CHAT_OPERATOR', recorded_by = 'svc_s07'",
+            (world.owner,),
+        )
+    # migration 0060: the approval row is no free write either (state, hash, task pointer)
+    approval = world.approval(job)["id"]
+    for stmt, params in (
+        ("UPDATE approvals SET state = 'APPROVED' WHERE id = %s", (approval,)),
+        (
+            "UPDATE approvals SET subject_sha256 = %s WHERE id = %s",
+            (bytes.fromhex(OTHER_SHA), approval),
+        ),
+        ("UPDATE tasks SET approval_id = NULL WHERE id = %s", (ids.TASK.to_uuid(job.task),)),
+    ):
+        with (
+            pytest.raises(PermissionDeniedError),
+            world.app_db.transaction(world.ctx) as tx,
+        ):
+            connection_of(tx).execute(stmt.encode(), params)
+    assert world.approval(job)["state"] == "PENDING"
 
 
 # ---- the owner replies (REAL source) ------------------------------------------------------
@@ -526,12 +555,76 @@ def test_real_desk_refuses_test_rows_and_the_dry_run_desk_takes_them(
             status = world.lookup(tx).get(row.id)
         assert status is not None
         assert status.source_kind is EvidenceSourceKind.TEST_FIXTURE
-        with pytest.raises(PermissionDeniedError):
+        # a REAL desk never works in a TEST-profile database (mode tied to the profile)
+        with pytest.raises(ConfigInvalidError):
             world.real.decision(job.task_input(), job.ctx())
         assert world.approval(job)["state"] == "PENDING"
+    # the profile cannot be flipped to REAL by a login; as the database owner it is flipped here
+    # to prove that the REAL desk still refuses the TEST_FIXTURE row itself (defence in depth)
+    admin.execute("UPDATE evidence_db_profile SET profile = 'REAL'")
+    with pytest.raises(PermissionDeniedError):
+        world.real.decision(job.task_input(), job.ctx())
+    with pytest.raises(PermissionDeniedError):
+        world.real.decided(str(job.job), str(job.task))
+    with pytest.raises(ConfigInvalidError):  # a DRY_RUN desk never touches a REAL database
+        world.dry.decision(job.task_input(), job.ctx())
+    assert world.approval(job)["state"] == "PENDING"
+    with profile_test(admin):
+        assert world.dry.decided(str(job.job), str(job.task))
         out = ApprovalOutput.model_validate(world.dry.decision(job.task_input(), job.ctx()))
         assert (out.state, out.evidence_ids) == ("APPROVED", (row.id,))
     assert world.approval(job)["state"] == "APPROVED"
+
+
+def test_mode_is_tied_to_the_database_profile(world: World, admin: Conn) -> None:
+    job = world.job()
+    with pytest.raises(ConfigInvalidError):  # DRY_RUN in a REAL database: no write at all
+        world.dry.open(job.task_input(), job.ctx())
+    count = admin.execute(
+        "SELECT count(*) FROM approvals WHERE job_id = %s", (ids.JOB.to_uuid(job.job),)
+    ).fetchone()
+    assert count == (0,)
+    with pytest.raises(ConfigInvalidError):
+        world.dry.decided(str(job.job), str(job.task))
+    with profile_test(admin):
+        with pytest.raises(ConfigInvalidError):  # REAL in a TEST database
+            world.real.open(job.task_input(), job.ctx())
+        with pytest.raises(ConfigInvalidError):
+            world.real.decided(str(job.job), str(job.task))
+        world.dry.open(job.task_input(), job.ctx())
+    assert world.approval(job)["state"] == "PENDING"
+
+
+def test_decided_needs_usable_evidence_not_just_a_state(world: World) -> None:
+    job = world.job()
+    world.real.open(job.task_input(), job.ctx())
+    world.owner_decides(job)
+    assert world.real.decided(str(job.job), str(job.task))
+    later_text = f"reject {world.approval(job)['code']}"
+    later = world.t.human(later_text, world.at(10))
+    world.t.write(world.root)
+    said = locate(world.src, world.t.session_id, later_text).timestamp
+    with world.operator_db.transaction(world.ctx) as tx:
+        world.db.insert_evidence(
+            PgDbSession(DbRole.OPERATOR),
+            tx,
+            world.draft(job, later, later_text, said, parsed_decision=ApprovalStepState.REJECTED),
+        )
+    # the decided step is now superseded: no longer a decision
+    assert not world.real.decided(str(job.job), str(job.task))
+    # a settled approval whose evidence is later superseded is not "decided" either
+    other = world.job()
+    world.real.open(other.task_input(), other.ctx())
+    world.owner_decides(other)
+    assert world.real.decision(other.task_input(), other.ctx()) is not None
+    assert world.real.decided(str(other.job), str(other.task))
+    world.admin.execute("SET session_replication_role = replica")
+    world.admin.execute(
+        "UPDATE owner_instruction_evidence SET quote = quote || ' ' WHERE id = %s",
+        (world.step_evidence(other),),
+    )
+    world.admin.execute("SET session_replication_role = origin")
+    assert not world.real.decided(str(other.job), str(other.task))
 
 
 # ---- tenant isolation -------------------------------------------------------------------

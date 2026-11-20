@@ -21,14 +21,14 @@ run. No key is read and no row is written.
 """
 
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Protocol, runtime_checkable
 
 from amw_core.approval_store_pg import ApprovalRecord, PgApprovalStore, StepRecord
 from amw_core.enums import EvidenceRecordKind, EvidenceState, InstructionSourceKind
 from amw_core.errors import InputInvalidError
-from amw_core.ids import APPROVAL, ApprovalId, WireId
+from amw_core.ids import APPROVAL, ActorRef, ApprovalId, OrgId, WireId
 from amw_core.interfaces.owner_evidence import DbSession, EvidenceDatabase, EvidenceRecord
-from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.interfaces.tenancy_context import TenancyContext, TenantContext, TenantTransaction
 from amw_core.owner_evidence_fake import PRODUCTION_MARK, TEST_MARK
 from amw_core.owner_evidence_real import superseded
 from amw_core.owner_evidence_review_code import is_valid_review_code
@@ -39,6 +39,7 @@ from amw_core.owner_evidence_status import (
 )
 
 APPROVAL_DECISION: Final = "APPROVAL_DECISION"
+DESK_ACTOR: Final = ActorRef("svc_s07")
 DECISION_KINDS: Final = frozenset(
     {EvidenceRecordKind.STEP_DECISION, EvidenceRecordKind.KNOWLEDGE_RELEASE_REQUEST}
 )
@@ -67,22 +68,53 @@ class ApprovalEvidenceLookup:
         self._db, self._store, self._session, self._tx = database, store, session, tx
 
     def get(self, evidence_id: str) -> ApprovalEvidenceStatus | None:
-        status, _ = self._check(evidence_id, None)
+        """The status of any approval's decision row (APPROVED, REJECTED or CHANGES_REQUESTED).
+        The ``EvidenceStatusLookup`` view. A consumer that authorises something with it must use
+        ``get_for_approval`` and compare the decision (a REJECT row is also a usable row)."""
+        status, _ = self._check(evidence_id, None, None, None)
         return status
 
-    def get_for_approval(self, evidence_id: str, approval_id: str) -> ApprovalEvidenceStatus | None:
-        """As ``get`` and the row must belong to ``approval_id``."""
-        status, _ = self._check(evidence_id, approval_id)
+    def get_for_approval(
+        self,
+        evidence_id: str,
+        approval_id: str,
+        *,
+        decision: str | None = None,
+        subject_sha256: str | None = None,
+    ) -> ApprovalEvidenceStatus | None:
+        """As ``get`` and the row must belong to ``approval_id``; with ``decision`` it must carry
+        exactly that decision, with ``subject_sha256`` the approval must be bound to that hash."""
+        status, _ = self._check(evidence_id, approval_id, decision, subject_sha256)
         return status
 
-    def explain(self, evidence_id: str, approval_id: str | None = None) -> str:
+    def get_approved(
+        self, evidence_id: str, approval_id: str, subject_sha256: str
+    ) -> ApprovalEvidenceStatus | None:
+        """The evidence of THIS approval and subject hash, only when it decided APPROVED (what a
+        consumer that authorises work needs: never a REJECT or CHANGES_REQUESTED row)."""
+        return self.get_for_approval(
+            evidence_id, approval_id, decision="APPROVED", subject_sha256=subject_sha256
+        )
+
+    def explain(
+        self,
+        evidence_id: str,
+        approval_id: str | None = None,
+        *,
+        decision: str | None = None,
+        subject_sha256: str | None = None,
+    ) -> str:
         """``bound`` or the first reason the row is refused."""
-        status, reason = self._check(evidence_id, approval_id)
+        status, reason = self._check(evidence_id, approval_id, decision, subject_sha256)
         return "bound" if status is not None else reason
 
     # ---- the checks ---------------------------------------------------------------------
     def _check(
-        self, evidence_id: str, approval_id: str | None
+        self,
+        evidence_id: str,
+        approval_id: str | None,
+        decision: str | None,
+        subject_sha256: str | None,
     ) -> tuple[ApprovalEvidenceStatus | None, str]:
         try:
             row = self._db.get(self._session, self._tx, WireId(evidence_id))
@@ -101,6 +133,8 @@ class ApprovalEvidenceLookup:
             return None, "evidence names no approval step decision"
         if approval_id is not None and e.approval_id != approval_id:
             return None, "evidence belongs to another approval"
+        if decision is not None and e.parsed_decision.value != decision:
+            return None, "evidence carries another decision than the one asked for"
         if not self._db.mac_valid(self._session, self._tx, row.id):
             return None, "evidence MAC is not valid"
         approval = self._store.get(self._tx, ApprovalId(e.approval_id))
@@ -109,6 +143,8 @@ class ApprovalEvidenceLookup:
         reason = self._binding(row, approval)
         if reason:
             return None, reason
+        if subject_sha256 is not None and approval.subject_sha256 != subject_sha256.lower():
+            return None, "the approval is bound to another subject hash"
         step = self._store.step(self._tx, approval.id, e.step_no)
         reason = self._step_binding(row, approval, step)
         if reason or step is None:
@@ -178,6 +214,55 @@ class ApprovalEvidenceLookup:
         if e.step_no != approval.current_step:
             return "the evidence is not for the approval's current step"
         return ""
+
+
+@runtime_checkable
+class ApprovalEvidencePort(Protocol):
+    """The long-lived read port a consumer of approvals holds (PR 107 / CCR-296, CCR-297).
+
+    ``ApprovalEvidenceLookup`` needs one tenant transaction per call, so a consumer cannot keep
+    one. The port opens its own. ``approved`` answers for ONE approval and subject hash: the
+    ``ApprovalEvidenceStatus`` of the evidence that decided the approval's current step
+    ``APPROVED`` (the approval is settled ``APPROVED``, the hash equals ``subject_sha256``, the
+    evidence passes every check of the lookup), else ``None``. A rejected, changes-requested,
+    pending, superseded, forged or other approval's evidence is ``None``. The consumer compares
+    ``approval_id``, ``subject_sha256`` and ``decision == "APPROVED"`` again and, in a real run,
+    refuses ``source_kind`` ``TEST_FIXTURE``."""
+
+    def approved(self, approval_id: str, subject_sha256: str) -> ApprovalEvidenceStatus | None: ...
+
+
+class PgApprovalEvidencePort:
+    """``ApprovalEvidencePort`` over PostgreSQL: one short read-only tenant transaction per call."""
+
+    def __init__(
+        self,
+        tenancy: TenancyContext,
+        database: EvidenceDatabase,
+        session: DbSession,
+        *,
+        org_id: OrgId,
+        actor: ActorRef = DESK_ACTOR,
+        store: PgApprovalStore | None = None,
+    ) -> None:
+        self._t, self._db, self._session = tenancy, database, session
+        self._ctx = TenantContext(org_id, actor)
+        self._store = store or PgApprovalStore()
+
+    def approved(self, approval_id: str, subject_sha256: str) -> ApprovalEvidenceStatus | None:
+        try:
+            wire = approval_wire(approval_id)
+        except InputInvalidError, ValueError:
+            return None
+        with self._t.transaction(self._ctx) as tx:
+            approval = self._store.get(tx, wire)
+            if approval is None or approval.state.value != "APPROVED":
+                return None
+            step = self._store.step(tx, approval.id, approval.current_step)
+            if step is None or step.evidence_id is None or not step.decided:
+                return None
+            lookup = ApprovalEvidenceLookup(self._db, self._store, self._session, tx)
+            return lookup.get_approved(step.evidence_id, approval.id, subject_sha256)
 
 
 def approval_wire(approval_id: str) -> ApprovalId:
