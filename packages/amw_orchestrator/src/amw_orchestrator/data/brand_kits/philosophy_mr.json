@@ -1,0 +1,32 @@
+{
+  "schema": "amw.brand_kit/1",
+  "channel_key": "philosophy_mr",
+  "language": "mr-IN",
+  "display_name": "तत्त्वज्ञान",
+  "palette": {
+    "background": "#16130f",
+    "foreground": "#f2ebdd",
+    "grid": "#3a332b",
+    "up": "#7fb069",
+    "down": "#c8553d",
+    "accent": "#d9a441",
+    "shade": "#2a241d"
+  },
+  "fonts": {
+    "primary": "mukta_regular",
+    "fallback": "noto_sans_devanagari_vf"
+  },
+  "caption_style": {
+    "font_key": "mukta_bold",
+    "size_ratio": 0.045,
+    "max_lines": 2,
+    "alignment": "center",
+    "text_colour": "foreground",
+    "box_colour": "shade"
+  },
+  "coverage_texts": [
+    "तत्त्वज्ञान",
+    "मराठी मथळा: जीवन, मृत्यू आणि कर्तव्य",
+    "0123456789 .,:;!?()-"
+  ]
+}

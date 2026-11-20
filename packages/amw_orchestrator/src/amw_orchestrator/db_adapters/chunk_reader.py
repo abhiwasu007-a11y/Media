@@ -14,13 +14,19 @@ and a location of another tenant is ``CrossTenantRefError``. Sections use the ma
 (a line ``§ <locator>``); a missing or repeated locator never resolves.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass
 from typing import Final, Protocol
 
 from agent_06_fact_checker.library.reader import KnowledgeLibraryReader
 from agent_16_compliance_qa.nearcopy import ChunkText
-from amw_core.errors import CrossTenantRefError, InputInvalidError, MissingDependencyError
+from amw_core.errors import (
+    CorruptedOutputError,
+    CrossTenantRefError,
+    InputInvalidError,
+    MissingDependencyError,
+)
 from amw_core.interfaces.tenancy_context import TenantTransaction
 
 _MARKER: Final = re.compile(r"^§[ \t]*(?P<loc>\S.*?)[ \t]*$")
@@ -35,6 +41,13 @@ class ChunkLocation:
     collection_id: str
     relative_path: str
     locator: str | None = None
+    start: int | None = None
+    """Character offset (into the decoded file) where the section body starts (the library chunk
+    index, CCR-307); ``end`` is exclusive. Both or neither."""
+    end: int | None = None
+    text_sha256: str | None = None
+    """SHA-256 of the chunk text as ``slice_text`` / ``section_text`` return it (UTF-8). When set,
+    the text read at use time must hash to it, otherwise the read fails closed."""
 
 
 class ChunkIndex(Protocol):
@@ -60,6 +73,13 @@ def section_text(raw: str, locator: str) -> str:
     return "\n".join(found[0])
 
 
+def slice_text(raw: str, start: int, end: int) -> str:
+    """Chunk text at ``raw[start:end]``, line-normalised exactly as ``section_text`` returns it."""
+    if not 0 <= start <= end <= len(raw):
+        raise MissingDependencyError("library chunk offsets are outside the file")
+    return "\n".join(raw[start:end].splitlines())
+
+
 class LibraryChunkReader:
     def __init__(self, library: KnowledgeLibraryReader, index: ChunkIndex) -> None:
         self._library = library
@@ -75,7 +95,19 @@ class LibraryChunkReader:
         if location.org_id != org:
             raise CrossTenantRefError("the chunk belongs to another tenant")
         raw = self._library.read_text(location.relative_path)
-        text = raw if location.locator is None else section_text(raw, location.locator)
+        if (location.start is None) != (location.end is None):
+            raise InputInvalidError("a chunk location needs both offsets or none")
+        if location.start is not None and location.end is not None:
+            if location.text_sha256 is None:
+                raise InputInvalidError("a chunk located by offsets needs its text hash")
+            text = slice_text(raw, location.start, location.end)
+        else:
+            text = raw if location.locator is None else section_text(raw, location.locator)
+        if (
+            location.text_sha256 is not None
+            and hashlib.sha256(text.encode("utf-8")).hexdigest() != location.text_sha256
+        ):
+            raise CorruptedOutputError("the library text of the chunk differs from its index hash")
         return ChunkText(
             chunk_id=chunk_id, org_id=org, collection_id=location.collection_id, text=text
         )
