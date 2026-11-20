@@ -48,7 +48,7 @@ from amw_runtime.confirmations import ConfirmationRecord
 from tests.adapters.conftest import packaged_with_render_minutes  # noqa: F401  (autouse)
 from tests.adapters.mock_providers import ANTHROPIC_SECRET, ELEVENLABS_SECRET, TEST_ENV
 from tests.adapters.preflight_support import EVENING, Lookup, limits
-from tests.orchestrator.run_job_world import SATURDAY, World, make_world
+from tests.orchestrator.run_job_world import EXPECTED_UNMET_PORTS, SATURDAY, World, make_world
 
 pytestmark = pytest.mark.integration
 
@@ -237,7 +237,9 @@ def test_a_tampered_config_is_refused_before_anything_is_built(world: World) -> 
         )  # fmt: skip
 
 
-def test_a_passed_preflight_without_worker_wiring_ends_in_the_honest_refusal(world: World) -> None:
+def test_a_passed_preflight_with_the_production_wiring_lists_every_missing_port(
+    world: World,
+) -> None:
     net = NoNetwork()
     records = [r for r in limits(world.seed.org_id) if r.provider]
     req = world.request(confirmations=tuple(records))
@@ -248,8 +250,9 @@ def test_a_passed_preflight_without_worker_wiring_ends_in_the_honest_refusal(wor
             evidence_factory=lookup_factory(world, records), transports=net.transports(),
             render_start=EVENING, clock=lambda: SATURDAY,
         )  # fmt: skip
-    assert isinstance(exc.value, MissingDependencyError)
-    assert exc.value.details["unmet"] == ["REAL_WIRING"]
+    unmet = exc.value.details["unmet"]
+    assert "REAL_WIRING" not in unmet  # the placeholder is gone: exact ports instead
+    assert set(unmet) == EXPECTED_UNMET_PORTS
     assert net.requests == []
 
 

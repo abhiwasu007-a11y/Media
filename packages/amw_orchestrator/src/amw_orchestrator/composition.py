@@ -16,9 +16,9 @@ REAL_RUN builds nothing before the sealed preflight passes: ``run_job_preflight`
 item listed, ``PreflightRefused``), then ``build_providers`` (real adapters only from that report,
 secrets by NAME), then the approval desk and ``PgApprovalEvidencePort`` of the database, and a
 ``GraphRunner`` with ``real_run=True``. The worker registry of the real agents is not built here:
-it comes from a ``RealRunWiring`` the caller supplies, and without one a passed preflight still
-ends in a ``MISSING_DEPENDENCY`` naming ``REAL_WIRING`` (honest: no production worker wiring
-exists yet).
+it comes from a ``RealRunWiring`` (the caller's, else ``ProductionWiring``): every port without a
+production wiring ends the run in a typed ``MISSING_DEPENDENCY`` listing exactly those ports, and
+an unset ``tts.provider`` refuses before any adapter is built.
 
 Tenant isolation: every database access goes through ``PgTenancy`` transactions of the job's org
 (explicit org filters in the callees, RLS as the second line); the approval desk and its evidence
@@ -74,6 +74,7 @@ from amw_orchestrator.plumbing import (
     plumbing_schemas,
     seed_job_documents,
 )
+from amw_orchestrator.real_wiring import ProductionWiring
 from amw_orchestrator.registry import job_graph, record
 from amw_orchestrator.run_request import JobRequest
 from amw_orchestrator.run_settings import RunEntrySettings
@@ -91,7 +92,7 @@ from amw_runtime.calendar import MarketCalendar
 from amw_runtime.config import RunMode, RuntimeConfig
 from amw_runtime.confirmations import ConfirmationRecord
 from amw_runtime.preflight import PreflightReport
-from amw_runtime.providers import ProviderSet, build_providers
+from amw_runtime.providers import TTS_ADAPTERS, ProviderSet, build_providers
 
 _MS_PER_SECOND = 1000
 
@@ -115,6 +116,9 @@ class WiringContext:
     settings: AmwSettings
     config: RuntimeConfig
     request: JobRequest
+    run: RunEntrySettings
+    guard: BudgetGuardCore
+    ledger: PgCostLedger
 
 
 class RealRunWiring(Protocol):
@@ -393,6 +397,21 @@ def _dry_run(
     )  # fmt: skip
 
 
+def _require_tts_choice(run: RunEntrySettings, config: RuntimeConfig) -> None:
+    chosen = run.tts.provider
+    if chosen is None or not chosen.strip():
+        raise MissingDependencyError(
+            "the voice (TTS) provider is not chosen: set tts.provider; there is no default",
+            details={"unmet": ["tts.provider"]},
+        )
+    names = {p.name for p in config.providers if p.role == "TTS"} & TTS_ADAPTERS
+    if chosen not in names:
+        raise ConfigInvalidError(
+            "tts.provider names no TTS provider with a real adapter",
+            details={"fields": ["tts.provider"], "provider": chosen},
+        )
+
+
 def _real_run(
     infra: Infrastructure,
     request: JobRequest,
@@ -408,7 +427,12 @@ def _real_run(
     clock: Callable[[], datetime] | None,
     render_start: datetime | None,
 ) -> Composition:
+    wiring = wiring or ProductionWiring()
     factory = evidence_factory or _pg_confirmation_evidence
+    # 0. the voice route is the owner's choice and has NO default (CCR-304): checked first, as a
+    # pure config check, so an unset or unknown choice is reported before any evidence is demanded
+    # and never falls back to ElevenLabs or a fake
+    _require_tts_choice(run, config)
     # 1. the sealed preflight: refuses with EVERY unmet item, mints the provider authorisations
     with factory(infra.tenancy, job.org_id, request.confirmations) as lookup:
         report = run_job_preflight(
@@ -424,18 +448,17 @@ def _real_run(
         )
 
     providers = build_providers(
-        config, preflight=report, env=env, guard_for=guard_for, transports=transports
-    )
-    if wiring is None:
-        raise MissingDependencyError(
-            "the preflight passed but no production worker wiring is available",
-            details={"unmet": ["REAL_WIRING"]},
-        )
+        config, preflight=report, env=env, guard_for=guard_for, transports=transports,
+        tts_provider=run.tts.provider,
+    )  # fmt: skip
     meter = PgMeter(
         infra.tenancy, infra.ledger, infra.guard, infra.jobs,
         lambda p: p in {s.name for s in config.providers}, config.currency,
     )  # fmt: skip
-    ctx = WiringContext(providers, infra.storage, infra.tenancy, meter, settings, config, request)
+    ctx = WiringContext(
+        providers, infra.storage, infra.tenancy, meter, settings, config, request, run,
+        infra.guard, infra.ledger,
+    )  # fmt: skip
     # 3. the S7 desk and the approval evidence port of the database (REAL profile only)
     desk = PgApprovalDesk(
         infra.tenancy, PgEvidenceDatabase(), PgDbSession(DbRole.APP),
