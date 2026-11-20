@@ -180,6 +180,8 @@ Operator summary:
 - **ORIGINAL-ANGLE** (D12): every video must carry an original angle or example; candidate script-gate / compliance check next to YTG-R1 (13 §3.1; YPP inauthentic content, RESEARCH_LOG YT-09; editorial contribution YTG-R4). Candidate only; no rule is added by this entry.
 - **CHANNEL-2** (D12): philosophy as a candidate second channel. Rule packs are specified in 24 (`rule_packs` field: mandatory `rp.youtube_general`, by category `rp.finance_sebi_in` etc.) and 13 §2 (pack registry); finance rules FIN-R1..R13 sit in `rp.finance_sebi_in`. Ticket: a channel-level rule-pack selector so a philosophy channel gets `rp.youtube_general` and not the finance pack, and no niche report of the trading channel; check how the production-type category maps to the channel before any change. No contract changed here.
 
+**Ticket filed 2026-11-20 (free voice):** **FREE-VOICE-1** (ADR-015): local TTS adapter for the owner-chosen open Marathi model, cost 0 micros, local path + sha256 from config. Blocked on owner pick R1 and first-hand licence read (R2: huggingface.co and learn.microsoft.com not reachable from the session). No adapter built; no audio heard.
+
 ### D13 (2026-11-19, owner chat message): philosophy sample #1, finance-only gates, icon answer, AI presenter backlog
 Recorded from the owner's chat message (R14: operator's record, not production-verified owner evidence until ticket 3A-13). Quoted verbatim:
 
