@@ -233,6 +233,71 @@ class WindowSettings(_Model):
     drain_grace_ms: int | None = Field(default=None, ge=0)
 
 
+DOCUMENTED_RULE_PACK_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {
+        "youtube_general",
+        "finance",
+        "health",
+        "kids",
+        "political_news",
+        "advertising",
+        "ad_sector",
+        "brand_safety",
+    }
+)
+"""The ``rule_packs.category`` values documented in 04 (``rule_packs`` table)."""
+
+DEFAULT_NON_FINANCE_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {"youtube_general", "health", "kids", "political_news"}
+)
+"""The documented CHANNEL categories that are not finance (PASS6-N, CCR-273 PROPOSED): the packaged
+list and the ceiling of ``rule_packs.non_finance_categories`` (an override can only remove entries
+from it, never add one)."""
+
+ALWAYS_FINANCE_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {"finance", "advertising", "ad_sector", "brand_safety"}
+)
+"""Left out of the non-finance list on purpose (fail closed): ``finance``; and the advertising /
+brand-safety pack categories, which are not channel content categories and may carry a finance
+subject (an ad sector can be finance). No configuration can make one of these non-finance."""
+
+
+class RulePackSettings(_Model):
+    """``rule_packs.*`` (CCR-273 / PASS6-N): which channel categories get non-finance treatment
+    (no FIN-R10 owner item, no price-data lag, no finance icon rules). Exact, case-sensitive match;
+    every other value (unset, empty, unknown, ``finance``) is finance. The owner may only NARROW
+    the packaged list: a value that is not in ``DEFAULT_NON_FINANCE_CATEGORIES`` (so ``finance``,
+    ``advertising``, ``ad_sector``, ``brand_safety`` and every undocumented value) is refused."""
+
+    non_finance_categories: frozenset[str] = DEFAULT_NON_FINANCE_CATEGORIES
+
+    @model_validator(mode="after")
+    def _only_narrowing(self) -> RulePackSettings:
+        bad = self.non_finance_categories - DEFAULT_NON_FINANCE_CATEGORIES
+        if bad:
+            raise ValueError(
+                "rule_packs.non_finance_categories may only narrow the packaged list "
+                f"({', '.join(sorted(DEFAULT_NON_FINANCE_CATEGORIES))}); refused: "
+                + ", ".join(sorted(bad))
+            )
+        return self
+
+
+def effective_non_finance_categories(configured: object) -> frozenset[str]:
+    """The non-finance channel categories a decision may use, fail closed (CCR-273, D13).
+
+    ``configured`` must be a ``frozenset`` or ``tuple`` of ``str`` (a bare ``str``, a list, a
+    mapping or anything else yields the empty set, so every category is finance). The result is
+    the intersection with the packaged list ``DEFAULT_NON_FINANCE_CATEGORIES``: ``finance`` and
+    the always-finance categories can never be in it, whatever ``configured`` holds (also a
+    ``RulePackSettings`` built with ``model_construct``, which skips the validator)."""
+    if not isinstance(configured, (frozenset, tuple)):
+        return frozenset()
+    return frozenset(c for c in configured if isinstance(c, str)) & (
+        DEFAULT_NON_FINANCE_CATEGORIES - ALWAYS_FINANCE_CATEGORIES
+    )
+
+
 class AmwSettings(BaseSettings):
     """Root settings. Environment: ``AMW_<SECTION>__<FIELD>`` (``AMW_LIMITS__MAX_TASKS_PER_JOB``).
 
@@ -259,6 +324,7 @@ class AmwSettings(BaseSettings):
     wait: WaitSettings = Field(default_factory=WaitSettings)
     dlq: DlqSettings = Field(default_factory=DlqSettings)
     finance: FinanceSettings = Field(default_factory=FinanceSettings)
+    rule_packs: RulePackSettings = Field(default_factory=RulePackSettings)
     evals: EvalSettings = Field(default_factory=EvalSettings)
     llm: LlmSettings = Field(default_factory=LlmSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)

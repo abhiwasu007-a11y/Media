@@ -290,7 +290,7 @@ def test_non_finance_job_runs_to_delivered_through_the_real_builders(
         pg_dsn, tmp_path / "blobs", registry_factory=factory,
         schemas=agent_registry(real_outputs=False), build_services=RuntimeFacts(), desk=TestDesk(),
     )  # fmt: skip
-    base = rig.intake("non-finance")
+    base = rig.intake("youtube_general")
     org = base.org_id
     from dataclasses import replace
 

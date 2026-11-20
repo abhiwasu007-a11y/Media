@@ -202,12 +202,21 @@ def test_cap_only_guards_with_one_book_share_the_cap_and_without_one_do_not() ->
 # ---- a real run preflight binds its tokens to the job -------------------------------------------
 
 
+class _NoJobs:
+    """No job row: the preflight category is then finance (fail closed), so the full real-run
+    evidence (FIN-R10 included) is what this test supplies."""
+
+    def get_job(self, tx: object, job_id: object) -> None:
+        return None
+
+
 def test_run_job_preflight_binds_the_authorisations_to_the_job_and_org() -> None:
     job = _job(ChannelCategory.FINANCE)
     config = load_runtime_config(REAL_ENV)
     records = limits(job.org_id)
     report = run_job_preflight(
-        job, config, records, env=REAL_ENV, evidence=Lookup(records, job.org_id),
+        job, config, records, tenancy=MemoryTenancy(), jobs=_NoJobs(),  # type: ignore[arg-type]
+        env=REAL_ENV, evidence=Lookup(records, job.org_id),
         render_start=EVENING, job_id="job_someone_else",
     )  # fmt: skip
     assert {a.provider for a in report.provider_authorisations} == {"anthropic", "elevenlabs"}
