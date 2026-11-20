@@ -197,7 +197,7 @@ class QualityScoreBuilder:
 
 def _bound_final_approval(ctx: BuildContext) -> ApprovalOutput:
     """The final approval, accepted only for the CURRENT render (and, when the graph approves the
-    script, the CURRENT script): hash, subject, org and confirmed evidence (CCR-296 PROVISIONAL,
+    script, the CURRENT script): hash, subject, org and confirmed evidence (CCR-296,
     ``amw_orchestrator.approval_binding``)."""
     sub = _subject(ctx)
     org = ctx.job.org_id
