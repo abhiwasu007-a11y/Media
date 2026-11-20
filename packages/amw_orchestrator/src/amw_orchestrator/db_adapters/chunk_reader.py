@@ -6,7 +6,7 @@ equal the SHA and the file must equal the pinned commit's blob, otherwise it ref
 returned to the caller in memory for the near-copy measure; this module never logs it, never
 stores it, never copies it and never offers a way to list or write the library.
 
-What is NOT defined anywhere (CCR-299, PROPOSED, fail closed): how a ``chunk_id`` maps to a file and
+What is NOT defined anywhere (CCR-300, PROPOSED, fail closed): how a ``chunk_id`` maps to a file and
 a section of the library. 04 5.10 has ``knowledge_chunks`` but no migration creates it, and the
 library file layout has no chunk index. The mapping is therefore an injected port,
 ``ChunkIndex``; without a location for a chunk the reader refuses with ``MissingDependencyError``

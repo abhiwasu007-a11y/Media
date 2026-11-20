@@ -3,7 +3,7 @@
 Every adapter runs inside the caller's tenant transaction (``amw_app``; explicit ``org_id``
 predicate plus RLS) or opens one through ``TenancyContext``, fails closed with the 07 typed errors,
 and writes only the tables of its owning agent. Ports with no table or document contract behind
-them are not built here: see CCR-299 and CCR-300 in ``docs/v4/CONTRACT_CHANGE_REQUESTS.md``.
+them are not built here: see CCR-300 and CCR-301 in ``docs/v4/CONTRACT_CHANGE_REQUESTS.md``.
 """
 
 from amw_orchestrator.db_adapters.brand_kit import UnavailableBrandKitReader

@@ -1,4 +1,4 @@
-"""``PgJobDestinationReader`` and the brand-kit refusal on real PostgreSQL (CCR-028, CCR-299)."""
+"""``PgJobDestinationReader`` and the brand-kit refusal on real PostgreSQL (CCR-028, CCR-300)."""
 
 import pytest
 

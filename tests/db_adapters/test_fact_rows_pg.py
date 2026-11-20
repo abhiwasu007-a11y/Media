@@ -332,7 +332,7 @@ def test_claims_rows_and_their_sensitive_approval(
     assert (got[wire[0]].status, got[wire[0]].sensitive_approval) == (ClaimStatus.VERIFIED, None)
     assert got[wire[1]].sensitive_approval == (APPROVAL.from_uuid(approval), sha("claim").hex())
     assert got[wire[1]].claim_type == "FACTUAL"
-    # no citations table and no chart column exist yet (CCR-300): the stricter reading
+    # no citations table and no chart column exist yet (CCR-301): the stricter reading
     assert (got[wire[0]].citation_count, got[wire[0]].chart_data_ref) == (0, None)
     with tenancy.transaction(_ctx(tenant_b)) as tx:
         assert READ.claims(tx, wire) == ()

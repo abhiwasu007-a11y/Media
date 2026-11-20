@@ -11,7 +11,7 @@ score subject hash must equal ``renders.content_sha256`` (a score never attaches
 render's content), and a ``HUMAN`` score is refused (04 section 5.16: human rows exist only
 through ``amw_human_record_apply``).
 
-Provisional where 04 has no column (CCR-300): ``qc_results`` has no ``gate`` or
+Provisional where 04 has no column (CCR-301): ``qc_results`` has no ``gate`` or
 ``remedy_stage_id`` column, so those two fields stay in the Task Output only; the per-criterion
 detail of a score is stored as the canonical JSON text of ``quality_scores.evidence_ref``
 (18 section 9.1.5). The lock window of the idempotency row is configuration (``lock_ms``).

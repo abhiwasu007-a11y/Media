@@ -5,7 +5,7 @@ Read only: SELECTs inside the caller's tenant transaction as ``amw_app``, each w
 (another tenant's rows are invisible) yields the port's "absent" value (``None``, empty), never a
 default that could pass a check.
 
-Sources and the provisional answers where 04 has no column (CCR-300, PROPOSED, fail closed):
+Sources and the provisional answers where 04 has no column (CCR-301, PROPOSED, fail closed):
 
 * ``channel``: ``channels.category`` verbatim (CCR-295: the raw value), ``audience_kind`` (NULL =
   not decided); ``knowledge_collection_id`` has no table yet, so ``None``.
@@ -23,7 +23,7 @@ Sources and the provisional answers where 04 has no column (CCR-300, PROPOSED, f
   approval is the newest approval of that kind whose ``subject_id`` is the claim; its state is
   derived later by the approval verifier, never here.
 * ``assets`` joins ``assets``, ``licences`` and ``licence_ledger``; the port carries no job ID, so
-  ``has_ledger_row`` means "the asset has a ledger row of this tenant" (REQUIRES REVIEW: CCR-300
+  ``has_ledger_row`` means "the asset has a ledger row of this tenant" (REQUIRES REVIEW: CCR-301
   asks for the job ID on the port).
 """
 
