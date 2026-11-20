@@ -153,6 +153,13 @@ So a consumer that compares `subject` can never accept a TEST, tampered or unbou
 - No record kind exists for these owner statements yet, so by default no kind is allowed (fail closed; CCR-260).
 - The CONTENT rules refuse negation, so "not SEBI-registered" cannot pass them today (CCR-260).
 
+## 8. The approval desk and the approval evidence reader (ticket 3A-13, built for review)
+
+- `amw_orchestrator.approval_desk.PgApprovalDesk` (the `ApprovalDesk` of the `ApprovalWorker`, `amw_app` login): `open` creates one approval per task (`tasks.approval_id`) with its review code (`review_codes` registry) and its undecided step, and the worker parks the stage; `decision` returns the CCR-283 output only for a step decided by `amw_human_record_apply` whose evidence `ApprovalEvidenceLookup` accepts; `REAL` mode refuses `TEST_FIXTURE` rows, `DRY_RUN` takes them. It never writes a decided step.
+- `amw_core.owner_evidence_approvals.ApprovalEvidenceLookup` (an `EvidenceStatusLookup`): CONFIRMED, MAC valid, owner chat, bound to the approval (ID and review code) and its subject, decided that step with that decision, not superseded; otherwise `None` (`explain` gives the reason).
+- Tests: `tests/core_services_db/test_approval_desk_pg.py` (PostgreSQL, synthetic transcripts). Open gaps and the proposed database guard on `approvals.state`: CCR-297.
+- **Not shown:** that this works against the real chat. No live owner confirmation has been demonstrated; until one is, nothing here is production-verified.
+
 ## 7. Tests
 
 | File | What it covers |
