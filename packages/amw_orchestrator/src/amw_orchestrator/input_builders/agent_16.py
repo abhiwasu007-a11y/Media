@@ -201,16 +201,7 @@ def _bound_final_approval(ctx: BuildContext) -> ApprovalOutput:
     ``amw_orchestrator.approval_binding``)."""
     sub = _subject(ctx)
     org = ctx.job.org_id
-    if c.has_stage(ctx, "a_script"):  # a script approval relied on must still be of this script
-        require_bound_approval(
-            c.payload(ctx, "a_script"),
-            stage_id="a_script",
-            approval_kind="SCRIPT",
-            subject=ExpectedSubject("script", sub["script_id"], sub["script_sha256"]),
-            org_id=org,
-            evidence=ctx.evidence,
-            real_run=ctx.real_run,
-        )
+    c.bound_script_approval(ctx)  # a script approval relied on must still be of this script
     return require_bound_approval(
         c.payload(ctx, "a_final"),
         stage_id="a_final",

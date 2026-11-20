@@ -26,12 +26,18 @@ from typing import Any
 from pydantic import ValidationError
 
 from amw_core.errors import InputInvalidError
+from amw_core.owner_evidence_real import FIN_R10, PROVIDER_LIMIT
 from amw_core.owner_evidence_status import (
     OWNER_CHAT_OPERATOR,
     EvidenceSourceKind,
     EvidenceStatusLookup,
 )
 from amw_orchestrator.payloads import ApprovalOutput
+
+_CONFIRMATION_KINDS: frozenset[str] = frozenset({PROVIDER_LIMIT, FIN_R10})
+"""``EvidenceStatus.kind`` values of the confirmation bindings (provider limit, FIN R10). Such a
+row backs a different claim and is never the evidence of an approval decision. ``EvidenceStatus``
+has no record kind, so "is an approval-decision row" is not decidable yet (CCR-296)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +97,8 @@ def require_bound_approval(
             raise _refuse(stage_id, "evidence source is neither REAL nor TEST_FIXTURE")
         if row.evidence_id != evidence_id or row.org_id != org_id:
             raise _refuse(stage_id, "evidence belongs to another org")
+        if row.kind in _CONFIRMATION_KINDS:
+            raise _refuse(stage_id, "evidence is a confirmation binding, not an owner decision")
         if row.subject_kind != subject.kind or row.subject_id != subject.id:
             raise _refuse(stage_id, "evidence is bound to another subject")
     return approval

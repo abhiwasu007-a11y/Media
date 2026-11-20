@@ -16,7 +16,9 @@ from typing import Any
 from amw_core.contracts import ContextRef, TaskOutput, ValidationResult
 from amw_core.enums import ContextRefPurpose, ProductionTypeKey
 from amw_core.errors import InputInvalidError, MissingDependencyError
+from amw_orchestrator.approval_binding import ExpectedSubject, require_bound_approval
 from amw_orchestrator.executor import BuildContext, DocRef, JobFacts
+from amw_orchestrator.payloads import ApprovalOutput
 
 YOUTUBE_GENERAL = "rp.youtube_general"
 FINANCE_SEBI_IN = "rp.finance_sebi_in"
@@ -196,3 +198,25 @@ def payload_doc_ref(ctx: BuildContext, stage_id: str) -> DocRef:
     if pl is not None and pl.data_ref is not None and pl.data_sha256 is not None:
         return DocRef(pl.data_ref, pl.data_sha256)
     return need(ctx.services, "the build services").payload_document(ctx.job, out)
+
+
+def bound_script_approval(ctx: BuildContext) -> ApprovalOutput | None:
+    """The ``a_script`` approval, accepted only for the CURRENT script (state, kind, document
+    hash, confirmed evidence, no TEST_FIXTURE in a real run: CCR-296 PROVISIONAL). ``None`` when
+    the graph has no ``a_script`` stage (the default registry leaves it disabled). Called by every
+    builder that hands the script approval to a PAID stage (``agent_07``, ``agent_09``) and by
+    ``agent_16``, so an unconfirmed, stale or other-subject approval is refused before any spend."""
+    if not has_stage(ctx, "a_script"):
+        return None
+    script = payload(ctx, script_stage_id(ctx.job))
+    return require_bound_approval(
+        payload(ctx, "a_script"),
+        stage_id="a_script",
+        approval_kind="SCRIPT",
+        subject=ExpectedSubject(
+            "script", script["script_id"], ref_in(script, "script_document").sha256
+        ),
+        org_id=ctx.job.org_id,
+        evidence=ctx.evidence,
+        real_run=ctx.real_run,
+    )
