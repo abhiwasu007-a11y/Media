@@ -62,6 +62,7 @@ from amw_orchestrator.services import (
     seed_cap_budgets,
 )
 from amw_orchestrator.task_io import TaskIo
+from tests.orchestrator.evidence_fake import FakeEvidenceStatuses
 
 M = 1_000_000
 FAKE_PROVIDERS = ("fake_llm", "fake_tts")
@@ -318,6 +319,7 @@ def approval_output(
     kind: str = "FINAL_VIDEO",
     state: str = "APPROVED",
     target_stage: str | None = None,
+    evidence_ids: list[str] | None = None,
 ) -> dict[str, object]:
     """An ``svc_s07.request_approval.output`` document in the CCR-283 PROVISIONAL shape."""
     from amw_core.ids import APPROVAL, OWNER_EVIDENCE
@@ -328,7 +330,9 @@ def approval_output(
         "approval_kind": kind,
         "state": state,
         "subject_sha256": subject_sha256,
-        "evidence_ids": [str(OWNER_EVIDENCE.new())] if owner else [],
+        "evidence_ids": evidence_ids
+        if evidence_ids is not None
+        else ([str(OWNER_EVIDENCE.new())] if owner else []),
         "parsed_target_stage_id": target_stage,
     }
 
@@ -344,13 +348,25 @@ class TestDesk:
         self.opened: list[str] = []
         self.decisions: set[str] = set()
         self.last_subject_sha256: str | None = None
+        self.evidence = FakeEvidenceStatuses()
 
     def _payload(self, task_input: TaskInput, state: str) -> dict[str, object]:
         data = task_input.payload.data or {}
         subject = data.get("subject") or {}
         self.last_subject_sha256 = str(subject.get("sha256", "0" * 64))
+        owner = state in {"APPROVED", "REJECTED", "CHANGES_REQUESTED"}
+        evidence = (  # TEST_FIXTURE owner evidence bound to the subject of the request
+            [
+                self.evidence.record(
+                    str(task_input.org_id), str(subject.get("kind", "")), str(subject.get("id", ""))
+                )
+            ]
+            if owner
+            else []
+        )
         return approval_output(
             self.last_subject_sha256,
+            evidence_ids=evidence,
             kind=str(data.get("approval_kind", "FINAL_VIDEO")),
             state=state,
             target_stage="s05_script" if state == "CHANGES_REQUESTED" else None,
@@ -438,6 +454,7 @@ def build_rig(
     schemas: PayloadSchemaRegistry | None = None,
     build_services: Any | None = None,
     desk: TestDesk | None = None,
+    real_run: bool = False,
 ) -> Rig:
     s = seed(dsn)
     with psycopg.connect(dsn, autocommit=True) as conn:
@@ -505,6 +522,8 @@ def build_rig(
             task_io=TaskIo(storage),
             spend=meter,
             build_services=build_services,
+            evidence=desk.evidence,
+            real_run=real_run,
             require_per_video=lambda tx, job_id, cur: require_per_video_budget(
                 guard, tx, job_id, cur
             ),

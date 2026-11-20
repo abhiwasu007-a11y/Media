@@ -40,9 +40,8 @@ class ShotPlanBuilder:
         if verdict not in ("ALLOWED", "NEEDS_HUMAN_REVIEW"):
             raise InputInvalidError("the script verdict does not allow a plan")
         voice = c.payload(ctx, "s07_voice")["timeline"]
-        approval = (
-            c.payload(ctx, "a_script").get("approval_id") if c.has_stage(ctx, "a_script") else None
-        )
+        bound = c.bound_script_approval(ctx)
+        approval = bound.approval_id if bound is not None else None
         previous = None
         if ctx.iteration > 0:
             previous = c.ref_in(c.payload_of(ctx, c.require_iteration_output(ctx)), "plan_ref")
