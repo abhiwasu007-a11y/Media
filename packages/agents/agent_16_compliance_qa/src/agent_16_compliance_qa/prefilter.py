@@ -18,6 +18,7 @@ _CLAIM_RULES: Final[Mapping[str, tuple[str, ...]]] = {
     "FORWARD_VIEW": ("FIN-R3", "FIN-R13"),
     "PRICE_LEVEL": ("FIN-R2",),
     "PERFORMANCE_CLAIM": ("FIN-R6",),
+    "HYPOTHETICAL_EXAMPLE": ("FIN-R6",),  # CCR-109 (13 FIN-R6: result display of a hypothetical)
     "TESTIMONIAL": ("FIN-R7",),
     "PROMOTION": ("FIN-R8",),
 }

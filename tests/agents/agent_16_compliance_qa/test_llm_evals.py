@@ -130,19 +130,11 @@ def prefiltered(case: dict[str, Any]) -> dict[str, Any]:
     return case | {"input": inp | {"items": items}}
 
 
-PREFILTER_GAPS = {
-    "EDGE-R6-04": "a percentage / money amount with no first- or second-person subject is not a "
-    "blueprint 6.2 signal (conflicts with 13 FIN-R6; CCR-109 PROPOSED); REQUIRES REVIEW (Phase 1)",
-}
-
-
 @pytest.mark.parametrize("case", CG, ids=case_ids(CG))
 def test_compliance_gate_case_through_the_prefilter(case: dict[str, Any]) -> None:
     """End to end as in production: pre-filter -> recorded judge reply -> post-check ->
     algebra. An item the pre-filter drops is never judged, so the verdict comes from what the
     pre-filter sent (nothing sent and no refusal => ALLOWED)."""
-    if case["case_id"] in PREFILTER_GAPS:
-        pytest.xfail(PREFILTER_GAPS[case["case_id"]])
     e = case["expected"]
     pc = prefiltered(case)
     if not pc["input"]["items"]:
@@ -154,16 +146,6 @@ def test_compliance_gate_case_through_the_prefilter(case: dict[str, Any]) -> Non
         found = {k[1] for k, f in check.findings.items() if f.finding == "VIOLATION"}
         sent = {r for i in pc["input"]["items"] for r in i["rules_to_check"]}
         assert set(e["violation_required"]) & sent <= found
-
-
-@pytest.mark.parametrize("case_id", sorted(PREFILTER_GAPS))
-def test_listed_prefilter_gaps_are_real(case_id: str) -> None:
-    """A listed gap must still be a gap (remove it from the list once the lexicon covers it)."""
-    case = next(c for c in CG if c["case_id"] == case_id)
-    pc = prefiltered(case)
-    if pc["input"]["items"]:
-        verdict, _ = run_policy(pc, recorded_policy(pc))
-        assert verdict.value not in case["expected"]["verdict_in"]
 
 
 def test_prefilter_detects_marathi_hindi_and_hinglish() -> None:
