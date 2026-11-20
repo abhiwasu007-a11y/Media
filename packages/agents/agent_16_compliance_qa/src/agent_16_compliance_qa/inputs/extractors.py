@@ -457,8 +457,11 @@ class FactRowReader(Protocol):
     def channel(self, tx: TenantTransaction, job_id: str) -> ChannelRow | None: ...
     def job(self, tx: TenantTransaction, job_id: str) -> JobRow | None: ...
     def assets(
-        self, tx: TenantTransaction, asset_ids: Sequence[str]
-    ) -> Mapping[str, AssetFactRow]: ...
+        self, tx: TenantTransaction, asset_ids: Sequence[str], job_id: str
+    ) -> Mapping[str, AssetFactRow]:
+        """Fact rows of the assets; ``has_ledger_row`` counts only a ledger row of THIS job."""
+        ...
+
     def voice_presenter_kind(self, tx: TenantTransaction, job_id: str) -> PresenterKind | None: ...
     def judged_qc_check_ids(self, tx: TenantTransaction, render_id: str) -> tuple[str, ...]:
         """``qc_results`` of the render that are ``SKIPPED`` with ``JUDGED_BY_AGENT_16``."""
@@ -634,7 +637,7 @@ class DocumentGateFactExtractor:
         if any(a is None for a in pictures):
             raise InputInvalidError("an owner-image thumbnail names no asset")
         thumb_assets = [a for a in pictures if a]
-        arows = rows.assets(tx, sorted({*used, *thumb_assets}))
+        arows = rows.assets(tx, sorted({*used, *thumb_assets}), scope.job_id)
 
         licensed = tuple(_licensed(a, st, arows.get(a)) for a, st in sorted(used.items()))
         render_persons: list[R.PersonAsset] = []
