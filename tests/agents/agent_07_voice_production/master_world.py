@@ -194,11 +194,6 @@ def build(case: dict[str, Any], scratch: Path) -> MasterWorld:
     ffmpeg = StubFfmpeg(
         stem, list(cm["post_codec_true_peak_overshoot_db"]), cm["bitrate_bps"], fx["faults"]
     )
-    for fault in fx[
-        "faults"
-    ]:  # AM-30 needs a second pass to exist: see the module note in the test
-        if fault.get("fault") == "FFMPEG_CRASH":
-            ffmpeg.overshoots = [0.6, *ffmpeg.overshoots[1:]]
     control = FakeControl(drain=any(f.get("control") == "DRAIN" for f in fx["faults"]))
     keys = (
         "target_lufs",
