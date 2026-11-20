@@ -18,9 +18,9 @@ from amw_core.interfaces.tenancy_context import TenantContext
 from amw_core.retries import dlq, record
 from amw_core.retries.breaker import new_row
 from amw_core.retries.pg import PgBreakerFunctions, PgDeadLetterStore
-from amw_core.tenancy import PgTenancy, dsn_connection_factory
+from amw_core.tenancy import PgTenancy
 from tests.core_services.support import T0, settings
-from tests.core_services_db.conftest import Work, make_user, run_sql
+from tests.core_services_db.conftest import Work, breaker_functions, make_user, run_sql
 from tests.pg_fixtures import Tenant
 
 pytestmark = pytest.mark.integration
@@ -46,7 +46,7 @@ def _functions(pg_dsn: str, open_ms: int = 300) -> PgBreakerFunctions:
             )
         }
     )
-    return PgBreakerFunctions(dsn_connection_factory(pg_dsn, role="amw_app"), cfg)
+    return breaker_functions(pg_dsn, cfg)
 
 
 @pytest.mark.failure_injection
@@ -156,11 +156,11 @@ def test_dead_letter_workflow_on_postgres(
         assert loaded.idempotency_scope == "task.agent_05.script_draft"
         item = dlq.triage(loaded, owner, "storage was down", perms, T0)
         item = dlq.approve_replay(dlq.request_replay(item, owner, perms, T0), owner, perms, cfg, T0)
-        store.save(tx, dlq_id, item)
-        item = dlq.mark_replayed(store.get(tx, dlq_id), cfg, T0)
-        store.save(tx, dlq_id, item)
-        item = dlq.mark_resolved(store.get(tx, dlq_id), T0)
-        store.save(tx, dlq_id, item)
+        store.save(tx, dlq_id, item, base=loaded)
+        base = store.get(tx, dlq_id, for_update=True)
+        store.save(tx, dlq_id, dlq.mark_replayed(base, cfg, T0), base=base)
+        base = store.get(tx, dlq_id, for_update=True)
+        store.save(tx, dlq_id, dlq.mark_resolved(base, T0), base=base)
         final = store.get(tx, dlq_id)
         assert final.recovery_status is DlqRecoveryStatus.RESOLVED
         assert final.replay_count == 1

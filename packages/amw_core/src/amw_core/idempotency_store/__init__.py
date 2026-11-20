@@ -138,7 +138,12 @@ class PgIdempotencyStore:
             assert refreshed is not None  # noqa: S101
             return BeginDecision(BeginAction.PROCEED, refreshed)
         if row.locked_until is not None and row.locked_until < now:
-            return BeginDecision(BeginAction.RECONCILE, row)
+            # The reconciler holds the key from now on: renew the lock so that the next caller
+            # gets IN_FLIGHT, not a second RECONCILE (PR #44 review m9).
+            self._update(tx, key, "locked_until = %s", (locked_until,))
+            renewed = self._row(tx, key, lock=False)
+            assert renewed is not None  # noqa: S101
+            return BeginDecision(BeginAction.RECONCILE, renewed)
         return BeginDecision(BeginAction.IN_FLIGHT, row)
 
     def _update(self, tx: TenantTransaction, key: str, sets: str, params: tuple[Any, ...]) -> None:

@@ -7,7 +7,9 @@ Before an external side effect the executor calls ``begin`` in the tenant transa
 * ``COMPLETED`` or ``IN_PROGRESS`` with a different ``request_sha256`` ->
   ``IdempotencyConflictError``;
 * ``IN_PROGRESS`` with the same hash and ``locked_until`` in the past -> ``RECONCILE``: the
-  effect's reconciliation procedure runs before any new attempt (07 section 11);
+  effect's reconciliation procedure runs before any new attempt (07 section 11); the lock is
+  renewed for the reconciling caller (``locked_until = now + lock_ms``), so a concurrent or
+  later caller gets ``IN_FLIGHT`` until it expires again;
 * ``IN_PROGRESS`` with the same hash still locked -> ``IN_FLIGHT`` (another attempt holds it);
 * ``FAILED`` with the same hash -> ``PROCEED`` again (the row returns to ``IN_PROGRESS``).
 

@@ -7,13 +7,20 @@
   ``read_diagnostics`` shows
   the shared row (tenants may read platform rows, 04 section 3.5) and must never decide admission:
   a read followed by the pure ``admit`` is not atomic.
-* ``PgDeadLetterStore`` writes the T14 row and moves its workflow columns (07 section 5).
+* Breaker transitions are audited (07 section 4.3), not only logged: each admit / record runs
+  under a transaction advisory lock on the breaker key, reads the row state before and after the
+  function and, when the state changed, appends ``breaker.<new state>`` to the platform owner
+  org's chain **in the same transaction** (a lost audit rolls the transition back). Tenant
+  credential scopes (``gcp_<wire id>``, the tenant's chain) are 3C (P4-03) and are refused.
+* ``PgDeadLetterStore`` writes the T14 row and moves its workflow columns (07 section 5);
+  ``save`` takes the row lock and refuses a stale base (``LockConflictError``), so two
+  concurrent replays cannot both pass ``max_replays_per_item``.
 """
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import psycopg
@@ -21,28 +28,51 @@ from psycopg.types.json import Jsonb
 
 from amw_core.config import AmwSettings
 from amw_core.enums import CircuitState, DlqRecoveryStatus, EscalationLevel, FailureClass
-from amw_core.errors import CircuitOpenError, ConfigInvalidError, MissingDependencyError
+from amw_core.errors import (
+    CircuitOpenError,
+    ConfigInvalidError,
+    LockConflictError,
+    MissingDependencyError,
+)
 from amw_core.ids import (
     APPROVAL,
     ATTEMPT,
     DEAD_LETTER,
     JOB,
+    ORG,
     TASK,
     USER,
     ActorRef,
     DeadLetterId,
     IdempotencyKey,
+    OrgId,
+    Prefix,
+    format_id,
     is_actor_ref,
 )
+from amw_core.interfaces.audit_log import AuditLog, NewAuditEntry
 from amw_core.interfaces.system_functions import BreakerKey, BreakerState
-from amw_core.interfaces.tenancy_context import TenantTransaction
+from amw_core.interfaces.tenancy_context import TenantContext, TenantTransaction
 from amw_core.observability import get_logger
 from amw_core.retries.breaker import BreakerRow, counts_as_failure
 from amw_core.retries.dlq import AttemptHistoryItem, DeadLetter
-from amw_core.tenancy import connection_of, org_uuid_of, translate_db_error
+from amw_core.state_machine.machine import actor_kind_of
+from amw_core.tenancy import PgTenantTransaction, connection_of, org_uuid_of, translate_db_error
 
 Connection = psycopg.Connection[tuple[Any, ...]]
 _log = get_logger("retries.breaker")
+PLATFORM_SCOPE = "platform"
+AUTHORITY_BREAKER = "breaker.rules"
+"""``audit_log.authority`` of a transition: the 07 section 4.3 rules applied by the function."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Snapshot:
+    id: Any
+    state: CircuitState
+    open_until: datetime | None
+    open_count: int
+    epoch: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +95,108 @@ class PgBreakerFunctions:
     """``amw_breaker_record`` caller. ``connections`` yields an ``amw_app`` connection."""
 
     def __init__(
-        self, connections: Callable[[], AbstractContextManager[Connection]], settings: AmwSettings
+        self,
+        connections: Callable[[], AbstractContextManager[Connection]],
+        settings: AmwSettings,
+        *,
+        audit: AuditLog,
+        platform_owner_org: OrgId,
     ) -> None:
+        """``audit`` writes the transitions (``PgAuditLog``); ``platform_owner_org`` is the org
+        whose chain holds platform-credential transitions (checked to be the platform owner
+        organisation when it is written)."""
         self._connections = connections
         self._settings = settings
+        self._audit = audit
+        self._platform_owner_org = platform_owner_org
+
+    @staticmethod
+    def _snapshot(conn: Connection, key: BreakerKey) -> _Snapshot | None:
+        row = conn.execute(
+            "SELECT id, state, open_until, open_count, half_open_epoch FROM circuit_breakers"
+            " WHERE provider = %s AND operation_class = %s AND credential_scope = %s",
+            (key.provider, key.operation_class, key.credential_scope),
+        ).fetchone()
+        if row is None:
+            return None
+        return _Snapshot(row[0], CircuitState(row[1]), row[2], int(row[3]), int(row[4]))
+
+    def _audited(
+        self, caller: ActorRef, key: BreakerKey, query: str, params: tuple[Any, ...]
+    ) -> tuple[Any, ...]:
+        """Run one breaker function under the key's advisory lock and audit a state change in
+        the same transaction (07 section 4.3)."""
+        if not is_actor_ref(caller):
+            raise ValueError("caller must be an actor reference")
+        if key.credential_scope != PLATFORM_SCOPE:
+            raise ConfigInvalidError(
+                "breaker audit for tenant credential scopes is 3C (P4-03)",
+                details={"credential_scope": key.credential_scope[:80]},
+            )
+        lock = "\x1f".join(("amw_breaker", key.provider, key.operation_class, key.credential_scope))
+        try:
+            with self._connections() as conn, conn.transaction():
+                conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
+                conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock,))
+                before = self._snapshot(conn, key)
+                row = conn.execute(query.encode(), params).fetchone()
+                assert row is not None  # noqa: S101 - the functions always return one row
+                after = self._snapshot(conn, key)  # None: admitted with no row yet (CLOSED)
+                old = before.state if before is not None else CircuitState.CLOSED
+                if after is not None and after.state is not old:
+                    self._audit_transition(conn, caller, key, old, after)
+        except psycopg.Error as exc:
+            raise translate_db_error(exc) from exc
+        return tuple(row)
+
+    def _audit_transition(
+        self,
+        conn: Connection,
+        caller: ActorRef,
+        key: BreakerKey,
+        old: CircuitState,
+        after: _Snapshot,
+    ) -> None:
+        org_uuid = ORG.to_uuid(self._platform_owner_org)
+        conn.execute("SELECT set_config('app.org_id', %s, true)", (str(org_uuid),))
+        owner = conn.execute(
+            "SELECT is_platform_owner FROM organisations WHERE id = %s", (org_uuid,)
+        ).fetchone()
+        if owner is None or owner[0] is not True:
+            raise ConfigInvalidError("platform_owner_org is not the platform owner organisation")
+        tx = PgTenantTransaction(conn, TenantContext(self._platform_owner_org, caller), org_uuid)
+        self._audit.append(
+            tx,
+            NewAuditEntry(
+                actor_kind=actor_kind_of(caller),
+                actor_ref=caller,
+                authority=AUTHORITY_BREAKER,
+                action=f"breaker.{after.state.value.lower()}",
+                target_kind="CIRCUIT_BREAKER",
+                target_id=format_id(Prefix.CIRCUIT_BREAKER, after.id),
+                occurred_at=datetime.now(UTC),
+                details={
+                    "provider": key.provider,
+                    "operation_class": key.operation_class,
+                    "scope": key.credential_scope,  # "credential_*" keys are redacted
+                    "from": old.value,
+                    "to": after.state.value,
+                    "open_until": after.open_until.isoformat() if after.open_until else None,
+                    "open_count": after.open_count,
+                    "epoch": after.epoch,
+                },
+            ),
+        )
+        _log.info(
+            "breaker transition audited",
+            extra={
+                "actor": caller,
+                "provider": key.provider,
+                "operation_class": key.operation_class,
+                "from": old.value,
+                "to": after.state.value,
+            },
+        )
 
     def admit(self, caller: ActorRef, key: BreakerKey) -> ProbeAdmission:
         """Atomic admission before a call (07 section 4.3): at most ``half_open_max_probes``
@@ -81,23 +209,18 @@ class PgBreakerFunctions:
                 "breaker.half_open_probe_timeout_ms is not configured (REQUIRES REVIEW)",
                 details={"provider": key.provider, "operation_class": key.operation_class},
             )
-        try:
-            with self._connections() as conn, conn.transaction():
-                conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
-                row = conn.execute(
-                    "SELECT admitted, state, open_until, epoch FROM"
-                    " amw_breaker_admit(%s, %s, %s, %s, %s)",
-                    (
-                        key.provider,
-                        key.operation_class,
-                        key.credential_scope,
-                        cfg.half_open_max_probes,
-                        cfg.half_open_probe_timeout_ms,
-                    ),
-                ).fetchone()
-        except psycopg.Error as exc:
-            raise translate_db_error(exc) from exc
-        assert row is not None  # noqa: S101 - the function always returns one row
+        row = self._audited(
+            caller,
+            key,
+            "SELECT admitted, state, open_until, epoch FROM amw_breaker_admit(%s, %s, %s, %s, %s)",
+            (
+                key.provider,
+                key.operation_class,
+                key.credential_scope,
+                cfg.half_open_max_probes,
+                cfg.half_open_probe_timeout_ms,
+            ),
+        )
         return ProbeAdmission(
             bool(row[0]), BreakerState(key, CircuitState(row[1]), row[2]), int(row[3])
         )
@@ -134,33 +257,29 @@ class PgBreakerFunctions:
         if not is_actor_ref(caller):
             raise ValueError("caller must be an actor reference")
         cfg = self._settings.breaker_for(key.provider, key.operation_class)
-        try:
-            with self._connections() as conn, conn.transaction():
-                conn.execute("SELECT set_config('app.actor', %s, true)", (caller,))
-                row = conn.execute(
-                    "SELECT state, open_until FROM amw_breaker_record("
-                    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (
-                        key.provider,
-                        key.operation_class,
-                        key.credential_scope,
-                        succeeded,
-                        counts_as_failure(error_code),
-                        error_code,
-                        cfg.window_ms,
-                        cfg.min_calls,
-                        cfg.failure_ratio,
-                        cfg.consecutive_failures,
-                        cfg.open_ms,
-                        cfg.open_ms_max,
-                        cfg.half_open_successes_to_close,
-                        probe,
-                        probe_epoch,
-                    ),
-                ).fetchone()
-        except psycopg.Error as exc:
-            raise translate_db_error(exc) from exc
-        assert row is not None  # noqa: S101 - the function always returns one row
+        row = self._audited(
+            caller,
+            key,
+            "SELECT state, open_until FROM amw_breaker_record("
+            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                key.provider,
+                key.operation_class,
+                key.credential_scope,
+                succeeded,
+                counts_as_failure(error_code),
+                error_code,
+                cfg.window_ms,
+                cfg.min_calls,
+                cfg.failure_ratio,
+                cfg.consecutive_failures,
+                cfg.open_ms,
+                cfg.open_ms_max,
+                cfg.half_open_successes_to_close,
+                probe,
+                probe_epoch,
+            ),
+        )
         state = BreakerState(key=key, state=CircuitState(row[0]), open_until=row[1])
         _log.info(
             "breaker outcome recorded",
@@ -278,13 +397,17 @@ class PgDeadLetterStore:
         )
         return dlq_id
 
-    def get(self, tx: TenantTransaction, dlq_id: DeadLetterId) -> DeadLetter:
+    def get(
+        self, tx: TenantTransaction, dlq_id: DeadLetterId, *, for_update: bool = False
+    ) -> DeadLetter:
+        """``for_update``: lock the row for the rest of the transaction, so a workflow step
+        (``amw_core.retries.dlq``) read here and saved later cannot interleave with another."""
         rows = self._exec(
             tx,
             f"SELECT {', '.join('d.' + c.strip() for c in _DLQ_COLS.split(','))},"  # noqa: S608
             " t.idempotency_key, t.task_type, (t.resource_budget->>'max_cost_micros')::bigint"
             " FROM dead_letter d JOIN tasks t ON t.org_id = d.org_id AND t.id = d.task_id"
-            " WHERE d.org_id = %s AND d.id = %s",
+            " WHERE d.org_id = %s AND d.id = %s" + (" FOR UPDATE OF d" if for_update else ""),
             (org_uuid_of(tx), DEAD_LETTER.to_uuid(dlq_id)),
         )
         if not rows:
@@ -315,8 +438,26 @@ class PgDeadLetterStore:
             estimated_cost_micros=int(r[21] or 0),
         )
 
-    def save(self, tx: TenantTransaction, dlq_id: DeadLetterId, item: DeadLetter) -> None:
-        """Persist the workflow columns after a ``amw_core.retries.dlq`` step."""
+    def save(
+        self, tx: TenantTransaction, dlq_id: DeadLetterId, item: DeadLetter, *, base: DeadLetter
+    ) -> None:
+        """Persist the workflow columns after a ``amw_core.retries.dlq`` step. ``base`` is the
+        row the step was computed from: under the row lock the stored workflow columns must still
+        equal it, otherwise another step was saved in between (e.g. a second replay) and the
+        save is refused with ``LockConflictError`` (re-read and re-apply the step)."""
+        rows = self._exec(
+            tx,
+            "SELECT recovery_status, replay_count, replay_approval_id, triaged_by,"
+            " root_cause_note, resolved_at FROM dead_letter"
+            " WHERE org_id = %s AND id = %s FOR UPDATE",
+            (org_uuid_of(tx), DEAD_LETTER.to_uuid(dlq_id)),
+        )
+        if not rows:
+            raise MissingDependencyError("dead-letter row not found")
+        if tuple(rows[0]) != self._workflow(base):
+            raise LockConflictError(
+                "dead-letter row changed since it was read", details={"dlq_id": dlq_id}
+            )
         self._exec(
             tx,
             "UPDATE dead_letter SET recovery_status = %s, replay_count = %s,"
@@ -332,6 +473,18 @@ class PgDeadLetterStore:
                 org_uuid_of(tx),
                 DEAD_LETTER.to_uuid(dlq_id),
             ),
+        )
+
+    @staticmethod
+    def _workflow(item: DeadLetter) -> tuple[Any, ...]:
+        """The stored form of the workflow columns ``save`` writes."""
+        return (
+            str(item.recovery_status),
+            item.replay_count,
+            APPROVAL.to_uuid(item.replay_approval_id) if item.replay_approval_id else None,
+            USER.to_uuid(item.triaged_by) if item.triaged_by else None,
+            item.root_cause_note,
+            item.resolved_at,
         )
 
     @staticmethod
