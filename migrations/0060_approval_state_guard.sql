@@ -357,6 +357,3 @@ BEGIN
 END
 $$;
 RESET ROLE;
-
--- Hygiene (PR 108 r2 MINOR): the nologin definer/owner roles create no objects in schema public.
-REVOKE CREATE ON SCHEMA public FROM amw_verifier_fn, amw_owner, amw_sysfn;

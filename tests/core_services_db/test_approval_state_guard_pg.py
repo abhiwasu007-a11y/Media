@@ -404,9 +404,19 @@ def test_the_task_pointer_needs_an_approval_of_the_same_job(world: World) -> Non
         )
 
 
-def test_definer_roles_cannot_create_objects_in_public(world: World) -> None:
-    for role in ("amw_verifier_fn", "amw_owner", "amw_sysfn"):
+def test_amw_owner_can_still_create_objects_after_the_last_migration(world: World) -> None:
+    """Regression (PR 108 r3): a later migration runs as amw_owner and creates objects in public;
+    0060 must not take CREATE on schema public away from the migration roles."""
+    for role in ("amw_owner", "amw_verifier_fn"):
         got = world.admin.execute(
             "SELECT has_schema_privilege(%s, 'public', 'CREATE')", (role,)
         ).fetchone()
-        assert got == (False,), role
+        assert got == (True,), role
+    with world.admin.transaction():
+        world.admin.execute("SET LOCAL ROLE amw_owner")
+        world.admin.execute("CREATE TABLE later_migration_probe (id int)")
+        world.admin.execute(
+            "CREATE FUNCTION later_migration_probe_fn() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$"
+        )
+        world.admin.execute("DROP TABLE later_migration_probe")
+        world.admin.execute("DROP FUNCTION later_migration_probe_fn()")
