@@ -172,6 +172,8 @@ def wait_for_kernel(
         try:
             status, msg = get_status(username, key, slug)
         except RuntimeError as exc:
+            if "HTTP 401" in str(exc) or "HTTP 403" in str(exc):
+                return "ERROR", f"auth refused: {str(exc)[:200]}"  # fail fast: retrying cannot fix credentials
             # The kernel may not be visible for a moment after the push; transient errors are retried.
             status, msg = "UNKNOWN", str(exc)
         if status != last:
@@ -264,6 +266,7 @@ def generate_clips(
         errors = {str(s["id"]): msg for s in shots}
         return {"clips": clips, "errors": errors, "kernel": f"{username}/{slug}", "status": status}
     try:
+        (out_dir / DONE_FILE).unlink(missing_ok=True)  # never read an old run's result list
         saved = set(download_outputs(username, key, slug, out_dir))
     except RuntimeError as exc:
         saved = set()

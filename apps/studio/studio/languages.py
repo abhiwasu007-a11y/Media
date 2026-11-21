@@ -57,3 +57,9 @@ def font_path(code: str, bold: bool) -> Path:
 def units(code: str, text: str) -> int:
     """Words (or characters for ja/zh) for the timing estimate."""
     return len(text.replace(" ", "")) if code in CHAR_BASED else len(text.split())
+
+
+def font_ok(code: str) -> bool:
+    """False when the language's own font is missing and Mukta would be used (wrong glyphs for that script)."""
+    stem = info(code)[2]
+    return stem == "mukta" or font_path(code, True).name != "Mukta-Bold.ttf"

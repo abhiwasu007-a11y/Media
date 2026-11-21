@@ -7,6 +7,7 @@ visual: the run never stops for an optional asset, and every asset is listed wit
 """
 
 import base64
+import hashlib
 import json
 import time
 import urllib.parse
@@ -106,18 +107,18 @@ def bfl_image(job: Path, key: str, prompt: str, out: Path, seed: int) -> dict:
     if llm.pilot_spent() + BFL_WORST_USD > config.load().pilot_cap_usd:
         raise llm.BudgetRefused("pilot cap reached before an AI image")
     body = json.dumps({"prompt": prompt, "width": IMG_W, "height": IMG_H, "seed": seed, "output_format": "jpeg"}).encode()
-    sub = _get_json(BFL_URL, {"x-key": key, "Content-Type": "application/json", "accept": "application/json"}, body)
+    # reserved BEFORE the request: a timeout after the server accepted it still counts against the caps
     llm.append_row(
         job,
         {
             "stage": "08a_assets",
             "provider": "bfl",
             "model": "flux-2-pro",
-            "request_id": sub.get("id"),
             "cost_usd": BFL_WORST_USD,
-            "basis": "ESTIMATE worst case per image (IMG-03)",
+            "basis": "ESTIMATE worst case per image, reserved before submit (IMG-03)",
         },
     )
+    sub = _get_json(BFL_URL, {"x-key": key, "Content-Type": "application/json", "accept": "application/json"}, body)
     deadline = time.time() + 180
     while time.time() < deadline:
         time.sleep(2)
@@ -236,6 +237,10 @@ def depth_maps(job: Path, files: list[Path], notes: list[str]) -> int:
     return len(todo)
 
 
+def _h(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()[:10]
+
+
 def s08a_assets(job: Path, meta: dict) -> str:
     plan = json.loads((job / "asset_plan.json").read_text())
     adir = job / "assets"
@@ -244,6 +249,7 @@ def s08a_assets(job: Path, meta: dict) -> str:
     chars = plan.get("characters", {})
     sheet = "; ".join(f"{k}: {v}" for k, v in chars.items())
     out, used, notes = {}, set(), []
+    budget_out = False  # after a cap refusal: keep using pictures already on disk, generate nothing new
     old = json.loads((job / "assets.json").read_text()) if (job / "assets.json").exists() else {}
     for i, p in enumerate(plan["scenes"]):
         sid, kind = p["id"], p.get("kind", "none")
@@ -252,18 +258,22 @@ def s08a_assets(job: Path, meta: dict) -> str:
                 prev = old.get(sid, {})
                 files, infos = [], []
                 for j, shot in enumerate(p.get("shots") or [p.get("prompt")]):
-                    f = adir / f"{sid}_{j}.jpg"
+                    f = adir / f"{sid}_{j}_{_h(shot + plan['style'])}.jpg"  # file name follows the prompt
+                    if not f.exists() and budget_out:
+                        continue
                     if not f.exists():
                         info = make_image(job, f"{shot}. Characters: {sheet}. Style: {plan['style']}", f, seed=1000 + 10 * i + j)
                         infos.append({"shot": shot, **info})
                     else:
                         infos.append(next((x for x in prev.get("shots_info", []) if x.get("shot") == shot), {"shot": shot}))
                     files.append(f"assets/{f.name}")
+                if not files:
+                    continue
                 lic = next((x.get("licence") for x in infos if x.get("licence")), prev.get("licence"))
                 out[sid] = {"kind": "image", "file": files[0], "files": files, "shots_info": infos, "licence": lic}
             elif kind == "stock_video":
-                f = adir / f"{sid}.mp4"
-                if sid in old and f.exists():
+                f = adir / f"{sid}_{_h(p.get('query') or '')}.mp4"
+                if sid in old and f.exists() and old[sid].get("file") == f"assets/{f.name}":
                     out[sid] = old[sid]
                     continue
                 if not pix:
@@ -272,22 +282,25 @@ def s08a_assets(job: Path, meta: dict) -> str:
                 out[sid] = {"kind": "video", "file": f"assets/{f.name}", "query": p.get("query"), **info}
         except llm.BudgetRefused as exc:
             notes.append(f"{sid}: {exc}")
-            break
+            budget_out = True
         except Exception as exc:  # optional asset: fall back to the code-made visual, record why
             notes.append(f"{sid}: {type(exc).__name__}: {str(exc)[:120]}")
-    tp, tf = plan.get("thumbnail_prompt"), adir / "thumb.jpg"
-    if tp and not tf.exists():
+    tp = plan.get("thumbnail_prompt")
+    tf = adir / f"thumb_{_h((tp or '') + plan.get('style', ''))}.jpg"
+    if tp and not tf.exists() and not budget_out:
         try:
             info = make_image(job, f"{tp}. Characters: {sheet}. Style: {plan['style']}", tf, seed=999)
-            out["_thumbnail"] = {"kind": "thumbnail", "file": "assets/thumb.jpg", "prompt": tp, **info}
+            out["_thumbnail"] = {"kind": "thumbnail", "file": f"assets/{tf.name}", "prompt": tp, **info}
         except Exception as exc:
             notes.append(f"thumbnail: {type(exc).__name__}: {str(exc)[:120]}")
-    elif tf.exists() and "_thumbnail" in old:
+    elif tf.exists() and old.get("_thumbnail", {}).get("file") == f"assets/{tf.name}":
         out["_thumbnail"] = old["_thumbnail"]
     n_depth = depth_maps(
         job, [job / f for a in out.values() if a["kind"] in ("image", "thumbnail") for f in a.get("files", [a["file"]])], notes
     )
-    (job / "assets.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    tmp = job / "assets.json.tmp"
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    tmp.replace(job / "assets.json")
     kinds = [a["kind"] for a in out.values()]
     msg = f"images {kinds.count('image')}, videos {kinds.count('video')}, depth maps {n_depth}"
     return msg + (f"; fallbacks: {len(notes)} ({'; '.join(notes[:3])})" if notes else "")
@@ -307,22 +320,34 @@ def s08b_motion(job: Path, meta: dict) -> str:
     assets_f = job / "assets.json"
     assets = json.loads(assets_f.read_text()) if assets_f.exists() else {}
     limit = int(config.get("AMW_MAX_MOTION_CLIPS", "8"))
+    want: dict[str, str] = {}  # scene id -> clip id (named after the prompt, so a new prompt never reuses an old clip)
     shots = []
     for p in plan["scenes"]:
         a = assets.get(p["id"])
-        if p.get("kind") == "ai_image" and a and p.get("shots") and len(shots) < limit:
-            if not (job / "assets" / f"{p['id']}_0.mp4").exists():
-                shots.append(
-                    {"id": f"{p['id']}_0", "prompt": f"{p['shots'][0]}. Style: {plan['style']}. Gentle cinematic camera move."}
-                )
-    res = motion_kaggle.generate_clips(user, key, shots, job / "assets") if shots else {"clips": {}, "errors": {}}
+        if p.get("kind") == "ai_image" and a and p.get("shots") and len(want) < limit:
+            prompt = f"{p['shots'][0]}. Style: {plan['style']}. Gentle cinematic camera move."
+            cid = f"{p['id']}_m{_h(prompt)}"
+            want[p["id"]] = cid
+            if not (job / "assets" / f"{cid}.mp4").exists():
+                shots.append({"id": cid, "prompt": prompt})
+    res: dict = {"clips": {}, "errors": {}}
+    note = ""
+    if shots:
+        try:
+            res = motion_kaggle.generate_clips(user, key, shots, job / "assets")
+        except Exception as exc:  # optional stage: never stop the video for it
+            note = f"; Kaggle failed: {type(exc).__name__}: {str(exc)[:160]}"
     used = 0
-    for sid, a in assets.items():
-        clip = job / "assets" / f"{sid}_0.mp4"
-        if a.get("kind") == "image" and clip.exists():
-            a["files"] = [f"assets/{clip.name}"] + a.get("files", [a["file"]])[1:]
+    for sid, cid in want.items():
+        clip = job / "assets" / f"{cid}.mp4"
+        a = assets.get(sid)
+        if a and a.get("kind") == "image" and clip.exists():
+            stills = [f for f in a.get("files", [a["file"]]) if not f.endswith(".mp4")]
+            a["files"] = [f"assets/{clip.name}"] + stills[1:]
             a["motion"] = {"provider": "Kaggle notebook, Wan2.1-T2V-1.3B", "licence": "Apache-2.0 model (Wan-AI model card)"}
             used += 1
-    assets_f.write_text(json.dumps(assets, ensure_ascii=False, indent=1))
+    tmp = job / "assets.json.tmp"
+    tmp.write_text(json.dumps(assets, ensure_ascii=False, indent=1))
+    tmp.replace(assets_f)
     errs = res.get("errors") or {}
-    return f"motion clips in use {used}; new {len(res.get('clips') or {})}; errors {len(errs)}"
+    return f"motion clips in use {used}; new {len(res.get('clips') or {})}; errors {len(errs)}{note}"

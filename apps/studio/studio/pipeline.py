@@ -49,7 +49,10 @@ def rj(p: Path) -> dict:
 
 
 def wj(p: Path, d: dict) -> None:
-    p.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+    """Atomic JSON write: readers never see a half-written file, a crash never corrupts it."""
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+    tmp.replace(p)
 
 
 def status(job: Path) -> dict:
@@ -108,6 +111,8 @@ JSON shape:
 
 def _complete_scenes(text: str) -> dict:
     """Recover the head fields and every complete scene from a JSON reply cut by max_tokens."""
+    if "{" not in text or '"scenes"' not in text:
+        raise ValueError("the cut-off reply holds no scenes; raise max_tokens or shorten the brief")
     t = text[text.find("{") :]
     i = t.find('"scenes"')
     head = json.loads(t[:i].rstrip().rstrip(",") + "}")
@@ -176,31 +181,50 @@ def s05_script(job: Path, meta: dict) -> str:
     return f"{len(data['scenes'])} scenes, {words} words"
 
 
+TRANSLATE_BATCH = 12  # scenes per call: keeps each reply far below the output limit
+
+
 def s05_translate(job: Path, meta: dict) -> str:
-    """Language version of an existing job: translate the script, keep scene ids, visuals and pictures (no new images)."""
+    """Language version of an existing job: translate the script in batches, keep scene ids, visuals and pictures."""
     src = rj(job / "source_script.json")
     target = languages.info(meta["language"])[0]
     keep_quote = (meta.get("quote") or "").strip()
     system = (
         f"You translate a YouTube narration script into natural, spoken {target} (its usual script), for a narrator voice. "
-        "Keep meaning, tone, scene count and scene ids exactly; adapt idioms naturally; write numbers as words; beats stay short "
-        "(max ~6 words). Translate title_options, thumbnail_text, description, tags, narration, beats and any visible text in "
-        "visual_params (table rows, words, items, meaning), but never translate an English quote marked as a quote: keep it "
-        "verbatim and translate only its meaning field. Return ONLY JSON with the same shape."
+        "Keep meaning, tone and scene ids exactly; adapt idioms naturally; write numbers as words; beats stay short "
+        "(max ~6 words). Translate narration, beats and any visible text in visual_params (table rows, words, items, "
+        "meaning), but never translate an English quote marked as a quote: keep it verbatim and translate only its "
+        "meaning field. Return ONLY JSON with the same shape as the input."
     )
-    user = f"Verbatim quote to keep: {keep_quote or 'none'}\n\nSCRIPT JSON:\n{json.dumps(src, ensure_ascii=False)}"
-    r = llm.call(job, "05_translate", system, user, max_tokens=64000, effort="low")
-    data = llm.parse_json(r.text)
-    if [s["id"] for s in data["scenes"]] != [s["id"] for s in src["scenes"]]:
-        raise RuntimeError("translation changed the scene list; refusing (pictures are matched by scene id)")
-    for a, b in zip(data["scenes"], src["scenes"], strict=True):
-        a["visual"] = b["visual"]
-    data["claims"] = src.get("claims", [])
+    head_in = {k: src.get(k) for k in ("title_options", "thumbnail_text", "description", "tags")}
+    head = llm.parse_json(
+        llm.call(job, "05_translate_head", system, f"JSON:\n{json.dumps(head_in, ensure_ascii=False)}", 8000, "low").text
+    )
+    scenes: list[dict] = []
+    for b in range(0, len(src["scenes"]), TRANSLATE_BATCH):
+        part = src["scenes"][b : b + TRANSLATE_BATCH]
+        user = f"Verbatim quote to keep: {keep_quote or 'none'}\n\nJSON:\n{json.dumps({'scenes': part}, ensure_ascii=False)}"
+        out = llm.parse_json(llm.call(job, f"05_translate_{b // TRANSLATE_BATCH:02d}", system, user, 24000, "low").text)
+        got = out.get("scenes", [])
+        if [x.get("id") for x in got] != [x["id"] for x in part]:
+            raise RuntimeError(f"translation changed the scene list in batch {b // TRANSLATE_BATCH}; refusing")
+        for a, src_s in zip(got, part, strict=True):
+            a["visual"] = src_s["visual"]
+            a.setdefault("section", src_s.get("section"))
+        scenes += got
+    data = {**{k: head.get(k, src.get(k)) for k in head_in}, "scenes": scenes, "claims": src.get("claims", [])}
     wj(job / "script.json", data)
-    return f"translated {len(data['scenes'])} scenes to {target}"
+    return f"translated {len(scenes)} scenes to {target}"
 
 
 # ------------------------------------------------------------------ 06 fact-check
+# medical / mental-health advice markers (mr, hi, en); other languages rely on the LLM fact-check item
+MEDICAL = re.compile(
+    r"डॉक्टर|उपचार|औषध|नैराश्य|डिप्रेशन|थेरपी|दवा|इलाज|\b(doctor|medicine|medication|therapy|diagnos\w*|cure|depression)\b",
+    re.IGNORECASE,
+)
+
+
 def s06_fact_check(job: Path, meta: dict) -> str:
     d = rj(job / "script.json")
     res = rj(job / "research.json")
@@ -209,9 +233,14 @@ def s06_fact_check(job: Path, meta: dict) -> str:
     det = {
         "quote_verified_exact": bool(q and q["verified_exact"]),
         "quote_scenes": [s["id"] for s in d["scenes"] if q and q["text"][:20] in json.dumps(s, ensure_ascii=False)],
-        "unverified_latin_quotes": [s["id"] for s in d["scenes"] if re.search(r"[\"“][A-Za-z][^\"”]{20,}[\"”]", s["narration"])],
+        "unverified_latin_quotes": [
+            s["id"]
+            for s in d["scenes"]
+            for m in re.findall(r"[\"“]([A-Za-z][^\"”]{20,})[\"”]", s["narration"])
+            if not (q and q["verified_exact"] and m.strip().rstrip(".") in q["text"])
+        ],
         "digits_in_narration": [(s["id"], x) for s in d["scenes"] for x in re.findall(r"[0-9०-९]+", s["narration"])],
-        "medical_terms": [s["id"] for s in d["scenes"] if re.search(r"डॉक्टर|उपचार|औषध|नैराश्य|डिप्रेशन|थेरपी", s["narration"])],
+        "medical_terms": [s["id"] for s in d["scenes"] if MEDICAL.search(s["narration"])],
         "fiction_disclosure": [s["id"] for s in d["scenes"] if "काल्पनिक" in s["narration"]],
     }
     det["quote_count_ok"] = len(det["quote_scenes"]) <= 1 and (not det["quote_scenes"] or det["quote_verified_exact"])
@@ -232,7 +261,7 @@ def s06_fact_check(job: Path, meta: dict) -> str:
 # ------------------------------------------------------------------ 07 voice
 def sentences(text: str) -> list[str]:
     out: list[str] = []
-    for p in re.split(r"(?<=[.?!।…؟])\s+|(?<=[。！？])", text.strip()):
+    for p in re.split(r"(?<=[.?!।…؟۔])\s+|(?<=[。！？])", text.strip()):
         p = p.strip()
         if p and out and len(p) < 12:
             out[-1] += " " + p
@@ -277,8 +306,8 @@ def _ts(t: float) -> str:
     return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}"
 
 
-def _chunks(text: str, n: int = 42) -> list[str]:
-    if " " not in text.strip() and len(text) > 18:  # ja/zh: no word spaces, cut by characters
+def _chunks(text: str, n: int = 42, cjk: bool = False) -> list[str]:
+    if cjk or (" " not in text.strip() and len(text) > 18):  # ja/zh: no word spaces, cut by characters
         return [text[i : i + 18] for i in range(0, len(text), 18)]
     out, cur = [], ""
     for w in text.split():
@@ -311,8 +340,9 @@ def s09_timeline(job: Path, meta: dict) -> str:
         if voice["mode"] == "file":  # scale the estimate to the real recording length
             x, sr = sf.read(job / "voice.wav", dtype="float32")
             real = len(x) / sr
-            est = sum(d for *_, d in sents) + GAP_SENT * len(sents) + GAP_SCENE * len(script["scenes"]) + LEAD + TAIL
-            k = max(0.2, (real - LEAD - TAIL) / (est - LEAD - TAIL))
+            gaps = GAP_SENT * len(sents) + GAP_SCENE * len(script["scenes"])
+            spoken = sum(d for *_, d in sents)
+            k = max(0.2, (real - LEAD - TAIL - gaps) / max(spoken, 0.1))  # timeline total then equals the recording
             sents = [(a, b, None, d * k) for a, b, _, d in sents]
     pieces, t, scenes, subs, cur, start = [np.zeros(int(LEAD * SR), np.float32)], LEAD, [], [], None, 0.0
     for sid, txt, x, d in sents:
@@ -322,7 +352,7 @@ def s09_timeline(job: Path, meta: dict) -> str:
                 pieces.append(np.zeros(int(GAP_SCENE * SR), np.float32))
                 scenes.append({"id": cur, "start": round(start, 3), "dur": round(t - start, 3)})
             cur, start = sid, (0.0 if cur is None else t)
-        cs = _chunks(txt)
+        cs = _chunks(txt, cjk=lang in languages.CHAR_BASED)
         tot, ct = sum(len(c) for c in cs), t
         for c in cs:
             cd = d * len(c) / tot
@@ -335,6 +365,8 @@ def s09_timeline(job: Path, meta: dict) -> str:
     scenes.append({"id": cur, "start": round(start, 3), "dur": round(t - start, 3)})
     if voice["mode"] == "parler":
         sf.write(job / "narration_48k.wav", np.concatenate(pieces), SR, subtype="PCM_24")
+    else:
+        (job / "narration_48k.wav").unlink(missing_ok=True)
     basis = {
         "parler": "MEASURED from TTS audio",
         "file": "ESTIMATE scaled to the recording length",
@@ -342,7 +374,9 @@ def s09_timeline(job: Path, meta: dict) -> str:
     }[voice["mode"]]
     wj(job / "timings.json", {"scenes": scenes, "total": round(t, 3), "basis": basis})
     srt = "\n".join(f"{i}\n{_ts(a)} --> {_ts(b)}\n{c}\n" for i, (a, b, c) in enumerate(subs, 1))
-    (job / "captions_mr.srt").write_text(srt, encoding="utf-8")
+    for old in job.glob("captions_*.srt"):
+        old.unlink()
+    (job / f"captions_{lang}.srt").write_text(srt, encoding="utf-8")
     return f"{t / 60:.2f} min, {len(subs)} captions ({basis})"
 
 
@@ -356,7 +390,9 @@ def s08_visuals(job: Path, meta: dict) -> str:
 
 def s11_thumbnail(job: Path, meta: dict) -> str:
     visuals.set_language(meta.get("language", "mr"))
-    hero = job / "assets" / "thumb.jpg"
+    af = job / "assets.json"
+    tf = (rj(af).get("_thumbnail") or {}).get("file") if af.exists() else None
+    hero = job / tf if tf else job / "assets" / "missing.jpg"
     visuals.thumbnail(rj(job / "script.json"), job / "thumbnail.png", hero if hero.exists() else None)
     return "1280x720" + (" with AI hero picture" if hero.exists() else "")
 
@@ -367,10 +403,11 @@ def sh(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def audio_source(job: Path) -> Path | None:
-    for f in ("narration_48k.wav", "voice.wav"):
-        if (job / f).exists():
-            return job / f
-    return None
+    """The narration chosen by stage 07 (voice.json mode), never a leftover file from an earlier mode."""
+    vf = job / "voice.json"
+    mode = rj(vf).get("mode") if vf.exists() else None
+    f = {"parler": job / "narration_48k.wav", "file": job / "voice.wav"}.get(mode or "")
+    return f if f and f.exists() else None
 
 
 def s10_render(job: Path, meta: dict) -> str:
@@ -543,6 +580,7 @@ def s10_qc(job: Path, meta: dict) -> str:
         "audio.voice_present": (voiced, "narration" if voiced else "MISSING: voice pending"),
         "audio.loudness_-14_lufs": (voiced and abs(lufs + 14) <= 1.0, f"{lufs} LUFS"),
         "audio.true_peak_-1_dbtp": (voiced and tp <= -1.0, f"{tp} dBTP"),
+        "font.for_language": (languages.font_ok(meta.get("language", "mr")), meta.get("language", "mr")),
         "duration.min_max": (60 * meta.get("min_minutes", 8) <= dur <= 60 * meta.get("max_minutes", 9.6), f"{dur:.1f} s"),
     }
     rep = {
@@ -566,7 +604,7 @@ def s16_gate(job: Path, meta: dict) -> str:
         "quote_policy": (det["quote_count_ok"] and not det["unverified_latin_quotes"], f"quote scenes {det['quote_scenes']}"),
         "fact_check": (fc["llm"].get("overall") == "PASS", fc["llm"].get("overall")),
         "fiction_disclosed": (
-            bool(det["fiction_disclosure"]) or not meta.get("has_fiction", True),
+            bool(det["fiction_disclosure"]) or not meta.get("has_fiction", False),
             str(det["fiction_disclosure"]),
         ),
         "no_medical_terms": (not det["medical_terms"], str(det["medical_terms"])),
@@ -592,14 +630,18 @@ def manifest(job: Path, meta: dict) -> str:
     rows = llm.ledger_rows(job)
     by: dict[str, float] = {s: 0.0 for s in STAGES if s != "manifest"}
     for r in rows:
-        k = "05_script" if r["stage"].startswith("05") else r["stage"]
+        k = (
+            "05_script"
+            if r["stage"] in ("05_script", "05_script_continuation") or r["stage"].startswith("05_translate")
+            else r["stage"]
+        )
         by[k] = round(by.get(k, 0.0) + r["cost_usd"], 6)
     voice = rj(job / "voice.json")
     script = rj(job / "script.json")
     files = [
         "final_1080p.mp4",
         "thumbnail.png",
-        "captions_mr.srt",
+        f"captions_{meta.get('language', 'mr')}.srt",
         "qc_report.json",
         "gate_report.json",
         "script.json",
@@ -652,21 +694,38 @@ FUNCS = {
 AFTER_VOICE = STAGES[STAGES.index("07_voice") :]
 
 
-def run(job: Path, from_stage: str | None = None) -> bool:
-    meta = rj(job / "job.json")
-    st = status(job)
-    todo = STAGES[STAGES.index(from_stage) :] if from_stage else STAGES
+HEAVY = {"07_voice", "08a_assets", "08b_motion", "08_visuals", "10_render", "10_qc"}
+
+
+def run(job: Path, from_stage: str | None = None, before_stage=None) -> bool:
+    """Run the stages in order. A stage that is not done runs; once any stage runs, every later stage runs too, so
+    nothing downstream is left from an older input. ``before_stage(stage)`` lets the caller wait (market hours)."""
+    try:
+        meta = rj(job / "job.json")
+        st = status(job)
+    except Exception as exc:  # unreadable job: report, never kill the caller
+        set_status(job, "queue", "failed", f"job unreadable: {type(exc).__name__}: {exc}")
+        return False
+    if from_stage is not None and from_stage not in STAGES:
+        set_status(job, "queue", "failed", f"unknown stage {from_stage!r}")
+        return False
+    dirty = False
     for stage in STAGES:
         done = st["stages"].get(stage, {}).get("state") == "done"
-        if stage not in todo and done:
+        forced = from_stage is not None and STAGES.index(stage) >= STAGES.index(from_stage)
+        if done and not forced and not dirty:
             continue
-        if done and not from_stage:
-            continue
+        if before_stage is not None:
+            before_stage(stage)
         set_status(job, stage, "running")
         try:
             note = FUNCS[stage](job, meta)
             set_status(job, stage, "done", note)
+            dirty = True
         except Exception as exc:  # recorded and the run stops: no silent skip, no retry loop
             set_status(job, stage, "failed", f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}")
+            for later in STAGES[STAGES.index(stage) + 1 :]:  # downstream results are now stale
+                if st["stages"].get(later, {}).get("state") == "done":
+                    set_status(job, later, "stale", f"needs re-run after {stage} failed")
             return False
     return True
