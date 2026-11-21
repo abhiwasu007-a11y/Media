@@ -345,7 +345,25 @@ def v_bar(d, s, t, dur, img):
     beats_panel(d, s["beats"], t, dur, 1420, W - 60, H / 2, big=70)
 
 
+def v_disclaimer(d, s, t, dur, img):
+    """FIN-R10 card: the full disclaimer, readable, for the whole scene."""
+    text = (s.get("visual_params") or {}).get("text", "")
+    cx, cy = W / 2, 140  # drawn warning sign (the fonts have no warning glyph)
+    d.polygon([(cx, cy - 55), (cx - 62, cy + 50), (cx + 62, cy + 50)], outline=ACC, width=8)
+    d.line([(cx, cy - 18), (cx, cy + 18)], fill=ACC, width=10)
+    d.ellipse([cx - 6, cy + 28, cx + 6, cy + 40], fill=ACC)
+    head = {"mr": "महत्त्वाची सूचना", "hi": "महत्वपूर्ण सूचना"}.get(LANG, "Disclaimer")
+    d.text((W / 2, 250), head, font=font(64), fill=ACC, anchor="mm")
+    f = font(46, False)
+    lines = wrap(text, f, W - 360)
+    y = H / 2 + 40 - len(lines) * 32
+    for ln in lines:
+        d.text((W / 2, y), ln, font=f, fill=INK, anchor="mm")
+        y += 64
+
+
 DRAW = {
+    "disclaimer": v_disclaimer,
     "kinetic_text": v_kinetic,
     "title_card": v_title,
     "question_card": v_question,

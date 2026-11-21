@@ -126,3 +126,18 @@ def test_google_voice_stops_before_the_free_limit(tmp_path, monkeypatch):
     except tts_google.FreeLimitReached:
         pass
     assert len(calls) == 2  # no request after the refusal
+
+
+def test_finance_disclaimer_card_and_description(tmp_path, monkeypatch):
+    job = make_job(tmp_path, monkeypatch, category="finance")
+    data = {
+        "description": "about candles",
+        "scenes": [{"id": "s01", "narration": "एक संकल्पना.", "beats": [], "visual": "kinetic_text"}],
+    }
+    pipeline.add_finance_disclaimer(data, "mr")
+    assert data["scenes"][0]["id"] == "s00" and data["scenes"][0]["visual"] == "disclaimer"
+    assert pipeline.disclaimer("mr") in data["description"]
+    pipeline.wj(job / "script.json", data)
+    assert pipeline._has_disclaimer(job)
+    assert pipeline.FIN_FLAGS.search("हा शेअर आत्ता खरेदी करा")
+    assert not pipeline.FIN_FLAGS.search("कँडलस्टिक म्हणजे काय ते समजून घेऊ")

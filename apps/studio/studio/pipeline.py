@@ -37,7 +37,7 @@ STAGES = [
     "16_gate",
     "manifest",
 ]
-VISUALS = sorted(visuals.DRAW)
+VISUALS = sorted(k for k in visuals.DRAW if k != "disclaimer")  # the disclaimer card is added by code
 
 
 def now() -> str:
@@ -154,6 +154,8 @@ def s05_script(job: Path, meta: dict) -> str:
     )
     minutes = meta.get("minutes", 8.5)
     system = SYSTEM_05.format(category=meta.get("category", "finance"), quote_rule=quote_rule, language=lang_name)
+    if meta.get("category") == "finance":
+        system += "\n" + FINANCE_RULES
     user = USER_05.format(
         brief=(job / "brief.md").read_text(),
         language=lang_name,
@@ -187,12 +189,21 @@ def s05_script(job: Path, meta: dict) -> str:
         s["id"] = f"s{k:02d}"
         if s.get("visual") not in visuals.DRAW:
             s["visual"] = "kinetic_text"
+    if meta.get("category") == "finance":
+        add_finance_disclaimer(data, meta.get("language", "mr"))
     wj(job / "script.json", data)
     words = sum(len(s["narration"].split()) for s in data["scenes"])
     return f"{len(data['scenes'])} scenes, {words} words"
 
 
 TRANSLATE_BATCH = 12  # scenes per call: keeps each reply far below the output limit
+
+
+def src_lang(job: Path) -> str:
+    try:
+        return rj(job / "job.json").get("source_language", "mr")
+    except (OSError, ValueError):
+        return "mr"
 
 
 def s05_translate(job: Path, meta: dict) -> str:
@@ -224,8 +235,54 @@ def s05_translate(job: Path, meta: dict) -> str:
             a.setdefault("section", src_s.get("section"))
         scenes += got
     data = {**{k: head.get(k, src.get(k)) for k in head_in}, "scenes": scenes, "claims": src.get("claims", [])}
+    if meta.get("category") == "finance":  # the approved template of the target language, never a free translation
+        if disclaimer(meta["language"]):
+            data["description"] = (data.get("description") or "").replace(disclaimer(src_lang(job)) or "\0", "").strip()
+        add_finance_disclaimer(data, meta["language"])
     wj(job / "script.json", data)
     return f"translated {len(scenes)} scenes to {target}"
+
+
+# ------------------------------------------------------------------ finance (SEBI rule pack, 13 section 5)
+FINANCE_RULES = """FINANCE RULES (SEBI, India; education only; any breach blocks the video):
+- No buy, sell or hold call on any instrument (FIN-R1). No entry, exit, stop-loss, target, strike or trigger level for a
+  current instrument (FIN-R2). No view on what a current market will do tomorrow/this week/in future (FIN-R3).
+- No performance, profit or return claims, no "guaranteed" or "assured" returns, no profit testimonials (FIN-R6, R7).
+- No broker referral, affiliate or paid promotion of any regulated entity (FIN-R8); no paid tips group (FIN-R5).
+- No forward-looking statement about the future direction of a NAMED security, even in a historical example (FIN-R13).
+  Prefer generic examples ("a stock", "an index"); dated price examples only if older than 30 days (FIN-R9).
+- Explain concepts, risks and how things work; always mention risk where returns are discussed."""
+FIN_FLAGS = re.compile(
+    r"खरेदी करा|विकत घ्या|विका\b|टार्गेट|स्टॉप.?लॉस|नफा (मिळेल|नक्की)|गॅरंटी|हमखास|खरीदें|बेचें|मुनाफा पक्का|"
+    r"\b(buy now|sell now|target price|stop.?loss at|guaranteed returns?|assured returns?|sure.?shot|multibagger)\b",
+    re.IGNORECASE,
+)
+
+
+def disclaimer(lang: str) -> str | None:
+    d = json.loads((Path(__file__).parent / "data" / "disclaimers.json").read_text(encoding="utf-8"))
+    return d.get(lang)
+
+
+def add_finance_disclaimer(data: dict, lang: str) -> None:
+    """FIN-R10: an on-screen disclaimer card first (5-6 s) and the text at the end of the description."""
+    text = disclaimer(lang) or disclaimer("en")
+    first = text.split(". ")[0].split("। ")[0].rstrip(".।") + ("।" if lang in ("hi",) else ".")
+    data["scenes"] = [s for s in data["scenes"] if s.get("id") != "s00"]
+    data["scenes"].insert(
+        0,
+        {
+            "id": "s00",
+            "section": "intro",
+            "narration": first,
+            "beats": [],
+            "visual": "disclaimer",
+            "visual_params": {"text": text},
+        },
+    )
+    desc = data.get("description") or ""
+    if text not in desc:
+        data["description"] = (desc.rstrip() + "\n\n" + text).strip()
 
 
 # ------------------------------------------------------------------ 06 fact-check
@@ -252,6 +309,11 @@ def s06_fact_check(job: Path, meta: dict) -> str:
         ],
         "digits_in_narration": [(s["id"], x) for s in d["scenes"] for x in re.findall(r"[0-9०-९]+", s["narration"])],
         "medical_terms": [s["id"] for s in d["scenes"] if MEDICAL.search(s["narration"])],
+        "finance_flags": [
+            s["id"]
+            for s in d["scenes"]
+            if s.get("id") != "s00" and FIN_FLAGS.search(s["narration"] + " " + " ".join(s.get("beats", [])))
+        ],
         "fiction_disclosure": [s["id"] for s in d["scenes"] if "काल्पनिक" in s["narration"]],
     }
     det["quote_count_ok"] = len(det["quote_scenes"]) <= 1 and (not det["quote_scenes"] or det["quote_verified_exact"])
@@ -263,6 +325,8 @@ def s06_fact_check(job: Path, meta: dict) -> str:
         'claim that a fictional story is real. Return ONLY JSON: {"items":[{"scene_id","claim","verdict":'
         '"SUPPORTED|UNSUPPORTED|NEEDS_EDIT","note"}],"overall":"PASS|FAIL","required_edits":[{"scene_id","old","new"}]}'
     )
+    if meta.get("category") == "finance":
+        user += "\nAlso judge every scene against these rules; any breach makes overall FAIL:\n" + FINANCE_RULES
     r = llm.parse_json(llm.call(job, "06_fact_check", "You are a strict fact-checker. Be concise.", user, 16000).text)
     wj(job / "fact_check.json", {"deterministic": det, "llm": r})
     del txt
@@ -701,7 +765,14 @@ def s16_gate(job: Path, meta: dict) -> str:
     fin = meta.get("category", "finance") == "finance"
     gates = {
         "category": (True, "finance: SEBI rule pack applies" if fin else "non-finance: finance-only gates not applied (CCR-273)"),
-        "finance_rule_pack": (not fin, "finance jobs are not supported by this studio build" if fin else "n/a"),
+        "finance_rule_pack": (
+            (not fin) or (not det.get("finance_flags") and fc["llm"].get("overall") == "PASS"),
+            f"SEBI rule pack: flagged scenes {det.get('finance_flags', [])}" if fin else "n/a",
+        ),
+        "finance_disclaimer": (
+            (not fin) or _has_disclaimer(job),
+            "FIN-R10 card at the start + description" if fin else "n/a",
+        ),
         "quote_policy": (det["quote_count_ok"] and not det["unverified_latin_quotes"], f"quote scenes {det['quote_scenes']}"),
         "fact_check": (fc["llm"].get("overall") == "PASS", fc["llm"].get("overall")),
         "fiction_disclosed": (
@@ -725,6 +796,13 @@ def s16_gate(job: Path, meta: dict) -> str:
     wj(job / "gate_report.json", rep)
     failed = [k for k, g in rep["gates"].items() if not g["pass"]]
     return "auto PASS (owner review next)" if not failed else "BLOCKED: " + ", ".join(failed)
+
+
+def _has_disclaimer(job: Path) -> bool:
+    sc = rj_or_none(job / "script.json") or {}
+    first = (sc.get("scenes") or [{}])[0]
+    text = (first.get("visual_params") or {}).get("text", "")
+    return first.get("visual") == "disclaimer" and bool(text) and text in (sc.get("description") or "")
 
 
 def manifest(job: Path, meta: dict) -> str:

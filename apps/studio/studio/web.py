@@ -83,7 +83,7 @@ CATEGORY_LABELS = {
     "business": "व्यवसाय / करिअर (Business, careers; no investment advice)",
     "health": "आरोग्य जागरूकता (Health awareness; no medical advice)",
     "kids": "मुलांसाठी (Kids; mark 'made for kids' on YouTube)",
-    "finance": "finance (blocked in this build: SEBI rules not wired)",
+    "finance": "शेअर बाजार शिक्षण (Finance education: SEBI rules + disclaimer)",
 }
 CATEGORIES = tuple(CATEGORY_LABELS)
 VOICE_MODES = ("none", "parler")  # plus "ai:<speaker>" for the free Kaggle voice
@@ -901,7 +901,15 @@ def _make_versions(jid: str, src: Path, langs: list[str], user: str):
         if (src / "assets").exists():
             shutil.copytree(src / "assets", dst / "assets")
         shutil.copy2(src / "script.json", dst / "source_script.json")
-        m = {**meta, "id": nid, "language": lang, "translate_from": jid, "voice_mode": "none", "created_utc": pipeline.now()}
+        m = {
+            **meta,
+            "id": nid,
+            "language": lang,
+            "translate_from": jid,
+            "voice_mode": "none",
+            "created_utc": pipeline.now(),
+            "source_language": meta.get("language", "mr"),
+        }
         m["title"] = f"{meta.get('title')} [{LANGS[lang][0]}]"
         pipeline.wj(dst / "job.json", m)
         for st in ("04_research", "05b_asset_plan", "08a_assets", "08b_motion"):

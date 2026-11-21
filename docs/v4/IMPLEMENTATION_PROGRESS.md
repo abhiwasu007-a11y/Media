@@ -274,6 +274,9 @@ Quoted verbatim: "adhicha video 500 mb cha jhalay, khhup heavy quality select kr
 ### D26 (2026-11-21, owner chat messages): downloads per quality; many videos at once
 Owner: "download option de, quality nusa" and "eckach vely multiple video sathi instruction deta aali pahije, nantr te kam queued mdhe suru rahil, jhale ki update disel". Done: job page downloads 1080p / 720p / 480p / 360p (missing ones made on request); "+ Many videos" form: one block per video (title line + notes, blocks separated by ---), shared language/type/length/voice, each block becomes a queued job; the home page shows "working now" / "in queue #n" per job.
 
+### D27 (2026-11-21, owner chat messages): more categories; finance with disclaimer
+Owner: "fakt philosophi hach subject yetoy, other subject che ky" and "finance pn jod, disclamer de". Done: 13 categories (philosophy, motivation, stories, history, mythology, science, technology, education, biography, business, health, kids, finance) with a picture style per category. Finance enabled: SEBI rule pack (FIN-R1..R13 summary) in the script prompt and in the fact-check judge; a deterministic call/target/guarantee scan; gate blocks on any finance flag or a failed judge; FIN-R10 disclaimer card first (5-6 s) plus the disclaimer text in the description (mr = owner wording from the runtime data, hi/en = translations; all DRAFT, lawyer approval REQUIRES REVIEW; the text says "not SEBI-registered": owner to confirm status A6). Open: FIN-R11 (AI persona on finance) — an AI narrator voice may count as synthetic media on a finance channel; the owner's own voice is safer for monetized finance videos (REQUIRES REVIEW).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
