@@ -223,6 +223,15 @@ Operator summary and what was done:
 4. **Not verified here:** the Docker image build (Docker Hub refused the base-image pull from the session: HTTP 429). The pinned requirements were installed and imported on Python 3.12 instead.
 5. **Rule note:** the CLAUDE.md "documentation only" rule predates D8/D15; this app is built on the owner's explicit instruction. Sample content derived from the private library stays out of git (job folders live under `data/`, ignored).
 
+### D16 (2026-11-21, owner chat message): sample #1 v0 rejected as too basic; production-grade upgrade
+Recorded from the owner's chat (R14 operator record). Quoted verbatim:
+
+> Video khupch basic hota, quality, graphics, production grade che nahi
+
+Owner answers to the follow-up questions (dashboard question form, 2026-11-21): visuals = "AI चित्रे + मोफत stock"; music = "हो, संगीत + SFX" (YouTube Audio Library per D10, owner uploads tracks; auto ducking under the voice); reference = "मी लिंक पाठवतो" (owner will send reference videos for the quality bar).
+
+Operator notes: no score was given, so no score or approval is recorded. Next: AI image provider and free stock sources are researched from official pages (price, commercial-use terms) before any spend; the provider and its spending limit need the owner's choice (rule 8). Story illustrations in one consistent style, B-roll from licensed free stock, richer motion design, music bed + SFX. Visual hierarchy per CONTEXT_BRIEF §1A (code-made motion graphics rank above AI stills; AI stills are used here for the fictional story scenes only).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
