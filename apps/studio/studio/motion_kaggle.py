@@ -156,6 +156,12 @@ def push_kernel(username: str, key: str, slug: str, title: str, source: str, tim
     return data
 
 
+def resolved_slug(push_response: dict[str, Any], slug: str) -> str:
+    """The slug Kaggle actually stored (from the push response ``ref``/``url``), else the requested one."""
+    ref = str(push_response.get("ref") or push_response.get("url") or "").rstrip("/")
+    return ref.rsplit("/", 1)[-1] if ref else slug
+
+
 def get_status(username: str, key: str, slug: str) -> tuple[str, str]:
     """Return (status name, failure message), e.g. ("RUNNING", "")."""
     data = _call(username, key, "GetKernelSessionStatus", {"userName": username, "kernelSlug": slug})
@@ -256,9 +262,8 @@ def generate_clips(
     if not shots:
         return {"clips": {}, "errors": {}, "kernel": "", "status": "EMPTY"}
     slug = f"amw-wan-clips-{int(time.time())}"
-    title = slug.replace("-", " ")  # slugifies back to `slug`
     log(f"kaggle: pushing kernel {username}/{slug} ({len(shots)} shots)")
-    push_kernel(username, key, slug, title, kernel_source(shots), timeout_s)
+    slug = resolved_slug(push_kernel(username, key, slug, slug, kernel_source(shots), timeout_s), slug)
     status, msg = wait_for_kernel(username, key, slug, timeout_s, log)
     errors: dict[str, str] = {}
     clips: dict[str, str] = {}

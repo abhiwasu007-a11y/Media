@@ -116,7 +116,9 @@ def synthesize(
     todo = [i for i in items if not (tts / i["file"]).exists()]
     if todo:
         slug = f"amw-tts-{job.name[-20:].lower().replace('_', '-')}-{int(time.time())}"[:50]
-        mk.push_kernel(username, key, slug, f"AMW TTS {job.name[-30:]}", kernel_source(todo, speaker, hf_token), timeout_s)
+        # the title must slugify to the slug (official client rule), so the slug itself is the title
+        resp = mk.push_kernel(username, key, slug, slug, kernel_source(todo, speaker, hf_token), timeout_s)
+        slug = mk.resolved_slug(resp, slug)
         status, msg = mk.wait_for_kernel(username, key, slug, timeout_s, log)
         (tts / DONE).unlink(missing_ok=True)
         try:
