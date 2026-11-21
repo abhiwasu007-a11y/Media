@@ -734,32 +734,27 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         play = "preview_360p.mp4" if (job / "preview_360p.mp4").exists() else "final_1080p.mp4"
         media += (
             f"<div><video controls preload=metadata src='/jobs/{e(jid)}/files/{play}' poster='/jobs/{e(jid)}/files/thumbnail.png'></video>"
-            f"<div class=dim>Player: small preview. For YouTube download <a href='/jobs/{e(jid)}/files/final_1080p.mp4'>final_1080p.mp4</a>"
-            f" ({(job / 'final_1080p.mp4').stat().st_size / 1e6:.0f} MB)."
-            + (
-                ""
-                if (job / "preview_360p.mp4").exists()
-                else f"<form method=post action='/jobs/{e(jid)}/preview'><button>Make small preview (for slow internet)</button></form>"
-            )
-            + "<div class=card><b>Download</b>: "
-            + " · ".join(
+            f"<div class=dim>वरचा प्लेयर हलकी (360p) फाइल चालवतो. YouTube साठी खालची 1080p फाइल डाउनलोड करा.</div>"
+            + "<div class=card><b>डाउनलोड</b><ul style='margin:6px 0 0 18px;padding:0'>"
+            + "".join(
                 (
-                    f"<a href='/jobs/{e(jid)}/files/{f}' download>{lbl} ({(job / f).stat().st_size / 1e6:.0f} MB)</a>"
+                    f"<li><a href='/jobs/{e(jid)}/files/{f}' download>{lbl}</a> · {(job / f).stat().st_size / 1e6:.0f} MB</li>"
                     if (job / f).exists()
                     else (
-                        f"<form method=post action='/jobs/{e(jid)}/export/{r}' style='display:inline'><button>Make {lbl}</button></form>"
+                        f"<li>{lbl} · <form method=post action='/jobs/{e(jid)}/export/{r}' style='display:inline'>"
+                        f"<button style='padding:2px 10px'>बनवा</button></form> <span class=dim>(गरज असेल तरच)</span></li>"
                         if r
-                        else f"{lbl}: <i>use the preview button</i>"
+                        else f"<li>{lbl} · <span class=dim>प्लेयरच्या खालचे बटण वापरा</span></li>"
                     )
                 )
                 for f, lbl, r in (
-                    ("final_1080p.mp4", "1080p", ""),
-                    ("export_720p.mp4", "720p", "720"),
-                    ("export_480p.mp4", "480p", "480"),
-                    ("preview_360p.mp4", "360p", ""),
+                    ("final_1080p.mp4", "1080p – YouTube साठी (उत्तम)", ""),
+                    ("export_720p.mp4", "720p – मध्यम", "720"),
+                    ("export_480p.mp4", "480p – हलकी", "480"),
+                    ("preview_360p.mp4", "360p – मोबाइलवर पाहण्यासाठी", ""),
                 )
             )
-            + "</div></div></div>"
+            + "</ul></div></div>"
         )
     if (job / "thumbnail.png").exists():
         media += f"<div><img alt=thumbnail src='/jobs/{e(jid)}/files/thumbnail.png'></div>"
