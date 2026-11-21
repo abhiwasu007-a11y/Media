@@ -265,6 +265,9 @@ Residual (documented, not fixed): .env reaches the studio container via env_file
 Owner: use the prepared voices for new videos instead of "no voice" ("ase nko apan ata je voice pack dile aahet tyawarunch adjust kra"); owner set up Kaggle; owner reported 2 CPU / 4 GB RAM free on the server and approved giving them (AMW_CPUS=2.0, AMW_MEM=3g; low CPU shares keep the trading app first).
 Finding: Kaggle's terms allow only "personal, non-commercial use" (KG-01), so Kaggle cannot serve monetized channels. The server cannot run Indic Parler-TTS safely (peak RSS about 5.7 GB measured even in bf16). Decision applied: AI voice = Google Cloud Text-to-Speech Chirp 3: HD (GTTS-01), free first 1,000,000 characters per month, male/female per language, guard stops before the free limit; Kaggle voice removed from the UI, Kaggle motion labelled non-commercial and off. Owner needs a Google Cloud project with billing enabled and a Text-to-Speech API key (Settings page). Existing free Parler voice packs (made off-server) remain usable.
 
+### D24 (2026-11-21, owner chat message): keep Kaggle for the AI voice for now
+Quoted verbatim: "sadhyache kaggle thewa, nantr change karu". Applied: Settings "AI voice provider" = kaggle (default) or google; the Kaggle voice maps language + gender to the recommended Parler speakers (mr Sanjay/Sunita, hi Rohit/Divya, en Thoma/Mary). Risk recorded and told to the owner: Kaggle's terms allow personal, non-commercial use only (KG-01); switch the provider to google before the channel is monetized.
+
 ## Owner inputs: status
 
 | ID | Input | Status |

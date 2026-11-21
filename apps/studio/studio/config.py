@@ -51,6 +51,20 @@ FIELDS: list[tuple[str, str, str, str, tuple[str, ...]]] = [
     ("AMW_SECRET_CF_AI_TOKEN", "Cloudflare API token with Workers AI permission", "secret", "", ()),
     ("AMW_SECRET_BFL_API_KEY", "Black Forest Labs key (paid, only if source = bfl)", "secret", "", ()),
     ("AMW_MAX_AI_IMAGES", "Max AI pictures per video", "number", "80", ()),
+    (
+        "AMW_VOICE_PROVIDER",
+        "AI voice provider (owner D24: kaggle for now; Kaggle terms are non-commercial: switch to google before monetizing)",
+        "select",
+        "kaggle",
+        ("kaggle", "google"),
+    ),
+    (
+        "AMW_SECRET_HF_TOKEN",
+        "Hugging Face read token (Kaggle AI voice; placed in your private Kaggle notebook)",
+        "secret",
+        "",
+        (),
+    ),
     ("AMW_SECRET_GOOGLE_TTS_KEY", "Google Cloud Text-to-Speech API key (AI voice, free monthly tier)", "secret", "", ()),
     (
         "AMW_GOOGLE_TTS_FREE_CHARS",

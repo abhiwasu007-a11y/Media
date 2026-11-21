@@ -32,6 +32,18 @@ from . import config, llm, pipeline
 from .languages import LANGS
 
 app = FastAPI(title="AMW Studio", docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(Exception)
+async def _show_error(request: Request, exc: Exception):
+    """Owner-only dashboard: show the error type and message (and log the trace) instead of a bare 500."""
+    import logging  # noqa: PLC0415
+    import traceback  # noqa: PLC0415
+
+    logging.getLogger("studio").error("unhandled error on %s\n%s", request.url.path, traceback.format_exc())
+    return PlainTextResponse(f"Dashboard error on {request.url.path}: {type(exc).__name__}: {str(exc)[:500]}", status_code=500)
+
+
 security = HTTPBasic()
 Q: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
 SERVE = {
@@ -408,7 +420,7 @@ def settings_page(msg: str = "", _: str = Depends(auth)) -> HTMLResponse:
         rows += f"<label>{label_html}</label>{field}"
     tests = "".join(
         f"<form method=post action='/settings/test/{t}' style='display:inline'><button>Test {t}</button></form> "
-        for t in ("anthropic", "cloudflare", "pixabay", "google_tts")
+        for t in ("anthropic", "cloudflare", "pixabay", "kaggle", "google_tts")
     )
     body = (
         f"<p><a href='/'>← dashboard</a></p><h1>Settings</h1>"
@@ -511,10 +523,7 @@ Story contains fictional characters/events</label>
     from .languages import LANGS  # noqa: PLC0415
 
     opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
-    vopts = (
-        "<option value='ai:male'>AI voice – पुरुष (Google, free tier)</option>"
-        "<option value='ai:female'>AI voice – स्त्री (Google, free tier)</option>"
-    )
+    vopts = "<option value='ai:male'>AI voice – पुरुष (free)</option><option value='ai:female'>AI voice – स्त्री (free)</option>"
     return page("New job", body.replace("{LANG_OPTIONS}", opts).replace("{VOICE_OPTIONS}", vopts))
 
 
@@ -672,7 +681,7 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         f"<h2>Actions</h2><div class=row><form class=card method=post action='/jobs/{e(jid)}/voice' enctype=multipart/form-data>"
         f"<label>Upload owner voice recording (wav / mp3 / m4a): re-renders, no paid call</label>"
         f"<input type=file name=voice accept='audio/*' required><p><button>Upload and re-render</button></p></form>"
-        f"<form class=card method=post action='/jobs/{e(jid)}/aivoice'><label>AI voice (Google Text-to-Speech, free monthly tier; key in Settings)</label><select name=speaker>{voice_opts}</select>"
+        f"<form class=card method=post action='/jobs/{e(jid)}/aivoice'><label>AI voice (free; provider chosen in Settings)</label><select name=speaker>{voice_opts}</select>"
         f"<p><button>Make AI voice and re-render</button></p></form>"
         f"<form class=card method=post action='/jobs/{e(jid)}/voicepack' enctype=multipart/form-data>"
         f"<label>Upload a voice pack (.zip from the free AI voice; exact timing per sentence)</label>"

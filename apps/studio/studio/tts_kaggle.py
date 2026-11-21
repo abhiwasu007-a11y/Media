@@ -1,4 +1,5 @@
-"""Free AI narration on Kaggle's free GPU: AI4Bharat Indic Parler-TTS (Apache-2.0), one file per sentence.
+"""AI narration on Kaggle's free GPU (Kaggle terms: personal, non-commercial use only, KG-01; owner D24 keeps it
+for now and switches to Google before monetizing): AI4Bharat Indic Parler-TTS (Apache-2.0), one file per sentence.
 
 The dashboard VPS is too small for this model (several GB of RAM), so stage 07 sends the sentences to a private Kaggle
 GPU notebook and downloads the audio. Re-uses the Kaggle REST helpers of ``motion_kaggle`` (push, poll, download).
@@ -28,6 +29,14 @@ VOICES: dict[str, tuple[str, str, str]] = {
     "Mary": ("en", "female", "English"),
 }
 DONE = "tts_done.json"
+
+
+def speaker_for(lang: str, gender: str) -> str:
+    """Recommended Parler speaker for the video language and gender (model card)."""
+    for name, (code, g, _) in VOICES.items():
+        if code == lang and g == gender:
+            return name
+    raise RuntimeError(f"no Kaggle (Parler) voice for language {lang}; choose the google provider in Settings")
 
 
 def description(speaker: str) -> str:
