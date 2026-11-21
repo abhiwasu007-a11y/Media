@@ -268,6 +268,9 @@ Finding: Kaggle's terms allow only "personal, non-commercial use" (KG-01), so Ka
 ### D24 (2026-11-21, owner chat message): keep Kaggle for the AI voice for now
 Quoted verbatim: "sadhyache kaggle thewa, nantr change karu". Applied: Settings "AI voice provider" = kaggle (default) or google; the Kaggle voice maps language + gender to the recommended Parler speakers (mr Sanjay/Sunita, hi Rohit/Divya, en Thoma/Mary). Risk recorded and told to the owner: Kaggle's terms allow personal, non-commercial use only (KG-01); switch the provider to google before the channel is monetized.
 
+### D25 (2026-11-21, owner chat message): quality setting, smaller files
+Quoted verbatim: "adhicha video 500 mb cha jhalay, khhup heavy quality select krnyachi setting pahije". Done: Settings "Video quality" high (8 Mbps, YouTube's recommended target per D10, default) / medium (5 Mbps) / small (2.5 Mbps); every render also writes a small 540p preview that the dashboard player uses (about 9x smaller in the test), the full file stays for YouTube. A changed quality applies to new renders (or re-run from 08_visuals).
+
 ## Owner inputs: status
 
 | ID | Input | Status |

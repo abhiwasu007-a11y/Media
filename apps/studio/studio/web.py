@@ -48,6 +48,7 @@ security = HTTPBasic()
 Q: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
 SERVE = {
     "final_1080p.mp4",
+    "preview_540p.mp4",
     "thumbnail.png",
     "captions_mr.srt",
     "qc_report.json",
@@ -650,7 +651,12 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
     )
     media = ""
     if (job / "final_1080p.mp4").exists():
-        media += f"<div><video controls preload=metadata src='/jobs/{e(jid)}/files/final_1080p.mp4' poster='/jobs/{e(jid)}/files/thumbnail.png'></video></div>"
+        play = "preview_540p.mp4" if (job / "preview_540p.mp4").exists() else "final_1080p.mp4"
+        media += (
+            f"<div><video controls preload=metadata src='/jobs/{e(jid)}/files/{play}' poster='/jobs/{e(jid)}/files/thumbnail.png'></video>"
+            f"<div class=dim>Player: small preview. For YouTube download <a href='/jobs/{e(jid)}/files/final_1080p.mp4'>final_1080p.mp4</a>"
+            f" ({(job / 'final_1080p.mp4').stat().st_size / 1e6:.0f} MB).</div></div>"
+        )
     if (job / "thumbnail.png").exists():
         media += f"<div><img alt=thumbnail src='/jobs/{e(jid)}/files/thumbnail.png'></div>"
     names = {f for f in SERVE if (job / f).exists()} | {p.name for p in job.glob("captions_*.srt") if CAP_RE.fullmatch(p.name)}

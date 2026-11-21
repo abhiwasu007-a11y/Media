@@ -498,6 +498,35 @@ def s10_render(job: Path, meta: dict) -> str:
         ]
     )
     out.replace(final)
+    # small copy for watching on the phone through the dashboard (the full file stays for YouTube)
+    prev = job / "preview_540p.mp4"
+    tmp = job / "preview_540p.rendering.mp4"
+    sh(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(final),
+            "-vf",
+            "scale=-2:540",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "28",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+            "-movflags",
+            "+faststart",
+            str(tmp),
+        ]
+    )
+    tmp.replace(prev)
     parts = ["voice" if voiced else "NO voice (pending)"]
     parts += ["music"] if music_file(job) else []
     parts += ["SFX"]
@@ -592,7 +621,10 @@ def s10_qc(job: Path, meta: dict) -> str:
         ),
         "video.cfr_30": (v["r_frame_rate"] == "30/1" and v["avg_frame_rate"] == "30/1", v["avg_frame_rate"]),
         "video.yuv420p": (v["pix_fmt"] == "yuv420p", v["pix_fmt"]),
-        "video.encoder_8mbps_vbr": (True, f"-b:v 8M VBR target (D10); file {int(pr['format']['bit_rate']) / 1e6:.2f} Mbps"),
+        "video.encoder_bitrate": (
+            True,
+            f"quality '{config.get('AMW_VIDEO_QUALITY', 'high')}' (high = 8 Mbps, D10); file {int(pr['format']['bit_rate']) / 1e6:.2f} Mbps",
+        ),
         "audio.aac_lc_48k": (
             a["codec_name"] == "aac" and a.get("profile") == "LC" and a["sample_rate"] == "48000",
             f"{a['codec_name']} {a.get('profile')} {a['sample_rate']}",

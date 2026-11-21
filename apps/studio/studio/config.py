@@ -85,6 +85,13 @@ FIELDS: list[tuple[str, str, str, str, tuple[str, ...]]] = [
     ("AMW_KAGGLE_USERNAME", "Kaggle username", "text", "", ()),
     ("AMW_SECRET_KAGGLE_KEY", "Kaggle API key", "secret", "", ()),
     ("AMW_MAX_MOTION_CLIPS", "Max motion clips per video", "number", "8", ()),
+    (
+        "AMW_VIDEO_QUALITY",
+        "Video quality: high 8 Mbps (YouTube recommended, ~600 MB per 10 min), medium 5 Mbps, small 2.5 Mbps",
+        "select",
+        "high",
+        ("high", "medium", "small"),
+    ),
     ("AMW_BUDGET_PER_VIDEO_USD", "Per-video cap, USD (D9)", "number", "5.0", ()),
     ("AMW_BUDGET_PILOT_USD", "Pilot cap, USD (D9)", "number", "50.0", ()),
 ]

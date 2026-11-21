@@ -564,30 +564,38 @@ def thumbnail(script, out: Path, hero: Path | None = None):
     img.resize((1280, 720), Image.LANCZOS).save(out, optimize=True)
 
 
-DELIVERY_VIDEO = [
-    "-c:v",
-    "libx264",
-    "-profile:v",
-    "high",
-    "-preset",
-    "medium",
-    "-b:v",
-    "8M",
-    "-maxrate",
-    "12M",
-    "-bufsize",
-    "16M",
-    "-pix_fmt",
-    "yuv420p",
-    "-r",
-    "30",
-    "-fps_mode",
-    "cfr",
-    "-g",
-    "15",
-    "-bf",
-    "2",
-]
+QUALITY = {"high": ("8M", "12M", "16M"), "medium": ("5M", "7.5M", "10M"), "small": ("2.5M", "4M", "5M")}
+
+
+def delivery_video() -> list[str]:
+    """Delivery encode, bitrate from Settings: high = YouTube's recommended 8 Mbps (D10), medium/small = owner D25."""
+    from . import config  # noqa: PLC0415
+
+    b, mx, buf = QUALITY.get(config.get("AMW_VIDEO_QUALITY", "high"), QUALITY["high"])
+    return [
+        "-c:v",
+        "libx264",
+        "-profile:v",
+        "high",
+        "-preset",
+        "medium",
+        "-b:v",
+        b,
+        "-maxrate",
+        mx,
+        "-bufsize",
+        buf,
+        "-pix_fmt",
+        "yuv420p",
+        "-r",
+        "30",
+        "-fps_mode",
+        "cfr",
+        "-g",
+        "15",
+        "-bf",
+        "2",
+    ]
 
 
 def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
@@ -611,7 +619,7 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
         "-i",
         "-",
         # encoded once at the delivery settings (H.264 High, 8 Mbps VBR target, D10); stage 10 copies this stream
-        *DELIVERY_VIDEO,
+        *delivery_video(),
         str(out),
     ]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
