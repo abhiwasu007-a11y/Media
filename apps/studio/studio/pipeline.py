@@ -57,7 +57,18 @@ def wj(p: Path, d: dict) -> None:
 
 def status(job: Path) -> dict:
     f = job / "status.json"
-    return rj(f) if f.exists() else {"stages": {}}
+    try:
+        return rj(f) if f.exists() else {"stages": {}}
+    except ValueError:  # unreadable (e.g. written by an older, non-atomic version): start a fresh record
+        return {"stages": {}}
+
+
+def rj_or_none(p: Path) -> dict | None:
+    """Read a JSON report for display; None when missing or unreadable (the dashboard must never break on one file)."""
+    try:
+        return rj(p) if p.exists() else None
+    except (ValueError, OSError):
+        return None
 
 
 def set_status(job: Path, stage: str, state: str, note: str = "") -> None:

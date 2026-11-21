@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-shot install / update of AMW Studio on the server. Safe to re-run: keeps .env and data/.
 # Never exits the calling shell on an error (no `set -e`), prints what it found instead.
-umask 077
+umask 022  # code must stay readable for the container user; .env is written 0600 below
 APP=/opt/amw-studio
 BRANCH=${BRANCH:-ccr-b1e90a39-0g1b1l}
 mkdir -p "$APP" && cd "$APP" || exit 0
@@ -18,8 +18,8 @@ else
 fi
 [ -f .env ] || cp .env.example .env
 PORT=$(grep '^AMW_PORT=' .env | cut -d= -f2-); PORT=${PORT:-8080}
-setvar() {  # write NAME=value without sed, so any character in the value is safe
-  grep -v "^$1=" .env > .env.new; printf '%s=%s\n' "$1" "$2" >> .env.new; mv .env.new .env
+setvar() {  # write NAME=value without sed, so any character in the value is safe; the file is created 0600
+  (umask 077; grep -v "^$1=" .env > .env.new; printf '%s=%s\n' "$1" "$2" >> .env.new; mv .env.new .env)
 }
 if ! grep -q '^AMW_DASHBOARD_PASSWORD=..........' .env; then
   read -rsp "Dashboard password (letters and numbers, at least 10): " P; echo

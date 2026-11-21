@@ -331,10 +331,14 @@ def job_summary(job: Path) -> dict:
     meta = pipeline.rj(job / "job.json")
     st = pipeline.status(job)["stages"]
     cur = next((s for s in pipeline.STAGES if st.get(s, {}).get("state") != "done"), None)
-    qc = pipeline.rj(job / "qc_report.json") if (job / "qc_report.json").exists() else None
-    gate = pipeline.rj(job / "gate_report.json") if (job / "gate_report.json").exists() else None
+    qc = pipeline.rj_or_none(job / "qc_report.json")
+    gate = pipeline.rj_or_none(job / "gate_report.json")
     state = st.get(cur, {}).get("state", "queued") if cur else "complete"
-    return {"meta": meta, "stage": cur or "—", "state": state, "cost": llm.job_spent(job), "qc": qc, "gate": gate}
+    try:
+        cost = llm.job_spent(job)
+    except (ValueError, OSError, KeyError):  # unreadable ledger: shown as unknown; paid calls stay refused (llm raises)
+        cost = float("nan")
+    return {"meta": meta, "stage": cur or "—", "state": state, "cost": cost, "qc": qc, "gate": gate}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -355,7 +359,10 @@ def index(_: str = Depends(auth)) -> HTMLResponse:
             f"<td>{e(s['meta'].get('category'))}</td><td>{e(s['stage'])} <span class={state_cls(s['state'])}>{e(s['state'])}</span></td>"
             f"<td>${s['cost']:.2f}</td><td>{qc}</td><td>{gate}</td></tr>"
         )
-    spent = llm.pilot_spent()
+    try:
+        spent = llm.pilot_spent()
+    except (ValueError, OSError, KeyError):  # an unreadable ledger: shown as unknown (paid calls refuse on their own)
+        spent = float("nan")
     body = (
         f"<h1>AMW Studio</h1><div class=row><div class=card>Pilot spend <b>${spent:.2f}</b> / ${cfg.pilot_cap_usd:.2f}"
         f"<div class=dim>Per-video cap ${cfg.per_video_cap_usd:.2f} · model {e(cfg.model)}</div></div>"
@@ -625,7 +632,11 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
     s = job_summary(job)
     st = pipeline.status(job)["stages"]
     costs: dict[str, float] = {}
-    for r in llm.ledger_rows(job):
+    try:
+        ledger = llm.ledger_rows(job)
+    except (ValueError, OSError):
+        ledger = []
+    for r in ledger:
         k = (
             "05_script"
             if r["stage"] in ("05_script", "05_script_continuation") or r["stage"].startswith("05_translate")
@@ -662,7 +673,7 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
 
     titles = ""
     if (job / "script.json").exists():
-        sc = pipeline.rj(job / "script.json")
+        sc = pipeline.rj_or_none(job / "script.json") or {}
         titles = (
             "<ul>"
             + "".join(f"<li>{e(t)}</li>" for t in sc.get("title_options", []))
