@@ -586,7 +586,11 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
     st = pipeline.status(job)["stages"]
     costs: dict[str, float] = {}
     for r in llm.ledger_rows(job):
-        k = "05_script" if r["stage"].startswith("05") else r["stage"]
+        k = (
+            "05_script"
+            if r["stage"] in ("05_script", "05_script_continuation") or r["stage"].startswith("05_translate")
+            else r["stage"]
+        )
         costs[k] = costs.get(k, 0.0) + r["cost_usd"]
     rows = "".join(
         f"<tr><td>{e(k)}</td><td class={state_cls(st.get(k, {}).get('state', ''))}>{e(st.get(k, {}).get('state', 'pending'))}</td>"
