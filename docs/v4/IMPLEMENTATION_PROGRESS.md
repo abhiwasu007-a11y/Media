@@ -261,6 +261,10 @@ Two independent read-only code audits of apps/studio (pipeline side: 17 findings
 - Tests: 7 automated tests in apps/studio/tests (run from apps/studio: pytest -q tests).
 Residual (documented, not fixed): .env reaches the studio container via env_file (it holds the tunnel token); multipart bodies are spooled by the framework before the per-upload cap; deploy uses the work branch, not a merged tag.
 
+### D23 (2026-11-21, owner chat messages): AI voices selectable for new videos; Kaggle dropped; more server resources
+Owner: use the prepared voices for new videos instead of "no voice" ("ase nko apan ata je voice pack dile aahet tyawarunch adjust kra"); owner set up Kaggle; owner reported 2 CPU / 4 GB RAM free on the server and approved giving them (AMW_CPUS=2.0, AMW_MEM=3g; low CPU shares keep the trading app first).
+Finding: Kaggle's terms allow only "personal, non-commercial use" (KG-01), so Kaggle cannot serve monetized channels. The server cannot run Indic Parler-TTS safely (peak RSS about 5.7 GB measured even in bf16). Decision applied: AI voice = Google Cloud Text-to-Speech Chirp 3: HD (GTTS-01), free first 1,000,000 characters per month, male/female per language, guard stops before the free limit; Kaggle voice removed from the UI, Kaggle motion labelled non-commercial and off. Owner needs a Google Cloud project with billing enabled and a Text-to-Speech API key (Settings page). Existing free Parler voice packs (made off-server) remain usable.
+
 ## Owner inputs: status
 
 | ID | Input | Status |

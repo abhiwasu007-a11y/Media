@@ -408,7 +408,7 @@ def settings_page(msg: str = "", _: str = Depends(auth)) -> HTMLResponse:
         rows += f"<label>{label_html}</label>{field}"
     tests = "".join(
         f"<form method=post action='/settings/test/{t}' style='display:inline'><button>Test {t}</button></form> "
-        for t in ("anthropic", "cloudflare", "pixabay", "kaggle")
+        for t in ("anthropic", "cloudflare", "pixabay", "google_tts")
     )
     body = (
         f"<p><a href='/'>← dashboard</a></p><h1>Settings</h1>"
@@ -468,6 +468,16 @@ def connection_test(provider: str) -> str:
         q = urllib.parse.urlencode({"key": config.get("AMW_SECRET_PIXABAY_API_KEY"), "q": "clock", "per_page": 3})
         d = get(f"https://pixabay.com/api/videos/?{q}", {})
         return f"{d.get('totalHits', 0)} clips found for 'clock'"
+    if provider == "google_tts":
+        from .tts_google import month_used  # noqa: PLC0415
+
+        q = urllib.parse.urlencode({"languageCode": "mr-IN", "key": config.get("AMW_SECRET_GOOGLE_TTS_KEY")})
+        try:
+            d = get(f"https://texttospeech.googleapis.com/v1/voices?{q}", {})
+        except Exception as exc:  # the URL holds the key: report the status only
+            raise RuntimeError(f"Google TTS check failed: HTTP {getattr(exc, 'code', '?')}") from None
+        n = sum(1 for v in d.get("voices", []) if "Chirp3-HD" in v.get("name", ""))
+        return f"{n} Marathi Chirp3-HD voices available; used this month {month_used()} characters"
     if provider == "kaggle":
         from . import motion_kaggle  # noqa: PLC0415
 
@@ -501,11 +511,9 @@ Story contains fictional characters/events</label>
     from .languages import LANGS  # noqa: PLC0415
 
     opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
-    from .tts_kaggle import VOICES  # noqa: PLC0415
-
-    vopts = "".join(
-        f"<option value='ai:{n}'>{e(n)} – {e(v[2])} {e('पुरुष' if v[1] == 'male' else 'स्त्री')} (free AI voice)</option>"
-        for n, v in VOICES.items()
+    vopts = (
+        "<option value='ai:male'>AI voice – पुरुष (Google, free tier)</option>"
+        "<option value='ai:female'>AI voice – स्त्री (Google, free tier)</option>"
     )
     return page("New job", body.replace("{LANG_OPTIONS}", opts).replace("{VOICE_OPTIONS}", vopts))
 
@@ -530,10 +538,8 @@ def create(
         raise HTTPException(400, "unknown category")
     speaker = None
     if voice_mode.startswith("ai:"):
-        from .tts_kaggle import VOICES  # noqa: PLC0415
-
         speaker = voice_mode[3:]
-        if speaker not in VOICES:
+        if speaker not in ("male", "female"):
             raise HTTPException(400, "unknown voice")
         voice_mode = "ai"
     elif voice_mode not in VOICE_MODES:
@@ -581,7 +587,7 @@ def create(
             "min_minutes": 0.6 if short else max(1, minutes - 1),
             "max_minutes": 1.0 if short else minutes + 1.2,
             "voice_mode": voice_mode,
-            "speaker": speaker,
+            "speaker_gender": speaker,
             "quote": quote,
             "quote_credit": quote_credit,
             "has_fiction": bool(has_fiction),
@@ -654,11 +660,7 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
             + f"</ul><pre>{e(sc.get('description', ''))}</pre>"
         )
     opts = "".join(f"<option>{k}</option>" for k in pipeline.STAGES)
-    from .tts_kaggle import VOICES  # noqa: PLC0415
-
-    voice_opts = "".join(
-        f"<option value={e(n)}>{e(n)} – {e(v[2])} {e('पुरुष' if v[1] == 'male' else 'स्त्री')}</option>" for n, v in VOICES.items()
-    )
+    voice_opts = "<option value=male>पुरुष (male)</option><option value=female>स्त्री (female)</option>"
     body = (
         f"<p><a href='/'>← all jobs</a></p><h1>{e(s['meta'].get('title'))}</h1>"  # noqa: S608 - HTML, not SQL
         f"<div class=dim>{e(jid)} · {e(s['meta'].get('category'))} · voice: {e(s['meta'].get('voice_mode'))} · cost ${s['cost']:.4f}</div>"
@@ -670,8 +672,7 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         f"<h2>Actions</h2><div class=row><form class=card method=post action='/jobs/{e(jid)}/voice' enctype=multipart/form-data>"
         f"<label>Upload owner voice recording (wav / mp3 / m4a): re-renders, no paid call</label>"
         f"<input type=file name=voice accept='audio/*' required><p><button>Upload and re-render</button></p></form>"
-        f"<form class=card method=post action='/jobs/{e(jid)}/aivoice'><label>Free AI voice (made on Kaggle GPU; needs Kaggle + "
-        f"Hugging Face keys in Settings)</label><select name=speaker>{voice_opts}</select>"
+        f"<form class=card method=post action='/jobs/{e(jid)}/aivoice'><label>AI voice (Google Text-to-Speech, free monthly tier; key in Settings)</label><select name=speaker>{voice_opts}</select>"
         f"<p><button>Make AI voice and re-render</button></p></form>"
         f"<form class=card method=post action='/jobs/{e(jid)}/voicepack' enctype=multipart/form-data>"
         f"<label>Upload a voice pack (.zip from the free AI voice; exact timing per sentence)</label>"
@@ -766,14 +767,12 @@ def _make_versions(jid: str, src: Path, langs: list[str], user: str):
 
 @app.post("/jobs/{jid}/aivoice")
 def aivoice(jid: str, speaker: str = Form(...), user: str = Depends(auth)):
-    from .tts_kaggle import VOICES  # noqa: PLC0415
-
     job = get_job(jid)
-    if speaker not in VOICES:
+    if speaker not in ("male", "female"):
         raise HTTPException(400, "unknown voice")
     (job / "voice.wav").unlink(missing_ok=True)
     meta = pipeline.rj(job / "job.json")
-    meta["voice_mode"], meta["speaker"] = "ai", speaker
+    meta["voice_mode"], meta["speaker_gender"] = "ai", speaker
     pipeline.wj(job / "job.json", meta)
     config.audit(user, "job.aivoice", {"job": jid, "speaker": speaker})
     enqueue(jid, "07_voice")

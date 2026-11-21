@@ -96,3 +96,33 @@ def test_verified_quote_is_not_flagged_as_unverified(tmp_path, monkeypatch):
     pipeline.s06_fact_check(job, {})
     det = pipeline.rj(job / "fact_check.json")["deterministic"]
     assert det["unverified_latin_quotes"] == []
+
+
+def test_google_voice_stops_before_the_free_limit(tmp_path, monkeypatch):
+    import io
+
+    from studio import tts_google
+
+    job = make_job(tmp_path, monkeypatch)
+    monkeypatch.setenv("AMW_SECRET_GOOGLE_TTS_KEY", "k")
+    calls = []
+
+    def fake(key, text, lang, name):
+        calls.append(text)
+        b = io.BytesIO()
+        sf.write(b, np.zeros(4800, np.float32), 48000, format="WAV")
+        return b.getvalue()
+
+    monkeypatch.setattr(tts_google, "_synth", fake)
+    script = {"scenes": [{"id": "s01", "narration": "पहिले वाक्य इथे आहे. दुसरे वाक्य इथे आहे."}]}
+    info = tts_google.synthesize(job, script, "mr", "female", pipeline.sentences)
+    assert info["speaker"] == "mr-IN-Chirp3-HD-Kore" and len(calls) == 2
+    assert tts_google.month_used() == sum(len(c) for c in calls)
+    monkeypatch.setenv("AMW_GOOGLE_TTS_FREE_CHARS", "10")
+    script2 = {"scenes": [{"id": "s02", "narration": "हे एक नवीन आणि लांब वाक्य आहे."}]}
+    try:
+        tts_google.synthesize(job, script2, "mr", "male", pipeline.sentences)
+        raise AssertionError("expected the free-limit refusal")
+    except tts_google.FreeLimitReached:
+        pass
+    assert len(calls) == 2  # no request after the refusal

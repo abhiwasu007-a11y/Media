@@ -272,16 +272,13 @@ def sentences(text: str) -> list[str]:
 
 def s07_voice(job: Path, meta: dict) -> str:
     mode = meta.get("voice_mode", "none")
-    if mode == "ai":  # free AI narration generated on Kaggle's GPU with the chosen voice
-        from . import tts_kaggle  # noqa: PLC0415
+    if mode == "ai":  # AI narration: Google Cloud TTS Chirp 3 HD, inside the free monthly tier
+        from . import tts_google  # noqa: PLC0415
 
-        user, key, hf = config.get("AMW_KAGGLE_USERNAME"), config.get("AMW_SECRET_KAGGLE_KEY"), config.get("AMW_SECRET_HF_TOKEN")
-        if not (user and key and hf):
-            raise RuntimeError("AI voice needs the Kaggle username, Kaggle key and Hugging Face token in Settings")
-        speaker = meta.get("speaker") or "Sanjay"
-        info = tts_kaggle.synthesize(job, rj(job / "script.json"), speaker, sentences, user, key, hf)
+        gender = meta.get("speaker_gender") or "male"
+        info = tts_google.synthesize(job, rj(job / "script.json"), meta.get("language", "mr"), gender, sentences)
         wj(job / "voice.json", info)
-        return f"AI voice: {speaker} ({len(info['items'])} sentences, Kaggle GPU)"
+        return f"AI voice: {info['speaker']} ({len(info['items'])} sentences, {info['characters']} characters)"
     if mode == "pack":  # per-sentence TTS files installed from a voice pack (exact timing per sentence)
         v = rj(job / "voice.json") if (job / "voice.json").exists() else {}
         missing = [it["file"] for it in v.get("items", []) if not (job / "tts" / it["file"]).exists()]
