@@ -23,7 +23,7 @@ services:
   # The link is printed in the logs (docker compose logs tunnel | grep trycloudflare) and changes on restart.
   tunnel:
     image: cloudflare/cloudflared:2024.12.2
-    command: tunnel --no-autoupdate --url http://studio:8080
+    command: tunnel --no-autoupdate --protocol http2 --url http://studio:8080
     depends_on:
       - studio
     restart: unless-stopped

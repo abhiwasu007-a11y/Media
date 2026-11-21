@@ -29,7 +29,7 @@ chmod 600 .env
 mkdir -p data/jobs
 [ -f ~/sample-001-seneca-job.zip ] && unzip -oq ~/sample-001-seneca-job.zip -d data/jobs/
 chown -R 10001 data
-docker compose up -d --build --remove-orphans
+docker compose up -d --build --remove-orphans --force-recreate tunnel studio
 echo "== waiting for the app =="
 for i in $(seq 30); do curl -sf http://127.0.0.1:8080/healthz >/dev/null && break; sleep 2; done
 if curl -sf http://127.0.0.1:8080/healthz; then echo; echo "APP OK"; else
@@ -40,4 +40,10 @@ for i in $(seq 30); do
   [ -n "$URL" ] && break; sleep 2
 done
 echo "${URL:-no link yet: run  docker compose logs tunnel | grep trycloudflare}"
+if [ -n "$URL" ]; then
+  sleep 10
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$URL/healthz")
+  if [ "$CODE" = "200" ]; then echo "LINK OK (checked from the server)"; else
+    echo "LINK NOT REACHABLE YET (HTTP $CODE). Tunnel log:"; docker compose logs --tail 15 tunnel; fi
+fi
 echo "user: owner   password: the one in $APP/.env"
