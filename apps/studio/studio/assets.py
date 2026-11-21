@@ -8,7 +8,6 @@ visual: the run never stops for an optional asset, and every asset is listed wit
 
 import base64
 import json
-import os
 import time
 import urllib.parse
 import urllib.request
@@ -57,8 +56,8 @@ def s05b_asset_plan(job: Path, meta: dict) -> str:
         {"id": s["id"], "section": s["section"], "visual": s["visual"], "beats": s["beats"], "narration": s["narration"][:220]}
         for s in script["scenes"]
     ]
-    max_ai = int(os.environ.get("AMW_MAX_AI_IMAGES", "80"))
-    max_stock = int(os.environ.get("AMW_MAX_STOCK_CLIPS", "10"))
+    max_ai = int(config.get("AMW_MAX_AI_IMAGES", "80"))
+    max_stock = int(config.get("AMW_MAX_STOCK_CLIPS", "10"))
     user = USER_PLAN.format(scenes=json.dumps(compact, ensure_ascii=False), max_ai=max_ai, max_stock=max_stock)
     plan = llm.parse_json(llm.call(job, "05b_asset_plan", SYSTEM_PLAN, user, max_tokens=16000, effort="low").text)
     n_ai = n_st = 0
@@ -178,13 +177,15 @@ def cf_image(job: Path, account: str, token: str, prompt: str, out: Path) -> dic
 
 def make_image(job: Path, prompt: str, out: Path, seed: int) -> dict:
     """Free Cloudflare Workers AI by default; paid BFL FLUX.2 [pro] only when AMW_IMAGE_PROVIDER=bfl."""
-    provider = os.environ.get("AMW_IMAGE_PROVIDER", "cloudflare")
+    provider = config.get("AMW_IMAGE_PROVIDER", "cloudflare")
+    if provider == "off":
+        raise LookupError("AI pictures are switched off in Settings")
     if provider == "bfl":
-        key = os.environ.get("AMW_SECRET_BFL_API_KEY")
+        key = config.get("AMW_SECRET_BFL_API_KEY")
         if not key:
             raise LookupError("AMW_SECRET_BFL_API_KEY not set")
         return bfl_image(job, key, prompt, out, seed)
-    acc, tok = os.environ.get("AMW_CF_ACCOUNT_ID"), os.environ.get("AMW_SECRET_CF_AI_TOKEN")
+    acc, tok = config.get("AMW_CF_ACCOUNT_ID"), config.get("AMW_SECRET_CF_AI_TOKEN")
     if not acc or not tok:
         raise LookupError("AMW_CF_ACCOUNT_ID / AMW_SECRET_CF_AI_TOKEN not set")
     return cf_image(job, acc, tok, prompt, out)
@@ -239,7 +240,7 @@ def s08a_assets(job: Path, meta: dict) -> str:
     plan = json.loads((job / "asset_plan.json").read_text())
     adir = job / "assets"
     adir.mkdir(exist_ok=True)
-    pix = os.environ.get("AMW_SECRET_PIXABAY_API_KEY")
+    pix = config.get("AMW_SECRET_PIXABAY_API_KEY")
     chars = plan.get("characters", {})
     sheet = "; ".join(f"{k}: {v}" for k, v in chars.items())
     out, used, notes = {}, set(), []
@@ -290,3 +291,38 @@ def s08a_assets(job: Path, meta: dict) -> str:
     kinds = [a["kind"] for a in out.values()]
     msg = f"images {kinds.count('image')}, videos {kinds.count('video')}, depth maps {n_depth}"
     return msg + (f"; fallbacks: {len(notes)} ({'; '.join(notes[:3])})" if notes else "")
+
+
+def s08b_motion(job: Path, meta: dict) -> str:
+    """Optional free AI motion clips (Kaggle GPU, Wan2.1-T2V-1.3B, Apache-2.0) for the first shot of story scenes.
+    The clip replaces that still; everything else is unchanged. Off unless Settings says kaggle."""
+    if config.get("AMW_MOTION_PROVIDER", "off") != "kaggle":
+        return "off (Settings)"
+    user, key = config.get("AMW_KAGGLE_USERNAME"), config.get("AMW_SECRET_KAGGLE_KEY")
+    if not user or not key:
+        return "skipped: Kaggle username/key not set"
+    from . import motion_kaggle  # noqa: PLC0415
+
+    plan = json.loads((job / "asset_plan.json").read_text())
+    assets_f = job / "assets.json"
+    assets = json.loads(assets_f.read_text()) if assets_f.exists() else {}
+    limit = int(config.get("AMW_MAX_MOTION_CLIPS", "8"))
+    shots = []
+    for p in plan["scenes"]:
+        a = assets.get(p["id"])
+        if p.get("kind") == "ai_image" and a and p.get("shots") and len(shots) < limit:
+            if not (job / "assets" / f"{p['id']}_0.mp4").exists():
+                shots.append(
+                    {"id": f"{p['id']}_0", "prompt": f"{p['shots'][0]}. Style: {plan['style']}. Gentle cinematic camera move."}
+                )
+    res = motion_kaggle.generate_clips(user, key, shots, job / "assets") if shots else {"clips": {}, "errors": {}}
+    used = 0
+    for sid, a in assets.items():
+        clip = job / "assets" / f"{sid}_0.mp4"
+        if a.get("kind") == "image" and clip.exists():
+            a["files"] = [f"assets/{clip.name}"] + a.get("files", [a["file"]])[1:]
+            a["motion"] = {"provider": "Kaggle notebook, Wan2.1-T2V-1.3B", "licence": "Apache-2.0 model (Wan-AI model card)"}
+            used += 1
+    assets_f.write_text(json.dumps(assets, ensure_ascii=False, indent=1))
+    errs = res.get("errors") or {}
+    return f"motion clips in use {used}; new {len(res.get('clips') or {})}; errors {len(errs)}"

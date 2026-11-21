@@ -7,7 +7,6 @@ After every call: the cost from ``usage`` is appended to the job ledger before a
 """
 
 import json
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,7 +48,7 @@ def append_row(job: Path, row: dict) -> None:
 
 
 def call(job: Path, stage: str, system: str, user: str, max_tokens: int, effort: str = "medium") -> Reply:
-    key = os.environ.get(SECRET_ENV)
+    key = config.get(SECRET_ENV)
     if not key:
         raise BudgetRefused(f"secret {SECRET_ENV} is not set")
     cfg = config.load()

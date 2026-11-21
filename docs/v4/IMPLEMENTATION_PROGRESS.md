@@ -246,6 +246,10 @@ Owner asked (Marathi) for high-quality cinematic, animated and cartoon videos at
 ### D20 (2026-11-21, owner chat message): one more reference; study all references, do the work well
 Quoted verbatim: "सर्व व्हिडिओ  बघा repeat बघा pn kam changle kr" with a sixth reference (a vertical AI-drama short). Videos cannot be played from the session (the watch page is blocked); studied the thumbnails plus YouTube's three automatic frames per video. Applied: semi-realistic 3D cinematic Indian-film image style (closest reference: the Hindi animated story channel), a 2–3 shot list per story scene so the picture changes every 3–5 s (wide / medium / close-up / detail), rounded dialogue-box captions, free image budget raised to 80 shots per video (Workers AI free allocation, CF-01). Next candidate: a 9:16 Shorts cut (two references are Shorts).
 
+### D21 (2026-11-21, owner chat message): Opus for scripts; keys and options on the dashboard; all video types; enterprise grade
+Owner answers: (क) "Opus" (script model stays Opus 5.5); "a आणि b सेटिंग dashboard वर ठेव" (Cloudflare/Pixabay keys and the Kaggle option on the dashboard); "Sarv प्रकारचे video tayar krta aale pahije"; "Enterprise grade project asnar ha".
+Done: Settings page (write-only secrets in data/settings.json mode 0600, audit log of changes and connection tests, free connection tests for Anthropic, Cloudflare, Pixabay, Kaggle); video types long 16:9 and Short 9:16; optional stage 08b (free AI motion clips on Kaggle, Wan2.1-T2V-1.3B, Apache-2.0; Kaggle REST details from the official client, two items UNVERIFIED in code; not live-tested, no Kaggle account yet; Kaggle's terms on commercial use of outputs still to be read first-hand before the first real run). Open for enterprise grade: per-user accounts and roles, encrypted secret storage, automated tests and CI for apps/studio, job queue persistence in a database, backups.
+
 ## Owner inputs: status
 
 | ID | Input | Status |

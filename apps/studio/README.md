@@ -47,6 +47,19 @@ Exchange holidays are not modelled, so the guard errs on the side of waiting.
 5. Optional extra lock: Zero Trust, Access, Applications, add `studio.<your-domain>` with an email one-time-code
    policy for your address only. The dashboard password stays as the second lock.
 
+## Settings page
+
+All keys and options can be entered on the dashboard (Settings): Anthropic key and script model, AI picture source
+(free Cloudflare Workers AI by default), Pixabay key, Kaggle motion clips, limits and budget caps. Values are stored only
+on the server in `data/settings.json` (mode 0600), secret values are never shown again, and every change and connection
+test is written to `data/audit.log` (field names only). A value set on the Settings page wins over `.env`.
+
+## Video types
+
+- Long video 16:9 (1920x1080), any length set on the job.
+- Short 9:16 (1080x1920, under 60 s): its own short script; AI pictures and stock clips are reframed vertically, code-made
+  diagrams are placed on a blurred fill.
+
 ## Use
 
 - **New job**: title, category, length, the research pack (`.md`), optionally a public-domain source text and the

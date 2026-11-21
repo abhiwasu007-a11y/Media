@@ -12,7 +12,15 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 FONTS = Path(__file__).parent / "fonts"
-W, H, FPS = 1920, 1080, 30
+W, H, FPS = 1920, 1080, 30  # design canvas of the code-made scenes
+OW, OH = W, H  # output canvas: 1920x1080 (long) or 1080x1920 (Shorts), see set_output()
+
+
+def set_output(vertical: bool) -> None:
+    global OW, OH
+    OW, OH = (1080, 1920) if vertical else (W, H)
+
+
 BG = (16, 21, 31)
 BG2 = (28, 36, 52)
 INK = (245, 239, 230)
@@ -48,27 +56,29 @@ def background() -> Image.Image:
     ImageDraw.Draw(glow).ellipse([W * 0.55, -H * 0.3, W * 1.3, H * 0.6], fill=60)
     glow = glow.filter(ImageFilter.GaussianBlur(180))
     img.paste(Image.new("RGB", (W, H), (60, 48, 30)), (0, 0), glow)
-    img.paste(Image.new("RGB", (W, H), (0, 0, 0)), (0, 0), vignette())
+    img.paste(Image.new("RGB", (W, H), (0, 0, 0)), (0, 0), vignette((W, H)))
     return img
 
 
-@lru_cache(maxsize=1)
-def vignette() -> Image.Image:
-    m = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(m).ellipse([-W * 0.15, -H * 0.25, W * 1.15, H * 1.25], fill=255)
+@lru_cache(maxsize=4)
+def vignette(size: tuple[int, int] = (W, H)) -> Image.Image:
+    w, h = size
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).ellipse([-w * 0.15, -h * 0.25, w * 1.15, h * 1.25], fill=255)
     m = m.filter(ImageFilter.GaussianBlur(160))
     return m.point(lambda v: int((255 - v) * 0.55))
 
 
-@lru_cache(maxsize=1)
-def bottom_shade() -> Image.Image:
+@lru_cache(maxsize=4)
+def bottom_shade(size: tuple[int, int] = (W, H)) -> Image.Image:
     """Mask that darkens the lower part of a picture so captions stay readable."""
-    m = Image.new("L", (W, H), 0)
+    w, h = size
+    m = Image.new("L", (w, h), 0)
     d = ImageDraw.Draw(m)
-    for y in range(H):
-        a = max(0.0, (y / H - 0.45) / 0.55)
-        d.line([(0, y), (W, y)], fill=int(215 * a**1.4))
-    return Image.composite(m, Image.new("L", (W, H), 0), Image.new("L", (W, H), 255)).point(lambda v: max(v, 40))
+    for y in range(h):
+        a = max(0.0, (y / h - 0.45) / 0.55)
+        d.line([(0, y), (w, y)], fill=int(215 * a**1.4))
+    return m.point(lambda v: max(v, 40))
 
 
 PARTICLES = [((i * 7919) % W, (i * 104729) % H, 1 + (i % 3), 6 + (i * 13) % 14) for i in range(26)]
@@ -340,10 +350,11 @@ class Media:
 
     def __init__(self, job: Path, asset: dict, dur: float, idx: int):
         self.kind, self.idx, self.dur = asset["kind"], idx, dur
+        self.w, self.h = OW, OH
         self.proc = None
         if self.kind == "image":
             im = Image.open(job / asset["file"]).convert("RGB")
-            sc = max(W * 1.14 / im.width, H * 1.14 / im.height)
+            sc = max(self.w * 1.14 / im.width, self.h * 1.14 / im.height)
             self.img = im.resize((int(im.width * sc), int(im.height * sc)), Image.LANCZOS)
             self.depth = None
             dfile = (job / asset["file"]).with_name((job / asset["file"]).stem + "_depth.png")
@@ -356,7 +367,7 @@ class Media:
                 d = np.asarray(Image.open(dfile).convert("L").resize(self.img.size, Image.BILINEAR), np.float32) / 255.0
                 self.depth = cv2.GaussianBlur(d, (0, 0), 6)
         else:
-            vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},eq=saturation=0.85"
+            vf = f"scale={self.w}:{self.h}:force_original_aspect_ratio=increase,crop={self.w}:{self.h},fps={FPS},eq=saturation=0.85"
             self.proc = subprocess.Popen(
                 [
                     "ffmpeg",
@@ -379,7 +390,7 @@ class Media:
                 ],
                 stdout=subprocess.PIPE,
             )
-            self.last = Image.new("RGB", (W, H), BG)
+            self.last = Image.new("RGB", (self.w, self.h), BG)
 
     def frame(self, t: float) -> Image.Image:
         if self.kind == "image" and self.depth is not None:
@@ -387,15 +398,15 @@ class Media:
         if self.kind == "image":
             p = min(1.0, max(0.0, t / max(self.dur, 0.1)))
             q = p if self.idx % 2 == 0 else 1 - p  # alternate zoom in / zoom out
-            base = min(self.img.width, self.img.height * W / H)
+            base = min(self.img.width, self.img.height * self.w / self.h)
             cw = base / (1 + 0.12 * q)
-            ch = cw * H / W
+            ch = cw * self.h / self.w
             px = 0.35 + 0.3 * (p if self.idx % 3 else 1 - p)
             dx, dy = (self.img.width - cw) * px, (self.img.height - ch) * 0.5
-            return self.img.resize((W, H), Image.BILINEAR, box=(dx, dy, dx + cw, dy + ch))
-        raw = self.proc.stdout.read(W * H * 3) if self.proc else b""
-        if len(raw) == W * H * 3:
-            self.last = Image.frombytes("RGB", (W, H), raw)
+            return self.img.resize((self.w, self.h), Image.BILINEAR, box=(dx, dy, dx + cw, dy + ch))
+        raw = self.proc.stdout.read(self.w * self.h * 3) if self.proc else b""
+        if len(raw) == self.w * self.h * 3:
+            self.last = Image.frombytes("RGB", (self.w, self.h), raw)
         return self.last
 
     def _parallax(self, t: float) -> Image.Image:
@@ -405,12 +416,14 @@ class Media:
         sgn = 1 if self.idx % 2 == 0 else -1
         zoom = 1.0 + 0.07 * e
         ih, iw = self.depth.shape
-        base = min(iw, ih * W / H) / zoom
-        sx = base / W
+        base = min(iw, ih * self.w / self.h) / zoom
+        sx = base / self.w
         cx = iw / 2 + sgn * (e - 0.5) * iw * 0.03
         cy = ih / 2
         if not hasattr(self, "_grid"):
-            self._grid = np.meshgrid(np.arange(W, dtype=np.float32) - W / 2, np.arange(H, dtype=np.float32) - H / 2)
+            self._grid = np.meshgrid(
+                np.arange(self.w, dtype=np.float32) - self.w / 2, np.arange(self.h, dtype=np.float32) - self.h / 2
+            )
         gx, gy = self._grid
         mx = cx + gx * sx
         my = cy + gy * sx
@@ -434,17 +447,18 @@ def media_caption(d, s, t, dur):
     k = min(len(beats) - 1, int(t / seg))
     a = ease((t - k * seg) / 0.35)
     b = beats[k]
-    f = fit(b, W - 420, 78)
+    ow, oh = d.im.size
+    f = fit(b, ow - (420 if ow > oh else 140), 78 if ow > oh else 70)
     w = f.getlength(b)
-    y = H - 150 + (1 - a) * 20
-    box = [W / 2 - w / 2 - 34, y - 58, W / 2 + w / 2 + 34, y + 50]
+    y = oh - (150 if ow > oh else 520) + (1 - a) * 20
+    box = [ow / 2 - w / 2 - 34, y - 58, ow / 2 + w / 2 + 34, y + 50]
     d.rounded_rectangle(box, 26, fill=mix((0, 0, 0), (14, 40, 92), a), outline=mix((0, 0, 0), (255, 212, 0), a), width=4)
-    d.text((W / 2, y - 2), b, font=f, fill=mix((14, 40, 92), (255, 236, 120), a), anchor="mm")
+    d.text((ow / 2, y - 2), b, font=f, fill=mix((14, 40, 92), (255, 236, 120), a), anchor="mm")
 
 
 def frame_media(s, t, dur, media, media_t):
     img = media.frame(media_t)
-    img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, bottom_shade())
+    img = Image.composite(Image.new("RGB", img.size, (0, 0, 0)), img, bottom_shade(img.size))
     media_caption(ImageDraw.Draw(img), s, t, dur)
     return film_look(img, t)
 
@@ -462,7 +476,21 @@ def frame(s, t, dur, media=None):
         DRAW.get(s["visual"], v_kinetic)(d, s, t, dur, img)
     if media is not None:
         img = film_look(img, t)
-    return img
+    return to_output(img)
+
+
+def to_output(card: Image.Image) -> Image.Image:
+    """Place a 16:9 code-made card on the output canvas (Shorts: blurred fill behind, card in the middle)."""
+    if card.size == (OW, OH):
+        return card
+    sc = max(OW / card.width, OH / card.height)
+    bg = card.resize((int(card.width * sc / 4), int(card.height * sc / 4)), Image.BILINEAR).filter(ImageFilter.GaussianBlur(6))
+    bg = bg.resize((int(card.width * sc), int(card.height * sc)), Image.BILINEAR)
+    bg = bg.crop(((bg.width - OW) // 2, (bg.height - OH) // 2, (bg.width - OW) // 2 + OW, (bg.height - OH) // 2 + OH))
+    bg = Image.blend(Image.new("RGB", (OW, OH), (0, 0, 0)), bg, 0.55)
+    fg = card.resize((OW, int(card.height * OW / card.width)), Image.LANCZOS)
+    bg.paste(fg, (0, (OH - fg.height) // 2))
+    return bg
 
 
 @lru_cache(maxsize=1)
@@ -481,19 +509,20 @@ def _grade_lut():
     return lut
 
 
-@lru_cache(maxsize=8)
-def _grain(k: int) -> Image.Image:
+@lru_cache(maxsize=16)
+def _grain(k: int, size: tuple[int, int] = (W, H)) -> Image.Image:
     import random  # noqa: PLC0415
 
     rnd = random.Random(k)  # noqa: S311 - visual noise, not security
-    g = Image.effect_noise((W // 2, H // 2), 22 + rnd.random() * 4).resize((W, H), Image.BILINEAR)
+    g = Image.effect_noise((size[0] // 2, size[1] // 2), 22 + rnd.random() * 4).resize(size, Image.BILINEAR)
     return g
 
 
 def film_look(img: Image.Image, t: float) -> Image.Image:
     img = img.point(_grade_lut())
-    img = Image.blend(img, Image.merge("RGB", [_grain(int(t * FPS) % 8)] * 3), 0.045)
-    img.paste(Image.new("RGB", (W, H), (0, 0, 0)), (0, 0), vignette())
+    size = img.size
+    img = Image.blend(img, Image.merge("RGB", [_grain(int(t * FPS) % 8, size)] * 3), 0.045)
+    img.paste(Image.new("RGB", size, (0, 0, 0)), (0, 0), vignette(size))
     return img
 
 
@@ -533,7 +562,7 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
         "-pix_fmt",
         "rgb24",
         "-s",
-        f"{W}x{H}",
+        f"{OW}x{OH}",
         "-r",
         str(FPS),
         "-i",
@@ -565,7 +594,8 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
         last = prev
         for s0, s1, j in segs:
             seg_dur = max(0.1, (s1 - s0) / FPS)
-            media = Media(job, {**a, "file": files[j]}, seg_dur, idx * 3 + j) if files else None
+            kind = "video" if files and files[j].endswith(".mp4") else "image"
+            media = Media(job, {**a, "file": files[j], "kind": kind}, seg_dur, idx * 3 + j) if files else None
             try:
                 while fi < s1:
                     t = (fi - start) / FPS
@@ -578,7 +608,7 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
                     if prev is not None and k < xf:
                         img = Image.blend(prev, img, (k + 1) / (xf + 1))
                     elif prev is None and k < xf:  # fade in from black at the very start
-                        img = Image.blend(Image.new("RGB", (W, H), (0, 0, 0)), img, (k + 1) / (xf + 1))
+                        img = Image.blend(Image.new("RGB", (OW, OH), (0, 0, 0)), img, (k + 1) / (xf + 1))
                     p.stdin.write(img.tobytes())
                     last = img
                     fi += 1
@@ -587,7 +617,7 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
                     media.close()
             prev = last
     while fi < round(timings["total"] * FPS):
-        p.stdin.write(background().tobytes())
+        p.stdin.write(to_output(background()).tobytes())
         fi += 1
     p.stdin.close()
     if p.wait() != 0:

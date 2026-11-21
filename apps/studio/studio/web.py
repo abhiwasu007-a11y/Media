@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -200,13 +201,107 @@ async def import_job(bundle: UploadFile = File(...), _: str = Depends(auth)):
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(msg: str = "", _: str = Depends(auth)) -> HTMLResponse:
+    rows = ""
+    for name, label, kind, default, opts in config.FIELDS:
+        if kind == "secret":
+            state = "<span class=ok>set</span>" if config.is_set(name) else "<span class=bad>not set</span>"
+            field = f"<input type=password name='{name}' autocomplete=new-password placeholder='leave empty to keep'>"
+            label_html = f"{e(label)} · {state}"
+        elif kind == "select":
+            cur = config.get(name, default)
+            field = (
+                f"<select name='{name}'>"
+                + "".join(f"<option {'selected' if o == cur else ''}>{e(o)}</option>" for o in opts)
+                + "</select>"
+            )
+            label_html = e(label)
+        else:
+            field = f"<input name='{name}' value='{e(config.get(name, default))}'>"
+            label_html = e(label)
+        rows += f"<label>{label_html}</label>{field}"
+    tests = "".join(
+        f"<form method=post action='/settings/test/{t}' style='display:inline'><button>Test {t}</button></form> "
+        for t in ("anthropic", "cloudflare", "pixabay", "kaggle")
+    )
+    body = (
+        f"<p><a href='/'>← dashboard</a></p><h1>Settings</h1>"
+        f"{'<div class=card>' + e(msg) + '</div>' if msg else ''}"
+        f"<form class=card method=post action=/settings>{rows}<p><button>Save</button></p>"
+        f"<p class=dim>Keys are stored only on this server (data/settings.json, mode 0600) and are never shown again. "
+        f"Every change is written to the audit log (names only, never values).</p></form>"
+        f"<div class=card><b>Connection tests</b> (free calls only)<p>{tests}</p></div>"
+    )
+    return page("Settings", body)
+
+
+@app.post("/settings")
+async def settings_save(request: Request, user: str = Depends(auth)):
+    form = await request.form()
+    try:
+        changed = config.update({k: str(v) for k, v in form.items()}, user)
+        msg = f"saved: {', '.join(changed)}" if changed else "no change"
+    except ValueError as exc:
+        msg = f"not saved: {exc}"
+    return RedirectResponse(f"/settings?msg={urllib.parse.quote(msg)}", status_code=303)
+
+
+@app.post("/settings/test/{provider}")
+def settings_test(provider: str, user: str = Depends(auth)):
+    try:
+        msg = f"{provider}: OK, {connection_test(provider)}"
+    except Exception as exc:  # report, never the key
+        msg = f"{provider}: FAILED, {type(exc).__name__}: {str(exc)[:160]}"
+    config.audit(user, "settings.test", {"provider": provider, "ok": msg.startswith(f"{provider}: OK")})
+    return RedirectResponse(f"/settings?msg={urllib.parse.quote(msg)}", status_code=303)
+
+
+def connection_test(provider: str) -> str:
+    """Free checks only: token count, account lookup, one search. No paid generation."""
+    import json as _json  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    def get(url: str, headers: dict) -> dict:
+        req = urllib.request.Request(url, headers={"User-Agent": "amw-studio/1", **headers})  # noqa: S310
+        with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310 - fixed https endpoints
+            return _json.loads(r.read())
+
+    if provider == "anthropic":
+        import anthropic  # noqa: PLC0415
+
+        c = anthropic.Anthropic(api_key=config.get("AMW_SECRET_ANTHROPIC_API_KEY"), base_url="https://api.anthropic.com")
+        n = c.messages.count_tokens(model=config.load().model, messages=[{"role": "user", "content": "नमस्कार"}])
+        return f"token count works ({n.input_tokens} tokens), model {config.load().model}"
+    if provider == "cloudflare":
+        acc, tok = config.get("AMW_CF_ACCOUNT_ID"), config.get("AMW_SECRET_CF_AI_TOKEN")
+        d = get("https://api.cloudflare.com/client/v4/user/tokens/verify", {"Authorization": f"Bearer {tok}"})
+        if not d.get("success"):
+            raise RuntimeError("token not valid")
+        return f"token {d['result'].get('status')}; account id {'set' if acc else 'MISSING'}"
+    if provider == "pixabay":
+        q = urllib.parse.urlencode({"key": config.get("AMW_SECRET_PIXABAY_API_KEY"), "q": "clock", "per_page": 3})
+        d = get(f"https://pixabay.com/api/videos/?{q}", {})
+        return f"{d.get('totalHits', 0)} clips found for 'clock'"
+    if provider == "kaggle":
+        from . import motion_kaggle  # noqa: PLC0415
+
+        d = motion_kaggle._call(
+            config.get("AMW_KAGGLE_USERNAME"), config.get("AMW_SECRET_KAGGLE_KEY"), "ListKernels", {"mine": True, "pageSize": 1}
+        )
+        return f"authenticated ({len(d.get('kernels', []))} own notebook listed)"
+    raise HTTPException(404)
+
+
 @app.get("/jobs/new", response_class=HTMLResponse)
 def new_form(_: str = Depends(auth)) -> HTMLResponse:
     body = """<h1>New job</h1><form class=card method=post action=/jobs enctype=multipart/form-data>
 <label>Title</label><input name=title required>
 <label>Category</label><select name=category><option value=philosophy>philosophy (non-finance)</option>
 <option value=finance>finance (blocked in this build)</option></select>
-<label>Length (minutes)</label><input name=minutes type=number step=0.5 value=8.5>
+<label>Video type</label><select name=format><option value=long_16x9>Long video 16:9 (YouTube)</option>
+<option value=short_9x16>Short 9:16 (YouTube Shorts / Reels, under 60 s)</option></select>
+<label>Length in minutes (long video only)</label><input name=minutes type=number step=0.5 value=8.5>
 <label>Research pack / brief (.md, private)</label><input type=file name=brief accept=".md,.txt" required>
 <label>Public-domain source text for quote check (.txt, optional)</label><input type=file name=source accept=".txt">
 <label>Quote (exact text, optional)</label><input name=quote><label>Quote credit</label><input name=quote_credit>
@@ -222,6 +317,7 @@ async def create(
     title: str = Form(...),
     category: str = Form(...),
     minutes: float = Form(8.5),
+    format: str = Form("long_16x9"),  # noqa: A002 - form field name
     voice_mode: str = Form("none"),
     quote: str = Form(""),
     quote_credit: str = Form(""),
@@ -239,13 +335,19 @@ async def create(
     (job / "brief.md").write_bytes(await brief.read())
     if source and source.filename:
         (job / "source.txt").write_bytes(await source.read())
+    if format not in ("long_16x9", "short_9x16"):
+        raise HTTPException(400, "unknown video type")
+    short = format == "short_9x16"
+    if short:
+        minutes = 0.9
     meta = {
         "id": jid,
         "title": title,
         "category": category,
+        "format": format,
         "minutes": minutes,
-        "min_minutes": max(1, minutes - 1),
-        "max_minutes": minutes + 1.2,
+        "min_minutes": 0.6 if short else max(1, minutes - 1),
+        "max_minutes": 1.0 if short else minutes + 1.2,
         "voice_mode": voice_mode,
         "quote": quote,
         "quote_credit": quote_credit,

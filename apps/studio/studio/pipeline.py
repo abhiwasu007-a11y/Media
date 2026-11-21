@@ -27,6 +27,7 @@ STAGES = [
     "06_fact_check",
     "05b_asset_plan",
     "08a_assets",
+    "08b_motion",
     "07_voice",
     "09_timeline",
     "08_visuals",
@@ -141,6 +142,12 @@ def s05_script(job: Path, meta: dict) -> str:
         scenes=f"{int(minutes * 5)}–{int(minutes * 6.5)}",
         visuals=VISUALS,
     )
+    if meta.get("format") == "short_9x16":
+        user += (
+            "\n\nFORMAT: YouTube Short, vertical 9:16, 45–58 seconds in total (about 110–135 Marathi words), 8–12 scenes "
+            "of 3–6 seconds. The first scene is a 2-second hook question or shock line; one idea only; end with a one-line "
+            "takeaway and an invitation to watch the full video. Beats max 4 words (small screen)."
+        )
     r = llm.call(job, "05_script", system, user, max_tokens=64000, effort="medium")
     if r.stop_reason == "max_tokens":
         data = _complete_scenes(r.text)
@@ -310,6 +317,7 @@ def s09_timeline(job: Path, meta: dict) -> str:
 
 # ------------------------------------------------------------------ 08 visuals / 11 thumbnail
 def s08_visuals(job: Path, meta: dict) -> str:
+    visuals.set_output(meta.get("format") == "short_9x16")
     n = visuals.render_visuals(job, rj(job / "script.json"), rj(job / "timings.json"), job / "visuals.mp4")
     return f"{n} frames"
 
@@ -488,7 +496,10 @@ def s10_qc(job: Path, meta: dict) -> str:
     voiced = audio_source(job) is not None
     checks = {
         "video.h264_high": (v["codec_name"] == "h264" and v.get("profile") == "High", f"{v['codec_name']} {v.get('profile')}"),
-        "video.1920x1080": ((v["width"], v["height"]) == (1920, 1080), f"{v['width']}x{v['height']}"),
+        "video.resolution": (
+            (v["width"], v["height"]) == ((1080, 1920) if meta.get("format") == "short_9x16" else (1920, 1080)),
+            f"{v['width']}x{v['height']}",
+        ),
         "video.cfr_30": (v["r_frame_rate"] == "30/1" and v["avg_frame_rate"] == "30/1", v["avg_frame_rate"]),
         "video.yuv420p": (v["pix_fmt"] == "yuv420p", v["pix_fmt"]),
         "video.encoder_8mbps_vbr": (True, f"-b:v 8M VBR target (D10); file {int(pr['format']['bit_rate']) / 1e6:.2f} Mbps"),
@@ -594,6 +605,7 @@ FUNCS = {
     "06_fact_check": s06_fact_check,
     "05b_asset_plan": assets.s05b_asset_plan,
     "08a_assets": assets.s08a_assets,
+    "08b_motion": assets.s08b_motion,
     "07_voice": s07_voice,
     "09_timeline": s09_timeline,
     "08_visuals": s08_visuals,
