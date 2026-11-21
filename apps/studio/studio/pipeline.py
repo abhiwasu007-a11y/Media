@@ -417,7 +417,8 @@ def audio_source(job: Path) -> Path | None:
 
 
 def s10_render(job: Path, meta: dict) -> str:
-    out = job / "final_1080p.mp4"
+    final = job / "final_1080p.mp4"
+    out = job / "final_1080p.rendering.mp4"  # swapped in only when complete: the dashboard never serves a half file
     vid = [
         "-c:v",
         "libx264",
@@ -490,6 +491,7 @@ def s10_render(job: Path, meta: dict) -> str:
             str(out),
         ]
     )
+    out.replace(final)
     parts = ["voice" if voiced else "NO voice (pending)"]
     parts += ["music"] if music_file(job) else []
     parts += ["SFX"]
