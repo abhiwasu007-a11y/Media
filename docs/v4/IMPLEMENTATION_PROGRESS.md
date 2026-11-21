@@ -234,6 +234,9 @@ Reference videos sent by the owner (2026-11-21): five YouTube links (a film musi
 
 Operator notes: no score was given, so no score or approval is recorded. Next: AI image provider and free stock sources are researched from official pages (price, commercial-use terms) before any spend; the provider and its spending limit need the owner's choice (rule 8). Story illustrations in one consistent style, B-roll from licensed free stock, richer motion design, music bed + SFX. Visual hierarchy per CONTEXT_BRIEF §1A (code-made motion graphics rank above AI stills; AI stills are used here for the fictional story scenes only).
 
+### D17 (2026-11-21, owner chat message): free tools only
+Quoted verbatim: "Free Version use kra". Applied: story images from the Cloudflare Workers AI free daily allocation (FLUX.1 [schnell], CF-01, IMG-04) by default; the paid BFL provider stays only as an opt-in setting (`AMW_IMAGE_PROVIDER=bfl`) and is not used. Pixabay (free) for B-roll; SFX code-made. The script and fact-check still use the owner's Anthropic key (paid, within the D9 caps); a free LLM was not requested for those stages.
+
 ## Owner inputs: status
 
 | ID | Input | Status |

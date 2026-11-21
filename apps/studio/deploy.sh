@@ -25,7 +25,7 @@ if ! grep -q '^AMW_SECRET_ANTHROPIC_API_KEY=sk-' .env; then
   read -rsp "Anthropic API key (Enter to skip for now): " K; echo
   [ -n "$K" ] && setvar AMW_SECRET_ANTHROPIC_API_KEY "$K"; unset K
 fi
-for V in AMW_SECRET_BFL_API_KEY AMW_SECRET_PIXABAY_API_KEY; do
+for V in AMW_CF_ACCOUNT_ID AMW_SECRET_CF_AI_TOKEN AMW_SECRET_PIXABAY_API_KEY; do
   if ! grep -q "^$V=.\+" .env; then
     read -rsp "$V (Enter to skip): " X; echo
     [ -n "$X" ] && setvar "$V" "$X"; unset X
