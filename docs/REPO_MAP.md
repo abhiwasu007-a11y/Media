@@ -1,11 +1,12 @@
 # REPO MAP
 
-Use this map instead of scanning. Source code does not exist yet (documentation phase); the planned layout is in `docs/v4/SOURCE_LAYOUT.md`.
+Use this map instead of scanning. The 3A platform code is in `packages/`; the lean studio app (dashboard + production line, D15+) is in `apps/studio/`.
 
 ## Entry points
 | Need | Read |
 |---|---|
 | What the project is, binding rules | `docs/v4/CONTEXT_BRIEF.md` (then specific § of `docs/v4/MASTER_DIRECTIVE.md`) |
+| Session handover (studio app state, deploy, in-flight work) | `docs/v4/HANDOVER.md` |
 | Current status, tasks, owner decisions (D1+), open questions | `docs/v4/IMPLEMENTATION_PROGRESS.md` |
 | Plan, phases, defaults Q1–Q20 | `docs/v4/00_EXECUTION_PLAN.md` |
 | Index of every V4 document and its status | `docs/v4/README.md` |

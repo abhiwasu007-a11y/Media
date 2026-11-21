@@ -1,6 +1,7 @@
 # CLAUDE.md — AMW AI Media Factory (keep ≤150 lines: rules, commands, pointers only)
 
 ## Read first
+0. `docs/v4/HANDOVER.md`: current state of the studio app, deployment and in-flight work. Start here.
 1. `docs/v4/CONTEXT_BRIEF.md`: the digest of the binding directive. Read specific § of `docs/v4/MASTER_DIRECTIVE.md` only when needed.
 2. `docs/v4/IMPLEMENTATION_PROGRESS.md`: status, owner decisions (D1+), open questions. Resume from it; never redo finished work.
 3. `docs/REPO_MAP.md`: where everything lives. Use it instead of scanning.
