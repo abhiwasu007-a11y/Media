@@ -1,0 +1,20 @@
+# Own compose project, low priority and hard caps on the shared server (CONTEXT_BRIEF §1, INF-03/04).
+name: amw-studio
+services:
+  studio:
+    build:
+      context: .
+      args:
+        WITH_TTS: "${WITH_TTS:-0}"
+    env_file: .env
+    environment:
+      AMW_STUDIO_DATA: /data
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:${AMW_PORT:-8080}:8080"   # loopback only: reach it through an SSH tunnel or your reverse proxy with TLS
+    restart: unless-stopped
+    cpus: "${AMW_CPUS:-1.0}"
+    mem_limit: "${AMW_MEM:-2g}"
+    cpu_shares: 256
+    oom_score_adj: 500

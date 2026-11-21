@@ -211,6 +211,18 @@ Operator summary:
 4. **Priority unchanged: Seneca sample MP4 with FREE VOICE.** The voice provider is a free TTS: **REQUIRES REVIEW (Phase 1): which free Marathi-capable TTS, licence terms for monetised YouTube use** (researched by another lane; no provider is chosen here). This does not change D13 item 6 beyond the voice choice (A14) now being a free TTS.
 5. **Owner reply required:** ETA in hours and the single next blocker, in Marathi, at most 5 lines (given in the session reply, not in this ledger). SEBI registration status stays needed only for finance channels.
 
+### D15 (2026-11-21, owner chat message): deploy-ready package with a basic dashboard, voice later
+Recorded from the owner's chat message (R14 operator record). Quoted verbatim:
+
+> Voice token deil nantr, उर्वरित काम पूर्ण करून सॅम्पल व्हिडिओ दे तसेच एक बेसिक डॅशबोर्ड पण मला पाहिजे हे सर्व मला डिप्लोय करायचे आहे आणि याचे ऍक्च्युअल वर मला बघायचे आहे त्याच्यामुळे आवश्यक असणारीच कोडींग करा आणि डिप्लॉय साठी रेडी पॅकेज तयार करा मग आपण पुढच्या स्टेजमध्ये पुढील अपडेट करत चालू
+
+Operator summary and what was done:
+1. **Lean app `apps/studio/`** (separate from the `packages/` 3A platform; it reuses only the Mukta fonts): pipeline 04 → 05 → 06 → 07 → 09 → 08 → 11 → 10 → 16 → manifest, a password-protected dashboard (jobs, stage status, cost per stage, QC, gate, video, downloads, new job, voice upload, re-run from a stage), Dockerfile + compose (loopback port, CPU/memory caps, low CPU shares), `.env.example`, README with deploy steps. Budget guard: per-video USD 5 and pilot USD 50 checked against the worst case before each paid call (D9). Render waits during NSE market hours (D1; exchange holidays not modelled).
+2. **Sample #1 v0 (no voice)** produced in the dev environment: 05 script and 06 fact-check by real Anthropic calls; quote verified exactly against the public-domain Basore translation; QC FAIL only on the voice checks and the estimated duration (voice pending); gate BLOCKED on technical QC until a voice is added. API cost 2.18 USD (ESTIMATE; includes a 0.98 USD held worst case for one response lost to a local bookkeeping bug: reconcile in the Anthropic Console).
+3. **Voice:** free Indic Parler-TTS (Apache-2.0) is wired as an optional build (`WITH_TTS=1`) and needs the owner's Hugging Face read token (the model is gated); owner recordings can be uploaded on the job page.
+4. **Not verified here:** the Docker image build (Docker Hub refused the base-image pull from the session: HTTP 429). The pinned requirements were installed and imported on Python 3.12 instead.
+5. **Rule note:** the CLAUDE.md "documentation only" rule predates D8/D15; this app is built on the owner's explicit instruction. Sample content derived from the private library stays out of git (job folders live under `data/`, ignored).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
@@ -273,3 +285,4 @@ Operator summary:
 | Wave B-1 (first run, stopped and split) | 16 agents | ≈ 6.0M (Opus: ADRs, slice spec; Sonnet: docs + blueprints 04–09) | harness totals not yet summed per agent |
 | Wave B-2 groups | biz 4 agents 598k; shared 19 agents 2.70M; blueprints 8 agents ≈ 2.9M | ≈ 6.2M | |
 | Research verification (re-runs, log wave 3) | 3 agents | ≈ 0.26M | 86.5k + 171.8k |
+| D15 sample #1 v0 + studio app | 0 sub-agents | — | main session only; Anthropic API spend for the sample: 2.18 USD (ESTIMATE) |

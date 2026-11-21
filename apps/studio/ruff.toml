@@ -1,0 +1,7 @@
+# AMW Studio is a separate lean app (D15); it uses a lighter rule set than the platform packages.
+line-length = 130
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "S"]
+ignore = ["S603", "S607", "S101", "B008", "E501"]
