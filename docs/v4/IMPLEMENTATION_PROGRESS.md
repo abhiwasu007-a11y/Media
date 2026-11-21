@@ -240,6 +240,9 @@ Quoted verbatim: "Free Version use kra". Applied: story images from the Cloudfla
 ### D18 (2026-11-21, owner chat message): cinematic video
 Quoted verbatim: "Cinematic video". Applied within D17 (free tools): 2.5D parallax camera from depth maps (Depth-Anything-V2-Small, Apache-2.0, CPU; Base/Large are CC-BY-NC and not used), cinematic colour grade, film grain, vignette, cross-dissolves between scenes. Not done: AI-generated moving footage (image-to-video); no free option fits the server (CPU only) or the commercial terms, so it needs a paid provider or a GPU and an owner decision.
 
+### D19 (2026-11-21, owner chat message): lowest-cost high-quality video, research free options
+Owner asked (Marathi) for high-quality cinematic, animated and cartoon videos at the lowest cost, with web research for every free option. Research recorded in `docs/v4/research/FREE_VIDEO_OPTIONS.md` (UNVERIFIED items marked; no provider is cleared for commercial use before a first-hand terms read). Recommendation awaiting the owner's choice: free pipeline now; optional free hero motion via Wan2.1-1.3B on Kaggle; paid hero clips only with an owner-approved cap.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
