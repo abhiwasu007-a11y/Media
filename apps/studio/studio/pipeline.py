@@ -549,6 +549,12 @@ def s10_qc(job: Path, meta: dict) -> str:
     tp = float(pk.group(1)) if pk else float("-inf")
     dur = float(pr["format"]["duration"])
     voiced = audio_source(job) is not None
+    target = 60 * float(meta.get("minutes", 8.5))
+    if meta.get("format") == "short_9x16":
+        lo, hi = 20.0, 60.0  # a Short must stay under one minute
+    else:  # a real voice reads at its own pace: allow 25 % around the target length
+        lo = min(60 * meta.get("min_minutes", 8), 0.75 * target)
+        hi = max(60 * meta.get("max_minutes", 9.6), 1.25 * target)
     checks = {
         "video.h264_high": (v["codec_name"] == "h264" and v.get("profile") == "High", f"{v['codec_name']} {v.get('profile')}"),
         "video.resolution": (
@@ -566,7 +572,7 @@ def s10_qc(job: Path, meta: dict) -> str:
         "audio.loudness_-14_lufs": (voiced and abs(lufs + 14) <= 1.0, f"{lufs} LUFS"),
         "audio.true_peak_-1_dbtp": (voiced and tp <= -1.0, f"{tp} dBTP"),
         "font.for_language": (languages.font_ok(meta.get("language", "mr")), meta.get("language", "mr")),
-        "duration.min_max": (60 * meta.get("min_minutes", 8) <= dur <= 60 * meta.get("max_minutes", 9.6), f"{dur:.1f} s"),
+        "duration.min_max": (lo <= dur <= hi, f"{dur:.1f} s (allowed {lo:.0f}-{hi:.0f} s)"),
     }
     rep = {
         "duration_s": round(dur, 2),
