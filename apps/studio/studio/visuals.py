@@ -428,19 +428,25 @@ class Media:
 
 
 def media_caption(d, s, t, dur):
-    """Current beat as a lower-third caption with a soft shadow; one beat at a time."""
+    """Current beat in a rounded dialogue box (reference style), one beat at a time."""
     beats = s["beats"] or [""]
     seg = dur / len(beats)
     k = min(len(beats) - 1, int(t / seg))
-    a = ease((t - k * seg) / 0.4)
+    a = ease((t - k * seg) / 0.35)
     b = beats[k]
-    f = fit(b, W - 360, 92)
-    y = H - 170 + (1 - a) * 24
-    for ox, oy in ((3, 3), (0, 4)):
-        d.text((W / 2 + ox, y + oy), b, font=f, fill=(0, 0, 0), anchor="mm")
-    d.text((W / 2, y), b, font=f, fill=mix((40, 40, 40), INK, a), anchor="mm")
+    f = fit(b, W - 420, 78)
     w = f.getlength(b)
-    d.rounded_rectangle([W / 2 - w / 2, y + 62, W / 2 - w / 2 + w * a, y + 68], 3, fill=ACC)
+    y = H - 150 + (1 - a) * 20
+    box = [W / 2 - w / 2 - 34, y - 58, W / 2 + w / 2 + 34, y + 50]
+    d.rounded_rectangle(box, 26, fill=mix((0, 0, 0), (14, 40, 92), a), outline=mix((0, 0, 0), (255, 212, 0), a), width=4)
+    d.text((W / 2, y - 2), b, font=f, fill=mix((14, 40, 92), (255, 236, 120), a), anchor="mm")
+
+
+def frame_media(s, t, dur, media, media_t):
+    img = media.frame(media_t)
+    img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, bottom_shade())
+    media_caption(ImageDraw.Draw(img), s, t, dur)
+    return film_look(img, t)
 
 
 def frame(s, t, dur, media=None):
@@ -551,24 +557,35 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
         s, dur, start = by[row["id"]], row["dur"], round(row["start"] * FPS)
         end = round((row["start"] + dur) * FPS)
         a = assets.get(row["id"])
-        media = Media(job, a, dur, len(row["id"]) + int(row["id"][1:])) if a and (job / a["file"]).exists() else None
+        idx = int(row["id"][1:]) if row["id"][1:].isdigit() else 0
+        files = [f for f in (a.get("files") or [a["file"]]) if (job / f).exists()] if a else []
+        # one segment per shot: the picture changes every few seconds inside a scene
+        n = max(1, len(files))
+        segs = [(start + round((end - start) * j / n), start + round((end - start) * (j + 1) / n), j) for j in range(n)]
         last = prev
-        try:
-            while fi < end:
-                t = (fi - start) / FPS
-                img = frame(s, max(0.0, min(dur, t)), dur, media)
-                k = fi - start
-                if prev is not None and k < xf:
-                    img = Image.blend(prev, img, (k + 1) / (xf + 1))
-                elif prev is None and k < xf:  # fade in from black at the very start
-                    img = Image.blend(Image.new("RGB", (W, H), (0, 0, 0)), img, (k + 1) / (xf + 1))
-                p.stdin.write(img.tobytes())
-                last = img
-                fi += 1
+        for s0, s1, j in segs:
+            seg_dur = max(0.1, (s1 - s0) / FPS)
+            media = Media(job, {**a, "file": files[j]}, seg_dur, idx * 3 + j) if files else None
+            try:
+                while fi < s1:
+                    t = (fi - start) / FPS
+                    if media is not None:
+                        media_t = (fi - s0) / FPS
+                        img = frame_media(s, max(0.0, min(dur, t)), dur, media, media_t)
+                    else:
+                        img = frame(s, max(0.0, min(dur, t)), dur, None)
+                    k = fi - s0
+                    if prev is not None and k < xf:
+                        img = Image.blend(prev, img, (k + 1) / (xf + 1))
+                    elif prev is None and k < xf:  # fade in from black at the very start
+                        img = Image.blend(Image.new("RGB", (W, H), (0, 0, 0)), img, (k + 1) / (xf + 1))
+                    p.stdin.write(img.tobytes())
+                    last = img
+                    fi += 1
+            finally:
+                if media:
+                    media.close()
             prev = last
-        finally:
-            if media:
-                media.close()
     while fi < round(timings["total"] * FPS):
         p.stdin.write(background().tobytes())
         fi += 1

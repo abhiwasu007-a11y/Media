@@ -25,27 +25,30 @@ BFL_WORST_USD = 0.03 + 0.015 * 2
 UA = {"User-Agent": "amw-studio/1"}
 
 DEFAULT_STYLE = (
-    "stylized 3D animated feature-film look, expressive characters with large eyes and clear emotions, soft global "
-    "illumination, vibrant saturated colours, cinematic depth of field, rich detailed Indian setting, warm rim light, "
-    "no text, no letters, no logos, no watermark"
+    "cinematic still from a semi-realistic 3D animated Indian film, detailed expressive faces with clear emotion, "
+    "golden-hour or warm practical light, shallow depth of field, rich textured Indian village and city settings, "
+    "film colour grade, 16:9 composition, no text, no letters, no logos, no watermark"
 )
 
 SYSTEM_PLAN = """You plan the pictures for a Marathi explainer video. Return ONLY JSON.
 For each scene choose: "ai_image" for story moments with characters or specific places (a consistent illustrated
 world), "stock_video" for generic real-world B-roll (city traffic, phone screens, clocks, nature, crowds), or "none"
 where the code-made diagram/kinetic text is best (tables, timelines, checklists, quote cards, questions).
-Image prompts: English, concrete, one shot, describe composition and camera (wide/medium/close), reuse the exact
-character descriptions from the character sheet every time a character appears, never include text in the image,
-no real people, no brands. Stock queries: 2-4 English words."""
+For "ai_image" scenes write a short SHOT LIST of 2 shots (3 for scenes longer than 10 seconds of narration) so the
+picture changes every 3-5 seconds like a film: vary the framing (wide establishing / medium / emotional close-up /
+detail insert of an object or hands), keep continuity of place, light and costume inside a scene.
+Shot prompts: English, concrete, one camera shot each, describe framing, action, emotion, light (golden hour, firelight,
+soft window light), reuse the exact character descriptions from the character sheet every time a character appears,
+never include text in the image, no real or famous people, no brands. Stock queries: 2-4 English words."""
 
 USER_PLAN = """Scenes:
 {scenes}
 
-Limits: at most {max_ai} "ai_image" scenes and at most {max_stock} "stock_video" scenes.
+Limits: at most {max_ai} shots in total across "ai_image" scenes and at most {max_stock} "stock_video" scenes.
 Also write "thumbnail_prompt": one close-up of the main character with a strong, readable emotion (surprise or
 realisation) and the story's key object, character on the RIGHT half, empty darker space on the LEFT for big text.
 JSON shape: {{"characters": {{"name": "fixed visual description"}}, "thumbnail_prompt": "...",
- "scenes": [{{"id": "s01", "kind": "ai_image|stock_video|none", "prompt": "...", "query": "..."}}]}}"""
+ "scenes": [{{"id": "s01", "kind": "ai_image|stock_video|none", "shots": ["prompt 1", "prompt 2"], "query": "..."}}]}}"""
 
 
 def s05b_asset_plan(job: Path, meta: dict) -> str:
@@ -54,15 +57,18 @@ def s05b_asset_plan(job: Path, meta: dict) -> str:
         {"id": s["id"], "section": s["section"], "visual": s["visual"], "beats": s["beats"], "narration": s["narration"][:220]}
         for s in script["scenes"]
     ]
-    max_ai = int(os.environ.get("AMW_MAX_AI_IMAGES", "28"))
+    max_ai = int(os.environ.get("AMW_MAX_AI_IMAGES", "80"))
     max_stock = int(os.environ.get("AMW_MAX_STOCK_CLIPS", "10"))
     user = USER_PLAN.format(scenes=json.dumps(compact, ensure_ascii=False), max_ai=max_ai, max_stock=max_stock)
     plan = llm.parse_json(llm.call(job, "05b_asset_plan", SYSTEM_PLAN, user, max_tokens=16000, effort="low").text)
     n_ai = n_st = 0
     for p in plan["scenes"]:  # enforce the limits in code, not only in the prompt
         if p.get("kind") == "ai_image":
-            n_ai += 1
-            if n_ai > max_ai:
+            shots = [x for x in (p.get("shots") or [p.get("prompt")]) if x][:3]
+            room = max_ai - n_ai
+            p["shots"] = shots[: max(0, room)]
+            n_ai += len(p["shots"])
+            if not p["shots"]:
                 p["kind"] = "none"
         elif p.get("kind") == "stock_video":
             n_st += 1
@@ -71,7 +77,10 @@ def s05b_asset_plan(job: Path, meta: dict) -> str:
     plan["style"] = meta.get("visual_style") or DEFAULT_STYLE
     (job / "asset_plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1))
     kinds = [p["kind"] for p in plan["scenes"]]
-    return f"ai_image {kinds.count('ai_image')}, stock_video {kinds.count('stock_video')}, none {kinds.count('none')}"
+    return (
+        f"ai_image scenes {kinds.count('ai_image')} ({n_ai} shots), stock_video {kinds.count('stock_video')}, "
+        f"none {kinds.count('none')}"
+    )
 
 
 # ------------------------------------------------------------------ providers
@@ -239,13 +248,18 @@ def s08a_assets(job: Path, meta: dict) -> str:
         sid, kind = p["id"], p.get("kind", "none")
         try:
             if kind == "ai_image":
-                f = adir / f"{sid}.jpg"
-                if sid in old and f.exists():  # keep paid images on a re-run
-                    out[sid] = old[sid]
-                    continue
-                prompt = f"{p['prompt']}. Characters: {sheet}. Style: {plan['style']}"
-                info = make_image(job, prompt, f, seed=1000 + i)
-                out[sid] = {"kind": "image", "file": f"assets/{f.name}", "prompt": p["prompt"], **info}
+                prev = old.get(sid, {})
+                files, infos = [], []
+                for j, shot in enumerate(p.get("shots") or [p.get("prompt")]):
+                    f = adir / f"{sid}_{j}.jpg"
+                    if not f.exists():
+                        info = make_image(job, f"{shot}. Characters: {sheet}. Style: {plan['style']}", f, seed=1000 + 10 * i + j)
+                        infos.append({"shot": shot, **info})
+                    else:
+                        infos.append(next((x for x in prev.get("shots_info", []) if x.get("shot") == shot), {"shot": shot}))
+                    files.append(f"assets/{f.name}")
+                lic = next((x.get("licence") for x in infos if x.get("licence")), prev.get("licence"))
+                out[sid] = {"kind": "image", "file": files[0], "files": files, "shots_info": infos, "licence": lic}
             elif kind == "stock_video":
                 f = adir / f"{sid}.mp4"
                 if sid in old and f.exists():
@@ -269,7 +283,9 @@ def s08a_assets(job: Path, meta: dict) -> str:
             notes.append(f"thumbnail: {type(exc).__name__}: {str(exc)[:120]}")
     elif tf.exists() and "_thumbnail" in old:
         out["_thumbnail"] = old["_thumbnail"]
-    n_depth = depth_maps(job, [job / a["file"] for a in out.values() if a["kind"] == "image"], notes)
+    n_depth = depth_maps(
+        job, [job / f for a in out.values() if a["kind"] in ("image", "thumbnail") for f in a.get("files", [a["file"]])], notes
+    )
     (job / "assets.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     kinds = [a["kind"] for a in out.values()]
     msg = f"images {kinds.count('image')}, videos {kinds.count('video')}, depth maps {n_depth}"

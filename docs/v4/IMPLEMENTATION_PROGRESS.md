@@ -243,6 +243,9 @@ Quoted verbatim: "Cinematic video". Applied within D17 (free tools): 2.5D parall
 ### D19 (2026-11-21, owner chat message): lowest-cost high-quality video, research free options
 Owner asked (Marathi) for high-quality cinematic, animated and cartoon videos at the lowest cost, with web research for every free option. Research recorded in `docs/v4/research/FREE_VIDEO_OPTIONS.md` (UNVERIFIED items marked; no provider is cleared for commercial use before a first-hand terms read). Recommendation awaiting the owner's choice: free pipeline now; optional free hero motion via Wan2.1-1.3B on Kaggle; paid hero clips only with an owner-approved cap.
 
+### D20 (2026-11-21, owner chat message): one more reference; study all references, do the work well
+Quoted verbatim: "सर्व व्हिडिओ  बघा repeat बघा pn kam changle kr" with a sixth reference (a vertical AI-drama short). Videos cannot be played from the session (the watch page is blocked); studied the thumbnails plus YouTube's three automatic frames per video. Applied: semi-realistic 3D cinematic Indian-film image style (closest reference: the Hindi animated story channel), a 2–3 shot list per story scene so the picture changes every 3–5 s (wide / medium / close-up / detail), rounded dialogue-box captions, free image budget raised to 80 shots per video (Workers AI free allocation, CF-01). Next candidate: a 9:16 Shorts cut (two references are Shorts).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
