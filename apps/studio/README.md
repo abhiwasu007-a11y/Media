@@ -34,6 +34,19 @@ Resource caps are in `compose.yaml` (`AMW_CPUS`, default 1 CPU; `AMW_MEM`, defau
 Rendering waits outside NSE market hours (Mon–Fri 09:00–15:45 IST) while `AMW_BLOCK_MARKET_HOURS=1`.
 Exchange holidays are not modelled, so the guard errs on the side of waiting.
 
+## Permanent link (own domain, Cloudflare named tunnel)
+
+1. Buy a domain (any registrar) and add it to a free Cloudflare account; change the domain's nameservers to the two
+   Cloudflare gives you (at the registrar). Wait until Cloudflare shows the domain as active.
+2. Cloudflare dashboard: Zero Trust, Networks, Tunnels, Create a tunnel, type Cloudflared, name `amw-studio`.
+   Copy the token from the install command it shows (the long string after `--token`).
+3. In the tunnel, add a public hostname: subdomain `studio`, your domain, service `HTTP` and URL `studio:8080`.
+4. On the server, put the token and the link in `.env`: `CF_TUNNEL_TOKEN=<token>` and
+   `AMW_PUBLIC_URL=https://studio.<your-domain>`, then run the deploy line again. It switches to the named tunnel,
+   stops the temporary one and checks the link.
+5. Optional extra lock: Zero Trust, Access, Applications, add `studio.<your-domain>` with an email one-time-code
+   policy for your address only. The dashboard password stays as the second lock.
+
 ## Use
 
 - **New job**: title, category, length, the research pack (`.md`), optionally a public-domain source text and the

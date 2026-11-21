@@ -19,11 +19,24 @@ services:
     cpu_shares: 256
     oom_score_adj: 500
 
-  # Cloudflare quick tunnel: an HTTPS link for the phone without opening any server port.
-  # The link is printed in the logs (docker compose logs tunnel | grep trycloudflare) and changes on restart.
+  # Phone access without opening any server port. One of the two tunnels runs, chosen by COMPOSE_PROFILES in .env
+  # (deploy.sh sets it): "quick" = temporary trycloudflare link that changes on restart; "named" = permanent link on
+  # your own domain, using CF_TUNNEL_TOKEN from the Cloudflare dashboard.
   tunnel:
     image: cloudflare/cloudflared:2024.12.2
     command: tunnel --no-autoupdate --protocol http2 --url http://studio:8080
+    profiles: ["quick"]
+    depends_on:
+      - studio
+    restart: unless-stopped
+    cpus: "0.25"
+    mem_limit: 128m
+  tunnel-named:
+    image: cloudflare/cloudflared:2024.12.2
+    command: tunnel --no-autoupdate --protocol http2 run
+    environment:
+      TUNNEL_TOKEN: "${CF_TUNNEL_TOKEN:-}"
+    profiles: ["named"]
     depends_on:
       - studio
     restart: unless-stopped

@@ -25,25 +25,33 @@ if ! grep -q '^AMW_SECRET_ANTHROPIC_API_KEY=sk-' .env; then
   read -rsp "Anthropic API key (Enter to skip for now): " K; echo
   [ -n "$K" ] && setvar AMW_SECRET_ANTHROPIC_API_KEY "$K"; unset K
 fi
+if grep -q '^CF_TUNNEL_TOKEN=.\+' .env; then setvar COMPOSE_PROFILES named; else setvar COMPOSE_PROFILES quick; fi
 chmod 600 .env
 mkdir -p data/jobs
 [ -f ~/sample-001-seneca-job.zip ] && unzip -oq ~/sample-001-seneca-job.zip -d data/jobs/
 chown -R 10001 data
-docker compose up -d --build --remove-orphans --force-recreate tunnel studio
+docker compose --profile quick --profile named rm -sf tunnel tunnel-named >/dev/null 2>&1
+docker compose up -d --build --remove-orphans --force-recreate
 echo "== waiting for the app =="
 for i in $(seq 30); do curl -sf http://127.0.0.1:8080/healthz >/dev/null && break; sleep 2; done
 if curl -sf http://127.0.0.1:8080/healthz; then echo; echo "APP OK"; else
   echo "APP NOT UP. Logs:"; docker compose logs --tail 20 studio; exit 0; fi
 echo "== phone link =="
-for i in $(seq 30); do
-  URL=$(docker compose logs tunnel 2>/dev/null | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
-  [ -n "$URL" ] && break; sleep 2
-done
-echo "${URL:-no link yet: run  docker compose logs tunnel | grep trycloudflare}"
+PUB=$(grep '^AMW_PUBLIC_URL=' .env | cut -d= -f2-)
+if grep -q '^COMPOSE_PROFILES=named' .env; then
+  URL=$PUB
+  [ -z "$URL" ] && echo "permanent tunnel on: set AMW_PUBLIC_URL in .env to have the link checked here"
+else
+  for i in $(seq 30); do
+    URL=$(docker compose logs tunnel 2>/dev/null | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1)
+    [ -n "$URL" ] && break; sleep 2
+  done
+  echo "(temporary link: it changes when the tunnel restarts)"
+fi
 if [ -n "$URL" ]; then
-  sleep 10
+  echo "$URL"; sleep 10
   CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$URL/healthz")
   if [ "$CODE" = "200" ]; then echo "LINK OK (checked from the server)"; else
-    echo "LINK NOT REACHABLE YET (HTTP $CODE). Tunnel log:"; docker compose logs --tail 15 tunnel; fi
+    echo "LINK NOT REACHABLE YET (HTTP $CODE). Tunnel log:"; docker compose logs --tail 15 tunnel tunnel-named 2>/dev/null; fi
 fi
 echo "user: owner   password: the one in $APP/.env"
