@@ -488,7 +488,9 @@ def new_form(_: str = Depends(auth)) -> HTMLResponse:
 <label>Video type</label><select name=format><option value=long_16x9>Long video 16:9 (YouTube)</option>
 <option value=short_9x16>Short 9:16 (YouTube Shorts / Reels, under 60 s)</option></select>
 <label>Length in minutes (long video only)</label><input name=minutes type=number step=0.5 value=8.5>
-<label>Research pack / brief (.md, private)</label><input type=file name=brief accept=".md,.txt" required>
+<label>Topic notes: what the video is about (type or paste here; any language)</label>
+<textarea name=brief_text rows=10 placeholder="Topic, key ideas, story idea, outline, facts with sources..."></textarea>
+<label>…or upload the notes as a file (.md / .txt)</label><input type=file name=brief accept=".md,.txt">
 <label>Public-domain source text for quote check (.txt, optional)</label><input type=file name=source accept=".txt">
 <label>Quote (exact text, optional)</label><input name=quote><label>Quote credit</label><input name=quote_credit>
 <label>Voice</label><select name=voice_mode><option value=none>none yet (silent, upload later)</option>
@@ -514,7 +516,8 @@ def create(
     quote: str = Form(""),
     quote_credit: str = Form(""),
     has_fiction: str = Form(""),
-    brief: UploadFile = File(...),
+    brief_text: str = Form(""),
+    brief: UploadFile | None = File(None),
     source: UploadFile | None = File(None),
     _: str = Depends(auth),
 ):
@@ -531,6 +534,11 @@ def create(
     title = title.strip()[:200]
     if not title:
         raise HTTPException(400, "title required")
+    has_file = bool(brief and brief.filename)
+    if not has_file and len(brief_text.strip()) < 30:
+        raise HTTPException(400, "write the topic notes (at least a few lines) or upload a notes file")
+    if len(brief_text) > 200_000:
+        raise HTTPException(413, "notes too long")
     jid = (
         datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         + "-"
@@ -541,7 +549,10 @@ def create(
     job = config.jobs_dir() / jid
     job.mkdir()
     try:
-        save_upload(brief, job / "brief.md")
+        if has_file:
+            save_upload(brief, job / "brief.md")
+        else:
+            (job / "brief.md").write_text(brief_text.strip() + "\n", encoding="utf-8")
         if source and source.filename:
             save_upload(source, job / "source.txt")
         short = format == "short_9x16"
