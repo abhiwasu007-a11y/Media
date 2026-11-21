@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
@@ -42,10 +42,22 @@ IST = timezone(timedelta(hours=5, minutes=30))
 RENDER_STAGES = {"08_visuals", "10_render"}
 
 
-def auth(c: HTTPBasicCredentials = Depends(security)) -> str:
+FAILS: dict[str, list[float]] = {}
+FAIL_LIMIT, FAIL_WINDOW_S = 10, 900
+
+
+def auth(request: Request, c: HTTPBasicCredentials = Depends(security)) -> str:
+    """HTTP Basic auth; an address with 10 wrong passwords in 15 minutes is refused until the window passes."""
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    now_s = time.time()
+    recent = [t for t in FAILS.get(ip, []) if now_s - t < FAIL_WINDOW_S]
+    FAILS[ip] = recent
+    if len(recent) >= FAIL_LIMIT:
+        raise HTTPException(429, "too many failed logins, try again later")
     user, pw = os.environ.get("AMW_DASHBOARD_USER", "owner"), os.environ.get("AMW_DASHBOARD_PASSWORD", "")
     ok = bool(pw) and secrets.compare_digest(c.username, user) and secrets.compare_digest(c.password, pw)
     if not ok:
+        recent.append(now_s)
         raise HTTPException(401, "unauthorised", headers={"WWW-Authenticate": "Basic"})
     return c.username
 

@@ -20,8 +20,14 @@ Needs Docker with the compose plugin. All commands run in this folder on the ser
    - `AMW_SECRET_ANTHROPIC_API_KEY`: the Anthropic API key. Also set a spend limit in the Anthropic Console.
    - `AMW_DASHBOARD_PASSWORD`: a long password. The app refuses to start without one.
 2. `docker compose up -d --build`
-3. Open the dashboard through an SSH tunnel: `ssh -L 8080:127.0.0.1:8080 <server>`, then `http://localhost:8080`.
-   The port is bound to loopback only. If you want it on the internet, put it behind your reverse proxy with TLS.
+3. Open the dashboard:
+   - phone: the `tunnel` service (Cloudflare quick tunnel) prints an HTTPS link:
+     `docker compose logs tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1`.
+     No server port is opened. The link changes when the tunnel restarts. Quick tunnels are Cloudflare's test
+     service (no uptime guarantee); a named tunnel on your own domain is the next step.
+   - computer: `ssh -L 8080:127.0.0.1:8080 <server>`, then `http://localhost:8080`.
+   The password is the only lock: use a long one. 10 wrong passwords from one address in 15 minutes lock it out
+   for the rest of the window.
 4. Health: `curl http://127.0.0.1:8080/healthz`.
 
 Resource caps are in `compose.yaml` (`AMW_CPUS`, default 1 CPU; `AMW_MEM`, default 2 GB; low CPU shares).
