@@ -47,6 +47,7 @@ async def _show_error(request: Request, exc: Exception):
 security = HTTPBasic()
 Q: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
 SERVE = {
+    "review.json",
     "final_1080p.mp4",
     "preview_360p.mp4",
     "export_720p.mp4",

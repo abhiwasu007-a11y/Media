@@ -283,6 +283,9 @@ Recorded answers to the two open questions of D27: (1) the disclaimer sentence "
 ### D29 (2026-11-21, owner chat messages): topic-only videos; the AI researches by itself
 Owner: a one-line batch topic was refused ("notes too short"), then "ai coonected aahe na mg to reserch ka nahi karat". Done: one line = one video in the batch form (blocks with --- still work for long notes); single-job notes optional; a topic-only job gets stage-04 web research with the Claude web search server tool (up to 6 searches; $10 per 1,000 searches per the claude-api reference): a research pack with key facts and source URLs, the traditional version for mythology, an original story idea and an outline; the script and the fact-check then use that pack. Live test (2 searches, short topic): worked, 0.23 USD; worst case reserved before the call and replaced by the measured cost (tokens + searches).
 
+### D30 (2026-11-21, owner chat message): unique, attractive, viral scripts for monetization
+Quoted verbatim: "script pn ashi tayar jhali pahije je unique asel jenekarun aple video viral hotil, servh goshti unique ani attractive aslya pahije tewhach monetize hoil". Done: script prompt craft rules (5-second hook, one original angle, story first, open loops with payoffs, a turn every 30-45 s, no AI clichés, specific comment question, truthful curiosity titles) plus the channel's earlier titles so angles are not repeated (YPP inauthentic-content risk, YT-09); new stage 05c_review: a retention-editor pass that scores hook/originality/story/retention/clarity/emotion (0-60), rewrites up to 12 weak scenes without adding facts, improves titles and thumbnail text (review.json on the job page). Fact-check runs after the edits. No virality outcome is promised.
+
 ## Owner inputs: status
 
 | ID | Input | Status |

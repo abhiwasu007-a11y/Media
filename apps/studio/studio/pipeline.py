@@ -24,6 +24,7 @@ GAP_SENT, GAP_SCENE, LEAD, TAIL = 0.28, 0.55, 0.6, 1.5
 STAGES = [
     "04_research",
     "05_script",
+    "05c_review",
     "06_fact_check",
     "05b_asset_plan",
     "08a_assets",
@@ -105,6 +106,19 @@ Use only the ideas in the research pack; attribute ideas to a named author only 
 chapter; keep historical dates vague unless the pack gives them; fictional stories are disclosed as fictional once;
 no medical, legal or financial advice; no invented statistics; write numbers in narration as {language} words.
 {quote_rule}
+CRAFT (originality and retention decide monetization and reach):
+- Hook in the first 5 seconds: a surprising fact, a sharp question or a moment of tension that the video then answers.
+  Never start with greetings, the channel name or "in this video".
+- One clear, ORIGINAL angle: a fresh comparison, a modern relatable situation or a story the viewer has not heard in this
+  form. Do not retell the topic the way every other channel does.
+- Story first: a character with a want, an obstacle and a turn; emotion before explanation; concrete sensory details;
+  everyday examples from the audience's life.
+- Open loops: tease what is coming ("but the strangest part came later") and pay every loop off; a new turn, question or
+  reveal every 30-45 seconds; vary sentence rhythm.
+- No generic AI phrasing or clichés (no "in today's fast-paced world", "let's dive in", "unlock", "journey"), no filler.
+- End with one memorable line and a natural, specific call to comment (a question), not a generic "like and subscribe".
+- Titles: curiosity with truth (no misleading clickbait); thumbnail text 2-4 strong words.
+{avoid}
 Return ONLY a JSON object, no prose."""
 
 USER_05 = """RESEARCH PACK:
@@ -161,7 +175,9 @@ def s05_script(job: Path, meta: dict) -> str:
         else "Do not quote any author verbatim."
     )
     minutes = meta.get("minutes", 8.5)
-    system = SYSTEM_05.format(category=meta.get("category", "finance"), quote_rule=quote_rule, language=lang_name)
+    system = SYSTEM_05.format(
+        category=meta.get("category", "finance"), quote_rule=quote_rule, language=lang_name, avoid=previous_angles(job)
+    )
     if meta.get("category") == "finance":
         system += "\n" + FINANCE_RULES
     user = USER_05.format(
@@ -291,6 +307,65 @@ def add_finance_disclaimer(data: dict, lang: str) -> None:
     desc = data.get("description") or ""
     if text not in desc:
         data["description"] = (desc.rstrip() + "\n\n" + text).strip()
+
+
+def previous_angles(job: Path, limit: int = 30) -> str:
+    """Titles of the channel's earlier videos, so a new script does not repeat an angle (uniqueness, YPP)."""
+    titles = []
+    for j in sorted(config.jobs_dir().iterdir(), reverse=True):
+        if j == job or not (j / "script.json").exists():
+            continue
+        sc = rj_or_none(j / "script.json") or {}
+        if sc.get("title_options"):
+            titles.append(sc["title_options"][0])
+        if len(titles) >= limit:
+            break
+    return ("Earlier videos of this channel (do not repeat their angle or hook):\n- " + "\n- ".join(titles)) if titles else ""
+
+
+REVIEW_SYSTEM = """You are a senior YouTube retention editor. You improve scripts so they are original, gripping and
+monetizable (YouTube rejects repetitive, template-like content). Keep the language of the script. Keep facts exactly as
+they are (do not add new facts); you may rewrite wording, order of reveals, hooks, transitions and endings. Return ONLY JSON."""
+
+
+def s05c_review(job: Path, meta: dict) -> str:
+    """Editor pass: scores the script and rewrites weak scenes (hook, middle dips, ending), titles and thumbnail text."""
+    if meta.get("translate_from"):
+        return "skipped (language version of a reviewed script)"
+    d = rj(job / "script.json")
+    compact = [
+        {"id": s["id"], "section": s.get("section"), "narration": s["narration"], "beats": s.get("beats", [])}
+        for s in d["scenes"]
+        if s.get("id") != "s00"
+    ]
+    user = (
+        f"Category: {meta.get('category')}. Titles: {json.dumps(d.get('title_options', []), ensure_ascii=False)}\n"
+        f"Thumbnail text: {json.dumps(d.get('thumbnail_text', {}), ensure_ascii=False)}\n"
+        f"SCRIPT: {json.dumps(compact, ensure_ascii=False)}\n\n"
+        "Score 0-10 each: hook (first 5 s), originality (fresh angle, not template), story, retention (open loops, "
+        "turns every 30-45 s), clarity, emotion. Then rewrite ONLY the scenes that most raise the scores (always the "
+        "first 1-2 scenes if the hook is below 9; at most 12 scenes), same scene ids, same length range, beats max 6 "
+        'words. Also give 3 better titles and better thumbnail text. JSON: {"scores": {...}, "total": 0-60, '
+        '"edits": [{"id", "narration", "beats"}], "title_options": [...], "thumbnail_text": '
+        '{"line1", "line2"}, "notes": "one line"}'
+    )
+    r = llm.parse_json(llm.call(job, "05c_review", REVIEW_SYSTEM, user, 24000, effort="medium").text)
+    by = {s["id"]: s for s in d["scenes"]}
+    n = 0
+    for ed in r.get("edits", [])[:12]:
+        sc = by.get(ed.get("id"))
+        if sc and sc.get("id") != "s00" and ed.get("narration"):
+            sc["narration"] = ed["narration"]
+            if ed.get("beats"):
+                sc["beats"] = ed["beats"][:3]
+            n += 1
+    if r.get("title_options"):
+        d["title_options"] = r["title_options"][:3]
+    if isinstance(r.get("thumbnail_text"), dict) and r["thumbnail_text"].get("line1"):
+        d["thumbnail_text"] = r["thumbnail_text"]
+    wj(job / "script.json", d)
+    wj(job / "review.json", r)
+    return f"editor score {r.get('total', '?')}/60, {n} scenes improved; {str(r.get('notes', ''))[:120]}"
 
 
 # ------------------------------------------------------------------ 06 fact-check
@@ -880,6 +955,7 @@ def manifest(job: Path, meta: dict) -> str:
 FUNCS = {
     "04_research": s04_research,
     "05_script": s05_script,
+    "05c_review": s05c_review,
     "06_fact_check": s06_fact_check,
     "05b_asset_plan": assets.s05b_asset_plan,
     "08a_assets": assets.s08a_assets,
