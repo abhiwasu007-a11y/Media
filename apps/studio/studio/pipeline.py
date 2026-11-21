@@ -498,9 +498,17 @@ def s10_render(job: Path, meta: dict) -> str:
         ]
     )
     out.replace(final)
-    # small copy for watching on the phone through the dashboard (the full file stays for YouTube)
-    prev = job / "preview_540p.mp4"
-    tmp = job / "preview_540p.rendering.mp4"
+    make_preview(job)
+    parts = ["voice" if voiced else "NO voice (pending)"]
+    parts += ["music"] if music_file(job) else []
+    parts += ["SFX"]
+    return "rendered with " + " + ".join(parts)
+
+
+def make_preview(job: Path) -> Path:
+    """Light copy for watching on a phone over a slow connection (360p, about 0.4 Mbps); the full file stays for YouTube."""
+    final, prev = job / "final_1080p.mp4", job / "preview_360p.mp4"
+    tmp = job / "preview_360p.rendering.mp4"
     sh(
         [
             "ffmpeg",
@@ -510,27 +518,28 @@ def s10_render(job: Path, meta: dict) -> str:
             "-i",
             str(final),
             "-vf",
-            "scale=-2:540",
+            "scale=-2:360",
             "-c:v",
             "libx264",
             "-preset",
             "veryfast",
             "-crf",
-            "28",
+            "30",
+            "-maxrate",
+            "450k",
+            "-bufsize",
+            "900k",
             "-c:a",
             "aac",
             "-b:a",
-            "96k",
+            "64k",
             "-movflags",
             "+faststart",
             str(tmp),
         ]
     )
     tmp.replace(prev)
-    parts = ["voice" if voiced else "NO voice (pending)"]
-    parts += ["music"] if music_file(job) else []
-    parts += ["SFX"]
-    return "rendered with " + " + ".join(parts)
+    return prev
 
 
 def music_file(job: Path) -> Path | None:

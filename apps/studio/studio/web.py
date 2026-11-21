@@ -48,7 +48,7 @@ security = HTTPBasic()
 Q: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
 SERVE = {
     "final_1080p.mp4",
-    "preview_540p.mp4",
+    "preview_360p.mp4",
     "thumbnail.png",
     "captions_mr.srt",
     "qc_report.json",
@@ -651,11 +651,17 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
     )
     media = ""
     if (job / "final_1080p.mp4").exists():
-        play = "preview_540p.mp4" if (job / "preview_540p.mp4").exists() else "final_1080p.mp4"
+        play = "preview_360p.mp4" if (job / "preview_360p.mp4").exists() else "final_1080p.mp4"
         media += (
             f"<div><video controls preload=metadata src='/jobs/{e(jid)}/files/{play}' poster='/jobs/{e(jid)}/files/thumbnail.png'></video>"
             f"<div class=dim>Player: small preview. For YouTube download <a href='/jobs/{e(jid)}/files/final_1080p.mp4'>final_1080p.mp4</a>"
-            f" ({(job / 'final_1080p.mp4').stat().st_size / 1e6:.0f} MB).</div></div>"
+            f" ({(job / 'final_1080p.mp4').stat().st_size / 1e6:.0f} MB)."
+            + (
+                ""
+                if (job / "preview_360p.mp4").exists()
+                else f"<form method=post action='/jobs/{e(jid)}/preview'><button>Make small preview (for slow internet)</button></form>"
+            )
+            + "</div></div>"
         )
     if (job / "thumbnail.png").exists():
         media += f"<div><img alt=thumbnail src='/jobs/{e(jid)}/files/thumbnail.png'></div>"
@@ -802,6 +808,16 @@ def aivoice(jid: str, speaker: str = Form(...), user: str = Depends(auth)):
     pipeline.wj(job / "job.json", meta)
     config.audit(user, "job.aivoice", {"job": jid, "speaker": speaker})
     enqueue(jid, "07_voice")
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
+
+
+@app.post("/jobs/{jid}/preview")
+def preview(jid: str, _: str = Depends(auth)):
+    """Make the light 360p copy of an existing video in the background (a minute or two)."""
+    job = get_job(jid)
+    if not (job / "final_1080p.mp4").exists():
+        raise HTTPException(409, "no video yet")
+    threading.Thread(target=lambda: pipeline.make_preview(job), daemon=True).start()
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
