@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from . import config, llm, pipeline
@@ -241,6 +241,8 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
     if (job / "thumbnail.png").exists():
         media += f"<div><img alt=thumbnail src='/jobs/{e(jid)}/files/thumbnail.png'></div>"
     files = " · ".join(f"<a href='/jobs/{e(jid)}/files/{f}'>{f}</a>" for f in sorted(SERVE) if (job / f).exists())
+    if (job / "script.json").exists():
+        files += f" · <a href='/jobs/{e(jid)}/narration.txt'>narration.txt (वाचण्यासाठी स्क्रिप्ट)</a>"
 
     def checks(rep: dict | None, key: str) -> str:
         if not rep:
@@ -303,6 +305,14 @@ async def voice(jid: str, voice: UploadFile = File(...), _: str = Depends(auth))
     pipeline.wj(job / "job.json", meta)
     Q.put((jid, "07_voice"))
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
+
+
+@app.get("/jobs/{jid}/narration.txt", response_class=PlainTextResponse)
+def narration(jid: str, _: str = Depends(auth)) -> str:
+    """Reading script for the owner's voice recording: one block per scene, read in order, short pause between."""
+    sc = pipeline.rj(get_job(jid) / "script.json")
+    head = "आवाज रेकॉर्ड करताना: शांत खोली, फोन तोंडापासून एक वीत अंतरावर, एकाच गतीने वाचा; प्रत्येक दृश्यानंतर एक सेकंद थांबा.\n\n"
+    return head + "\n\n".join(f"[{s['id']}]\n{s['narration']}" for s in sc["scenes"]) + "\n"
 
 
 @app.get("/jobs/{jid}/files/{name}")
