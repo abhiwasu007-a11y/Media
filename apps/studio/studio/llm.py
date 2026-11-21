@@ -42,7 +42,7 @@ def pilot_spent() -> float:
     return sum(job_spent(j) for j in config.jobs_dir().iterdir() if j.is_dir())
 
 
-def _append(job: Path, row: dict) -> None:
+def append_row(job: Path, row: dict) -> None:
     rows = ledger_rows(job)
     rows.append(row)
     (job / "ledger.json").write_text(json.dumps({"currency": "USD", "rows": rows}, indent=1))
@@ -74,7 +74,7 @@ def call(job: Path, stage: str, system: str, user: str, max_tokens: int, effort:
     text = "".join(b.text for b in msg.content if b.type == "text")
     (job / f"raw_{stage}.txt").write_text(text)
     u = msg.usage
-    _append(
+    append_row(
         job,
         {
             "stage": stage,

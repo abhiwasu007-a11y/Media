@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from . import config, llm, visuals
+from . import assets, config, llm, visuals
 
 SR = 48000
 GAP_SENT, GAP_SCENE, LEAD, TAIL = 0.28, 0.55, 0.6, 1.5
@@ -25,6 +25,8 @@ STAGES = [
     "04_research",
     "05_script",
     "06_fact_check",
+    "05b_asset_plan",
+    "08a_assets",
     "07_voice",
     "09_timeline",
     "08_visuals",
@@ -356,41 +358,31 @@ def s10_render(job: Path, meta: dict) -> str:
         "2",
     ]
     aud = ["-c:a", "aac", "-b:a", "384k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart"]
-    src = audio_source(job)
-    if src is None:
-        sh(
+    voiced = audio_source(job) is not None
+    mix = build_mix(job)
+    if voiced:
+        m = subprocess.run(
             [
                 "ffmpeg",
-                "-y",
-                "-loglevel",
-                "error",
+                "-hide_banner",
                 "-i",
-                str(job / "visuals.mp4"),
+                str(mix),
+                "-af",
+                "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json",
                 "-f",
-                "lavfi",
-                "-i",
-                "anullsrc=r=48000:cl=stereo",
-                "-map",
-                "0:v",
-                "-map",
-                "1:a",
-                *vid,
-                *aud,
-                "-shortest",
-                str(out),
-            ]
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+        ).stderr
+        j = json.loads(m[m.rindex("{") : m.rindex("}") + 1])
+        af = (
+            f"loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={j['input_i']}:measured_TP={j['input_tp']}:measured_LRA={j['input_lra']}:"
+            f"measured_thresh={j['input_thresh']}:offset={j['target_offset']}:linear=true,aresample=48000"
         )
-        return "rendered with a SILENT audio track (voice pending)"
-    m = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-i", str(src), "-af", "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"],
-        capture_output=True,
-        text=True,
-    ).stderr
-    j = json.loads(m[m.rindex("{") : m.rindex("}") + 1])
-    af = (
-        f"loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={j['input_i']}:measured_TP={j['input_tp']}:measured_LRA={j['input_lra']}:"
-        f"measured_thresh={j['input_thresh']}:offset={j['target_offset']}:linear=true,aresample=48000"
-    )
+    else:  # music/SFX only: fixed level, no loudness target (voice pending)
+        af = "volume=0.8,alimiter=limit=0.8,aresample=48000"
     sh(
         [
             "ffmpeg",
@@ -400,7 +392,7 @@ def s10_render(job: Path, meta: dict) -> str:
             "-i",
             str(job / "visuals.mp4"),
             "-i",
-            str(src),
+            str(mix),
             "-map",
             "0:v",
             "-map",
@@ -413,7 +405,67 @@ def s10_render(job: Path, meta: dict) -> str:
             str(out),
         ]
     )
-    return f"rendered with {src.name}"
+    parts = ["voice" if voiced else "NO voice (pending)"]
+    parts += ["music"] if music_file(job) else []
+    parts += ["SFX"]
+    return "rendered with " + " + ".join(parts)
+
+
+def music_file(job: Path) -> Path | None:
+    f = job / "music.wav"
+    return f if f.exists() else None
+
+
+def build_sfx(job: Path, total: float) -> Path:
+    """Code-made sound effects (no licence needed): a soft whoosh at scene changes, ticks on running-clock scenes."""
+    rng = np.random.default_rng(7)
+    out = np.zeros(int((total + 1) * SR), np.float32)
+    tim = rj(job / "timings.json")
+    by = {s["id"]: s for s in rj(job / "script.json")["scenes"]}
+    n = int(0.45 * SR)
+    noise = rng.standard_normal(n).astype(np.float32)
+    k = np.ones(40, np.float32) / 40  # crude low-pass
+    whoosh = np.convolve(noise, k, mode="same") * np.sin(np.linspace(0, np.pi, n)) ** 2 * 0.05
+    tn = int(0.03 * SR)
+    tt = np.arange(tn) / SR
+    tick = (np.sin(2 * np.pi * 2400 * tt) * np.exp(-tt * 180) * 0.12).astype(np.float32)
+    for row in tim["scenes"][1:]:
+        a = max(0, int((row["start"] - 0.2) * SR))
+        out[a : a + n] += whoosh[: len(out) - a]
+    for row in tim["scenes"]:
+        if by[row["id"]]["visual"] == "clock_running":
+            t = row["start"] + 0.3
+            while t < row["start"] + row["dur"] - 0.3:
+                a = int(t * SR)
+                out[a : a + tn] += tick[: len(out) - a]
+                t += 1.0
+    f = job / "sfx.wav"
+    sf.write(f, out, SR, subtype="PCM_16")
+    return f
+
+
+def build_mix(job: Path) -> Path:
+    """Narration (or silence) + SFX + music ducked under the voice -> mix.wav (48 kHz stereo)."""
+    total = rj(job / "timings.json")["total"]
+    narr = audio_source(job)
+    if narr is None:
+        narr = job / "silence.wav"
+        sf.write(narr, np.zeros(int(total * SR), np.float32), SR, subtype="PCM_16")
+    sfx = build_sfx(job, total)
+    mus = music_file(job)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(narr), "-i", str(sfx)]
+    if mus:
+        cmd += ["-stream_loop", "-1", "-i", str(mus)]
+        fc = (
+            "[0:a]aformat=channel_layouts=stereo,asplit=2[v][sc];[2:a]aformat=channel_layouts=stereo,volume=0.30[m];"
+            "[m][sc]sidechaincompress=threshold=0.015:ratio=10:attack=15:release=450[md];"
+            "[1:a]aformat=channel_layouts=stereo[x];[v][x][md]amix=inputs=3:normalize=0:duration=first[out]"
+        )
+    else:
+        fc = "[0:a]aformat=channel_layouts=stereo[v];[1:a]aformat=channel_layouts=stereo[x];[v][x]amix=inputs=2:normalize=0:duration=first[out]"
+    out = job / "mix.wav"
+    sh([*cmd, "-filter_complex", fc, "-map", "[out]", "-ar", "48000", str(out)])
+    return out
 
 
 def s10_qc(job: Path, meta: dict) -> str:
@@ -475,6 +527,10 @@ def s16_gate(job: Path, meta: dict) -> str:
         "no_medical_terms": (not det["medical_terms"], str(det["medical_terms"])),
         "technical_qc": (qc["all_pass"], "see qc_report.json"),
         "budget": (llm.job_spent(job) <= config.load().per_video_cap_usd, f"{llm.job_spent(job):.4f} USD"),
+        "asset_licences": (
+            all(a.get("licence") for a in (rj(job / "assets.json").values() if (job / "assets.json").exists() else [])),
+            "every picture/clip has a licence record",
+        ),
     }
     rep = {
         "auto_pass": all(p for p, _ in gates.values()),
@@ -522,7 +578,9 @@ def manifest(job: Path, meta: dict) -> str:
         "title_options": script.get("title_options"),
         "description": script.get("description"),
         "tags": script.get("tags"),
-        "synthetic_media_disclosure_recommended": voice["mode"] == "parler",
+        "assets": rj(job / "assets.json") if (job / "assets.json").exists() else {},
+        "music": rj(job / "music.json") if (job / "music.json").exists() else None,
+        "synthetic_media_disclosure_recommended": voice["mode"] == "parler" or (job / "assets.json").exists(),
         "files_sha256": {f: hashlib.sha256((job / f).read_bytes()).hexdigest() for f in files if (job / f).exists()},
     }
     wj(job / "manifest.json", m)
@@ -533,6 +591,8 @@ FUNCS = {
     "04_research": s04_research,
     "05_script": s05_script,
     "06_fact_check": s06_fact_check,
+    "05b_asset_plan": assets.s05b_asset_plan,
+    "08a_assets": assets.s08a_assets,
     "07_voice": s07_voice,
     "09_timeline": s09_timeline,
     "08_visuals": s08_visuals,

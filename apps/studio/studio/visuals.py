@@ -3,6 +3,7 @@
 Fonts: Mukta (SIL OFL 1.1), copied from the agent_11 pinned font data.
 """
 
+import json
 import math
 import subprocess
 from functools import lru_cache
@@ -47,7 +48,37 @@ def background() -> Image.Image:
     ImageDraw.Draw(glow).ellipse([W * 0.55, -H * 0.3, W * 1.3, H * 0.6], fill=60)
     glow = glow.filter(ImageFilter.GaussianBlur(180))
     img.paste(Image.new("RGB", (W, H), (60, 48, 30)), (0, 0), glow)
+    img.paste(Image.new("RGB", (W, H), (0, 0, 0)), (0, 0), vignette())
     return img
+
+
+@lru_cache(maxsize=1)
+def vignette() -> Image.Image:
+    m = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(m).ellipse([-W * 0.15, -H * 0.25, W * 1.15, H * 1.25], fill=255)
+    m = m.filter(ImageFilter.GaussianBlur(160))
+    return m.point(lambda v: int((255 - v) * 0.55))
+
+
+@lru_cache(maxsize=1)
+def bottom_shade() -> Image.Image:
+    """Mask that darkens the lower part of a picture so captions stay readable."""
+    m = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(m)
+    for y in range(H):
+        a = max(0.0, (y / H - 0.45) / 0.55)
+        d.line([(0, y), (W, y)], fill=int(215 * a**1.4))
+    return Image.composite(m, Image.new("L", (W, H), 0), Image.new("L", (W, H), 255)).point(lambda v: max(v, 40))
+
+
+PARTICLES = [((i * 7919) % W, (i * 104729) % H, 1 + (i % 3), 6 + (i * 13) % 14) for i in range(26)]
+
+
+def particles(d, t):
+    for x0, y0, r, sp in PARTICLES:
+        x = (x0 + t * sp * 0.6) % W
+        y = (y0 - t * sp) % H
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(70, 72, 84))
 
 
 def fit(text: str, max_w: int, size: int, bold=True) -> ImageFont.FreeTypeFont:
@@ -304,13 +335,93 @@ DRAW = {
 }
 
 
-def frame(s, t, dur):
-    img = background().copy()
-    d = ImageDraw.Draw(img)
-    DRAW.get(s["visual"], v_kinetic)(d, s, t, dur, img)
-    fade = min(1.0, t / 0.25, (dur - t) / 0.25)
+class Media:
+    """A picture or a stock clip behind one scene: Ken Burns on stills, frames streamed from ffmpeg for video."""
+
+    def __init__(self, job: Path, asset: dict, dur: float, idx: int):
+        self.kind, self.idx, self.dur = asset["kind"], idx, dur
+        self.proc = None
+        if self.kind == "image":
+            im = Image.open(job / asset["file"]).convert("RGB")
+            sc = max(W * 1.14 / im.width, H * 1.14 / im.height)
+            self.img = im.resize((int(im.width * sc), int(im.height * sc)), Image.LANCZOS)
+        else:
+            vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},eq=saturation=0.85"
+            self.proc = subprocess.Popen(
+                [
+                    "ffmpeg",
+                    "-loglevel",
+                    "error",
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    str(job / asset["file"]),
+                    "-t",
+                    f"{dur + 1:.2f}",
+                    "-vf",
+                    vf,
+                    "-an",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "rgb24",
+                    "-",
+                ],
+                stdout=subprocess.PIPE,
+            )
+            self.last = Image.new("RGB", (W, H), BG)
+
+    def frame(self, t: float) -> Image.Image:
+        if self.kind == "image":
+            p = min(1.0, max(0.0, t / max(self.dur, 0.1)))
+            q = p if self.idx % 2 == 0 else 1 - p  # alternate zoom in / zoom out
+            base = min(self.img.width, self.img.height * W / H)
+            cw = base / (1 + 0.12 * q)
+            ch = cw * H / W
+            px = 0.35 + 0.3 * (p if self.idx % 3 else 1 - p)
+            dx, dy = (self.img.width - cw) * px, (self.img.height - ch) * 0.5
+            return self.img.resize((W, H), Image.BILINEAR, box=(dx, dy, dx + cw, dy + ch))
+        raw = self.proc.stdout.read(W * H * 3) if self.proc else b""
+        if len(raw) == W * H * 3:
+            self.last = Image.frombytes("RGB", (W, H), raw)
+        return self.last
+
+    def close(self) -> None:
+        if self.proc:
+            self.proc.kill()
+            self.proc.wait()
+
+
+def media_caption(d, s, t, dur):
+    """Current beat as a lower-third caption with a soft shadow; one beat at a time."""
+    beats = s["beats"] or [""]
+    seg = dur / len(beats)
+    k = min(len(beats) - 1, int(t / seg))
+    a = ease((t - k * seg) / 0.4)
+    b = beats[k]
+    f = fit(b, W - 360, 92)
+    y = H - 170 + (1 - a) * 24
+    for ox, oy in ((3, 3), (0, 4)):
+        d.text((W / 2 + ox, y + oy), b, font=f, fill=(0, 0, 0), anchor="mm")
+    d.text((W / 2, y), b, font=f, fill=mix((40, 40, 40), INK, a), anchor="mm")
+    w = f.getlength(b)
+    d.rounded_rectangle([W / 2 - w / 2, y + 62, W / 2 - w / 2 + w * a, y + 68], 3, fill=ACC)
+
+
+def frame(s, t, dur, media=None):
+    if media is not None:
+        img = media.frame(t)
+        img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, bottom_shade())
+        d = ImageDraw.Draw(img)
+        media_caption(d, s, t, dur)
+    else:
+        img = background().copy()
+        d = ImageDraw.Draw(img)
+        particles(d, t)
+        DRAW.get(s["visual"], v_kinetic)(d, s, t, dur, img)
+    fade = min(1.0, t / 0.22, (dur - t) / 0.22)
     if fade < 1:
-        img = Image.blend(Image.new("RGB", (W, H), BG), img, max(0.0, fade))
+        img = Image.blend(Image.new("RGB", (W, H), (0, 0, 0) if media else BG), img, max(0.0, fade))
     return img
 
 
@@ -329,6 +440,8 @@ def thumbnail(script, out: Path):
 def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
     """Render the silent 1080p30 visuals track for ``timings`` into ``out``; returns frames written."""
     by = {s["id"]: s for s in script["scenes"]}
+    af = job / "assets.json"
+    assets = json.loads(af.read_text()) if af.exists() else {}
     cmd = [
         "ffmpeg",
         "-y",
@@ -360,10 +473,16 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
     for row in timings["scenes"]:
         s, dur, start = by[row["id"]], row["dur"], round(row["start"] * FPS)
         end = round((row["start"] + dur) * FPS)
-        while fi < end:
-            t = (fi - start) / FPS
-            p.stdin.write(frame(s, max(0.0, min(dur, t)), dur).tobytes())
-            fi += 1
+        a = assets.get(row["id"])
+        media = Media(job, a, dur, len(row["id"]) + int(row["id"][1:])) if a and (job / a["file"]).exists() else None
+        try:
+            while fi < end:
+                t = (fi - start) / FPS
+                p.stdin.write(frame(s, max(0.0, min(dur, t)), dur, media).tobytes())
+                fi += 1
+        finally:
+            if media:
+                media.close()
     while fi < round(timings["total"] * FPS):
         p.stdin.write(background().tobytes())
         fi += 1

@@ -311,7 +311,7 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         )
     opts = "".join(f"<option>{k}</option>" for k in pipeline.STAGES)
     body = (
-        f"<p><a href='/'>← all jobs</a></p><h1>{e(s['meta'].get('title'))}</h1>"
+        f"<p><a href='/'>← all jobs</a></p><h1>{e(s['meta'].get('title'))}</h1>"  # noqa: S608 - HTML, not SQL
         f"<div class=dim>{e(jid)} · {e(s['meta'].get('category'))} · voice: {e(s['meta'].get('voice_mode'))} · cost ${s['cost']:.4f}</div>"
         f"<div class=row>{media}</div><div class=card>{files or '<span class=dim>no files yet</span>'}</div>"
         f"<h2>Stages</h2><div class=wrap><table><tr><th>Stage</th><th>State</th><th>Cost</th><th>Note</th></tr>{rows}</table></div>"
@@ -321,6 +321,12 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         f"<h2>Actions</h2><div class=row><form class=card method=post action='/jobs/{e(jid)}/voice' enctype=multipart/form-data>"
         f"<label>Upload owner voice recording (wav / mp3 / m4a): re-renders, no paid call</label>"
         f"<input type=file name=voice accept='audio/*' required><p><button>Upload and re-render</button></p></form>"
+        f"<form class=card method=post action='/jobs/{e(jid)}/music' enctype=multipart/form-data>"
+        f"<label>Background music (YouTube Audio Library track, own channels only, D10)</label>"
+        f"<input type=file name=music accept='audio/*' required><label>Track title and artist</label><input name=title required>"
+        f"<label>Licence</label><select name=licence><option value=standard>Audio Library standard (no attribution)</option>"
+        f"<option value=cc-by>Creative Commons BY 4.0 (attribution added to the description)</option></select>"
+        f"<p><button>Upload music and re-render</button></p></form>"
         f"<form class=card method=post action='/jobs/{e(jid)}/run'><label>Run / resume from stage</label>"
         f"<select name=from_stage><option value=''>resume (unfinished stages)</option>{opts}</select>"
         f"<p class=dim>Re-running 05/06 makes new paid calls.</p><p><button>Run</button></p></form></div>"
@@ -332,6 +338,27 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
 def rerun(jid: str, from_stage: str = Form(""), _: str = Depends(auth)):
     get_job(jid)
     Q.put((jid, from_stage or None))
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
+
+
+@app.post("/jobs/{jid}/music")
+async def music(
+    jid: str, music: UploadFile = File(...), title: str = Form(...), licence: str = Form("standard"), _: str = Depends(auth)
+):
+    job = get_job(jid)
+    if licence not in ("standard", "cc-by"):
+        raise HTTPException(400, "unsupported licence (non-commercial tracks are rejected)")
+    raw = job / ("music_upload" + Path(music.filename or "a.mp3").suffix.lower()[:5])
+    with raw.open("wb") as f:
+        shutil.copyfileobj(music.file, f)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-ac", "2", "-ar", "48000", str(job / "music.wav")], check=True
+    )
+    attribution = f'Music: "{title}" (YouTube Audio Library, CC BY 4.0)' if licence == "cc-by" else None
+    pipeline.wj(
+        job / "music.json", {"title": title, "source": "YouTube Audio Library", "licence": licence, "attribution": attribution}
+    )
+    Q.put((jid, "10_render"))
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
