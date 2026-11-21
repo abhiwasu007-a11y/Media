@@ -230,6 +230,8 @@ Recorded from the owner's chat (R14 operator record). Quoted verbatim:
 
 Owner answers to the follow-up questions (dashboard question form, 2026-11-21): visuals = "AI चित्रे + मोफत stock"; music = "हो, संगीत + SFX" (YouTube Audio Library per D10, owner uploads tracks; auto ducking under the voice); reference = "मी लिंक पाठवतो" (owner will send reference videos for the quality bar).
 
+Reference videos sent by the owner (2026-11-21): five YouTube links (a film music video, two dance/footage shorts, and two AI-animated story channels). Read from titles and thumbnails only (not downloaded). Applied: the AI-animated story look (stylized 3D feature-film characters, vivid colour, expressive faces) as the default image style, and bold outlined thumbnail text on an AI hero picture. No real person or celebrity likeness is generated. Choices: FLUX.2 [pro] for story images (IMG-03), Pixabay for B-roll and audio (STK-02).
+
 Operator notes: no score was given, so no score or approval is recorded. Next: AI image provider and free stock sources are researched from official pages (price, commercial-use terms) before any spend; the provider and its spending limit need the owner's choice (rule 8). Story illustrations in one consistent style, B-roll from licensed free stock, richer motion design, music bed + SFX. Visual hierarchy per CONTEXT_BRIEF §1A (code-made motion graphics rank above AI stills; AI stills are used here for the fictional story scenes only).
 
 ## Owner inputs: status

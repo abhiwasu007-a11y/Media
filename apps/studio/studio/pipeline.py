@@ -315,8 +315,9 @@ def s08_visuals(job: Path, meta: dict) -> str:
 
 
 def s11_thumbnail(job: Path, meta: dict) -> str:
-    visuals.thumbnail(rj(job / "script.json"), job / "thumbnail.png")
-    return "1280x720"
+    hero = job / "assets" / "thumb.jpg"
+    visuals.thumbnail(rj(job / "script.json"), job / "thumbnail.png", hero if hero.exists() else None)
+    return "1280x720" + (" with AI hero picture" if hero.exists() else "")
 
 
 # ------------------------------------------------------------------ 10 render + QC

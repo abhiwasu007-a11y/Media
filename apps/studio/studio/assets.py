@@ -24,8 +24,9 @@ BFL_WORST_USD = 0.03 + 0.015 * 2
 UA = {"User-Agent": "amw-studio/1"}
 
 DEFAULT_STYLE = (
-    "warm painterly 2D digital illustration, cinematic soft light, muted earthy palette with saffron accents, "
-    "subtle film grain, contemporary India, no text, no letters, no logos, no watermark"
+    "stylized 3D animated feature-film look, expressive characters with large eyes and clear emotions, soft global "
+    "illumination, vibrant saturated colours, cinematic depth of field, rich detailed Indian setting, warm rim light, "
+    "no text, no letters, no logos, no watermark"
 )
 
 SYSTEM_PLAN = """You plan the pictures for a Marathi explainer video. Return ONLY JSON.
@@ -40,7 +41,9 @@ USER_PLAN = """Scenes:
 {scenes}
 
 Limits: at most {max_ai} "ai_image" scenes and at most {max_stock} "stock_video" scenes.
-JSON shape: {{"characters": {{"name": "fixed visual description"}},
+Also write "thumbnail_prompt": one close-up of the main character with a strong, readable emotion (surprise or
+realisation) and the story's key object, character on the RIGHT half, empty darker space on the LEFT for big text.
+JSON shape: {{"characters": {{"name": "fixed visual description"}}, "thumbnail_prompt": "...",
  "scenes": [{{"id": "s01", "kind": "ai_image|stock_video|none", "prompt": "...", "query": "..."}}]}}"""
 
 
@@ -184,6 +187,15 @@ def s08a_assets(job: Path, meta: dict) -> str:
             break
         except Exception as exc:  # optional asset: fall back to the code-made visual, record why
             notes.append(f"{sid}: {type(exc).__name__}: {str(exc)[:120]}")
+    tp, tf = plan.get("thumbnail_prompt"), adir / "thumb.jpg"
+    if tp and bfl and not tf.exists():
+        try:
+            info = bfl_image(job, bfl, f"{tp}. Characters: {sheet}. Style: {plan['style']}", tf, seed=999)
+            out["_thumbnail"] = {"kind": "thumbnail", "file": "assets/thumb.jpg", "prompt": tp, **info}
+        except Exception as exc:
+            notes.append(f"thumbnail: {type(exc).__name__}: {str(exc)[:120]}")
+    elif tf.exists() and "_thumbnail" in old:
+        out["_thumbnail"] = old["_thumbnail"]
     (job / "assets.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     kinds = [a["kind"] for a in out.values()]
     msg = f"images {kinds.count('image')}, videos {kinds.count('video')}"

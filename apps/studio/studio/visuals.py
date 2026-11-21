@@ -425,15 +425,24 @@ def frame(s, t, dur, media=None):
     return img
 
 
-def thumbnail(script, out: Path):
+def thumbnail(script, out: Path, hero: Path | None = None):
+    """Bold YouTube-style thumbnail: AI hero picture when present, big outlined text on the left."""
     tt = script["thumbnail_text"]
-    img = background().resize((W, H)).copy()
+    if hero and hero.exists():
+        im = Image.open(hero).convert("RGB")
+        sc = max(W / im.width, H / im.height)
+        im = im.resize((int(im.width * sc), int(im.height * sc)), Image.LANCZOS)
+        img = im.crop(((im.width - W) // 2, (im.height - H) // 2, (im.width - W) // 2 + W, (im.height - H) // 2 + H))
+        shade = Image.linear_gradient("L").rotate(-90).resize((W, H)).point(lambda v: int(v * 0.75))
+        img = Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, shade)
+    else:
+        img = background().copy()
+        clock(ImageDraw.Draw(img), 1500, 600, 0, False)
     d = ImageDraw.Draw(img)
-    clock(d, 1500, 600, 0, False)
-    d.text((110, 380), tt["line1"], font=fit(tt["line1"], 1150, 190), fill=INK, anchor="lm")
-    d.text((110, 640), tt["line2"], font=fit(tt["line2"], 1150, 200), fill=ACC, anchor="lm")
-    if tt.get("line3"):
-        d.text((110, 900), tt["line3"], font=font(72, False), fill=DIM, anchor="lm")
+    yellow = (255, 212, 0)
+    f1, f2 = fit(tt["line1"], 1050, 200), fit(tt["line2"], 1050, 220)
+    d.text((90, 380), tt["line1"], font=f1, fill=(255, 255, 255), anchor="lm", stroke_width=14, stroke_fill=(0, 0, 0))
+    d.text((90, 650), tt["line2"], font=f2, fill=yellow, anchor="lm", stroke_width=16, stroke_fill=(0, 0, 0))
     img.resize((1280, 720), Image.LANCZOS).save(out, optimize=True)
 
 
