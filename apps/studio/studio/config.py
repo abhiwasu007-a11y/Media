@@ -6,6 +6,7 @@ the time, the user and the names of the changed fields (never the values).
 """
 
 import json
+import math
 import os
 import threading
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ FIELDS: list[tuple[str, str, str, str, tuple[str, ...]]] = [
     ("AMW_BUDGET_PER_VIDEO_USD", "Per-video cap, USD (D9)", "number", "5.0", ()),
     ("AMW_BUDGET_PILOT_USD", "Pilot cap, USD (D9)", "number", "50.0", ()),
 ]
+BUDGET_FIELDS = {"AMW_BUDGET_PER_VIDEO_USD", "AMW_BUDGET_PILOT_USD"}
 PRICES = {"claude-opus-5-5": (4.0, 20.0), "claude-sonnet-5-5": (2.0, 10.0)}  # USD per MTok (claude-api skill table)
 _lock = threading.Lock()
 
@@ -101,7 +103,14 @@ def update(values: dict[str, str], user: str, clear: list[str] | None = None) ->
             if f[2] == "secret" and not v:
                 continue
             if f[2] == "number" and v:
-                float(v)  # raises ValueError on bad input
+                try:
+                    num = float(v)
+                except ValueError as exc:
+                    raise ValueError(f"{k}: not a number") from exc
+                if not math.isfinite(num) or num < 0:
+                    raise ValueError(f"{k}: must be a finite number >= 0")
+                if k in BUDGET_FIELDS and num <= 0:
+                    raise ValueError(f"{k}: budget must be greater than 0")
             if f[2] == "select" and v not in f[4]:
                 raise ValueError(f"{k}: unsupported value")
             if cur.get(k) != v:
@@ -113,9 +122,13 @@ def update(values: dict[str, str], user: str, clear: list[str] | None = None) ->
                 changed.append(k)
         f = _store()
         tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cur, indent=1))
-        os.chmod(tmp, 0o600)
-        tmp.replace(f)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # 0600 from the first byte
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(cur, indent=1))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)  # in case the temp file already existed with looser bits
+        os.replace(tmp, f)
         if changed:
             audit(user, "settings.update", {"fields": changed})
     return changed

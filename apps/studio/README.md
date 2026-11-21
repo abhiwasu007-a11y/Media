@@ -7,7 +7,7 @@ needed, a package ready to deploy, then improve stage by stage". It runs one job
 08 code-made visuals -> 11 thumbnail -> 10 render + QC -> 16 gate (auto part) -> manifest`
 
 Output per job (`data/jobs/<id>/`): `final_1080p.mp4` (H.264 High, 8 Mbps VBR target, 30 fps CFR, AAC-LC 384k 48 kHz,
--14 LUFS / -1 dBTP when a voice is present), `thumbnail.png`, `captions_mr.srt`, `qc_report.json`, `gate_report.json`,
+-14 LUFS / -1 dBTP when a voice is present), `thumbnail.png`, `captions_<lang>.srt`, `qc_report.json`, `gate_report.json`,
 `manifest.json` (provider, licence, cost per stage). No upload to YouTube, no OAuth (D1).
 
 This is a separate, minimal app. It does not replace the `packages/` 3A platform; it reuses only the Mukta fonts.
@@ -19,20 +19,55 @@ Needs Docker with the compose plugin. All commands run in this folder on the ser
 1. `cp .env.example .env`, then fill in `.env` on the server only (never commit it):
    - `AMW_SECRET_ANTHROPIC_API_KEY`: the Anthropic API key. Also set a spend limit in the Anthropic Console.
    - `AMW_DASHBOARD_PASSWORD`: a long password. The app refuses to start without one.
-2. `docker compose up -d --build`
+2. `mkdir -p data && sudo chown -R 10001 data` (the container runs as uid 10001 and cannot chown the bind mount itself;
+   `deploy.sh` does this). Then `docker compose up -d --build`
 3. Open the dashboard:
    - phone: the `tunnel` service (Cloudflare quick tunnel) prints an HTTPS link:
      `docker compose logs tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1`.
      No server port is opened. The link changes when the tunnel restarts. Quick tunnels are Cloudflare's test
      service (no uptime guarantee); a named tunnel on your own domain is the next step.
    - computer: `ssh -L 8080:127.0.0.1:8080 <server>`, then `http://localhost:8080`.
-   The password is the only lock: use a long one. 10 wrong passwords from one address in 15 minutes lock it out
-   for the rest of the window.
+   See "Security model" below. Use a long password.
 4. Health: `curl http://127.0.0.1:8080/healthz`.
 
+`AMW_PORT` only chooses the host port in `compose.yaml`; the app always listens on 8080 inside the container.
+
 Resource caps are in `compose.yaml` (`AMW_CPUS`, default 1 CPU; `AMW_MEM`, default 2 GB; low CPU shares).
-Rendering waits outside NSE market hours (Mon–Fri 09:00–15:45 IST) while `AMW_BLOCK_MARKET_HOURS=1`.
-Exchange holidays are not modelled, so the guard errs on the side of waiting.
+Containers also run with `no-new-privileges`, all capabilities dropped, a 512-process limit and rotated logs
+(10 MB x 3).
+
+## Security model
+
+- HTTP Basic auth (`AMW_DASHBOARD_USER` / `AMW_DASHBOARD_PASSWORD`) on every page; the app refuses to start without a
+  password. 10 wrong passwords from one address in 15 minutes lock it out for the rest of the window. The
+  `cf-connecting-ip` header is trusted only when the TCP peer is not loopback (i.e. the request came through the tunnel
+  container); the lockout table is capped at 10,000 addresses.
+- Same-origin check: every non-GET/HEAD request is refused unless `Sec-Fetch-Site` is `same-origin`/`none`, or (header
+  absent) the `Origin`/`Referer` host equals the request `Host`. Responses carry `X-Frame-Options: DENY`,
+  `frame-ancestors 'none'`, `Referrer-Policy: same-origin` and `nosniff`.
+- Settings are written atomically to `data/settings.json`, created mode 0600; numbers must be finite and >= 0, budgets > 0.
+- `.env` is passed to the studio container whole, so `CF_TUNNEL_TOKEN` is visible to the app process; the tunnel container
+  receives it through its own `environment`.
+
+## Upload limits
+
+Request bodies over `AMW_MAX_UPLOAD_MB` (default 300) are refused (413); uploads are streamed to disk in chunks. A zip import
+may hold at most 5000 entries and `AMW_MAX_UPLOAD_MB` x 3 of unpacked data (checked before extraction). Voice and music uploads
+accept only `.wav .mp3 .m4a .aac .ogg .flac .webm .mp4`; ffmpeg runs in the worker (not in the web request), with a 600 s
+timeout and `-protocol_whitelist file,pipe`.
+
+## Market-hours guard
+
+With `AMW_BLOCK_MARKET_HOURS=1` the worker waits (job shows `queue: waiting`, rechecked every 60 s) before each heavy stage:
+`07_voice`, `08a_assets`, `08b_motion`, `08_visuals`, `10_render`, `10_qc`, and before converting an uploaded voice or music
+file. Window: NSE Mon–Fri 09:00–15:45 IST. Exchange holidays are not modelled, so the guard errs on the side of waiting.
+
+## Queue persistence
+
+Queued work (job and start stage) is saved in `data/queue.json` and removed when the job finishes or fails. After a restart
+the saved queue is reloaded, and jobs with a stage left in `running` or `waiting` are resumed. A job that never started
+(no `status.json`) is not queued automatically; open it and press Run. A failed job records the error on its `queue` stage
+and the worker carries on with the next one.
 
 ## Permanent link (own domain, Cloudflare named tunnel)
 
@@ -63,7 +98,7 @@ test is written to `data/audit.log` (field names only). A value set on the Setti
 ## Use
 
 - **New job**: title, category, length, the research pack (`.md`), optionally a public-domain source text and the
-  exact quote to verify. The script and fact-check stages make paid calls, refused before the request when the
+  exact quote to verify, and a checkbox "Story contains fictional characters/events" (default off). The script and fact-check stages make paid calls, refused before the request when the
   worst case would pass the per-video cap (default USD 5) or the pilot cap (default USD 50).
 - **Voice**: three ways.
   1. Upload an owner recording on the job page. The job re-renders from stage 07 with no paid call.
@@ -85,6 +120,5 @@ its page or re-run it from `07_voice` with TTS enabled.
 - The 100-point score and approval are the owner's; the gate here is the automated part only.
 - Timings without a voice are an estimate; with an uploaded recording they are scaled to its length, not
   aligned word by word.
-- One worker, one job at a time. A job interrupted by a restart is resumed at startup; queued-but-not-started jobs
-  are resumed too.
+- One worker, one job at a time (see "Queue persistence").
 - Costs are estimates from list prices; reconcile them with the Anthropic Console.

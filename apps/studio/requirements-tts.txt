@@ -1,5 +1,6 @@
 # Optional free local TTS (CPU). Installed only with build arg WITH_TTS=1.
+# torch / torchaudio 2.8.0+cpu cp312 wheels verified on the PyTorch CPU index listing.
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch
-torchaudio
+torch==2.8.0
+torchaudio==2.8.0
 parler-tts==0.2.2

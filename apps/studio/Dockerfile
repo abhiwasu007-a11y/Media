@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
  && if [ "$WITH_DEPTH" = "1" ]; then pip install --no-cache-dir -r requirements-depth.txt; fi \
  && if [ "$WITH_TTS" = "1" ]; then pip install --no-cache-dir -r requirements-tts.txt; fi
 COPY studio ./studio
+# The app runs as uid 10001. Bind-mounted ./data must be owned by it: `sudo chown -R 10001 data` (deploy.sh does this).
 RUN useradd -m -u 10001 studio && mkdir -p /data && chown studio /data
 USER studio
 EXPOSE 8080

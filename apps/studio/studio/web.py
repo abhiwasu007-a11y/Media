@@ -1,10 +1,14 @@
 """Basic dashboard: jobs, stage status, cost per stage, QC, gate, video, downloads; new job; voice upload.
 
-Password-protected (HTTP Basic, AMW_DASHBOARD_USER / AMW_DASHBOARD_PASSWORD). One worker thread runs jobs one
-at a time. Rendering waits outside market hours when AMW_BLOCK_MARKET_HOURS=1 (shared VPS rule, D1).
+Password-protected (HTTP Basic, AMW_DASHBOARD_USER / AMW_DASHBOARD_PASSWORD), same-origin check on every write,
+failed-login lockout. One worker thread runs jobs one at a time; the queue is persisted in data/queue.json. Heavy
+stages (voice, pictures, motion, render, QC) wait outside market hours when AMW_BLOCK_MARKET_HOURS=1 (shared VPS rule, D1).
 """
 
+import contextlib
 import html
+import json
+import math
 import os
 import queue
 import re
@@ -13,6 +17,7 @@ import shutil
 import subprocess
 import threading
 import time
+import traceback
 import urllib.parse
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -21,6 +26,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from starlette.concurrency import run_in_threadpool
 
 from . import config, llm, pipeline
 from .languages import LANGS
@@ -41,20 +47,127 @@ SERVE = {
     "ledger.json",
     "visuals.mp4",
 }
+CAP_RE = re.compile(r"captions_[a-z]{2}\.srt")
+JOB_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,120}")
 IST = timezone(timedelta(hours=5, minutes=30))
-RENDER_STAGES = {"08_visuals", "10_render"}
+# stages that use the shared CPU heavily: they wait outside market hours (the guard is checked before each one)
+HEAVY_STAGES = {"07_voice", "08a_assets", "08b_motion", "08_visuals", "10_render", "10_qc"}
+AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".webm", ".mp4"}
+CATEGORIES = ("philosophy", "finance")
+VOICE_MODES = ("none", "parler")
+FORMATS = ("long_16x9", "short_9x16")
 
 
+def _max_upload() -> int:
+    try:
+        mb = float(os.environ.get("AMW_MAX_UPLOAD_MB", "300"))
+    except ValueError:
+        mb = 300.0
+    return int((mb if math.isfinite(mb) and mb > 0 else 300.0) * 1024 * 1024)
+
+
+MAX_UPLOAD = _max_upload()
+MAX_ZIP_ENTRIES = 5000
+LOOPBACK = {"127.0.0.1", "::1"}
 FAILS: dict[str, list[float]] = {}
-FAIL_LIMIT, FAIL_WINDOW_S = 10, 900
+FAIL_LIMIT, FAIL_WINDOW_S, FAIL_MAX_KEYS = 10, 900, 10000
+_qlock = threading.Lock()
+
+
+def _queue_file() -> Path:
+    return config.data_dir() / "queue.json"
+
+
+def _queue_load() -> list[list]:
+    try:
+        d = json.loads(_queue_file().read_text())
+        return [x for x in d if isinstance(x, list) and len(x) == 2] if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _queue_save(items: list[list]) -> None:
+    f = _queue_file()
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items))
+    os.replace(tmp, f)
+
+
+def enqueue(jid: str, frm: str | None) -> None:
+    """Persist (job, from_stage) in data/queue.json, then hand it to the worker."""
+    with _qlock:
+        items = _queue_load()
+        items.append([jid, frm])
+        _queue_save(items)
+    Q.put((jid, frm))
+
+
+def _dequeue(jid: str, frm: str | None) -> None:
+    with _qlock:
+        items = _queue_load()
+        if [jid, frm] in items:
+            items.remove([jid, frm])
+            _queue_save(items)
+
+
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    """Same-origin check on writes (CSRF), upload size cap, and hardening headers on every response."""
+    if request.method not in ("GET", "HEAD"):
+        site = request.headers.get("sec-fetch-site")
+        if site:
+            same = site in ("same-origin", "none")
+        else:
+            src = request.headers.get("origin") or request.headers.get("referer") or ""
+            same = bool(src) and urllib.parse.urlsplit(src).netloc == request.headers.get("host", "\0")
+        if not same:
+            return PlainTextResponse("cross-site request refused", status_code=403)
+        cl = request.headers.get("content-length")
+        # chunked bodies (no Content-Length, possible behind the tunnel) are allowed: the upload handlers stream to
+        # disk with a running byte count and stop at the same cap
+        if cl is not None and (not cl.isdigit() or int(cl) > MAX_UPLOAD + 2 * 1024 * 1024):
+            return PlainTextResponse("request too large", status_code=413)
+    resp = await call_next(request)
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+    resp.headers["Referrer-Policy"] = "same-origin"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+def save_upload(up: UploadFile, dest: Path, limit: int = MAX_UPLOAD) -> int:
+    """Stream an upload to ``dest`` in 1 MB chunks with a running byte count; 413 and no file when over ``limit``."""
+    n = 0
+    try:
+        with dest.open("wb") as f:
+            while chunk := up.file.read(1024 * 1024):
+                n += len(chunk)
+                if n > limit:
+                    raise HTTPException(413, f"upload larger than {limit // (1024 * 1024)} MB")
+                f.write(chunk)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return n
+
+
+def audio_ext(up: UploadFile) -> str:
+    ext = Path(up.filename or "").suffix.lower()
+    if ext not in AUDIO_EXT:
+        raise HTTPException(400, "unsupported audio type; use " + " ".join(sorted(AUDIO_EXT)))
+    return ext
 
 
 def auth(request: Request, c: HTTPBasicCredentials = Depends(security)) -> str:
     """HTTP Basic auth; an address with 10 wrong passwords in 15 minutes is refused until the window passes."""
-    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    peer = request.client.host if request.client else "?"
+    # cf-connecting-ip is only trusted when the TCP peer is not loopback (i.e. it came through the tunnel container)
+    ip = (request.headers.get("cf-connecting-ip") or peer) if peer not in LOOPBACK else peer
     now_s = time.time()
-    recent = [t for t in FAILS.get(ip, []) if now_s - t < FAIL_WINDOW_S]
-    FAILS[ip] = recent
+    recent = [t for t in FAILS.pop(ip, []) if now_s - t < FAIL_WINDOW_S]
+    FAILS[ip] = recent  # re-inserted last, so the dict stays ordered oldest-first
+    while len(FAILS) > FAIL_MAX_KEYS:
+        FAILS.pop(next(iter(FAILS)))
     if len(recent) >= FAIL_LIMIT:
         raise HTTPException(429, "too many failed logins, try again later")
     user, pw = os.environ.get("AMW_DASHBOARD_USER", "owner"), os.environ.get("AMW_DASHBOARD_PASSWORD", "")
@@ -73,16 +186,74 @@ def market_hours() -> bool:
     return n.weekday() < 5 and (9, 0) <= (n.hour, n.minute) <= (15, 45)
 
 
+def wait_market(job: Path) -> None:
+    """Block (checking every 60 s) while market hours are on; the job shows queue/waiting meanwhile."""
+    waited = False
+    while market_hours():
+        waited = True
+        pipeline.set_status(job, "queue", "waiting", "market hours: heavy stage waits (D1)")
+        time.sleep(60)
+    if waited:
+        pipeline.set_status(job, "queue", "done", "resumed after market hours")
+
+
+def _before_stage(job: Path):
+    def before(stage: str) -> None:
+        if stage in HEAVY_STAGES:
+            wait_market(job)
+
+    return before
+
+
+def _ffmpeg_audio(src: Path, dst: Path, channels: int) -> None:
+    subprocess.run(
+        ["ffmpeg", "-y", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file,pipe", "-i", str(src)]
+        + ["-ac", str(channels), "-ar", "48000", str(dst)],
+        check=True,
+        timeout=600,
+    )
+
+
+def _convert_uploads(job: Path) -> None:
+    """Convert voice/music uploads (saved by the request) in the worker, outside market hours."""
+    marker = job / "convert.json"
+    if not marker.exists():
+        return
+    todo = pipeline.rj(marker)
+    wait_market(job)
+    try:
+        for key, (name, ch) in {"voice": ("voice.wav", 1), "music": ("music.wav", 2)}.items():
+            raw = todo.get(key)
+            if raw and Path(raw).name == raw and (job / raw).exists() and Path(raw).suffix.lower() in AUDIO_EXT:
+                _ffmpeg_audio(job / raw, job / name, ch)
+    finally:
+        marker.unlink(missing_ok=True)
+
+
+def _mark_convert(job: Path, key: str, raw_name: str) -> None:
+    marker = job / "convert.json"
+    cur = pipeline.rj(marker) if marker.exists() else {}
+    cur[key] = raw_name
+    pipeline.wj(marker, cur)
+
+
 def worker() -> None:
     while True:
         jid, frm = Q.get()
-        job = config.jobs_dir() / jid
         try:
-            while market_hours():
-                pipeline.set_status(job, "queue", "waiting", "market hours: render waits (D1)")
-                time.sleep(60)
-            pipeline.set_status(job, "queue", "done", "started")
-            pipeline.run(job, frm)
+            job = config.jobs_dir() / jid
+            try:
+                _convert_uploads(job)
+                pipeline.set_status(job, "queue", "done", "started")
+                pipeline.run(job, frm, before_stage=_before_stage(job))
+            except Exception as exc:  # keep the thread alive; show the reason on the job page
+                msg = f"{type(exc).__name__}: {exc}"
+                print(traceback.format_exc(), flush=True)
+                with contextlib.suppress(Exception):
+                    pipeline.set_status(job, "queue", "failed", msg)
+            _dequeue(jid, frm)
+        except Exception:  # never let the worker thread die
+            print(traceback.format_exc(), flush=True)
         finally:
             Q.task_done()
 
@@ -91,10 +262,23 @@ def worker() -> None:
 def _start() -> None:
     if not os.environ.get("AMW_DASHBOARD_PASSWORD"):
         raise RuntimeError("AMW_DASHBOARD_PASSWORD must be set")
-    for j in sorted(config.jobs_dir().iterdir()):  # resume jobs interrupted by a restart
-        st = pipeline.status(j)["stages"] if (j / "job.json").exists() else None
-        if st is not None and (not st or any(v.get("state") in ("running", "waiting") for v in st.values())):
-            Q.put((j.name, None))
+    pending: list[tuple[str, str | None]] = []
+    for jid, frm in _queue_load():  # queued before the restart
+        if isinstance(jid, str) and JOB_ID_RE.fullmatch(jid) and (config.jobs_dir() / jid / "job.json").exists():
+            pending.append((jid, frm if isinstance(frm, str) else None))
+    queued = {j for j, _ in pending}
+    for j in sorted(config.jobs_dir().iterdir()):  # jobs interrupted mid-stage (never-started jobs are NOT auto-queued)
+        try:
+            if j.name in queued or not (j / "job.json").exists() or not (j / "status.json").exists():
+                continue
+            if any(v.get("state") in ("running", "waiting") for v in pipeline.status(j)["stages"].values()):
+                pending.append((j.name, None))
+        except Exception:  # one broken job must not stop the app
+            print(f"startup scan skipped {j.name}", flush=True)
+    with _qlock:
+        _queue_save([[a, b] for a, b in pending])
+    for item in pending:
+        Q.put(item)
     threading.Thread(target=worker, daemon=True).start()
 
 
@@ -174,22 +358,22 @@ def index(_: str = Depends(auth)) -> HTMLResponse:
 
 
 @app.post("/jobs/import")
-async def import_job(bundle: UploadFile = File(...), _: str = Depends(auth)):
-    """Import a zipped job folder (one top folder holding job.json). Paths are checked; nothing outside data/jobs."""
-    raw = config.data_dir() / "import.zip"
-    with raw.open("wb") as f:
-        shutil.copyfileobj(bundle.file, f)
+def import_job(bundle: UploadFile = File(...), _: str = Depends(auth)):
+    """Import a zipped job folder (one top folder holding job.json). Paths and sizes are checked before extraction."""
+    raw = config.data_dir() / f"import-{secrets.token_hex(4)}.zip"
+    save_upload(bundle, raw)
     try:
         with zipfile.ZipFile(raw) as z:
-            names = [n for n in z.namelist() if not n.endswith("/")]
+            infos = [i for i in z.infolist() if not i.is_dir()]
+            if len(z.infolist()) > MAX_ZIP_ENTRIES:
+                raise HTTPException(400, f"zip has more than {MAX_ZIP_ENTRIES} entries")
+            if sum(i.file_size for i in infos) > MAX_UPLOAD * 3:
+                raise HTTPException(400, "zip content too large when unpacked")
+            names = [i.filename for i in infos]
             tops = {n.split("/", 1)[0] for n in names}
-            if (
-                len(tops) != 1
-                or not re.fullmatch(r"[A-Za-z0-9._-]+", next(iter(tops)))
-                or f"{next(iter(tops))}/job.json" not in names
-            ):
+            if len(tops) != 1 or not JOB_ID_RE.fullmatch(next(iter(tops))) or f"{next(iter(tops))}/job.json" not in names:
                 raise HTTPException(400, "zip must hold one job folder with job.json")
-            if any(".." in n.split("/") or n.startswith("/") for n in names):
+            if any(".." in n.split("/") or n.startswith("/") or "\\" in n for n in names):
                 raise HTTPException(400, "unsafe path in zip")
             jid = next(iter(tops))
             if (config.jobs_dir() / jid).exists():
@@ -309,6 +493,8 @@ def new_form(_: str = Depends(auth)) -> HTMLResponse:
 <label>Quote (exact text, optional)</label><input name=quote><label>Quote credit</label><input name=quote_credit>
 <label>Voice</label><select name=voice_mode><option value=none>none yet (silent, upload later)</option>
 <option value=parler>Indic Parler-TTS (free, needs HF_TOKEN + WITH_TTS build)</option></select>
+<label style='display:flex;gap:8px;align-items:center'><input type=checkbox name=has_fiction value=1 style='width:auto'>
+Story contains fictional characters/events</label>
 <p class=dim>Paid step: the script and fact-check use the Anthropic API within the per-video cap.</p>
 <button>Create and run</button></form>"""
     from .languages import LANGS  # noqa: PLC0415
@@ -318,7 +504,7 @@ def new_form(_: str = Depends(auth)) -> HTMLResponse:
 
 
 @app.post("/jobs")
-async def create(
+def create(
     title: str = Form(...),
     category: str = Form(...),
     minutes: float = Form(8.5),
@@ -327,46 +513,65 @@ async def create(
     voice_mode: str = Form("none"),
     quote: str = Form(""),
     quote_credit: str = Form(""),
+    has_fiction: str = Form(""),
     brief: UploadFile = File(...),
     source: UploadFile | None = File(None),
     _: str = Depends(auth),
 ):
+    if category not in CATEGORIES:
+        raise HTTPException(400, "unknown category")
+    if voice_mode not in VOICE_MODES:
+        raise HTTPException(400, "unknown voice mode")
+    if format not in FORMATS:
+        raise HTTPException(400, "unknown video type")
+    if language not in LANGS:
+        raise HTTPException(400, "unknown language")
+    if not math.isfinite(minutes) or not 0.5 <= minutes <= 120:
+        raise HTTPException(400, "minutes must be between 0.5 and 120")
+    title = title.strip()[:200]
+    if not title:
+        raise HTTPException(400, "title required")
     jid = (
         datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         + "-"
         + (re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24] or "job")
+        + "-"
+        + secrets.token_hex(2)
     )
     job = config.jobs_dir() / jid
     job.mkdir()
-    (job / "brief.md").write_bytes(await brief.read())
-    if source and source.filename:
-        (job / "source.txt").write_bytes(await source.read())
-    if format not in ("long_16x9", "short_9x16"):
-        raise HTTPException(400, "unknown video type")
-    short = format == "short_9x16"
-    if short:
-        minutes = 0.9
-    meta = {
-        "id": jid,
-        "title": title,
-        "category": category,
-        "format": format,
-        "language": language if language in LANGS else "mr",
-        "minutes": minutes,
-        "min_minutes": 0.6 if short else max(1, minutes - 1),
-        "max_minutes": 1.0 if short else minutes + 1.2,
-        "voice_mode": voice_mode,
-        "quote": quote,
-        "quote_credit": quote_credit,
-        "created_utc": pipeline.now(),
-    }
-    pipeline.wj(job / "job.json", meta)
-    Q.put((jid, None))
+    try:
+        save_upload(brief, job / "brief.md")
+        if source and source.filename:
+            save_upload(source, job / "source.txt")
+        short = format == "short_9x16"
+        if short:
+            minutes = 0.9
+        meta = {
+            "id": jid,
+            "title": title,
+            "category": category,
+            "format": format,
+            "language": language,
+            "minutes": minutes,
+            "min_minutes": 0.6 if short else max(1, minutes - 1),
+            "max_minutes": 1.0 if short else minutes + 1.2,
+            "voice_mode": voice_mode,
+            "quote": quote,
+            "quote_credit": quote_credit,
+            "has_fiction": bool(has_fiction),
+            "created_utc": pipeline.now(),
+        }
+        pipeline.wj(job / "job.json", meta)
+    except BaseException:
+        shutil.rmtree(job, ignore_errors=True)
+        raise
+    enqueue(jid, None)
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
 def get_job(jid: str) -> Path:
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", jid):
+    if not JOB_ID_RE.fullmatch(jid) or jid in (".", ".."):
         raise HTTPException(404)
     job = config.jobs_dir() / jid
     if not (job / "job.json").exists():
@@ -393,7 +598,8 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         media += f"<div><video controls preload=metadata src='/jobs/{e(jid)}/files/final_1080p.mp4' poster='/jobs/{e(jid)}/files/thumbnail.png'></video></div>"
     if (job / "thumbnail.png").exists():
         media += f"<div><img alt=thumbnail src='/jobs/{e(jid)}/files/thumbnail.png'></div>"
-    files = " · ".join(f"<a href='/jobs/{e(jid)}/files/{f}'>{f}</a>" for f in sorted(SERVE) if (job / f).exists())
+    names = {f for f in SERVE if (job / f).exists()} | {p.name for p in job.glob("captions_*.srt") if CAP_RE.fullmatch(p.name)}
+    files = " · ".join(f"<a href='/jobs/{e(jid)}/files/{f}'>{f}</a>" for f in sorted(names))
     if (job / "script.json").exists():
         files += f" · <a href='/jobs/{e(jid)}/narration.txt'>narration.txt (वाचण्यासाठी स्क्रिप्ट)</a>"
 
@@ -455,28 +661,28 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
 @app.post("/jobs/{jid}/run")
 def rerun(jid: str, from_stage: str = Form(""), _: str = Depends(auth)):
     get_job(jid)
-    Q.put((jid, from_stage or None))
+    if from_stage and from_stage not in pipeline.STAGES:
+        raise HTTPException(400, "unknown stage")
+    enqueue(jid, from_stage or None)
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
 @app.post("/jobs/{jid}/music")
-async def music(
+def music(
     jid: str, music: UploadFile = File(...), title: str = Form(...), licence: str = Form("standard"), _: str = Depends(auth)
 ):
     job = get_job(jid)
     if licence not in ("standard", "cc-by"):
         raise HTTPException(400, "unsupported licence (non-commercial tracks are rejected)")
-    raw = job / ("music_upload" + Path(music.filename or "a.mp3").suffix.lower()[:5])
-    with raw.open("wb") as f:
-        shutil.copyfileobj(music.file, f)
-    subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-ac", "2", "-ar", "48000", str(job / "music.wav")], check=True
-    )
+    title = title.strip()[:200]
+    raw = "music_upload" + audio_ext(music)
+    save_upload(music, job / raw)
+    _mark_convert(job, "music", raw)  # the worker converts it (outside market hours) before the render
     attribution = f'Music: "{title}" (YouTube Audio Library, CC BY 4.0)' if licence == "cc-by" else None
     pipeline.wj(
         job / "music.json", {"title": title, "source": "YouTube Audio Library", "licence": licence, "attribution": attribution}
     )
-    Q.put((jid, "10_render"))
+    enqueue(jid, "10_render")
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
@@ -488,6 +694,10 @@ async def versions(jid: str, request: Request, user: str = Depends(auth)):
         raise HTTPException(409, "the script is not ready yet")
     form = await request.form()
     langs = [str(x) for x in form.getlist("langs") if str(x) in LANGS]
+    return await run_in_threadpool(_make_versions, jid, src, langs, user)
+
+
+def _make_versions(jid: str, src: Path, langs: list[str], user: str):
     meta = pipeline.rj(src / "job.json")
     made = []
     for lang in langs:
@@ -509,24 +719,21 @@ async def versions(jid: str, request: Request, user: str = Depends(auth)):
             if (dst / "asset_plan.json").exists() or st == "04_research":
                 pipeline.set_status(dst, st, "done", f"copied from {jid}")
         config.audit(user, "job.versions", {"from": jid, "to": nid})
-        Q.put((nid, None))
+        enqueue(nid, None)
         made.append(nid)
     return RedirectResponse("/" if made else f"/jobs/{jid}", status_code=303)
 
 
 @app.post("/jobs/{jid}/voice")
-async def voice(jid: str, voice: UploadFile = File(...), _: str = Depends(auth)):
+def voice(jid: str, voice: UploadFile = File(...), _: str = Depends(auth)):
     job = get_job(jid)
-    raw = job / ("voice_upload" + Path(voice.filename or "a.wav").suffix.lower()[:5])
-    with raw.open("wb") as f:
-        shutil.copyfileobj(voice.file, f)
-    subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-ac", "1", "-ar", "48000", str(job / "voice.wav")], check=True
-    )
+    raw = "voice_upload" + audio_ext(voice)
+    save_upload(voice, job / raw)
+    _mark_convert(job, "voice", raw)  # the worker converts it (outside market hours) before stage 07
     meta = pipeline.rj(job / "job.json")
     meta["voice_mode"] = "file"
     pipeline.wj(job / "job.json", meta)
-    Q.put((jid, "07_voice"))
+    enqueue(jid, "07_voice")
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
@@ -541,7 +748,7 @@ def narration(jid: str, _: str = Depends(auth)) -> str:
 @app.get("/jobs/{jid}/files/{name}")
 def files(jid: str, name: str, _: str = Depends(auth)):
     job = get_job(jid)
-    if name not in SERVE or not (job / name).exists():
+    if not (name in SERVE or CAP_RE.fullmatch(name)) or not (job / name).exists():
         raise HTTPException(404)
     return FileResponse(job / name)
 

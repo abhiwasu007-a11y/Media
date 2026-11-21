@@ -3,6 +3,7 @@
 Fonts: Mukta (SIL OFL 1.1), copied from the agent_11 pinned font data.
 """
 
+import contextlib
 import json
 import math
 import subprocess
@@ -217,10 +218,12 @@ def v_person(d, s, t, dur, img):
 
 
 def v_ledger(d, s, t, dur, img):
-    rows = s.get("visual_params", {}).get("rows") or [["दिला", ""], ["गेला", ""], ["जगलो", ""]]
+    # Marathi labels are fallbacks for the sample job only; scripts should supply rows / title in visual_params.
+    vp = s.get("visual_params", {})
+    rows = vp.get("rows") or [["दिला", ""], ["गेला", ""], ["जगलो", ""]]
     x0, y0, x1 = 160, 210, 1120
     d.rounded_rectangle([x0 - 30, y0 - 110, x1 + 30, y0 + 3 * 190 + 40], 24, fill=(238, 228, 205))
-    d.text(((x0 + x1) / 2, y0 - 55), "वेळेचा हिशोब", font=font(64), fill=(70, 50, 30), anchor="mm")
+    d.text(((x0 + x1) / 2, y0 - 55), vp.get("title") or "वेळेचा हिशोब", font=font(64), fill=(70, 50, 30), anchor="mm")
     for i, (name, val) in enumerate(rows[:3]):
         a = ease((t - i * 0.6) / 0.5)
         y = y0 + 20 + i * 190
@@ -291,14 +294,17 @@ def v_timeline(d, s, t, dur, img):
 
 def v_quote(d, s, t, dur, img):
     p = s.get("visual_params", {})
-    q = "“" + p.get("quote", "life, if you know how to use it, is long.") + "”"
+    q = "“" + (p.get("quote") or "life, if you know how to use it, is long.") + "”"
     a = ease(t / 0.8)
     d.text((W / 2, 300), q, font=fit(q, W - 260, 92, False), fill=mix(BG, INK, a), anchor="mm")
     m = p.get("meaning", "")
     a2 = ease((t - 1.2) / 0.7)
     d.text((W / 2, 470), m, font=fit(m, W - 260, 80), fill=mix(BG, ACC, a2), anchor="mm")
-    cr = "— Seneca, On the Shortness of Life, Ch. 2 · tr. John W. Basore (1932), public domain"
-    d.text((W / 2, 600), cr, font=fit(cr, W - 300, 40, False), fill=mix(BG, DIM, a2), anchor="mm")
+    cr = p.get("credit") or p.get("quote_credit") or ""
+    if cr and not cr.startswith("—"):
+        cr = "— " + cr
+    if cr:
+        d.text((W / 2, 600), cr, font=fit(cr, W - 300, 40, False), fill=mix(BG, DIM, a2), anchor="mm")
     beats_panel(d, s["beats"], t, dur, 160, W - 160, 830, big=72)
 
 
@@ -590,47 +596,59 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
     ]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     assert p.stdin is not None
-    fi = 0
-    prev = None  # last frame of the previous scene, dissolved into the new one
-    xf = round(0.4 * FPS)
-    for row in timings["scenes"]:
-        s, dur, start = by[row["id"]], row["dur"], round(row["start"] * FPS)
-        end = round((row["start"] + dur) * FPS)
-        a = assets.get(row["id"])
-        idx = int(row["id"][1:]) if row["id"][1:].isdigit() else 0
-        files = [f for f in (a.get("files") or [a["file"]]) if (job / f).exists()] if a else []
-        # one segment per shot: the picture changes every few seconds inside a scene
-        n = max(1, len(files))
-        segs = [(start + round((end - start) * j / n), start + round((end - start) * (j + 1) / n), j) for j in range(n)]
-        last = prev
-        for s0, s1, j in segs:
-            seg_dur = max(0.1, (s1 - s0) / FPS)
-            kind = "video" if files and files[j].endswith(".mp4") else "image"
-            media = Media(job, {**a, "file": files[j], "kind": kind}, seg_dur, idx * 3 + j) if files else None
-            try:
-                while fi < s1:
-                    t = (fi - start) / FPS
-                    if media is not None:
-                        media_t = (fi - s0) / FPS
-                        img = frame_media(s, max(0.0, min(dur, t)), dur, media, media_t)
-                    else:
-                        img = frame(s, max(0.0, min(dur, t)), dur, None)
-                    k = fi - s0
-                    if prev is not None and k < xf:
-                        img = Image.blend(prev, img, (k + 1) / (xf + 1))
-                    elif prev is None and k < xf:  # fade in from black at the very start
-                        img = Image.blend(Image.new("RGB", (OW, OH), (0, 0, 0)), img, (k + 1) / (xf + 1))
-                    p.stdin.write(img.tobytes())
-                    last = img
-                    fi += 1
-            finally:
-                if media:
-                    media.close()
-            prev = last
-    while fi < round(timings["total"] * FPS):
-        p.stdin.write(to_output(background()).tobytes())
-        fi += 1
-    p.stdin.close()
-    if p.wait() != 0:
-        raise RuntimeError("ffmpeg failed while encoding visuals")
-    return fi
+    ok = False
+    try:
+        fi = 0
+        prev = None  # last frame of the previous scene, dissolved into the new one
+        xf = round(0.4 * FPS)
+        for row in timings["scenes"]:
+            s, dur, start = by[row["id"]], row["dur"], round(row["start"] * FPS)
+            end = round((row["start"] + dur) * FPS)
+            a = assets.get(row["id"])
+            idx = int(row["id"][1:]) if row["id"][1:].isdigit() else 0
+            files = [f for f in (a.get("files") or [a["file"]]) if (job / f).exists()] if a else []
+            # one segment per shot: the picture changes every few seconds inside a scene
+            n = max(1, len(files))
+            segs = [(start + round((end - start) * j / n), start + round((end - start) * (j + 1) / n), j) for j in range(n)]
+            last = prev
+            for s0, s1, j in segs:
+                seg_dur = max(0.1, (s1 - s0) / FPS)
+                kind = "video" if files and files[j].endswith(".mp4") else "image"
+                media = Media(job, {**a, "file": files[j], "kind": kind}, seg_dur, idx * 3 + j) if files else None
+                try:
+                    while fi < s1:
+                        t = (fi - start) / FPS
+                        if media is not None:
+                            media_t = (fi - s0) / FPS
+                            img = frame_media(s, max(0.0, min(dur, t)), dur, media, media_t)
+                        else:
+                            img = frame(s, max(0.0, min(dur, t)), dur, None)
+                        k = fi - s0
+                        if prev is not None and k < xf:
+                            img = Image.blend(prev, img, (k + 1) / (xf + 1))
+                        elif prev is None and k < xf:  # fade in from black at the very start
+                            img = Image.blend(Image.new("RGB", (OW, OH), (0, 0, 0)), img, (k + 1) / (xf + 1))
+                        p.stdin.write(img.tobytes())
+                        last = img
+                        fi += 1
+                finally:
+                    if media:
+                        media.close()
+                prev = last
+        while fi < round(timings["total"] * FPS):
+            p.stdin.write(to_output(background()).tobytes())
+            fi += 1
+        p.stdin.close()
+        if p.wait() != 0:
+            raise RuntimeError("ffmpeg failed while encoding visuals")
+        ok = True
+        return fi
+    finally:
+        if not ok:
+            with contextlib.suppress(Exception):
+                p.stdin.close()
+            if p.poll() is None:
+                p.kill()
+            with contextlib.suppress(Exception):
+                p.wait(timeout=10)
+            out.unlink(missing_ok=True)

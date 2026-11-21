@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-shot install / update of AMW Studio on the server. Safe to re-run: keeps .env and data/.
 # Never exits the calling shell on an error (no `set -e`), prints what it found instead.
+umask 077
 APP=/opt/amw-studio
 BRANCH=${BRANCH:-ccr-b1e90a39-0g1b1l}
 mkdir -p "$APP" && cd "$APP" || exit 0
@@ -9,11 +10,14 @@ docker compose logs --tail 5 studio 2>/dev/null | tail -5
 echo "== fetching code ($BRANCH) =="
 rm -rf /tmp/amw-media
 if git clone -q -b "$BRANCH" --depth 1 https://github.com/abhiwasu007-a11y/Media.git /tmp/amw-media; then
+  COMMIT=$(git -C /tmp/amw-media rev-parse --short HEAD 2>/dev/null)
   cp -r /tmp/amw-media/apps/studio/. "$APP"/ && rm -rf /tmp/amw-media
+  echo "deployed commit: ${COMMIT:-unknown} (branch $BRANCH)"
 else
   echo "git clone failed: check the network"; exit 0
 fi
 [ -f .env ] || cp .env.example .env
+PORT=$(grep '^AMW_PORT=' .env | cut -d= -f2-); PORT=${PORT:-8080}
 setvar() {  # write NAME=value without sed, so any character in the value is safe
   grep -v "^$1=" .env > .env.new; printf '%s=%s\n' "$1" "$2" >> .env.new; mv .env.new .env
 }
@@ -34,13 +38,18 @@ done
 if grep -q '^CF_TUNNEL_TOKEN=.\+' .env; then setvar COMPOSE_PROFILES named; else setvar COMPOSE_PROFILES quick; fi
 chmod 600 .env
 mkdir -p data/jobs
-[ -f ~/sample-001-seneca-job.zip ] && unzip -oq ~/sample-001-seneca-job.zip -d data/jobs/
+# the sample is unpacked only once: never overwrite a job folder that already exists
+if [ -f ~/sample-001-seneca-job.zip ]; then
+  TOP=$(unzip -Z1 ~/sample-001-seneca-job.zip | head -1 | cut -d/ -f1)
+  [ -n "$TOP" ] && [ ! -e "data/jobs/$TOP" ] && unzip -q ~/sample-001-seneca-job.zip -d data/jobs/
+fi
 chown -R 10001 data
 docker compose --profile quick --profile named rm -sf tunnel tunnel-named >/dev/null 2>&1
 docker compose up -d --build --remove-orphans --force-recreate
+docker image prune -f >/dev/null 2>&1   # dangling images only
 echo "== waiting for the app =="
-for i in $(seq 30); do curl -sf http://127.0.0.1:8080/healthz >/dev/null && break; sleep 2; done
-if curl -sf http://127.0.0.1:8080/healthz; then echo; echo "APP OK"; else
+for i in $(seq 30); do curl -sf http://127.0.0.1:$PORT/healthz >/dev/null && break; sleep 2; done
+if curl -sf http://127.0.0.1:$PORT/healthz; then echo; echo "APP OK"; else
   echo "APP NOT UP. Logs:"; docker compose logs --tail 20 studio; exit 0; fi
 echo "== phone link =="
 PUB=$(grep '^AMW_PUBLIC_URL=' .env | cut -d= -f2-)

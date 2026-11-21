@@ -14,7 +14,8 @@ def main() -> int:
         import uvicorn
 
         host = os.environ.get("AMW_BIND", "0.0.0.0")  # noqa: S104 - inside the container; compose publishes on loopback only
-        uvicorn.run("studio.web:app", host=host, port=int(os.environ.get("AMW_PORT", "8080")))
+        # Always 8080 inside the container. AMW_PORT only picks the host port in compose.yaml.
+        uvicorn.run("studio.web:app", host=host, port=int(os.environ.get("AMW_INTERNAL_PORT", "8080")))
         return 0
     print(__doc__)
     return 2

@@ -1,15 +1,28 @@
 # Own compose project, low priority and hard caps on the shared server (CONTEXT_BRIEF §1, INF-03/04).
 name: amw-studio
+x-hardening: &hardening
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  pids_limit: 512
+
 services:
   studio:
+    <<: *hardening
     build:
       context: .
       args:
         WITH_TTS: "${WITH_TTS:-0}"
         WITH_DEPTH: "${WITH_DEPTH:-1}"
+    # .env is read by studio, so CF_TUNNEL_TOKEN in it is visible to the app process too (no secret is ever shown by the
+    # app). The tunnel container gets the token through `environment` only. ./data must be owned by uid 10001
+    # (`sudo chown -R 10001 data`, deploy.sh does it); with cap_drop ALL the container cannot chown it itself.
     env_file: .env
     environment:
       AMW_STUDIO_DATA: /data
+      AMW_INTERNAL_PORT: "8080"   # the app always listens on 8080 inside; AMW_PORT below only maps the host side
     volumes:
       - ./data:/data
     ports:
@@ -24,6 +37,7 @@ services:
   # (deploy.sh sets it): "quick" = temporary trycloudflare link that changes on restart; "named" = permanent link on
   # your own domain, using CF_TUNNEL_TOKEN from the Cloudflare dashboard.
   tunnel:
+    <<: *hardening
     image: cloudflare/cloudflared:2024.12.2
     command: tunnel --no-autoupdate --protocol http2 --url http://studio:8080
     profiles: ["quick"]
@@ -33,6 +47,7 @@ services:
     cpus: "0.25"
     mem_limit: 128m
   tunnel-named:
+    <<: *hardening
     image: cloudflare/cloudflared:2024.12.2
     command: tunnel --no-autoupdate --protocol http2 run
     environment:
