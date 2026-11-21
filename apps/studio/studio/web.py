@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import threading
 import time
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -162,10 +163,41 @@ def index(_: str = Depends(auth)) -> HTMLResponse:
         f"<div class=dim>Per-video cap ${cfg.per_video_cap_usd:.2f} · model {e(cfg.model)}</div></div>"
         f"<div class=card>Queue: {Q.qsize()} waiting · {'<span class=bad>market hours: render paused</span>' if market_hours() else '<span class=ok>render allowed</span>'}"
         f"<div><a href='/jobs/new'>+ New job</a></div></div></div>"
+        f"<form class=card method=post action=/jobs/import enctype=multipart/form-data><label>Import a job folder (.zip)</label>"
+        f"<input type=file name=bundle accept='.zip' required><p><button>Import</button></p></form>"
         f"<div class=wrap><table><tr><th>Job</th><th>Category</th><th>Stage</th><th>Cost</th><th>QC</th><th>Gate</th></tr>"
         f"{rows or '<tr><td colspan=6 class=dim>No jobs yet</td></tr>'}</table></div>"
     )
     return page("AMW Studio", body)
+
+
+@app.post("/jobs/import")
+async def import_job(bundle: UploadFile = File(...), _: str = Depends(auth)):
+    """Import a zipped job folder (one top folder holding job.json). Paths are checked; nothing outside data/jobs."""
+    raw = config.data_dir() / "import.zip"
+    with raw.open("wb") as f:
+        shutil.copyfileobj(bundle.file, f)
+    try:
+        with zipfile.ZipFile(raw) as z:
+            names = [n for n in z.namelist() if not n.endswith("/")]
+            tops = {n.split("/", 1)[0] for n in names}
+            if (
+                len(tops) != 1
+                or not re.fullmatch(r"[A-Za-z0-9._-]+", next(iter(tops)))
+                or f"{next(iter(tops))}/job.json" not in names
+            ):
+                raise HTTPException(400, "zip must hold one job folder with job.json")
+            if any(".." in n.split("/") or n.startswith("/") for n in names):
+                raise HTTPException(400, "unsafe path in zip")
+            jid = next(iter(tops))
+            if (config.jobs_dir() / jid).exists():
+                raise HTTPException(409, "a job with this id already exists")
+            z.extractall(config.jobs_dir(), members=names)
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(400, "not a zip file") from exc
+    finally:
+        raw.unlink(missing_ok=True)
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
 @app.get("/jobs/new", response_class=HTMLResponse)
