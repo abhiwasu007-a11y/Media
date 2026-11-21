@@ -49,6 +49,8 @@ Q: "queue.Queue[tuple[str, str | None]]" = queue.Queue()
 SERVE = {
     "final_1080p.mp4",
     "preview_360p.mp4",
+    "export_720p.mp4",
+    "export_480p.mp4",
     "thumbnail.png",
     "captions_mr.srt",
     "qc_report.json",
@@ -661,7 +663,25 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
                 if (job / "preview_360p.mp4").exists()
                 else f"<form method=post action='/jobs/{e(jid)}/preview'><button>Make small preview (for slow internet)</button></form>"
             )
-            + "</div></div>"
+            + "<div class=card><b>Download</b>: "
+            + " · ".join(
+                (
+                    f"<a href='/jobs/{e(jid)}/files/{f}' download>{lbl} ({(job / f).stat().st_size / 1e6:.0f} MB)</a>"
+                    if (job / f).exists()
+                    else (
+                        f"<form method=post action='/jobs/{e(jid)}/export/{r}' style='display:inline'><button>Make {lbl}</button></form>"
+                        if r
+                        else f"{lbl}: <i>use the preview button</i>"
+                    )
+                )
+                for f, lbl, r in (
+                    ("final_1080p.mp4", "1080p", ""),
+                    ("export_720p.mp4", "720p", "720"),
+                    ("export_480p.mp4", "480p", "480"),
+                    ("preview_360p.mp4", "360p", ""),
+                )
+            )
+            + "</div></div></div>"
         )
     if (job / "thumbnail.png").exists():
         media += f"<div><img alt=thumbnail src='/jobs/{e(jid)}/files/thumbnail.png'></div>"
@@ -808,6 +828,15 @@ def aivoice(jid: str, speaker: str = Form(...), user: str = Depends(auth)):
     pipeline.wj(job / "job.json", meta)
     config.audit(user, "job.aivoice", {"job": jid, "speaker": speaker})
     enqueue(jid, "07_voice")
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
+
+
+@app.post("/jobs/{jid}/export/{res}")
+def export(jid: str, res: str, _: str = Depends(auth)):
+    job = get_job(jid)
+    if res not in pipeline.EXPORTS or not (job / "final_1080p.mp4").exists():
+        raise HTTPException(404)
+    threading.Thread(target=lambda: pipeline.make_export(job, res), daemon=True).start()
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 

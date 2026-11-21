@@ -542,6 +542,46 @@ def make_preview(job: Path) -> Path:
     return prev
 
 
+EXPORTS = {"720": ("1280", "23", "2500k"), "480": ("854", "26", "1200k")}
+
+
+def make_export(job: Path, res: str) -> Path:
+    """Smaller download copy (720p / 480p) of the final video, made on request."""
+    w, crf, mx = EXPORTS[res]
+    out, tmp = job / f"export_{res}p.mp4", job / f"export_{res}p.rendering.mp4"
+    sh(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(job / "final_1080p.mp4"),
+            "-vf",
+            f"scale=-2:{res}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            crf,
+            "-maxrate",
+            mx,
+            "-bufsize",
+            mx,
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(tmp),
+        ]
+    )
+    tmp.replace(out)
+    return out
+
+
 def music_file(job: Path) -> Path | None:
     f = job / "music.wav"
     return f if f.exists() else None
