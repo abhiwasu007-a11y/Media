@@ -137,6 +137,92 @@ def call(job: Path, stage: str, system: str, user: str, max_tokens: int, effort:
     return Reply(text, msg.stop_reason)
 
 
+SEARCH_USD = 0.01  # web search: $10 per 1,000 searches (claude-api skill, Managed Agents list-cost note)
+
+
+def research(job: Path, topic_brief: str, max_searches: int = 6, max_tokens: int = 32000) -> Reply:
+    """Stage-04 research with the Claude web search server tool. Same reservation rule as ``call``: worst case (tokens +
+    every allowed search) reserved before the request, replaced by the measured cost (tokens + searches made)."""
+    cfg = config.load()
+    system = (
+        "You are a careful researcher for a YouTube explainer/story video. Search the web, prefer primary and authoritative "
+        "sources (encyclopedias, museums, universities, official sites, classical texts in public translations). Write a "
+        "RESEARCH PACK in English markdown: 1) 8-15 key facts, each followed by its source URL in brackets; 2) for stories "
+        "or mythology, the traditional version with its textual source and notable variants; 3) one original story or "
+        "scene idea that makes the topic vivid (clearly marked as our creative idea); 4) a minute-by-minute outline for the "
+        "requested length; 5) facts to avoid or treat with care. Never invent facts, quotes or numbers."
+    )
+    cache = _cache_file(job, "04_research", cfg.model, system, topic_brief, max_tokens, f"search{max_searches}")
+    if cache.exists():
+        d = json.loads(cache.read_text())
+        return Reply(d["text"], d.get("stop_reason"))
+    key = config.get(SECRET_ENV)
+    if not key:
+        raise BudgetRefused(f"secret {SECRET_ENV} is not set")
+    client = anthropic.Anthropic(api_key=key, base_url="https://api.anthropic.com", max_retries=2)
+    tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": max_searches}]
+    msgs: list = [{"role": "user", "content": topic_brief}]
+    counted = client.messages.count_tokens(model=cfg.model, system=system, messages=msgs, tools=tools).input_tokens
+    # search results add input tokens on the continuation turns: reserve generously (3x input + output + searches)
+    worst = 3 * (counted + 20000) * cfg.price_in + max_tokens * cfg.price_out + max_searches * SEARCH_USD
+    if job_spent(job) + worst > cfg.per_video_cap_usd or pilot_spent() + worst > cfg.pilot_cap_usd:
+        raise BudgetRefused(f"research worst case {worst:.4f} USD does not fit the caps")
+    rid = uuid.uuid4().hex
+    append_row(
+        job,
+        {
+            "rid": rid,
+            "stage": "04_research",
+            "provider": "anthropic",
+            "model": cfg.model,
+            "cost_usd": round(worst, 6),
+            "basis": "RESERVED worst case (web research in flight or lost)",
+        },
+    )
+    tin = tout = searches = 0
+    text, stop = "", None
+    for _ in range(4):  # pause_turn continuations of the server tool loop
+        with client.messages.stream(
+            model=cfg.model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=msgs,
+            tools=tools,
+            thinking={"type": "adaptive"},
+            output_config={"effort": "medium"},
+        ) as stream:
+            msg = stream.get_final_message()
+        tin += msg.usage.input_tokens
+        tout += msg.usage.output_tokens
+        stu = getattr(msg.usage, "server_tool_use", None)
+        searches += int(getattr(stu, "web_search_requests", 0) or 0)
+        text = "".join(b.text for b in msg.content if b.type == "text")
+        stop = msg.stop_reason
+        if stop != "pause_turn":
+            break
+        msgs = [msgs[0], {"role": "assistant", "content": msg.content}]
+    cost = tin * cfg.price_in + tout * cfg.price_out + searches * SEARCH_USD
+    replace_row(
+        job,
+        rid,
+        {
+            "stage": "04_research",
+            "provider": "anthropic",
+            "model": cfg.model,
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "web_searches": searches,
+            "cost_usd": round(cost, 6),
+            "basis": "ESTIMATE (list price x usage + searches)",
+            "stop_reason": stop,
+        },
+    )
+    cache.write_text(json.dumps({"text": text, "stop_reason": stop}, ensure_ascii=False))
+    if stop == "refusal":
+        raise RuntimeError("model refusal at research")
+    return Reply(text, stop)
+
+
 def parse_json(text: str) -> dict:
     s = text.strip()
     a, b = s.find("{"), s.rfind("}")

@@ -280,6 +280,9 @@ Owner: "fakt philosophi hach subject yetoy, other subject che ky" and "finance p
 ### D28 (2026-11-21, owner chat message): "default yes, remaining kam purn kra"
 Recorded answers to the two open questions of D27: (1) the disclaimer sentence "not SEBI-registered" is correct (owner input A6, SEBI status = not registered); (2) monetized finance videos use the owner's own voice (gate shows an advisory "finance_voice" line when an AI voice is used). Also done: CI job for apps/studio (ruff via the repo gate, pytest in apps/studio on Python 3.12 with FFmpeg); handover refreshed. Lawyer approval of the disclaimer text still REQUIRES REVIEW.
 
+### D29 (2026-11-21, owner chat messages): topic-only videos; the AI researches by itself
+Owner: a one-line batch topic was refused ("notes too short"), then "ai coonected aahe na mg to reserch ka nahi karat". Done: one line = one video in the batch form (blocks with --- still work for long notes); single-job notes optional; a topic-only job gets stage-04 web research with the Claude web search server tool (up to 6 searches; $10 per 1,000 searches per the claude-api reference): a research pack with key facts and source URLs, the traditional version for mythology, an original story idea and an outline; the script and the fact-check then use that pack. Live test (2 searches, short topic): worked, 0.23 USD; worst case reserved before the call and replaced by the measured cost (tokens + searches).
+
 ## Owner inputs: status
 
 | ID | Input | Status |

@@ -565,12 +565,10 @@ Story contains fictional characters/events</label>
 
 BATCH_FORM = """<p><a href='/'>← dashboard</a></p><h1>Many videos at once</h1>
 <form class=card method=post action=/jobs/batch>
-<label>Videos: one block per video, separated by a line with only <b>---</b>. First line = title, next lines = topic notes.</label>
-<textarea name=blocks rows=16 placeholder="मार्कस ऑरेलियस: जे हातात आहे ते करा
-Idea: control what you can... story idea... outline...
----
-एपिक्टेटस: काळजी कशाची करायची?
-Idea: ... story ... outline ..."></textarea>
+<label>Videos: <b>one line = one video topic</b>. For longer notes use blocks separated by a line with only <b>---</b> (first line = title, then notes).</label>
+<textarea name=blocks rows=16 placeholder="राम आणि रावण युद्ध – animated कथा
+मार्कस ऑरेलियस: जे हातात आहे ते करा
+पाण्याचे चक्र मुलांसाठी"></textarea>
 <label>Category (विषय)</label><select name=category>{CATEGORY_OPTIONS}</select>
 <label>Language</label><select name=language>{LANG_OPTIONS}</select>
 <label>Video type</label><select name=format><option value=long_16x9>Long video 16:9</option>
@@ -606,16 +604,15 @@ def batch_create(
     user: str = Depends(auth),
 ):
     """Create one queued job per block (title line + notes). Validation is the same as for a single job."""
-    items = [b.strip() for b in re.split(r"(?m)^\s*---\s*$", blocks) if b.strip()]
+    if re.search(r"(?m)^\s*---\s*$", blocks):  # blocks: title line + notes, separated by ---
+        items = [b.strip() for b in re.split(r"(?m)^\s*---\s*$", blocks) if b.strip()]
+    else:  # no separator: every non-empty line is one video topic
+        items = [ln.strip() for ln in blocks.splitlines() if ln.strip()]
     if not items:
         raise HTTPException(400, "write at least one video block")
     if len(items) > 50:
         raise HTTPException(400, "at most 50 videos per batch")
     made = []
-    for b in items:
-        title, _, notes = b.partition("\n")
-        if len(notes.strip()) < 30:
-            raise HTTPException(400, f"notes too short for: {title[:60]}")
     for b in items:
         title, _, notes = b.partition("\n")
         r = create(
@@ -674,8 +671,13 @@ def create(
     if not title:
         raise HTTPException(400, "title required")
     has_file = bool(brief and brief.filename)
-    if not has_file and len(brief_text.strip()) < 30:
-        raise HTTPException(400, "write the topic notes (at least a few lines) or upload a notes file")
+    brief_auto = not has_file and len(brief_text.strip()) < 30
+    if brief_auto:  # topic only: the script is written from widely known facts and checked against them
+        brief_text = (
+            f"TOPIC: {title}\n{brief_text.strip()}\nNo research pack was given: use only widely known, "
+            "well-established facts and traditional/mainstream versions of stories; keep dates and numbers vague "
+            "unless certain; no invented quotes."
+        )
     if len(brief_text) > 200_000:
         raise HTTPException(413, "notes too long")
     jid = (
@@ -711,6 +713,7 @@ def create(
             "quote": quote,
             "quote_credit": quote_credit,
             "has_fiction": bool(has_fiction),
+            "brief_auto": brief_auto,
             "created_utc": pipeline.now(),
         }
         pipeline.wj(job / "job.json", meta)

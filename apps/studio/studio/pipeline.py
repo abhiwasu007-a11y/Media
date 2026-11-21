@@ -79,6 +79,14 @@ def set_status(job: Path, stage: str, state: str, note: str = "") -> None:
 
 # ------------------------------------------------------------------ 04 research
 def s04_research(job: Path, meta: dict) -> str:
+    note = ""
+    if meta.get("brief_auto") and not (job / "brief_topic.md").exists():
+        # topic only: the AI researches the web and writes the research pack (sources listed with each fact)
+        topic = (job / "brief.md").read_text()
+        r = llm.research(job, f"{topic}\nVideo length: {meta.get('minutes', 8.5)} minutes; category: {meta.get('category')}.")
+        (job / "brief_topic.md").write_text(topic)
+        (job / "brief.md").write_text(r.text.strip() + "\n")
+        note = "web research done; "
     brief = (job / "brief.md").read_text()
     q = (meta.get("quote") or "").strip()
     out = {"brief_sha256": hashlib.sha256(brief.encode()).hexdigest(), "quote": None}
@@ -87,7 +95,7 @@ def s04_research(job: Path, meta: dict) -> str:
         found = src.exists() and q in re.sub(r"\s+", " ", src.read_text())
         out["quote"] = {"text": q, "credit": meta.get("quote_credit", ""), "verified_exact": bool(found)}
     wj(job / "research.json", out)
-    return "quote verified" if out["quote"] and out["quote"]["verified_exact"] else "no verified quote"
+    return note + ("quote verified" if out["quote"] and out["quote"]["verified_exact"] else "no verified quote")
 
 
 # ------------------------------------------------------------------ 05 script
@@ -325,6 +333,12 @@ def s06_fact_check(job: Path, meta: dict) -> str:
         'claim that a fictional story is real. Return ONLY JSON: {"items":[{"scene_id","claim","verdict":'
         '"SUPPORTED|UNSUPPORTED|NEEDS_EDIT","note"}],"overall":"PASS|FAIL","required_edits":[{"scene_id","old","new"}]}'
     )
+    if meta.get("brief_auto"):
+        user += (
+            "\nThe pack is only a topic line: judge each factual claim against widely documented, mainstream knowledge "
+            "(traditional versions for mythology); mark SUPPORTED when well established, UNSUPPORTED when doubtful or "
+            "invented. Creative retelling of a traditional story is fine."
+        )
     if meta.get("category") == "finance":
         user += "\nAlso judge every scene against these rules; any breach makes overall FAIL:\n" + FINANCE_RULES
     r = llm.parse_json(llm.call(job, "06_fact_check", "You are a strict fact-checker. Be concise.", user, 16000).text)
