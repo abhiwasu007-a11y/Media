@@ -56,6 +56,7 @@ FIELDS: list[tuple[str, str, str, str, tuple[str, ...]]] = [
     ("AMW_MOTION_PROVIDER", "AI motion clips (free Kaggle GPU, Wan2.1)", "select", "off", ("off", "kaggle")),
     ("AMW_KAGGLE_USERNAME", "Kaggle username", "text", "", ()),
     ("AMW_SECRET_KAGGLE_KEY", "Kaggle API key", "secret", "", ()),
+    ("AMW_SECRET_HF_TOKEN", "Hugging Face read token (AI voice; placed in your private Kaggle notebook)", "secret", "", ()),
     ("AMW_MAX_MOTION_CLIPS", "Max motion clips per video", "number", "8", ()),
     ("AMW_BUDGET_PER_VIDEO_USD", "Per-video cap, USD (D9)", "number", "5.0", ()),
     ("AMW_BUDGET_PILOT_USD", "Pilot cap, USD (D9)", "number", "50.0", ()),

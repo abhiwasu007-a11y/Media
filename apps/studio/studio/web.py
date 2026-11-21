@@ -54,7 +54,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 HEAVY_STAGES = {"07_voice", "08a_assets", "08b_motion", "08_visuals", "10_render", "10_qc"}
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".webm", ".mp4"}
 CATEGORIES = ("philosophy", "finance")
-VOICE_MODES = ("none", "parler")
+VOICE_MODES = ("none", "parler")  # plus "ai:<speaker>" for the free Kaggle voice
 FORMATS = ("long_16x9", "short_9x16")
 
 
@@ -493,8 +493,7 @@ def new_form(_: str = Depends(auth)) -> HTMLResponse:
 <label>…or upload the notes as a file (.md / .txt)</label><input type=file name=brief accept=".md,.txt">
 <label>Public-domain source text for quote check (.txt, optional)</label><input type=file name=source accept=".txt">
 <label>Quote (exact text, optional)</label><input name=quote><label>Quote credit</label><input name=quote_credit>
-<label>Voice</label><select name=voice_mode><option value=none>none yet (silent, upload later)</option>
-<option value=parler>Indic Parler-TTS (free, needs HF_TOKEN + WITH_TTS build)</option></select>
+<label>Voice</label><select name=voice_mode>{VOICE_OPTIONS}<option value=none>no voice yet (upload later)</option></select>
 <label style='display:flex;gap:8px;align-items:center'><input type=checkbox name=has_fiction value=1 style='width:auto'>
 Story contains fictional characters/events</label>
 <p class=dim>Paid step: the script and fact-check use the Anthropic API within the per-video cap.</p>
@@ -502,7 +501,13 @@ Story contains fictional characters/events</label>
     from .languages import LANGS  # noqa: PLC0415
 
     opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
-    return page("New job", body.replace("{LANG_OPTIONS}", opts))
+    from .tts_kaggle import VOICES  # noqa: PLC0415
+
+    vopts = "".join(
+        f"<option value='ai:{n}'>{e(n)} – {e(v[2])} {e('पुरुष' if v[1] == 'male' else 'स्त्री')} (free AI voice)</option>"
+        for n, v in VOICES.items()
+    )
+    return page("New job", body.replace("{LANG_OPTIONS}", opts).replace("{VOICE_OPTIONS}", vopts))
 
 
 @app.post("/jobs")
@@ -523,7 +528,15 @@ def create(
 ):
     if category not in CATEGORIES:
         raise HTTPException(400, "unknown category")
-    if voice_mode not in VOICE_MODES:
+    speaker = None
+    if voice_mode.startswith("ai:"):
+        from .tts_kaggle import VOICES  # noqa: PLC0415
+
+        speaker = voice_mode[3:]
+        if speaker not in VOICES:
+            raise HTTPException(400, "unknown voice")
+        voice_mode = "ai"
+    elif voice_mode not in VOICE_MODES:
         raise HTTPException(400, "unknown voice mode")
     if format not in FORMATS:
         raise HTTPException(400, "unknown video type")
@@ -568,6 +581,7 @@ def create(
             "min_minutes": 0.6 if short else max(1, minutes - 1),
             "max_minutes": 1.0 if short else minutes + 1.2,
             "voice_mode": voice_mode,
+            "speaker": speaker,
             "quote": quote,
             "quote_credit": quote_credit,
             "has_fiction": bool(has_fiction),
@@ -640,6 +654,11 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
             + f"</ul><pre>{e(sc.get('description', ''))}</pre>"
         )
     opts = "".join(f"<option>{k}</option>" for k in pipeline.STAGES)
+    from .tts_kaggle import VOICES  # noqa: PLC0415
+
+    voice_opts = "".join(
+        f"<option value={e(n)}>{e(n)} – {e(v[2])} {e('पुरुष' if v[1] == 'male' else 'स्त्री')}</option>" for n, v in VOICES.items()
+    )
     body = (
         f"<p><a href='/'>← all jobs</a></p><h1>{e(s['meta'].get('title'))}</h1>"  # noqa: S608 - HTML, not SQL
         f"<div class=dim>{e(jid)} · {e(s['meta'].get('category'))} · voice: {e(s['meta'].get('voice_mode'))} · cost ${s['cost']:.4f}</div>"
@@ -651,6 +670,9 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         f"<h2>Actions</h2><div class=row><form class=card method=post action='/jobs/{e(jid)}/voice' enctype=multipart/form-data>"
         f"<label>Upload owner voice recording (wav / mp3 / m4a): re-renders, no paid call</label>"
         f"<input type=file name=voice accept='audio/*' required><p><button>Upload and re-render</button></p></form>"
+        f"<form class=card method=post action='/jobs/{e(jid)}/aivoice'><label>Free AI voice (made on Kaggle GPU; needs Kaggle + "
+        f"Hugging Face keys in Settings)</label><select name=speaker>{voice_opts}</select>"
+        f"<p><button>Make AI voice and re-render</button></p></form>"
         f"<form class=card method=post action='/jobs/{e(jid)}/voicepack' enctype=multipart/form-data>"
         f"<label>Upload a voice pack (.zip from the free AI voice; exact timing per sentence)</label>"
         f"<input type=file name=pack accept='.zip' required><p><button>Upload voice pack and re-render</button></p></form>"
@@ -740,6 +762,22 @@ def _make_versions(jid: str, src: Path, langs: list[str], user: str):
         enqueue(nid, None)
         made.append(nid)
     return RedirectResponse("/" if made else f"/jobs/{jid}", status_code=303)
+
+
+@app.post("/jobs/{jid}/aivoice")
+def aivoice(jid: str, speaker: str = Form(...), user: str = Depends(auth)):
+    from .tts_kaggle import VOICES  # noqa: PLC0415
+
+    job = get_job(jid)
+    if speaker not in VOICES:
+        raise HTTPException(400, "unknown voice")
+    (job / "voice.wav").unlink(missing_ok=True)
+    meta = pipeline.rj(job / "job.json")
+    meta["voice_mode"], meta["speaker"] = "ai", speaker
+    pipeline.wj(job / "job.json", meta)
+    config.audit(user, "job.aivoice", {"job": jid, "speaker": speaker})
+    enqueue(jid, "07_voice")
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
 @app.post("/jobs/{jid}/voicepack")
