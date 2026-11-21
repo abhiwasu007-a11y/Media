@@ -640,6 +640,9 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         f"<h2>Actions</h2><div class=row><form class=card method=post action='/jobs/{e(jid)}/voice' enctype=multipart/form-data>"
         f"<label>Upload owner voice recording (wav / mp3 / m4a): re-renders, no paid call</label>"
         f"<input type=file name=voice accept='audio/*' required><p><button>Upload and re-render</button></p></form>"
+        f"<form class=card method=post action='/jobs/{e(jid)}/voicepack' enctype=multipart/form-data>"
+        f"<label>Upload a voice pack (.zip from the free AI voice; exact timing per sentence)</label>"
+        f"<input type=file name=pack accept='.zip' required><p><button>Upload voice pack and re-render</button></p></form>"
         f"<form class=card method=post action='/jobs/{e(jid)}/music' enctype=multipart/form-data>"
         f"<label>Background music (YouTube Audio Library track, own channels only, D10)</label>"
         f"<input type=file name=music accept='audio/*' required><label>Track title and artist</label><input name=title required>"
@@ -726,6 +729,50 @@ def _make_versions(jid: str, src: Path, langs: list[str], user: str):
         enqueue(nid, None)
         made.append(nid)
     return RedirectResponse("/" if made else f"/jobs/{jid}", status_code=303)
+
+
+@app.post("/jobs/{jid}/voicepack")
+def voicepack(jid: str, pack: UploadFile = File(...), user: str = Depends(auth)):
+    """Install a voice pack (zip: voice.json + tts/*.wav, one file per sentence) made by the free local TTS. The
+    sentences must match this job's script exactly, so the timing follows the real audio sentence by sentence."""
+    job = get_job(jid)
+    raw = job / "voicepack_upload.zip"
+    save_upload(pack, raw)
+    try:
+        with zipfile.ZipFile(raw) as z:
+            names = [n for n in z.namelist() if not n.endswith("/")]
+            if "voice.json" not in names or len(names) > 5000:
+                raise HTTPException(400, "not a voice pack (voice.json missing)")
+            if any(not (n == "voice.json" or re.fullmatch(r"tts/[A-Za-z0-9._-]+\.wav", n)) for n in names):
+                raise HTTPException(400, "unexpected file in the voice pack")
+            if sum(i.file_size for i in z.infolist()) > MAX_UPLOAD * 3:
+                raise HTTPException(413, "voice pack too large")
+            v = json.loads(z.read("voice.json"))
+            script = pipeline.rj(job / "script.json")
+            want = [(sc["id"], t) for sc in script["scenes"] for t in pipeline.sentences(sc["narration"])]
+            got = [(it["scene"], it["text"]) for it in v.get("items", [])]
+            if want != got:
+                raise HTTPException(409, "this voice pack was made for a different script or language")
+            if any(f"tts/{it['file']}" not in names for it in v["items"]):
+                raise HTTPException(400, "voice pack is missing audio files")
+            shutil.rmtree(job / "tts", ignore_errors=True)
+            (job / "tts").mkdir()
+            for n in names:
+                if n.startswith("tts/"):
+                    (job / n).write_bytes(z.read(n))
+            v["mode"] = "parler"
+            pipeline.wj(job / "voice.json", v)
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(400, "not a zip file") from exc
+    finally:
+        raw.unlink(missing_ok=True)
+    (job / "voice.wav").unlink(missing_ok=True)
+    meta = pipeline.rj(job / "job.json")
+    meta["voice_mode"], meta["speaker"] = "pack", v.get("speaker")
+    pipeline.wj(job / "job.json", meta)
+    config.audit(user, "job.voicepack", {"job": jid, "speaker": v.get("speaker")})
+    enqueue(jid, "07_voice")
+    return RedirectResponse(f"/jobs/{jid}", status_code=303)
 
 
 @app.post("/jobs/{jid}/voice")

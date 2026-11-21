@@ -272,6 +272,12 @@ def sentences(text: str) -> list[str]:
 
 def s07_voice(job: Path, meta: dict) -> str:
     mode = meta.get("voice_mode", "none")
+    if mode == "pack":  # per-sentence TTS files installed from a voice pack (exact timing per sentence)
+        v = rj(job / "voice.json") if (job / "voice.json").exists() else {}
+        missing = [it["file"] for it in v.get("items", []) if not (job / "tts" / it["file"]).exists()]
+        if v.get("mode") != "parler" or not v.get("items") or missing:
+            raise RuntimeError(f"voice pack incomplete ({len(missing)} files missing); upload it again")
+        return f"voice pack: {v.get('speaker')} ({len(v['items'])} sentences)"
     if (job / "voice.wav").exists():
         mode = "file"
     info = {"mode": mode}
