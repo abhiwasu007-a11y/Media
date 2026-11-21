@@ -205,6 +205,27 @@ def pixabay_video(key: str, query: str, out: Path, used: set[int]) -> dict:
     raise LookupError(f"no usable Pixabay video for '{query}'")
 
 
+DEPTH_MODEL = "depth-anything/Depth-Anything-V2-Small-hf"  # Apache-2.0 (model card, read 2026-11-21)
+
+
+def depth_maps(job: Path, files: list[Path], notes: list[str]) -> int:
+    """Depth map per AI picture for the 2.5D parallax camera. Optional: needs the WITH_DEPTH build (torch)."""
+    todo = [f for f in files if f.exists() and not f.with_name(f.stem + "_depth.png").exists()]
+    if not todo:
+        return 0
+    try:
+        from PIL import Image  # noqa: PLC0415
+        from transformers import pipeline  # noqa: PLC0415
+    except ImportError:
+        notes.append("depth: not installed (build with WITH_DEPTH=1); plain zoom/pan used")
+        return 0
+    est = pipeline("depth-estimation", model=DEPTH_MODEL, device=-1)
+    for f in todo:
+        d = est(Image.open(f).convert("RGB"))["depth"]
+        d.save(f.with_name(f.stem + "_depth.png"))
+    return len(todo)
+
+
 def s08a_assets(job: Path, meta: dict) -> str:
     plan = json.loads((job / "asset_plan.json").read_text())
     adir = job / "assets"
@@ -248,7 +269,8 @@ def s08a_assets(job: Path, meta: dict) -> str:
             notes.append(f"thumbnail: {type(exc).__name__}: {str(exc)[:120]}")
     elif tf.exists() and "_thumbnail" in old:
         out["_thumbnail"] = old["_thumbnail"]
+    n_depth = depth_maps(job, [job / a["file"] for a in out.values() if a["kind"] == "image"], notes)
     (job / "assets.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     kinds = [a["kind"] for a in out.values()]
-    msg = f"images {kinds.count('image')}, videos {kinds.count('video')}"
+    msg = f"images {kinds.count('image')}, videos {kinds.count('video')}, depth maps {n_depth}"
     return msg + (f"; fallbacks: {len(notes)} ({'; '.join(notes[:3])})" if notes else "")

@@ -6,6 +6,7 @@ services:
       context: .
       args:
         WITH_TTS: "${WITH_TTS:-0}"
+        WITH_DEPTH: "${WITH_DEPTH:-1}"
     env_file: .env
     environment:
       AMW_STUDIO_DATA: /data

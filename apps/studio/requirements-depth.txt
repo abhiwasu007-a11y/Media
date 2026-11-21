@@ -1,0 +1,4 @@
+# Optional 2.5D parallax (depth maps on CPU). Installed with build arg WITH_DEPTH=1 (default in compose).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+transformers==4.46.1

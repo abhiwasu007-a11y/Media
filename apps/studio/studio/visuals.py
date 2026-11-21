@@ -345,6 +345,16 @@ class Media:
             im = Image.open(job / asset["file"]).convert("RGB")
             sc = max(W * 1.14 / im.width, H * 1.14 / im.height)
             self.img = im.resize((int(im.width * sc), int(im.height * sc)), Image.LANCZOS)
+            self.depth = None
+            dfile = (job / asset["file"]).with_name((job / asset["file"]).stem + "_depth.png")
+            if dfile.exists():  # 2.5D parallax: near pixels move more than far ones
+                import cv2  # noqa: PLC0415 - optional speed path
+                import numpy as np  # noqa: PLC0415
+
+                self.cv2, self.np = cv2, np
+                self.arr = np.asarray(self.img)
+                d = np.asarray(Image.open(dfile).convert("L").resize(self.img.size, Image.BILINEAR), np.float32) / 255.0
+                self.depth = cv2.GaussianBlur(d, (0, 0), 6)
         else:
             vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={FPS},eq=saturation=0.85"
             self.proc = subprocess.Popen(
@@ -372,6 +382,8 @@ class Media:
             self.last = Image.new("RGB", (W, H), BG)
 
     def frame(self, t: float) -> Image.Image:
+        if self.kind == "image" and self.depth is not None:
+            return self._parallax(t)
         if self.kind == "image":
             p = min(1.0, max(0.0, t / max(self.dur, 0.1)))
             q = p if self.idx % 2 == 0 else 1 - p  # alternate zoom in / zoom out
@@ -385,6 +397,29 @@ class Media:
         if len(raw) == W * H * 3:
             self.last = Image.frombytes("RGB", (W, H), raw)
         return self.last
+
+    def _parallax(self, t: float) -> Image.Image:
+        np, cv2 = self.np, self.cv2
+        p = min(1.0, max(0.0, t / max(self.dur, 0.1)))
+        e = p * p * (3 - 2 * p)  # smoothstep camera move
+        sgn = 1 if self.idx % 2 == 0 else -1
+        zoom = 1.0 + 0.07 * e
+        ih, iw = self.depth.shape
+        base = min(iw, ih * W / H) / zoom
+        sx = base / W
+        cx = iw / 2 + sgn * (e - 0.5) * iw * 0.03
+        cy = ih / 2
+        if not hasattr(self, "_grid"):
+            self._grid = np.meshgrid(np.arange(W, dtype=np.float32) - W / 2, np.arange(H, dtype=np.float32) - H / 2)
+        gx, gy = self._grid
+        mx = cx + gx * sx
+        my = cy + gy * sx
+        dep = cv2.remap(self.depth, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        shift = sgn * (e - 0.5) * 46.0  # pixels of parallax between near and far
+        mx = mx - (dep - 0.5) * shift * sx
+        my = my - (dep - 0.5) * abs(shift) * 0.25 * sx
+        out = cv2.remap(self.arr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        return Image.fromarray(out)
 
     def close(self) -> None:
         if self.proc:
@@ -419,9 +454,40 @@ def frame(s, t, dur, media=None):
         d = ImageDraw.Draw(img)
         particles(d, t)
         DRAW.get(s["visual"], v_kinetic)(d, s, t, dur, img)
-    fade = min(1.0, t / 0.22, (dur - t) / 0.22)
-    if fade < 1:
-        img = Image.blend(Image.new("RGB", (W, H), (0, 0, 0) if media else BG), img, max(0.0, fade))
+    if media is not None:
+        img = film_look(img, t)
+    return img
+
+
+@lru_cache(maxsize=1)
+def _grade_lut():
+    """Cinematic grade: slightly lifted teal shadows, warm highlights, gentle S-curve."""
+    lut = []
+    for ch in range(3):
+        for v in range(256):
+            x = v / 255
+            x = 0.75 * x + 0.25 * x * x * (3 - 2 * x)  # soft S-curve
+            if ch == 0:
+                x = x + 0.05 * x**2
+            elif ch == 2:
+                x = x + 0.06 * (1 - x) ** 2 - 0.03 * x**2
+            lut.append(max(0, min(255, int(x * 255))))
+    return lut
+
+
+@lru_cache(maxsize=8)
+def _grain(k: int) -> Image.Image:
+    import random  # noqa: PLC0415
+
+    rnd = random.Random(k)  # noqa: S311 - visual noise, not security
+    g = Image.effect_noise((W // 2, H // 2), 22 + rnd.random() * 4).resize((W, H), Image.BILINEAR)
+    return g
+
+
+def film_look(img: Image.Image, t: float) -> Image.Image:
+    img = img.point(_grade_lut())
+    img = Image.blend(img, Image.merge("RGB", [_grain(int(t * FPS) % 8)] * 3), 0.045)
+    img.paste(Image.new("RGB", (W, H), (0, 0, 0)), (0, 0), vignette())
     return img
 
 
@@ -479,16 +545,27 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     assert p.stdin is not None
     fi = 0
+    prev = None  # last frame of the previous scene, dissolved into the new one
+    xf = round(0.4 * FPS)
     for row in timings["scenes"]:
         s, dur, start = by[row["id"]], row["dur"], round(row["start"] * FPS)
         end = round((row["start"] + dur) * FPS)
         a = assets.get(row["id"])
         media = Media(job, a, dur, len(row["id"]) + int(row["id"][1:])) if a and (job / a["file"]).exists() else None
+        last = prev
         try:
             while fi < end:
                 t = (fi - start) / FPS
-                p.stdin.write(frame(s, max(0.0, min(dur, t)), dur, media).tobytes())
+                img = frame(s, max(0.0, min(dur, t)), dur, media)
+                k = fi - start
+                if prev is not None and k < xf:
+                    img = Image.blend(prev, img, (k + 1) / (xf + 1))
+                elif prev is None and k < xf:  # fade in from black at the very start
+                    img = Image.blend(Image.new("RGB", (W, H), (0, 0, 0)), img, (k + 1) / (xf + 1))
+                p.stdin.write(img.tobytes())
+                last = img
                 fi += 1
+            prev = last
         finally:
             if media:
                 media.close()

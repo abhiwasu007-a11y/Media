@@ -237,6 +237,9 @@ Operator notes: no score was given, so no score or approval is recorded. Next: A
 ### D17 (2026-11-21, owner chat message): free tools only
 Quoted verbatim: "Free Version use kra". Applied: story images from the Cloudflare Workers AI free daily allocation (FLUX.1 [schnell], CF-01, IMG-04) by default; the paid BFL provider stays only as an opt-in setting (`AMW_IMAGE_PROVIDER=bfl`) and is not used. Pixabay (free) for B-roll; SFX code-made. The script and fact-check still use the owner's Anthropic key (paid, within the D9 caps); a free LLM was not requested for those stages.
 
+### D18 (2026-11-21, owner chat message): cinematic video
+Quoted verbatim: "Cinematic video". Applied within D17 (free tools): 2.5D parallax camera from depth maps (Depth-Anything-V2-Small, Apache-2.0, CPU; Base/Large are CC-BY-NC and not used), cinematic colour grade, film grain, vignette, cross-dissolves between scenes. Not done: AI-generated moving footage (image-to-video); no free option fits the server (CPU only) or the commercial terms, so it needs a paid provider or a GPU and an owner decision.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
