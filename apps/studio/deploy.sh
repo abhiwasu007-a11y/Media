@@ -35,6 +35,9 @@ for V in AMW_CF_ACCOUNT_ID AMW_SECRET_CF_AI_TOKEN AMW_SECRET_PIXABAY_API_KEY; do
     [ -n "$X" ] && setvar "$V" "$X"; unset X
   fi
 done
+# resources agreed with the owner (D23): 2 CPUs at low priority, 3 GB RAM; kept if already set
+grep -q '^AMW_CPUS=' .env || setvar AMW_CPUS 2.0
+grep -q '^AMW_MEM=' .env || setvar AMW_MEM 3g
 if grep -q '^CF_TUNNEL_TOKEN=.\+' .env; then setvar COMPOSE_PROFILES named; else setvar COMPOSE_PROFILES quick; fi
 chmod 600 .env
 mkdir -p data/jobs
