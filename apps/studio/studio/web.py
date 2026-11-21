@@ -348,7 +348,7 @@ def index(_: str = Depends(auth)) -> HTMLResponse:
         f"<h1>AMW Studio</h1><div class=row><div class=card>Pilot spend <b>${spent:.2f}</b> / ${cfg.pilot_cap_usd:.2f}"
         f"<div class=dim>Per-video cap ${cfg.per_video_cap_usd:.2f} · model {e(cfg.model)}</div></div>"
         f"<div class=card>Queue: {Q.qsize()} waiting · {'<span class=bad>market hours: render paused</span>' if market_hours() else '<span class=ok>render allowed</span>'}"
-        f"<div><a href='/jobs/new'>+ New job</a></div></div></div>"
+        f"<div><a href='/jobs/new'>+ New job</a> · <a href='/settings'>Settings</a></div></div></div>"
         f"<form class=card method=post action=/jobs/import enctype=multipart/form-data><label>Import a job folder (.zip)</label>"
         f"<input type=file name=bundle accept='.zip' required><p><button>Import</button></p></form>"
         f"<div class=wrap><table><tr><th>Job</th><th>Category</th><th>Stage</th><th>Cost</th><th>QC</th><th>Gate</th></tr>"
