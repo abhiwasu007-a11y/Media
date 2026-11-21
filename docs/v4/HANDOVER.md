@@ -31,7 +31,9 @@ no secrets, no server details, no book text here.
   without voice; the owner then uploaded the Marathi voice pack (Sanjay) — result not yet reported.
 - Permanent link: the owner's main domain carries the trading app — **never move its nameservers**. A second
   domain was added to Cloudflare (DNS records empty) and its nameservers were being switched at Hostinger; the
-  tunnel (Zero Trust → Tunnels, hostname `studio.<second domain>` → `HTTP studio:8080`) is not created yet.
+  tunnel is now live (Zero Trust tunnel `amw-studio`, route `studio.<second domain>` → `http://studio:8080`, token in
+  the server `.env` as `CF_TUNNEL_TOKEN`); `/healthz` answers 200 and the dashboard asks for the password. The
+  quick trycloudflare tunnel is off.
 
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
