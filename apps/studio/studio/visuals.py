@@ -31,10 +31,21 @@ GRN = (110, 196, 140)
 COLS = {"दिला": (120, 170, 235), "गेला": RED, "जगलो": GRN}
 
 
-@lru_cache(maxsize=64)
+LANG = "mr"
+
+
+def set_language(code: str) -> None:
+    global LANG
+    if code != LANG:
+        LANG = code
+        font.cache_clear()
+
+
+@lru_cache(maxsize=128)
 def font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    f = FONTS / ("Mukta-Bold.ttf" if bold else "Mukta-Regular.ttf")
-    return ImageFont.truetype(str(f), size, layout_engine=ImageFont.Layout.RAQM)
+    from .languages import font_path  # noqa: PLC0415
+
+    return ImageFont.truetype(str(font_path(LANG, bold)), size, layout_engine=ImageFont.Layout.RAQM)
 
 
 def ease(x: float) -> float:

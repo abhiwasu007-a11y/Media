@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Red
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from . import config, llm, pipeline
+from .languages import LANGS
 
 app = FastAPI(title="AMW Studio", docs_url=None, redoc_url=None, openapi_url=None)
 security = HTTPBasic()
@@ -299,6 +300,7 @@ def new_form(_: str = Depends(auth)) -> HTMLResponse:
 <label>Title</label><input name=title required>
 <label>Category</label><select name=category><option value=philosophy>philosophy (non-finance)</option>
 <option value=finance>finance (blocked in this build)</option></select>
+<label>Language</label><select name=language>{LANG_OPTIONS}</select>
 <label>Video type</label><select name=format><option value=long_16x9>Long video 16:9 (YouTube)</option>
 <option value=short_9x16>Short 9:16 (YouTube Shorts / Reels, under 60 s)</option></select>
 <label>Length in minutes (long video only)</label><input name=minutes type=number step=0.5 value=8.5>
@@ -309,7 +311,10 @@ def new_form(_: str = Depends(auth)) -> HTMLResponse:
 <option value=parler>Indic Parler-TTS (free, needs HF_TOKEN + WITH_TTS build)</option></select>
 <p class=dim>Paid step: the script and fact-check use the Anthropic API within the per-video cap.</p>
 <button>Create and run</button></form>"""
-    return page("New job", body)
+    from .languages import LANGS  # noqa: PLC0415
+
+    opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
+    return page("New job", body.replace("{LANG_OPTIONS}", opts))
 
 
 @app.post("/jobs")
@@ -318,6 +323,7 @@ async def create(
     category: str = Form(...),
     minutes: float = Form(8.5),
     format: str = Form("long_16x9"),  # noqa: A002 - form field name
+    language: str = Form("mr"),
     voice_mode: str = Form("none"),
     quote: str = Form(""),
     quote_credit: str = Form(""),
@@ -345,6 +351,7 @@ async def create(
         "title": title,
         "category": category,
         "format": format,
+        "language": language if language in LANGS else "mr",
         "minutes": minutes,
         "min_minutes": 0.6 if short else max(1, minutes - 1),
         "max_minutes": 1.0 if short else minutes + 1.2,
@@ -429,6 +436,15 @@ def job_page(jid: str, _: str = Depends(auth)) -> HTMLResponse:
         f"<label>Licence</label><select name=licence><option value=standard>Audio Library standard (no attribution)</option>"
         f"<option value=cc-by>Creative Commons BY 4.0 (attribution added to the description)</option></select>"
         f"<p><button>Upload music and re-render</button></p></form>"
+        f"<form class=card method=post action='/jobs/{e(jid)}/versions'><label>Make language versions (re-uses the pictures; "
+        f"only a translation call is paid)</label>"
+        + "".join(
+            f"<label style='display:inline-block;margin-right:10px'><input type=checkbox name=langs value={c} "
+            f"style='width:auto'> {e(v[1])}</label>"
+            for c, v in LANGS.items()
+            if c != s["meta"].get("language", "mr")
+        )
+        + "<p><button>Create versions</button></p></form>"
         f"<form class=card method=post action='/jobs/{e(jid)}/run'><label>Run / resume from stage</label>"
         f"<select name=from_stage><option value=''>resume (unfinished stages)</option>{opts}</select>"
         f"<p class=dim>Re-running 05/06 makes new paid calls.</p><p><button>Run</button></p></form></div>"
@@ -462,6 +478,40 @@ async def music(
     )
     Q.put((jid, "10_render"))
     return RedirectResponse(f"/jobs/{jid}", status_code=303)
+
+
+@app.post("/jobs/{jid}/versions")
+async def versions(jid: str, request: Request, user: str = Depends(auth)):
+    """One new job per language: copies the brief, research, picture plan and pictures; translates the script."""
+    src = get_job(jid)
+    if not (src / "script.json").exists():
+        raise HTTPException(409, "the script is not ready yet")
+    form = await request.form()
+    langs = [str(x) for x in form.getlist("langs") if str(x) in LANGS]
+    meta = pipeline.rj(src / "job.json")
+    made = []
+    for lang in langs:
+        nid = f"{jid}-{lang}"
+        dst = config.jobs_dir() / nid
+        if dst.exists():
+            continue
+        dst.mkdir()
+        for f in ("brief.md", "source.txt", "research.json", "asset_plan.json", "assets.json", "music.wav", "music.json"):
+            if (src / f).exists():
+                shutil.copy2(src / f, dst / f)
+        if (src / "assets").exists():
+            shutil.copytree(src / "assets", dst / "assets")
+        shutil.copy2(src / "script.json", dst / "source_script.json")
+        m = {**meta, "id": nid, "language": lang, "translate_from": jid, "voice_mode": "none", "created_utc": pipeline.now()}
+        m["title"] = f"{meta.get('title')} [{LANGS[lang][0]}]"
+        pipeline.wj(dst / "job.json", m)
+        for st in ("04_research", "05b_asset_plan", "08a_assets", "08b_motion"):
+            if (dst / "asset_plan.json").exists() or st == "04_research":
+                pipeline.set_status(dst, st, "done", f"copied from {jid}")
+        config.audit(user, "job.versions", {"from": jid, "to": nid})
+        Q.put((nid, None))
+        made.append(nid)
+    return RedirectResponse("/" if made else f"/jobs/{jid}", status_code=303)
 
 
 @app.post("/jobs/{jid}/voice")

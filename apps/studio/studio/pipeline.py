@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from . import assets, config, llm, visuals
+from . import assets, config, languages, llm, visuals
 
 SR = 48000
 GAP_SENT, GAP_SCENE, LEAD, TAIL = 0.28, 0.55, 0.6, 1.5
@@ -77,11 +77,11 @@ def s04_research(job: Path, meta: dict) -> str:
 
 
 # ------------------------------------------------------------------ 05 script
-SYSTEM_05 = """You are the scriptwriter of a Marathi YouTube channel. Channel category: {category}.
-Write natural, warm, spoken Marathi (Devanagari) for a narrator voice, in short sentences a TTS voice reads well.
+SYSTEM_05 = """You are the scriptwriter of a {language} YouTube channel. Channel category: {category}.
+Write natural, warm, spoken {language} in its usual script for a narrator voice, in short sentences a TTS voice reads well.
 Use only the ideas in the research pack; attribute ideas to a named author only where the pack does, with its
 chapter; keep historical dates vague unless the pack gives them; fictional stories are disclosed as fictional once;
-no medical, legal or financial advice; no invented statistics; write numbers in narration as Marathi words.
+no medical, legal or financial advice; no invented statistics; write numbers in narration as {language} words.
 {quote_rule}
 Return ONLY a JSON object, no prose."""
 
@@ -90,14 +90,14 @@ USER_05 = """RESEARCH PACK:
 {brief}
 </pack>
 
-TASK: write the full {minutes}-minute script following the pack's outline. Target {words} Marathi words of
-narration in total. Split into {scenes} scenes of 6–14 seconds. Each scene has 1–3 on-screen beats (short Marathi
+TASK: write the full {minutes}-minute script following the pack's outline. Target {words} {language} words of
+narration in total. Split into {scenes} scenes of 6–14 seconds. Each scene has 1–3 on-screen beats (short {language}
 text, max ~6 words each) so the picture changes every 3–5 seconds. Keep the JSON compact (no extra fields).
 
 JSON shape:
-{{"title_options": [3 Marathi titles <= 70 chars],
+{{"title_options": [3 {language} titles <= 70 chars],
  "thumbnail_text": {{"line1": "<=3 words", "line2": "<=4 words"}},
- "description": "Marathi YouTube description with the source credit line",
+ "description": "{language} YouTube description with the source credit line",
  "tags": [8-12 tags],
  "scenes": [{{"id": "s01", "section": "hook|intro|story|lessons|action|ending", "narration": "...",
    "beats": ["..."], "visual": one of {visuals},
@@ -125,18 +125,22 @@ def _complete_scenes(text: str) -> dict:
 
 
 def s05_script(job: Path, meta: dict) -> str:
+    if meta.get("translate_from"):
+        return s05_translate(job, meta)
+    lang_name = languages.info(meta.get("language", "mr"))[0]
     res = rj(job / "research.json")
     q = res.get("quote")
     quote_rule = (
         f'At most ONE quote, exactly this verified text: "{q["text"]}" ({q["credit"]}), shown on a quote_card '
-        "with its Marathi meaning."
+        f"with its {lang_name} meaning."
         if q and q["verified_exact"]
         else "Do not quote any author verbatim."
     )
     minutes = meta.get("minutes", 8.5)
-    system = SYSTEM_05.format(category=meta.get("category", "finance"), quote_rule=quote_rule)
+    system = SYSTEM_05.format(category=meta.get("category", "finance"), quote_rule=quote_rule, language=lang_name)
     user = USER_05.format(
         brief=(job / "brief.md").read_text(),
+        language=lang_name,
         minutes=minutes,
         words=int(minutes * 128),
         scenes=f"{int(minutes * 5)}–{int(minutes * 6.5)}",
@@ -144,7 +148,7 @@ def s05_script(job: Path, meta: dict) -> str:
     )
     if meta.get("format") == "short_9x16":
         user += (
-            "\n\nFORMAT: YouTube Short, vertical 9:16, 45–58 seconds in total (about 110–135 Marathi words), 8–12 scenes "
+            "\n\nFORMAT: YouTube Short, vertical 9:16, 45–58 seconds in total (about 110–135 words in the video language), 8–12 scenes "
             "of 3–6 seconds. The first scene is a 2-second hook question or shock line; one idea only; end with a one-line "
             "takeaway and an invitation to watch the full video. Beats max 4 words (small screen)."
         )
@@ -170,6 +174,30 @@ def s05_script(job: Path, meta: dict) -> str:
     wj(job / "script.json", data)
     words = sum(len(s["narration"].split()) for s in data["scenes"])
     return f"{len(data['scenes'])} scenes, {words} words"
+
+
+def s05_translate(job: Path, meta: dict) -> str:
+    """Language version of an existing job: translate the script, keep scene ids, visuals and pictures (no new images)."""
+    src = rj(job / "source_script.json")
+    target = languages.info(meta["language"])[0]
+    keep_quote = (meta.get("quote") or "").strip()
+    system = (
+        f"You translate a YouTube narration script into natural, spoken {target} (its usual script), for a narrator voice. "
+        "Keep meaning, tone, scene count and scene ids exactly; adapt idioms naturally; write numbers as words; beats stay short "
+        "(max ~6 words). Translate title_options, thumbnail_text, description, tags, narration, beats and any visible text in "
+        "visual_params (table rows, words, items, meaning), but never translate an English quote marked as a quote: keep it "
+        "verbatim and translate only its meaning field. Return ONLY JSON with the same shape."
+    )
+    user = f"Verbatim quote to keep: {keep_quote or 'none'}\n\nSCRIPT JSON:\n{json.dumps(src, ensure_ascii=False)}"
+    r = llm.call(job, "05_translate", system, user, max_tokens=64000, effort="low")
+    data = llm.parse_json(r.text)
+    if [s["id"] for s in data["scenes"]] != [s["id"] for s in src["scenes"]]:
+        raise RuntimeError("translation changed the scene list; refusing (pictures are matched by scene id)")
+    for a, b in zip(data["scenes"], src["scenes"], strict=True):
+        a["visual"] = b["visual"]
+    data["claims"] = src.get("claims", [])
+    wj(job / "script.json", data)
+    return f"translated {len(data['scenes'])} scenes to {target}"
 
 
 # ------------------------------------------------------------------ 06 fact-check
@@ -204,7 +232,7 @@ def s06_fact_check(job: Path, meta: dict) -> str:
 # ------------------------------------------------------------------ 07 voice
 def sentences(text: str) -> list[str]:
     out: list[str] = []
-    for p in re.split(r"(?<=[.?!।…])\s+", text.strip()):
+    for p in re.split(r"(?<=[.?!।…؟])\s+|(?<=[。！？])", text.strip()):
         p = p.strip()
         if p and out and len(p) < 12:
             out[-1] += " " + p
@@ -250,6 +278,8 @@ def _ts(t: float) -> str:
 
 
 def _chunks(text: str, n: int = 42) -> list[str]:
+    if " " not in text.strip() and len(text) > 18:  # ja/zh: no word spaces, cut by characters
+        return [text[i : i + 18] for i in range(0, len(text), 18)]
     out, cur = [], ""
     for w in text.split():
         if cur and len(cur) + len(w) + 1 > n:
@@ -263,7 +293,8 @@ def _chunks(text: str, n: int = 42) -> list[str]:
 def s09_timeline(job: Path, meta: dict) -> str:
     script = rj(job / "script.json")
     voice = rj(job / "voice.json")
-    wps = config.load().words_per_second
+    lang = meta.get("language", "mr")
+    wps = languages.info(lang)[3]
     # per sentence: (scene id, text, audio or None, duration)
     sents = []
     if voice["mode"] == "parler":
@@ -276,7 +307,7 @@ def s09_timeline(job: Path, meta: dict) -> str:
     else:
         for s in script["scenes"]:
             for txt in sentences(s["narration"]):
-                sents.append((s["id"], txt, None, max(1.2, len(txt.split()) / wps)))
+                sents.append((s["id"], txt, None, max(1.2, languages.units(lang, txt) / wps)))
         if voice["mode"] == "file":  # scale the estimate to the real recording length
             x, sr = sf.read(job / "voice.wav", dtype="float32")
             real = len(x) / sr
@@ -318,11 +349,13 @@ def s09_timeline(job: Path, meta: dict) -> str:
 # ------------------------------------------------------------------ 08 visuals / 11 thumbnail
 def s08_visuals(job: Path, meta: dict) -> str:
     visuals.set_output(meta.get("format") == "short_9x16")
+    visuals.set_language(meta.get("language", "mr"))
     n = visuals.render_visuals(job, rj(job / "script.json"), rj(job / "timings.json"), job / "visuals.mp4")
     return f"{n} frames"
 
 
 def s11_thumbnail(job: Path, meta: dict) -> str:
+    visuals.set_language(meta.get("language", "mr"))
     hero = job / "assets" / "thumb.jpg"
     visuals.thumbnail(rj(job / "script.json"), job / "thumbnail.png", hero if hero.exists() else None)
     return "1280x720" + (" with AI hero picture" if hero.exists() else "")

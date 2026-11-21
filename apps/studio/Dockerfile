@@ -5,7 +5,7 @@ ARG WITH_TTS=0
 ARG WITH_DEPTH=1
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 AMW_STUDIO_DATA=/data HF_HOME=/data/hf-cache
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg libraqm0 libsndfile1 \
+ && apt-get install -y --no-install-recommends ffmpeg libraqm0 libsndfile1 fonts-noto-core fonts-noto-cjk \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt requirements-tts.txt requirements-depth.txt ./

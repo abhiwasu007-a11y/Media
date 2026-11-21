@@ -29,7 +29,7 @@ DEFAULT_STYLE = (
     "film colour grade, 16:9 composition, no text, no letters, no logos, no watermark"
 )
 
-SYSTEM_PLAN = """You plan the pictures for a Marathi explainer video. Return ONLY JSON.
+SYSTEM_PLAN = """You plan the pictures for an explainer / story video (any language). Return ONLY JSON.
 For each scene choose: "ai_image" for story moments with characters or specific places (a consistent illustrated
 world), "stock_video" for generic real-world B-roll (city traffic, phone screens, clocks, nature, crowds), or "none"
 where the code-made diagram/kinetic text is best (tables, timelines, checklists, quote cards, questions).
