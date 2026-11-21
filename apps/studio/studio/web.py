@@ -327,6 +327,8 @@ def e(x: object) -> str:
 
 
 def state_cls(s: str) -> str:
+    if s.startswith("in queue") or s == "working now":
+        return "run"
     return {"done": "ok", "failed": "bad", "running": "run", "waiting": "run"}.get(s, "dim")
 
 
@@ -349,8 +351,13 @@ def index(_: str = Depends(auth)) -> HTMLResponse:
     cfg = config.load()
     jobs = sorted((j for j in config.jobs_dir().iterdir() if (j / "job.json").exists()), key=lambda p: p.name, reverse=True)
     rows = ""
+    with _qlock:
+        order = [jid for jid, _ in _queue_load()]
     for j in jobs:
         s = job_summary(j)
+        if j.name in order:
+            pos = order.index(j.name)
+            s["state"] = "working now" if pos == 0 else f"in queue #{pos}"
         qc = "—" if not s["qc"] else ("<span class=ok>PASS</span>" if s["qc"]["all_pass"] else "<span class=bad>FAIL</span>")
         gate = (
             "—"
@@ -370,7 +377,7 @@ def index(_: str = Depends(auth)) -> HTMLResponse:
         f"<h1>AMW Studio</h1><div class=row><div class=card>Pilot spend <b>${spent:.2f}</b> / ${cfg.pilot_cap_usd:.2f}"
         f"<div class=dim>Per-video cap ${cfg.per_video_cap_usd:.2f} · model {e(cfg.model)}</div></div>"
         f"<div class=card>Queue: {Q.qsize()} waiting · {'<span class=bad>market hours: render paused</span>' if market_hours() else '<span class=ok>render allowed</span>'}"
-        f"<div><a href='/jobs/new'>+ New job</a> · <a href='/settings'>Settings</a></div></div></div>"
+        f"<div><a href='/jobs/new'>+ New job</a> · <a href='/jobs/batch'>+ Many videos</a> · <a href='/settings'>Settings</a></div></div></div>"
         f"<form class=card method=post action=/jobs/import enctype=multipart/form-data><label>Import a job folder (.zip)</label>"
         f"<input type=file name=bundle accept='.zip' required><p><button>Import</button></p></form>"
         f"<div class=wrap><table><tr><th>Job</th><th>Category</th><th>Stage</th><th>Cost</th><th>QC</th><th>Gate</th></tr>"
@@ -535,6 +542,77 @@ Story contains fictional characters/events</label>
     opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
     vopts = "<option value='ai:male'>AI voice – पुरुष (free)</option><option value='ai:female'>AI voice – स्त्री (free)</option>"
     return page("New job", body.replace("{LANG_OPTIONS}", opts).replace("{VOICE_OPTIONS}", vopts))
+
+
+BATCH_FORM = """<p><a href='/'>← dashboard</a></p><h1>Many videos at once</h1>
+<form class=card method=post action=/jobs/batch>
+<label>Videos: one block per video, separated by a line with only <b>---</b>. First line = title, next lines = topic notes.</label>
+<textarea name=blocks rows=16 placeholder="मार्कस ऑरेलियस: जे हातात आहे ते करा
+Idea: control what you can... story idea... outline...
+---
+एपिक्टेटस: काळजी कशाची करायची?
+Idea: ... story ... outline ..."></textarea>
+<label>Category</label><select name=category><option value=philosophy>philosophy (non-finance)</option></select>
+<label>Language</label><select name=language>{LANG_OPTIONS}</select>
+<label>Video type</label><select name=format><option value=long_16x9>Long video 16:9</option>
+<option value=short_9x16>Short 9:16 (under 60 s)</option></select>
+<label>Length in minutes (long video only)</label><input name=minutes type=number step=0.5 value=8.5>
+<label>Voice</label><select name=voice_mode><option value='ai:male'>AI voice – पुरुष (free)</option>
+<option value='ai:female'>AI voice – स्त्री (free)</option><option value=none>no voice yet</option></select>
+<label><input type=checkbox name=has_fiction value=1 style='width:auto'> Stories contain fictional characters/events</label>
+<p class=dim>Each video becomes its own job in the queue; they are made one after another. Paid part: the script
+(about 1–2 USD per long video), within the per-video and pilot caps.</p>
+<button>Queue all videos</button></form>"""
+
+
+@app.get("/jobs/batch", response_class=HTMLResponse)
+def batch_form(_: str = Depends(auth)) -> HTMLResponse:
+    opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
+    return page("Many videos", BATCH_FORM.replace("{LANG_OPTIONS}", opts))
+
+
+@app.post("/jobs/batch")
+def batch_create(
+    blocks: str = Form(...),
+    category: str = Form("philosophy"),
+    language: str = Form("mr"),
+    format: str = Form("long_16x9"),  # noqa: A002 - form field name
+    minutes: float = Form(8.5),
+    voice_mode: str = Form("ai:male"),
+    has_fiction: str = Form(""),
+    user: str = Depends(auth),
+):
+    """Create one queued job per block (title line + notes). Validation is the same as for a single job."""
+    items = [b.strip() for b in re.split(r"(?m)^\s*---\s*$", blocks) if b.strip()]
+    if not items:
+        raise HTTPException(400, "write at least one video block")
+    if len(items) > 50:
+        raise HTTPException(400, "at most 50 videos per batch")
+    made = []
+    for b in items:
+        title, _, notes = b.partition("\n")
+        if len(notes.strip()) < 30:
+            raise HTTPException(400, f"notes too short for: {title[:60]}")
+    for b in items:
+        title, _, notes = b.partition("\n")
+        r = create(
+            title=title,
+            category=category,
+            minutes=minutes,
+            format=format,
+            language=language,
+            voice_mode=voice_mode,
+            quote="",
+            quote_credit="",
+            has_fiction=has_fiction,
+            brief_text=notes,
+            brief=None,
+            source=None,
+            _=user,
+        )
+        made.append(r.headers["location"].rsplit("/", 1)[-1])
+    config.audit(user, "jobs.batch", {"count": len(made)})
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/jobs")

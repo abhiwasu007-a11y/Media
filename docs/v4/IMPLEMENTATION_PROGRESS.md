@@ -271,6 +271,9 @@ Quoted verbatim: "sadhyache kaggle thewa, nantr change karu". Applied: Settings 
 ### D25 (2026-11-21, owner chat message): quality setting, smaller files
 Quoted verbatim: "adhicha video 500 mb cha jhalay, khhup heavy quality select krnyachi setting pahije". Done: Settings "Video quality" high (8 Mbps, YouTube's recommended target per D10, default) / medium (5 Mbps) / small (2.5 Mbps); every render also writes a small 540p preview that the dashboard player uses (about 9x smaller in the test), the full file stays for YouTube. A changed quality applies to new renders (or re-run from 08_visuals).
 
+### D26 (2026-11-21, owner chat messages): downloads per quality; many videos at once
+Owner: "download option de, quality nusa" and "eckach vely multiple video sathi instruction deta aali pahije, nantr te kam queued mdhe suru rahil, jhale ki update disel". Done: job page downloads 1080p / 720p / 480p / 360p (missing ones made on request); "+ Many videos" form: one block per video (title line + notes, blocks separated by ---), shared language/type/length/voice, each block becomes a queued job; the home page shows "working now" / "in queue #n" per job.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
