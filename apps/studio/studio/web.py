@@ -68,7 +68,24 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # stages that use the shared CPU heavily: they wait outside market hours (the guard is checked before each one)
 HEAVY_STAGES = {"07_voice", "08a_assets", "08b_motion", "08_visuals", "10_render", "10_qc"}
 AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".flac", ".webm", ".mp4"}
-CATEGORIES = ("philosophy", "finance")
+# non-finance categories use the general rules (fact-check, no invented facts, no medical/legal/financial advice);
+# finance needs the SEBI rule pack and stays blocked by the gate in this build
+CATEGORY_LABELS = {
+    "philosophy": "तत्त्वज्ञान (Philosophy)",
+    "motivation": "प्रेरणा / स्वयं-विकास (Motivation, self-help)",
+    "story": "कथा / बोधकथा (Stories, moral tales)",
+    "history": "इतिहास (History)",
+    "mythology": "पुराणकथा / अध्यात्म (Mythology, spirituality)",
+    "science": "विज्ञान (Science)",
+    "technology": "तंत्रज्ञान / AI (Technology)",
+    "education": "शिक्षण / ज्ञान (Education, general knowledge)",
+    "biography": "चरित्र (Biographies)",
+    "business": "व्यवसाय / करिअर (Business, careers; no investment advice)",
+    "health": "आरोग्य जागरूकता (Health awareness; no medical advice)",
+    "kids": "मुलांसाठी (Kids; mark 'made for kids' on YouTube)",
+    "finance": "finance (blocked in this build: SEBI rules not wired)",
+}
+CATEGORIES = tuple(CATEGORY_LABELS)
 VOICE_MODES = ("none", "parler")  # plus "ai:<speaker>" for the free Kaggle voice
 FORMATS = ("long_16x9", "short_9x16")
 
@@ -521,8 +538,7 @@ def connection_test(provider: str) -> str:
 def new_form(_: str = Depends(auth)) -> HTMLResponse:
     body = """<h1>New job</h1><form class=card method=post action=/jobs enctype=multipart/form-data>
 <label>Title</label><input name=title required>
-<label>Category</label><select name=category><option value=philosophy>philosophy (non-finance)</option>
-<option value=finance>finance (blocked in this build)</option></select>
+<label>Category (विषय)</label><select name=category>{CATEGORY_OPTIONS}</select>
 <label>Language</label><select name=language>{LANG_OPTIONS}</select>
 <label>Video type</label><select name=format><option value=long_16x9>Long video 16:9 (YouTube)</option>
 <option value=short_9x16>Short 9:16 (YouTube Shorts / Reels, under 60 s)</option></select>
@@ -541,7 +557,10 @@ Story contains fictional characters/events</label>
 
     opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
     vopts = "<option value='ai:male'>AI voice – पुरुष (free)</option><option value='ai:female'>AI voice – स्त्री (free)</option>"
-    return page("New job", body.replace("{LANG_OPTIONS}", opts).replace("{VOICE_OPTIONS}", vopts))
+    return page(
+        "New job",
+        body.replace("{LANG_OPTIONS}", opts).replace("{VOICE_OPTIONS}", vopts).replace("{CATEGORY_OPTIONS}", cat_options()),
+    )
 
 
 BATCH_FORM = """<p><a href='/'>← dashboard</a></p><h1>Many videos at once</h1>
@@ -552,7 +571,7 @@ Idea: control what you can... story idea... outline...
 ---
 एपिक्टेटस: काळजी कशाची करायची?
 Idea: ... story ... outline ..."></textarea>
-<label>Category</label><select name=category><option value=philosophy>philosophy (non-finance)</option></select>
+<label>Category (विषय)</label><select name=category>{CATEGORY_OPTIONS}</select>
 <label>Language</label><select name=language>{LANG_OPTIONS}</select>
 <label>Video type</label><select name=format><option value=long_16x9>Long video 16:9</option>
 <option value=short_9x16>Short 9:16 (under 60 s)</option></select>
@@ -565,10 +584,14 @@ Idea: ... story ... outline ..."></textarea>
 <button>Queue all videos</button></form>"""
 
 
+def cat_options() -> str:
+    return "".join(f"<option value={c}>{e(lbl)}</option>" for c, lbl in CATEGORY_LABELS.items())
+
+
 @app.get("/jobs/batch", response_class=HTMLResponse)
 def batch_form(_: str = Depends(auth)) -> HTMLResponse:
     opts = "".join(f"<option value={c}>{e(v[1])} ({e(v[0])})</option>" for c, v in LANGS.items())
-    return page("Many videos", BATCH_FORM.replace("{LANG_OPTIONS}", opts))
+    return page("Many videos", BATCH_FORM.replace("{LANG_OPTIONS}", opts).replace("{CATEGORY_OPTIONS}", cat_options()))
 
 
 @app.post("/jobs/batch")

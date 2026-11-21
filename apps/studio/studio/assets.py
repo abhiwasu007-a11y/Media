@@ -30,6 +30,26 @@ DEFAULT_STYLE = (
     "film colour grade, 16:9 composition, no text, no letters, no logos, no watermark"
 )
 
+CATEGORY_STYLE = {
+    "science": "clean modern 3D explainer render, soft studio light, clear shapes, scientific accuracy, vivid but calm colours, "
+    "no text, no letters, no logos, no watermark",
+    "technology": "sleek futuristic 3D render, cool blue and teal light with warm accents, clean composition, "
+    "no text, no letters, no logos, no watermark",
+    "history": "cinematic historical painting style, period-accurate costumes and architecture, dramatic natural light, "
+    "rich textures, no text, no letters, no logos, no watermark",
+    "mythology": "epic cinematic semi-realistic 3D Indian mythological art, divine glow, rich colours and ornaments, respectful, "
+    "no text, no letters, no logos, no watermark",
+    "kids": "bright cute 3D cartoon for children, round friendly characters, cheerful colours, soft light, safe and gentle, "
+    "no text, no letters, no logos, no watermark",
+    "education": "clear friendly 3D illustration, simple background, bright balanced colours, "
+    "no text, no letters, no logos, no watermark",
+    "business": "modern cinematic photo-real style office and city scenes, confident mood, warm daylight, "
+    "no text, no letters, no logos, no watermark",
+    "health": "calm clean semi-realistic illustration, soft natural light, reassuring mood, no medical procedures shown, "
+    "no text, no letters, no logos, no watermark",
+}
+
+
 SYSTEM_PLAN = """You plan the pictures for an explainer / story video (any language). Return ONLY JSON.
 For each scene choose: "ai_image" for story moments with characters or specific places (a consistent illustrated
 world), "stock_video" for generic real-world B-roll (city traffic, phone screens, clocks, nature, crowds), or "none"
@@ -74,7 +94,7 @@ def s05b_asset_plan(job: Path, meta: dict) -> str:
             n_st += 1
             if n_st > max_stock:
                 p["kind"] = "none"
-    plan["style"] = meta.get("visual_style") or DEFAULT_STYLE
+    plan["style"] = meta.get("visual_style") or CATEGORY_STYLE.get(meta.get("category", ""), DEFAULT_STYLE)
     (job / "asset_plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1))
     kinds = [p["kind"] for p in plan["scenes"]]
     return (
