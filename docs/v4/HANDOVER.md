@@ -23,41 +23,35 @@ no secrets, no server details, no book text here.
 
 ## 2. Deployed state (owner's VPS, owner runs every command)
 
-- Deployed from branch `ccr-b1e90a39-0g1b1l` with the one-line deploy (clone + `apps/studio/deploy.sh`), which
-  prints the commit and a temporary trycloudflare link. Last deploy included the voice-pack upload (commit b5a63a1
-  or later). Not yet deployed: commits after it (render to temp file, cost-column fix) — next deploy picks them up.
-- Settings done by the owner: Cloudflare account ID + Workers AI token, Pixabay key (tests reported done).
-- Sample #1 (Seneca, Marathi) on the server: pictures generated (21 AI scenes / 51 shots, 8 stock clips), rendered
-  without voice; the owner then uploaded the Marathi voice pack (Sanjay) — result not yet reported.
-- Permanent link: the owner's main domain carries the trading app — **never move its nameservers**. A second
-  domain was added to Cloudflare (DNS records empty) and its nameservers were being switched at Hostinger; the
-  tunnel is now live (Zero Trust tunnel `amw-studio`, route `studio.<second domain>` → `http://studio:8080`, token in
-  the server `.env` as `CF_TUNNEL_TOKEN`); `/healthz` answers 200 and the dashboard asks for the password. The
-  quick trycloudflare tunnel is off.
+- Permanent dashboard link on the owner's SECOND domain via a Cloudflare named tunnel (token in the server `.env`).
+  The main domain (trading app) is untouched. Deploy = the one-line clone + `apps/studio/deploy.sh` (prints commit).
+- Server limits agreed (D23): `AMW_CPUS=2.0` (low CPU shares, trading app first), `AMW_MEM=3g`; deploy sets them.
+- Settings saved by the owner: Cloudflare account ID + Workers AI token, Pixabay key, Kaggle username/key, HF token.
+  Voice provider = kaggle (D24) until monetization, then google (needs a Google Cloud TTS key; free 1M chars/month).
+- Sample #1 (Seneca, Marathi): pictures + Sanjay voice pack rendered (~10 min, 540 MB at 8 Mbps); a Kaggle voice run
+  failed on a slug bug (fixed in code, not yet re-run on the server). Sunita voice pack sent to the owner.
+- Last code on the branch not yet deployed at handover time: Kaggle slug fix, quality setting + previews + downloads,
+  batch form, categories + finance (D25–D28). Owner reported a downloaded 1080p file that Windows could not play
+  (likely an incomplete 540 MB download over a slow link); asked to compare sizes / try the 360p file / VLC.
 
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
-- Hindi and English job folders (translated, fact-check PASS; cost hi 0.38 / en 0.29 USD) were sent to the owner
-  as zips to import; not yet imported.
-- Free TTS runs in the session: done = Marathi Sanjay (pack sent). Queued/running = Marathi Sunita, English Thoma,
-  English Mary, Hindi Rohit, Hindi Divya (~30–90 min each, two at a time). Packs are zipped automatically and must
-  be sent to the owner. If the session is gone, regenerate with `tts_parler`-equivalent code (speaker names from the
-  model card: mr Sanjay/Sunita, hi Rohit/Divya, en Thoma/Mary) — sentence split must equal `pipeline.sentences`.
+- Hindi/English job zips (translated, fact-check PASS) were sent; not yet imported. Voice packs sent: mr Sanjay,
+  mr Sunita. Other local TTS runs were stopped (the dashboard's Kaggle voice replaces them).
 
 ## 4. Spend so far (ESTIMATE, list price × usage)
 
-Sample #1 Marathi 2.44 USD (includes a 0.98 USD held worst case from a lost first call — reconcile in the Anthropic
-Console); Hindi translation 0.38; English 0.29. Caps: 5 USD per video, 50 USD pilot (D9).
+Sample #1 Marathi about 2.44 USD (includes a 0.98 USD held worst case: reconcile in the Anthropic Console);
+Hindi translation 0.38; English 0.29. Caps: 5 USD per video, 50 USD pilot (D9).
 
 ## 5. Next steps (in order)
 
-1. Owner reports the Marathi video with the Sanjay voice; collect score/feedback verbatim (D5) — no score recorded yet.
-2. Send the remaining voice packs as they finish; owner imports the hi/en job zips, runs "resume", uploads packs.
-3. Finish the permanent link on the second domain (tunnel token → `.env`, redeploy).
-4. Open owner items: music track (D10), Kaggle terms first-hand before enabling motion, foreign-language TTS
-   (Parler covers Indian languages + English only), visual check of non-Devanagari fonts and RTL.
-5. Enterprise backlog (D21): users/roles, encrypted secrets, CI for apps/studio, DB-backed queue, backups; deploy a
-   merged tag instead of the work branch.
+1. Owner deploys; re-run the Kaggle voice once to confirm the slug fix; owner reviews sample #1 (score verbatim, D5).
+2. Owner imports the hi/en jobs, runs "resume", chooses an AI voice (or uploads packs).
+3. First new-topic videos through "+ New job" / "+ Many videos" (categories incl. finance with disclaimer).
+4. Before monetizing: switch voice provider to google (Kaggle terms, KG-01); finance videos with the owner's voice;
+   lawyer review of the disclaimer; Kaggle motion stays off.
+5. Enterprise backlog (D21): users/roles, encrypted secrets, DB-backed queue, backups, deploy from a merged tag.
 
 ## 6. Working with the owner
 

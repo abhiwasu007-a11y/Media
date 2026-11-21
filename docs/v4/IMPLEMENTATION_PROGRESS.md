@@ -277,6 +277,9 @@ Owner: "download option de, quality nusa" and "eckach vely multiple video sathi 
 ### D27 (2026-11-21, owner chat messages): more categories; finance with disclaimer
 Owner: "fakt philosophi hach subject yetoy, other subject che ky" and "finance pn jod, disclamer de". Done: 13 categories (philosophy, motivation, stories, history, mythology, science, technology, education, biography, business, health, kids, finance) with a picture style per category. Finance enabled: SEBI rule pack (FIN-R1..R13 summary) in the script prompt and in the fact-check judge; a deterministic call/target/guarantee scan; gate blocks on any finance flag or a failed judge; FIN-R10 disclaimer card first (5-6 s) plus the disclaimer text in the description (mr = owner wording from the runtime data, hi/en = translations; all DRAFT, lawyer approval REQUIRES REVIEW; the text says "not SEBI-registered": owner to confirm status A6). Open: FIN-R11 (AI persona on finance) — an AI narrator voice may count as synthetic media on a finance channel; the owner's own voice is safer for monetized finance videos (REQUIRES REVIEW).
 
+### D28 (2026-11-21, owner chat message): "default yes, remaining kam purn kra"
+Recorded answers to the two open questions of D27: (1) the disclaimer sentence "not SEBI-registered" is correct (owner input A6, SEBI status = not registered); (2) monetized finance videos use the owner's own voice (gate shows an advisory "finance_voice" line when an AI voice is used). Also done: CI job for apps/studio (ruff via the repo gate, pytest in apps/studio on Python 3.12 with FFmpeg); handover refreshed. Lawyer approval of the disclaimer text still REQUIRES REVIEW.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
@@ -286,7 +289,7 @@ Owner: "fakt philosophi hach subject yetoy, other subject che ky" and "finance p
 | A3 | Research network access | **Received.** Owner switched to Custom access (2026-11-18). All research sources reachable except `github.com`, `copyright.gov.in`, `egazette.gov.in`, `indiacode.nic.in`. |
 | A4 | Cloud Console quota screenshot | Waiting. Owner will send in a few days; not blocking until Agent 13 / 00b. |
 | A5 | Channel Google account / Brand Account decision | Waiting (same as A4) |
-| A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. Still needed: SEBI registration status (**finance channels only**, D13; CCR-273 approved, D14), GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
+| A6 | Business inputs | Partly covered: course outline found in `trade-data/research/course/`. SEBI registration status: **not registered** (owner, D28). Still needed: GST status, weekly review time, budget ceiling, narration choice, benchmark channels. |
 | A7 | API keys | Not needed in this phase |
 | A8 | **Separate verifier host with its own platform-API credential** (D11 item 2) | **Mandatory gate before any YouTube publish and before the first client.** Not needed for 3A. |
 | A9 | **D12/D13:** create the private repo (D13 names it `amw-knowledge-library`) and grant read access (then the session attaches it); D13 sample #1 depends on it | **Done (D13 follow-up, 2026-11-19):** the owner created the private repo and the session attached it read-only: `abhiwasu007-a11y/amw-knowledge-library` @ `fb26bc9` (main). Books and studies are read from there only; nothing is copied into this repo; job inputs carry only the repo path and the commit SHA, never book text. Per-book rules: `philosophy/BOOKS_MANIFEST.md`. |

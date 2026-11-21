@@ -769,6 +769,16 @@ def s16_gate(job: Path, meta: dict) -> str:
             (not fin) or (not det.get("finance_flags") and fc["llm"].get("overall") == "PASS"),
             f"SEBI rule pack: flagged scenes {det.get('finance_flags', [])}" if fin else "n/a",
         ),
+        "finance_voice": (
+            True,  # advisory (D28): the owner chose his own voice for monetized finance videos
+            (
+                "AI voice used: record your own voice before monetizing (D28, FIN-R11)"
+                if meta.get("voice_mode") in ("ai", "pack")
+                else "owner voice"
+            )
+            if fin
+            else "n/a",
+        ),
         "finance_disclaimer": (
             (not fin) or _has_disclaimer(job),
             "FIN-R10 card at the start + description" if fin else "n/a",
