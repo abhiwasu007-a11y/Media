@@ -564,6 +564,32 @@ def thumbnail(script, out: Path, hero: Path | None = None):
     img.resize((1280, 720), Image.LANCZOS).save(out, optimize=True)
 
 
+DELIVERY_VIDEO = [
+    "-c:v",
+    "libx264",
+    "-profile:v",
+    "high",
+    "-preset",
+    "medium",
+    "-b:v",
+    "8M",
+    "-maxrate",
+    "12M",
+    "-bufsize",
+    "16M",
+    "-pix_fmt",
+    "yuv420p",
+    "-r",
+    "30",
+    "-fps_mode",
+    "cfr",
+    "-g",
+    "15",
+    "-bf",
+    "2",
+]
+
+
 def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
     """Render the silent 1080p30 visuals track for ``timings`` into ``out``; returns frames written."""
     by = {s["id"]: s for s in script["scenes"]}
@@ -584,14 +610,8 @@ def render_visuals(job: Path, script: dict, timings: dict, out: Path) -> int:
         str(FPS),
         "-i",
         "-",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "12",
-        "-pix_fmt",
-        "yuv420p",
+        # encoded once at the delivery settings (H.264 High, 8 Mbps VBR target, D10); stage 10 copies this stream
+        *DELIVERY_VIDEO,
         str(out),
     ]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)

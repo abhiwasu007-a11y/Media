@@ -419,30 +419,7 @@ def audio_source(job: Path) -> Path | None:
 def s10_render(job: Path, meta: dict) -> str:
     final = job / "final_1080p.mp4"
     out = job / "final_1080p.rendering.mp4"  # swapped in only when complete: the dashboard never serves a half file
-    vid = [
-        "-c:v",
-        "libx264",
-        "-profile:v",
-        "high",
-        "-preset",
-        "slow",
-        "-b:v",
-        "8M",
-        "-maxrate",
-        "12M",
-        "-bufsize",
-        "16M",
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        "30",
-        "-fps_mode",
-        "cfr",
-        "-g",
-        "15",
-        "-bf",
-        "2",
-    ]
+    vid = ["-c:v", "copy"]  # the visuals stage already encoded at the delivery settings: no second video encode
     aud = ["-c:a", "aac", "-b:a", "384k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart"]
     voiced = audio_source(job) is not None
     mix = build_mix(job)
