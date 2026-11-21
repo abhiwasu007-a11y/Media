@@ -429,7 +429,7 @@ class Media:
 
     def frame(self, t: float) -> Image.Image:
         if self.kind == "image" and self.depth is not None:
-            return self._parallax(t)
+            return Image.fromarray(self._parallax(t))
         if self.kind == "image":
             p = min(1.0, max(0.0, t / max(self.dur, 0.1)))
             q = p if self.idx % 2 == 0 else 1 - p  # alternate zoom in / zoom out
@@ -456,18 +456,19 @@ class Media:
         cx = iw / 2 + sgn * (e - 0.5) * iw * 0.03
         cy = ih / 2
         if not hasattr(self, "_grid"):
+            # the warp field is smooth (blurred depth, linear camera): build it at half size, upscale, warp once at full size
+            hw, hh = self.w // 2, self.h // 2
             self._grid = np.meshgrid(
-                np.arange(self.w, dtype=np.float32) - self.w / 2, np.arange(self.h, dtype=np.float32) - self.h / 2
+                np.arange(hw, dtype=np.float32) * 2 - self.w / 2, np.arange(hh, dtype=np.float32) * 2 - self.h / 2
             )
         gx, gy = self._grid
         mx = cx + gx * sx
         my = cy + gy * sx
-        dep = cv2.remap(self.depth, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        dep = cv2.remap(self.depth, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT) - 0.5
         shift = sgn * (e - 0.5) * 46.0  # pixels of parallax between near and far
-        mx = mx - (dep - 0.5) * shift * sx
-        my = my - (dep - 0.5) * abs(shift) * 0.25 * sx
-        out = cv2.remap(self.arr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-        return Image.fromarray(out)
+        mx = cv2.resize(mx - dep * (shift * sx), (self.w, self.h), interpolation=cv2.INTER_LINEAR)
+        my = cv2.resize(my - dep * (abs(shift) * 0.25 * sx), (self.w, self.h), interpolation=cv2.INTER_LINEAR)
+        return cv2.remap(self.arr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
 
     def close(self) -> None:
         if self.proc:
@@ -492,10 +493,37 @@ def media_caption(d, s, t, dur):
 
 
 def frame_media(s, t, dur, media, media_t):
-    img = media.frame(media_t)
-    img = Image.composite(Image.new("RGB", img.size, (0, 0, 0)), img, bottom_shade(img.size))
+    """Picture frame: grade + caption shade + vignette + grain in a few vectorised OpenCV ops, then the caption."""
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    if media.kind == "image" and getattr(media, "depth", None) is not None:
+        arr = media._parallax(media_t)
+    else:
+        arr = np.asarray(media.frame(media_t))
+    size = (arr.shape[1], arr.shape[0])
+    lut, mult, grains = _fast_look(size)
+    arr = cv2.LUT(arr, lut)
+    arr = cv2.multiply(arr, mult, scale=1 / 255)
+    arr = cv2.addWeighted(arr, 0.955, grains[int(t * FPS) % len(grains)], 0.045, 0)
+    img = Image.fromarray(arr)
     media_caption(ImageDraw.Draw(img), s, t, dur)
-    return film_look(img, t)
+    return img
+
+
+@lru_cache(maxsize=4)
+def _fast_look(size: tuple[int, int]):
+    """Cached per output size: the grade LUT (256x1x3), one multiplier map (caption shade x vignette) and 8 grain frames."""
+    import numpy as np  # noqa: PLC0415
+
+    flat = _grade_lut()
+    lut = np.stack([np.array(flat[i * 256 : (i + 1) * 256], np.uint8) for i in range(3)], axis=-1).reshape(256, 1, 3)
+    shade = 1.0 - np.asarray(bottom_shade(size), np.float32) / 255.0
+    vig = 1.0 - np.asarray(vignette(size), np.float32) / 255.0
+    mult = np.clip(shade * vig * 255.0, 0, 255).astype(np.uint8)
+    mult = np.repeat(mult[:, :, None], 3, axis=2)
+    grains = [np.repeat(np.asarray(_grain(k, size), np.uint8)[:, :, None], 3, axis=2) for k in range(8)]
+    return lut, mult, grains
 
 
 def frame(s, t, dur, media=None):
@@ -596,7 +624,7 @@ def delivery_video() -> list[str]:
         "-profile:v",
         "high",
         "-preset",
-        "medium",
+        "veryfast",  # ~2x quicker than medium on the 2-CPU server; bitrate caps hold the size
         "-b:v",
         b,
         "-maxrate",

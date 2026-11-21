@@ -34,6 +34,9 @@ no secrets, no server details, no book text here.
   batch form, categories + finance (D25–D28). Owner reported a downloaded 1080p file that Windows could not play
   (likely an incomplete 540 MB download over a slow link); asked to compare sizes / try the 360p file / VLC.
 
+- Render speed-up (owner: 2 h too long): picture frames use cached OpenCV grade/shade/vignette/grain, parallax warp
+  field built at half size, x264 preset veryfast. Bench on 2 CPUs: 84 -> 44 ms/frame (about half the render time).
+
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
 - Hindi/English job zips (translated, fact-check PASS) were sent; not yet imported. Voice packs sent: mr Sanjay,
