@@ -37,6 +37,18 @@ no secrets, no server details, no book text here.
 - Render speed-up (owner: 2 h too long): picture frames use cached OpenCV grade/shade/vignette/grain, parallax warp
   field built at half size, x264 preset veryfast. Bench on 2 CPUs: 84 -> 44 ms/frame (about half the render time).
 
+- **Review of the server 360p preview (2026-11-22), plan sent to the owner, awaiting "हो" before coding:**
+  - Bug: the file is corrupt (mvhd size overwritten by the mdat size). Two `make_preview` runs wrote the same
+    `preview_360p.rendering.mp4` (button pressed twice or during render; `web.py` starts a thread per click). This also
+    explains a ~3.5 min frozen picture. Fix: one job at a time per output (lock), unique temp name, decode check after
+    encode, show file size; preview/export with Main profile for every phone.
+  - Quality: (1) `assets.py` appends the WHOLE character sheet to every image prompt, so most pictures show the
+    same 4 people in a crowd. Add only the characters named in the shot. (2) Faces change between pictures: fixed
+    description and seed per character. Vary wide, close-up, object and place shots. (3) Text cards look plain: blurred
+    scene picture behind, bigger kinetic text. (4) Captions are small: larger, 2 lines, synced to the voice. (5) An
+    unrelated Pixabay clip (farmland) appeared: use stock only when it matches the scene, else an AI picture.
+    (6) Small local test render and stills to the owner, then deploy.
+
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
 - Hindi/English job zips (translated, fact-check PASS) were sent; not yet imported. Voice packs sent: mr Sanjay,
@@ -49,7 +61,7 @@ Hindi translation 0.38; English 0.29. Caps: 5 USD per video, 50 USD pilot (D9).
 
 ## 5. Next steps (in order)
 
-1. Owner deploys; re-run the Kaggle voice once to confirm the slug fix; owner reviews sample #1 (score verbatim, D5).
+1. Owner approves the preview-review plan (§2); implement it. Owner deploys; re-run the Kaggle voice once to confirm the slug fix; owner reviews sample #1 (score verbatim, D5).
 2. Owner imports the hi/en jobs, runs "resume", chooses an AI voice (or uploads packs).
 3. First new-topic videos through "+ New job" / "+ Many videos" (categories incl. finance with disclaimer).
 4. Before monetizing: switch voice provider to google (Kaggle terms, KG-01); finance videos with the owner's voice;
