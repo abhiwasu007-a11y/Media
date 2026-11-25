@@ -243,3 +243,9 @@ Question for the section: which free or open TTS can speak Marathi (mr-IN) and m
 | IN-03 | §1/§1B.2: case studies on historical data older than the lag are allowed | SEBI order 23 Oct 2026 also bars "historical data which provides future directional movement for a specified security" | Stricter rule pack: no forward-looking statements about any named security, even in historical case studies |
 | IN-04 | §1D.2: "verify the final guideline text and its effective date" | Final ASCI text 17 Sep 2026; in force 3 months after publication (≈ end Dec 2026) | Ad rule pack follows the final text |
 | INF-10, INF-12 | §1A.5: 15–25 Mbps at 1080p | YouTube recommends 8 Mbps (SDR, standard fps), 12 Mbps at 48–60 fps; "No bitrate limit is required" | ~~Keep the directive value as the target~~ **Owner decision D10 (2026-11-19, ADR-014): YouTube's value is the encoder target (H.264 High VBR); no measured floor; quality is measured by SSIM against a lossless intermediate (threshold in 3B).** |
+
+## Feature film providers (2026-11-25, owner D35)
+
+IDs VEO-01..04, FLOW-01, GIMG-01, MUS-01, MUS-02a..e, VOI-01, VOI-02, LIP-01, FACE-01, VID-ALT and DANCE-01 are
+recorded with exact official URLs and read dates in `research/FEATURE_FILM_PROVIDERS.md` (Appendices A–D). Rows
+marked as search extracts or tool summaries must be re-read before binding use.

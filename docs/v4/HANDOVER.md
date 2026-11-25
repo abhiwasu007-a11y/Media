@@ -55,7 +55,8 @@ no secrets, no server details, no book text here.
   Kaggle voice setup fails because parler-tts downgrades protobuf to 4.25 (fix tested: re-upgrade protobuf, USE_TF=0).
 
 - **V5.0 feature film direction (D32):** vision in `docs/v4/directives/V5_FEATURE_FILM_VISION.md`, plan in
-  `docs/v4/FEATURE_FILM_PLAN.md` (builds on the V4 plan; milestone 1 = 60 s trailer). PLAN ONLY.
+  `docs/v4/FEATURE_FILM_PLAN.md` (builds on the V4 plan; milestone 1 = 60 s Hindi trailer). Direction approved, no coding (D34). Provider research
+  and trailer estimate: `docs/v4/research/FEATURE_FILM_PROVIDERS.md`.
 
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
