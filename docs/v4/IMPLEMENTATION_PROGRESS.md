@@ -295,6 +295,9 @@ Owner vision (Marathi) stored verbatim in `directives/V5_FEATURE_FILM_VISION.md`
 ### D33 (2026-11-25, owner chat message): film language Hindi
 Quoted verbatim: "Bhasha hindi". The first film (Milestone 1 trailer onward) is in Hindi. Effect on the plan: actor voices and dialogue in Hindi first (Parler has Hindi speakers Rohit/Divya for tests; commercial voice provider still an open decision); VEO-03 must check native Hindi speech. Other decisions in `FEATURE_FILM_PLAN.md` §6 still open (direction approval, trailer budget, first 4 actors, genre/story).
 
+### D34 (2026-11-25, owner chat message): feature film direction approved; no coding yet
+Quoted verbatim: "Ho, but no coding". Approved: the direction in `FEATURE_FILM_PLAN.md` and Milestone 1 = 60-second Hindi trailer. Not approved: any code, migration, config or deployment; work stays documentation and research until the owner says otherwise. Still open: trailer budget, first 4 actors, genre/story, the V4 §6 decisions.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
