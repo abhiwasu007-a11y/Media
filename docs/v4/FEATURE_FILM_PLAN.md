@@ -98,7 +98,7 @@ owner's written go-ahead and budget for the next one.
 
 1. Approve this direction and the milestone gates (Milestone 1 = 60 s trailer).
 2. Budget for Milestone 1 (paid video generation is required; amount set after Step 1 research gives prices).
-3. First 4 actors: names, ages, look (photoreal fictional), language of the first film (Marathi?).
+3. First 4 actors: names, ages, look (photoreal fictional). Language of the first film: **Hindi (owner, D33)**.
 4. Genre and one-line story idea for the trailer.
 5. Earlier V4 decisions still open (`CINEMATIC_UPGRADE_PLAN.md` §6): voice provider, database, server limits,
    external worker.

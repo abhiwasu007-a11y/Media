@@ -292,6 +292,9 @@ Owner pasted "V4.0 – Advanced Cinematic Production Integration" with the instr
 ### D32 (2026-11-25, owner chat message): goal widened to an AI feature film studio (V5.0 direction); discuss and plan
 Owner vision (Marathi) stored verbatim in `directives/V5_FEATURE_FILM_VISION.md`: own synthetic actors (Actor Passport: physical, voice, acting DNA), films up to 180 minutes, original songs, action, romance, dance, locations library, 16 engines inside the 16 agents, milestones 60 s trailer → 180 min. Plan with discussion: `FEATURE_FILM_PLAN.md` (start with 4 actors, human shot review by design, budget from measured cost per accepted second, Suno/Udio API and licence to verify, Marathi speech via own voices + lip sync). Plan only; owner decisions in §6.
 
+### D33 (2026-11-25, owner chat message): film language Hindi
+Quoted verbatim: "Bhasha hindi". The first film (Milestone 1 trailer onward) is in Hindi. Effect on the plan: actor voices and dialogue in Hindi first (Parler has Hindi speakers Rohit/Divya for tests; commercial voice provider still an open decision); VEO-03 must check native Hindi speech. Other decisions in `FEATURE_FILM_PLAN.md` §6 still open (direction approval, trailer budget, first 4 actors, genre/story).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
