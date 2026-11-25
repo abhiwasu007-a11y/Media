@@ -49,6 +49,11 @@ no secrets, no server details, no book text here.
     unrelated Pixabay clip (farmland) appeared: use stock only when it matches the scene, else an AI picture.
     (6) Small local test render and stills to the owner, then deploy.
 
+- **V4.0 Cinematic directive (D31):** stored in `docs/v4/directives/V4_CINEMATIC_DIRECTIVE.md`; plan in
+  `docs/v4/CINEMATIC_UPGRADE_PLAN.md`. PLAN ONLY, awaiting owner approval and decisions (§6 of the plan).
+- Also diagnosed, not yet fixed (P0 of that plan): Cloudflare 429 = free daily image allocation used up;
+  Kaggle voice setup fails because parler-tts downgrades protobuf to 4.25 (fix tested: re-upgrade protobuf, USE_TF=0).
+
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
 - Hindi/English job zips (translated, fact-check PASS) were sent; not yet imported. Voice packs sent: mr Sanjay,

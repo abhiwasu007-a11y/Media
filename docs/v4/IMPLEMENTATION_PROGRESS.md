@@ -286,6 +286,9 @@ Owner: a one-line batch topic was refused ("notes too short"), then "ai coonecte
 ### D30 (2026-11-21, owner chat message): unique, attractive, viral scripts for monetization
 Quoted verbatim: "script pn ashi tayar jhali pahije je unique asel jenekarun aple video viral hotil, servh goshti unique ani attractive aslya pahije tewhach monetize hoil". Done: script prompt craft rules (5-second hook, one original angle, story first, open loops with payoffs, a turn every 30-45 s, no AI clichés, specific comment question, truthful curiosity titles) plus the channel's earlier titles so angles are not repeated (YPP inauthentic-content risk, YT-09); new stage 05c_review: a retention-editor pass that scores hook/originality/story/retention/clarity/emotion (0-60), rewrites up to 12 weak scenes without adding facts, improves titles and thumbnail text (review.json on the job page). Fact-check runs after the edits. No virality outcome is promised.
 
+### D31 (2026-11-25, owner chat message): V4.0 Cinematic directive stored; plan only
+Owner pasted "V4.0 – Advanced Cinematic Production Integration" with the instruction "Store karun thewa, no coding, only plan tayar kr". Stored verbatim in `directives/V4_CINEMATIC_DIRECTIVE.md`; plan in `CINEMATIC_UPGRADE_PLAN.md` (phases P0–P10, capabilities mapped into the 16 existing agents, 13 research questions marked REQUIRES REVIEW, 6 owner decisions incl. a video-generation budget). No code until the owner approves.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
