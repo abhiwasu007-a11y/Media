@@ -301,6 +301,9 @@ Quoted verbatim: "Ho, but no coding". Approved: the direction in `FEATURE_FILM_P
 ### D35 (2026-11-25, owner chat message): research approved; V5.0 master prompt to compare
 Owner: "Yes and compare this Prompt / Don't add extra agent" with the V5.0 master prompt (stored verbatim in `directives/V5_FEATURE_FILM_MASTER_PROMPT.md`). Research started (docs only): Google Veo/Flow/image, music providers, Hindi voices + lip sync, alternative video providers. Comparison added as `FEATURE_FILM_PLAN.md` §7 (adopted additions; open point: prompt §19 asks for implementation, D34 says no coding). Research done: `research/FEATURE_FILM_PROVIDERS.md` (Veo preview shut down → Gemini Omni Flash 1.2 / Vertex Veo 3.1; English-only native speech; Flow no API; Sora API shut down; Suno no API; ElevenLabs Music excludes film use; Milestone 1 trailer estimate about 15–17 USD + lip-sync plan fee).
 
+### D36 (2026-11-25, owner chat message): trailer budget 25 USD; still no coding (token limit)
+Quoted verbatim: "Ok but no coding because of low token". Accepted: Milestone 1 (60 s Hindi trailer) budget 25 USD as proposed. No coding until the owner says so; next session resumes from `FEATURE_FILM_PLAN.md` + `research/FEATURE_FILM_PROVIDERS.md`; first code step when allowed = V4 P0 fixes.
+
 ## Owner inputs: status
 
 | ID | Input | Status |
