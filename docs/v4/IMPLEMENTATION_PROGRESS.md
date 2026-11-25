@@ -289,6 +289,9 @@ Quoted verbatim: "script pn ashi tayar jhali pahije je unique asel jenekarun apl
 ### D31 (2026-11-25, owner chat message): V4.0 Cinematic directive stored; plan only
 Owner pasted "V4.0 – Advanced Cinematic Production Integration" with the instruction "Store karun thewa, no coding, only plan tayar kr". Stored verbatim in `directives/V4_CINEMATIC_DIRECTIVE.md`; plan in `CINEMATIC_UPGRADE_PLAN.md` (phases P0–P10, capabilities mapped into the 16 existing agents, 13 research questions marked REQUIRES REVIEW, 6 owner decisions incl. a video-generation budget). No code until the owner approves.
 
+### D32 (2026-11-25, owner chat message): goal widened to an AI feature film studio (V5.0 direction); discuss and plan
+Owner vision (Marathi) stored verbatim in `directives/V5_FEATURE_FILM_VISION.md`: own synthetic actors (Actor Passport: physical, voice, acting DNA), films up to 180 minutes, original songs, action, romance, dance, locations library, 16 engines inside the 16 agents, milestones 60 s trailer → 180 min. Plan with discussion: `FEATURE_FILM_PLAN.md` (start with 4 actors, human shot review by design, budget from measured cost per accepted second, Suno/Udio API and licence to verify, Marathi speech via own voices + lip sync). Plan only; owner decisions in §6.
+
 ## Owner inputs: status
 
 | ID | Input | Status |

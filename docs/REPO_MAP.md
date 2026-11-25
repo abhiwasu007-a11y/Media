@@ -9,6 +9,7 @@ Use this map instead of scanning. The 3A platform code is in `packages/`; the le
 | Session handover (studio app state, deploy, in-flight work) | `docs/v4/HANDOVER.md` |
 | Current status, tasks, owner decisions (D1+), open questions | `docs/v4/IMPLEMENTATION_PROGRESS.md` |
 | V4.0 Cinematic directive (verbatim) and its upgrade plan | `docs/v4/directives/V4_CINEMATIC_DIRECTIVE.md`, `docs/v4/CINEMATIC_UPGRADE_PLAN.md` |
+| V5.0 feature film vision (verbatim, Marathi) and its plan | `docs/v4/directives/V5_FEATURE_FILM_VISION.md`, `docs/v4/FEATURE_FILM_PLAN.md` |
 | Plan, phases, defaults Q1–Q20 | `docs/v4/00_EXECUTION_PLAN.md` |
 | Index of every V4 document and its status | `docs/v4/README.md` |
 | External facts (cite by ID) | `docs/v4/RESEARCH_LOG.md` |

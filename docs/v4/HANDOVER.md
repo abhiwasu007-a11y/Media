@@ -54,6 +54,9 @@ no secrets, no server details, no book text here.
 - Also diagnosed, not yet fixed (P0 of that plan): Cloudflare 429 = free daily image allocation used up;
   Kaggle voice setup fails because parler-tts downgrades protobuf to 4.25 (fix tested: re-upgrade protobuf, USE_TF=0).
 
+- **V5.0 feature film direction (D32):** vision in `docs/v4/directives/V5_FEATURE_FILM_VISION.md`, plan in
+  `docs/v4/FEATURE_FILM_PLAN.md` (builds on the V4 plan; milestone 1 = 60 s trailer). PLAN ONLY.
+
 ## 3. Work in progress outside the repo (session scratch, lost if the session ends)
 
 - Hindi/English job zips (translated, fact-check PASS) were sent; not yet imported. Voice packs sent: mr Sanjay,
