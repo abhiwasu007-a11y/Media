@@ -102,3 +102,39 @@ owner's written go-ahead and budget for the next one.
 4. Genre and one-line story idea for the trailer.
 5. Earlier V4 decisions still open (`CINEMATIC_UPGRADE_PLAN.md` §6): voice provider, database, server limits,
    external worker.
+
+## 7. Comparison with the owner's V5.0 master prompt (`directives/V5_FEATURE_FILM_MASTER_PROMPT.md`)
+
+**Same direction.** 16 agents, no new agents; reuse V4; actor library, voice DNA, screenplay, dialogue, romance,
+action, music, locations, Google video with Flow optional, storyboard before paid generation, per-shot continuity,
+selective regeneration, budget reservation, night window, "never claim realism without measured validation".
+The prompt's 19 sections map onto the 16 engines in §2 without a new agent.
+
+**The prompt adds (adopted into this plan):**
+1. Actor identity separate from the film role (an actor plays different characters in different films): data
+   model = `actor_passports` (permanent) + `characters` (per film, linked to an actor version).
+2. Story bible + incremental screenplay generation from structured memory (never resend the full script): cuts
+   LLM cost for long films; matches CLAUDE.md token rules (§18 of the prompt).
+3. Richer dialogue segments: listener, subtext, facial expression, body language, reaction of others.
+4. Locations: interior/exterior, spatial layout, weather and day/night variants.
+5. Workflow order puts **Music before Shot Generation** (songs and dance shots are cut to the music's beats).
+6. Film configuration: content rating, target audience, story complexity, automatic vs human-assisted mode,
+   configurable quality thresholds; duration any value 1–180 min (the 7 modes become presets).
+7. Exports: individual songs, audio masters, posters, teaser, promotional clips.
+8. QC dimensions: story, dialogue, romance chemistry, dance sync, originality.
+9. Infrastructure: external object storage, disk-space monitoring, temp-file cleanup.
+
+**Points that need the owner's decision or keep this plan's position:**
+1. **Coding vs plan.** Prompt §19 says "Do not produce another architecture proposal instead of implementation";
+   the owner's D34 says "no coding". This plan follows D34 until the owner gives the go-ahead to build.
+2. **Human review.** The prompt keeps human review for unresolved critical defects only. This plan adds an owner
+   shot-review screen in Milestones 1–4 to calibrate the automatic thresholds (prompt §14 asks for calibration
+   on real samples); after calibration it narrows to critical defects as the prompt says.
+3. **Validation order.** Prompt: trailer → dialogue+romance → action → song → 15-min film → extended-duration and
+   recovery tests → 180 min. Vision: 60 s → 5-min action+romance → 5-min song → 15 → 45 → 90 → 180.
+   Merged (proposed): **M1** 60 s Hindi trailer; **M2** dialogue + romance scene; **M3** action scene; **M4**
+   original song with dance; **M5** 15-min short film; **M6** 45 and 90 min with pause/resume and failure-recovery
+   tests; **M7** 180 min when budget and measured quality allow.
+4. Not in the prompt, kept here: Phase 0 bug fixes first; start with 4 actors; Hindi first (D33); research gate
+   with official prices before any spend; synthetic-media disclosure on every upload (YT-07, IN-06); faces must not
+   resemble real people (the prompt covers voices; faces are added).

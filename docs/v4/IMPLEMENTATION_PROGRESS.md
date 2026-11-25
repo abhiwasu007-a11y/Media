@@ -298,6 +298,9 @@ Quoted verbatim: "Bhasha hindi". The first film (Milestone 1 trailer onward) is 
 ### D34 (2026-11-25, owner chat message): feature film direction approved; no coding yet
 Quoted verbatim: "Ho, but no coding". Approved: the direction in `FEATURE_FILM_PLAN.md` and Milestone 1 = 60-second Hindi trailer. Not approved: any code, migration, config or deployment; work stays documentation and research until the owner says otherwise. Still open: trailer budget, first 4 actors, genre/story, the V4 §6 decisions.
 
+### D35 (2026-11-25, owner chat message): research approved; V5.0 master prompt to compare
+Owner: "Yes and compare this Prompt / Don't add extra agent" with the V5.0 master prompt (stored verbatim in `directives/V5_FEATURE_FILM_MASTER_PROMPT.md`). Research started (docs only): Google Veo/Flow/image, music providers, Hindi voices + lip sync, alternative video providers. Comparison added as `FEATURE_FILM_PLAN.md` §7 (adopted additions; open point: prompt §19 asks for implementation, D34 says no coding).
+
 ## Owner inputs: status
 
 | ID | Input | Status |
